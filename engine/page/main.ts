@@ -970,7 +970,7 @@ async function main() {
     lens: (fovAdd, rollAdd, energy) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy },
     fx: {
       smoke: (at, vel, intensity, colour) => smoke.tireSmoke(at, vel, intensity, colour),
-      exhaust: (at, dir, pop) => smoke.exhaust(at, dir, pop),
+      exhaust: (at, dir, pop, boost) => smoke.exhaust(at, dir, pop, boost),
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),

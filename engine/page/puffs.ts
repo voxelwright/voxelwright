@@ -68,10 +68,13 @@ fn cloud(p: vec2f, seed: u32) -> f32 {
   let lit = 0.42 + 0.5 * max(dot(round, towards), 0.0) + 0.16 * round.y + (billow - 0.5) * 0.5;
   let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35) * mix(0.07, 1.0, u.day);
   // Fire: white-yellow at its heart and when hottest, then yellow, orange for most of its life, and a dull red only
-  // as it goes out. Its folds are darker, so it rolls.
+  // as it goes out. Blue-white plasma flame for nitrous boost when colour encodes cool blue with zero smoke cover.
   let core = body * body;
   let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
-  let flame = mix(mix(vec3f(0.7, 0.06, 0.01), vec3f(1.0, 0.4, 0.05), smoothstep(0.06, 0.36, hot)), vec3f(1.0, 0.9, 0.55), smoothstep(0.42, 0.95, hot));
+  let warm = mix(mix(vec3f(0.7, 0.06, 0.01), vec3f(1.0, 0.4, 0.05), smoothstep(0.06, 0.36, hot)), vec3f(1.0, 0.9, 0.55), smoothstep(0.42, 0.95, hot));
+  let coolFlame = mix(mix(vec3f(0.06, 0.36, 1.0), vec3f(0.32, 0.8, 1.0), smoothstep(0.06, 0.36, hot)), vec3f(0.9, 0.98, 1.0), smoothstep(0.42, 0.95, hot));
+  let isBlue = step(0.5, in.colour.b - in.colour.r) * step(in.colour.a, 0.05);
+  let flame = mix(warm, coolFlame, isBlue);
   let glow = flame * smoothstep(0.0, 0.22, heat) * (0.3 + billow * 1.15) * body * fade * 0.9;
   return vec4f(smoke * cover + glow, cover);
 }
@@ -92,8 +95,8 @@ export interface Puffs {
   spray(at: readonly [number, number, number], dt: number): void
   /** Tire smoke, dirt dust or wet road spray kicked up behind a sliding wheel (intensity 0 to 1). */
   tireSmoke(at: readonly [number, number, number], vel: readonly [number, number, number], intensity: number, colour?: readonly [number, number, number]): void
-  /** Exhaust puff or backfire flame flash on upshift / high-RPM overrun. */
-  exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean): void
+  /** Exhaust puff, backfire flame flash on upshift / overrun, or blue-white nitrous boost flame burst. */
+  exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean, boost?: boolean): void
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -221,7 +224,23 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       seed[i] = Math.floor(Math.random() * 65536)
       late[i] = 0
     },
-    exhaust(at, dir, pop = false) {
+    exhaust(at, dir, pop = false, boost = false) {
+      if (boost) {
+        for (let k = 0; k < 2; k++) {
+          const i = KEPT + (next++ % (MOST - KEPT))
+          const step = k * 1.4
+          p[i * 3] = at[0] + dir[0] * step; p[i * 3 + 1] = at[1] + dir[1] * step; p[i * 3 + 2] = at[2] + dir[2] * step
+          v[i * 3] = dir[0] * (44 + k * 16) + (Math.random() - 0.5) * 3
+          v[i * 3 + 1] = dir[1] * (44 + k * 16) + 1.5
+          v[i * 3 + 2] = dir[2] * (44 + k * 16) + (Math.random() - 0.5) * 3
+          size[i] = 1.5 + k * 0.45; grow[i] = 5.2; life[i] = span[i] = 0.11 + k * 0.03
+          heat[i] = 0.98; cool[i] = 6.2; rise[i] = 3; drag[i] = 4.5
+          tone.set([0.08, 0.65, 1.0, 0.0], i * 4)
+          seed[i] = Math.floor(Math.random() * 65536)
+          late[i] = 0
+        }
+        return
+      }
       if (pop) {
         const i = KEPT + (next++ % (MOST - KEPT))
         p[i * 3] = at[0]; p[i * 3 + 1] = at[1]; p[i * 3 + 2] = at[2]

@@ -124,6 +124,23 @@ pub struct Live {
     prev_rolls: f32,
     long_acc: f32,
     lat_acc: f32,
+    /// Burnout launch control: charge built holding throttle + handbrake stationary/slow, and the 0.8 s launch surge.
+    pub burnout_charge: f32,
+    pub launch_timer: f32,
+    launch_power: f32,
+    /// Nitrous / turbo boost: driver request, rechargeable reserve (0..1), active boost flag, recharge cooldown, and air time.
+    pub boost_ask: bool,
+    pub boost_fuel: f32,
+    pub boost_on: bool,
+    boost_cd: f32,
+    air_time: f32,
+    /// Surface-aware grip & archetype: rain wetness (0..1), optional explicit surface grip override (<= 0 uses `city::top`),
+    /// cached terrain cell and base grip, and wheelbase (cells) derived from feet.
+    pub wetness: f32,
+    pub surface_grip: f32,
+    surf_cell: [i32; 2],
+    surf_base: f32,
+    wheelbase: f32,
 }
 
 impl Live {
@@ -132,6 +149,9 @@ impl Live {
             front: 0, feet: Vec::new(), grip: 1.0, power: 0.0, top: 0.0, steer: 0.0, hover: 0.0, lift: 0.0, upright: 0.0, turns: 0.0, jump: 0.0, tough: 120.0,
             go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, ghost: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, reel: 0.0, base: None, frame: None, cling: false, turning: 0, lost: 0.0, fresh: 0.0, was: [0.0; 3], jolt: 0.0,
             steer_now: 0.0, prev_rolls: 0.0, long_acc: 0.0, lat_acc: 0.0,
+            burnout_charge: 0.0, launch_timer: 0.0, launch_power: 0.0,
+            boost_ask: false, boost_fuel: 1.0, boost_on: false, boost_cd: 0.0, air_time: 0.0,
+            wetness: 0.0, surface_grip: 0.0, surf_cell: [i32::MIN; 2], surf_base: 1.0, wheelbase: 28.0,
         }
     }
 
@@ -153,6 +173,14 @@ impl Live {
         self.jump = n[9].clamp(0.0, 300.0);
         self.tough = n[10].clamp(10.0, 2000.0);
         self.feet = n[11..].chunks_exact(6).take(16).map(|f| Foot { at: [f[0], f[1], f[2]], reach: f[3].clamp(1.0, 24.0), steers: f[4] != 0.0, drives: f[5] != 0.0, pressed: 0.0, spun: 0.0, road: f32::NAN, rise: 0.0 }).collect();
+        let fwd = FRONTS[self.front as usize];
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for f in &self.feet {
+            let along = dot(f.at, fwd);
+            lo = lo.min(along);
+            hi = hi.max(along);
+        }
+        self.wheelbase = if hi > lo { hi - lo } else { 28.0 };
         true
     }
 
@@ -168,7 +196,41 @@ impl Live {
 
     /// Whether it is told nothing and has nothing left to do.
     fn idle(&self) -> bool {
-        (self.heard >= HOLD || (self.go == 0.0 && self.turn == 0.0 && self.rise == 0.0 && self.side == 0.0)) && !self.hop && self.rolling == 0.0
+        (self.heard >= HOLD || (self.go == 0.0 && self.turn == 0.0 && self.rise == 0.0 && self.side == 0.0 && !self.boost_ask)) && !self.hop && self.rolling == 0.0 && self.launch_timer <= 0.0
+    }
+
+    /// Effective surface grip multiplier: 1.0 dry asphalt/paved, 0.78 wet rain, 0.64 off-road grass/earth/sand.
+    /// Uses fast O(1) `city::top` cached per 4-cell tile (never sector-building `Ground::kind`), or an explicit override.
+    fn surface_factor(&mut self, b: &Body) -> f32 {
+        if self.surface_grip > 0.0 {
+            return self.surface_grip.clamp(0.3, 1.5);
+        }
+        let (ix, iz) = (b.pos[0].floor() as i32, b.pos[2].floor() as i32);
+        let cell = [ix >> 2, iz >> 2];
+        if cell != self.surf_cell {
+            self.surf_cell = cell;
+            let g = crate::city::ground(ix, iz) as f32;
+            // Elevated structures (bridges, rooftops, elevated test strips) ride on built surfaces.
+            self.surf_base = if b.pos[1] - b.com[1] > g + 10.0 {
+                1.0
+            } else {
+                match material(crate::city::top(ix, iz)) {
+                    GRASS | EARTH | SAND | LEAVES => 0.64,
+                    WATER => 0.55,
+                    _ => 1.0,
+                }
+            };
+        }
+        let wet = self.wetness.clamp(0.0, 1.0);
+        if wet > 0.0 {
+            if self.surf_base >= 0.9 {
+                1.0 - 0.22 * wet
+            } else {
+                self.surf_base * (1.0 - 0.12 * wet)
+            }
+        } else {
+            self.surf_base
+        }
     }
 }
 
@@ -305,22 +367,99 @@ impl Live {
         let lat_vel = dot(b.vel, right);
         // For what rolls and does not fly, `rise > 0` is the handbrake (Space / touch Drift): unlocks the rear to drift.
         let handbrake = if rolling && !flies { rise.clamp(0.0, 1.0) } else { 0.0 };
+        let boost_req = rolling && !flies && told && self.boost_ask;
+        let surf = if rolling { self.surface_factor(b) } else { 1.0 };
+        // Handling archetypes derived from motor stats: high-speed sports cars get sharper turn-in & playful
+        // power-oversteer; heavy long-wheelbase buses/trucks get planted low-roll weight & stronger momentum.
+        let sport = if rolling {
+            ((self.top - 280.0) / 320.0).clamp(0.0, 1.0) * (1.0 - ((self.wheelbase - 36.0) / 24.0).clamp(0.0, 0.7))
+        } else {
+            0.0
+        };
+        let heavy = if rolling {
+            ((self.wheelbase - 38.0) / 28.0).clamp(0.0, 1.0) * (1.0 - ((self.top - 260.0) / 160.0).clamp(0.0, 1.0))
+        } else {
+            0.0
+        };
+        // Burnout & launch control: stationary/slow (< 18 cells/s) with throttle + handbrake pins front brakes,
+        // spins rear tires and builds launch charge; releasing handbrake unleashes a crisp 0.8 s launch grip surge.
+        let in_burnout = rolling && !flies && self.on >= 2 && rolls.abs() < 18.0 && go > 0.5 && handbrake > 0.5;
+        if rolling && !flies {
+            if in_burnout {
+                self.burnout_charge = (self.burnout_charge + h / 1.15).min(1.0);
+                self.launch_timer = 0.0;
+            } else if self.burnout_charge > 0.15 && handbrake < 0.2 && go > 0.3 && self.on >= 2 {
+                self.launch_power = self.burnout_charge;
+                self.launch_timer = 0.8;
+                self.burnout_charge = 0.0;
+            } else {
+                self.burnout_charge = (self.burnout_charge - h * 2.2).max(0.0);
+                if self.launch_timer > 0.0 {
+                    let decay = if go > 0.1 { h } else { h * 3.0 };
+                    self.launch_timer = (self.launch_timer - decay).max(0.0);
+                }
+            }
+            // Nitrous / turbo boost reserve (0..1): burns for +40% thrust & +24% top speed; refills from drifting,
+            // clean high-speed driving, or landing jumps.
+            let want_boost = boost_req && go > 0.1 && !in_burnout;
+            let min_fuel = if self.boost_on { 0.001 } else { 0.08 };
+            self.boost_on = want_boost && self.boost_fuel >= min_fuel;
+            if self.boost_on {
+                self.boost_fuel = (self.boost_fuel - 0.36 * h).max(0.0);
+                self.boost_cd = 0.55;
+                if self.boost_fuel <= 0.001 {
+                    self.boost_on = false;
+                }
+            } else {
+                self.boost_cd = (self.boost_cd - h).max(0.0);
+                if self.on >= 2 && self.air_time >= 0.25 {
+                    let bonus = (self.air_time * 0.28).clamp(0.12, 0.35);
+                    self.boost_fuel = (self.boost_fuel + bonus).min(1.0);
+                }
+                if self.on >= 2 {
+                    let slip_abs = if rolls > 18.0 { lat_vel.abs().atan2(rolls.max(15.0)) } else { 0.0 };
+                    if slip_abs > 0.18 && rolls > 22.0 {
+                        self.boost_fuel = (self.boost_fuel + 0.18 * (slip_abs / 0.45).min(1.5) * h).min(1.0);
+                    } else if self.boost_cd <= 0.0 {
+                        if rolls > self.top * 0.45 && slip_abs < 0.14 {
+                            self.boost_fuel = (self.boost_fuel + 0.08 * (rolls / self.top.max(1.0)).min(1.2) * h).min(1.0);
+                        } else if rolls.abs() > 1.0 {
+                            self.boost_fuel = (self.boost_fuel + 0.025 * h).min(1.0);
+                        }
+                    }
+                }
+            }
+            self.air_time = if self.on == 0 { self.air_time + h } else { 0.0 };
+        } else {
+            self.burnout_charge = 0.0;
+            self.launch_timer = 0.0;
+            self.boost_on = false;
+            self.air_time = 0.0;
+        }
+        let launch_surge = if self.launch_timer > 0.0 && go > 0.1 {
+            (self.launch_timer / 0.8).clamp(0.0, 1.0) * self.launch_power
+        } else {
+            0.0
+        };
+        let boost_thrust = if self.boost_on { 1.40 } else { 1.0 };
+        let boost_top = if self.boost_on { 1.24 } else { 1.0 };
         // Progressive steering ramp (fast counter-steer, smooth turn-in, crisp self-center) so keyboard taps feel
         // planted instead of twitchy, plus speed-sensitive steering falloff and mild slip-angle counter-steer assist.
         let steer_rad = if rolling {
             let rate = if turning == 0.0 {
-                8.5
+                8.5 + 2.0 * sport - 1.0 * heavy
             } else if turning * self.steer_now < 0.0 {
-                12.5
+                12.5 + 2.5 * sport - 1.5 * heavy
             } else {
-                6.5
+                (6.5 + 3.0 * sport - 1.6 * heavy).max(3.5)
             };
             self.steer_now += (turning - self.steer_now) * (rate * h).min(1.0);
             if turning == 0.0 && self.steer_now.abs() < 1e-4 {
                 self.steer_now = 0.0;
             }
             let ratio = (rolls.abs() / self.top.max(1.0)).min(1.5);
-            let curve = 1.0 / (1.0 + ratio * 1.15 + ratio * ratio * 0.55);
+            let fall = 1.15 - 0.18 * sport + 0.15 * heavy;
+            let curve = 1.0 / (1.0 + ratio * fall + ratio * ratio * 0.55);
             let slip = if rolls > 20.0 { lat_vel.atan2(rolls.max(15.0)) } else { 0.0 };
             let assist = if rolls > 25.0 && slip.abs() > 0.14 && handbrake < 0.8 {
                 (slip * 0.35).clamp(-0.22, 0.22)
@@ -411,60 +550,79 @@ impl Live {
                 continue;
             }
             let (wheel, across) = if foot.steers { (add(scale(flat, cos), scale(right, sin)), sub(scale(right, cos), scale(flat, sin))) } else { (flat, right) };
-            let (base_most, share) = (self.grip * press * h, mass / n);
+            let (base_most, share) = (self.grip * surf * press * h, mass / n);
             let along = dot(b.speed_at(at), wheel);
-            // Weight-transfer and drift grip balance: handbrake frees the rear to slide while keeping the front biting;
-            // flooring it hard in a fast corner gently loosens the rear for playful power-slides; braking loads the front.
+            // Weight-transfer, surface-aware and archetype drift grip balance: handbrake frees the rear to slide
+            // while keeping the front biting; sports cars get sharper front bite & playful power-oversteer.
             let lat_grip = if rolling {
                 if !foot.steers {
                     if handbrake > 0.05 {
                         base_most * (1.0 - 0.56 * handbrake)
-                    } else if go > 0.5 && self.steer_now.abs() > 0.4 && rolls > 45.0 {
-                        base_most * (1.0 - 0.18 * (go - 0.5) * 2.0 * self.steer_now.abs())
+                    } else if go > 0.5 && self.steer_now.abs() > 0.4 && rolls > 45.0 - 10.0 * sport {
+                        base_most * (1.0 - (0.18 + 0.12 * sport) * (go - 0.5) * 2.0 * self.steer_now.abs())
                     } else {
                         base_most
                     }
                 } else if along * go < 0.0 {
-                    base_most * 1.08
+                    base_most * (1.08 + 0.06 * sport)
                 } else {
-                    base_most
+                    base_most * (1.0 + 0.08 * sport)
                 }
             } else {
                 base_most
             };
             grips.push((at, across, lat_grip));
-            foot.spun += along * h;
-            let push = if rolling && !foot.steers && handbrake > 0.05 {
+            if in_burnout && !foot.steers {
+                // Rear wheels spin freely in place while front brakes hold the car during a burnout.
+                foot.spun += (42.0 + 48.0 * self.burnout_charge) * h;
+            } else {
+                foot.spun += along * h;
+            }
+            let drive_most = if rolling && go > 0.0 && foot.drives && !in_burnout {
+                base_most * (1.0 + 0.55 * launch_surge) * (if self.boost_on { 1.24 } else { 1.0 })
+            } else {
+                base_most
+            };
+            let push = if in_burnout {
+                if foot.steers {
+                    if along.abs() < 8.0 { -along * share } else { -along.signum() * self.grip * surf * G * 0.95 * share * h }
+                } else {
+                    0.0
+                }
+            } else if rolling && !foot.steers && handbrake > 0.05 {
                 // Handbrake on the rear axle: without gas it locks down smoothly to a J-turn stop; with gas held it
                 // bleeds just enough speed to hold a sweeping, smoke-billowing drift.
                 if along.abs() < 6.0 && go <= 0.0 {
                     -along * share
                 } else if go > 0.0 && foot.drives {
-                    let top = self.top;
+                    let top = self.top * boost_top;
                     let gear = 2.0 - (along.abs() / 30.0).min(1.0);
-                    go * self.power * 0.45 * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h
-                        - along.signum() * self.grip * G * 0.14 * mass / n * h * handbrake
+                    go * self.power * boost_thrust * 0.45 * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h
+                        - along.signum() * self.grip * surf * G * 0.14 * mass / n * h * handbrake
                 } else {
-                    -along.signum() * self.grip * G * (if go > 0.0 { 0.16 } else { 0.65 }) * mass / n * h * handbrake
+                    -along.signum() * self.grip * surf * G * (if go > 0.0 { 0.16 } else { 0.65 }) * mass / n * h * handbrake
                 }
             } else if go == 0.0 || flies && self.aloft {
-                // Told nothing it rolls to a stop, and stands where it stopped, on a hill too.
-                if flies && self.aloft { 0.0 } else if along.abs() < 6.0 { -along * share } else { -along.signum() * self.power.max(40.0) * 0.6 * share * h }
+                // Told nothing it rolls to a stop, and stands where it stopped, on a hill too; heavy vehicles carry more momentum.
+                let coast = 0.6 - 0.26 * heavy;
+                if flies && self.aloft { 0.0 } else if along.abs() < 6.0 { -along * share } else { -along.signum() * self.power.max(40.0) * coast * share * h }
             } else if along * go < 0.0 {
                 // Against the way it rolls: a brake, on every foot whichever of them drive, and as hard as the road will
                 // hold whatever the engine (the grip caps it below). A car that drove its rear two braked with those
                 // two alone and took 85 m to stop from 100 km/h.
-                go * (self.power * 2.5).max(self.grip * G) * mass / n * h
+                go * (self.power * 2.5).max(self.grip * surf * G) * mass / n * h
             } else if !foot.drives {
-                0.0
+                if rolling && surf < 0.72 { -along * 0.06 * (1.0 - surf) * share * h } else { 0.0 }
             } else {
-                // Backwards it gets to a third of its speed.
-                let top = if go > 0.0 { self.top } else { self.top * 0.35 };
+                // Backwards it gets to a third of its speed; forward gets boost & launch surge multipliers.
+                let top = if go > 0.0 { self.top * boost_top } else { self.top * 0.35 };
                 // From standing it pulls twice as hard, as in a low gear: enough to get off a heap of rubble it sits on.
                 let gear = 2.0 - (along.abs() / 30.0).min(1.0);
-                go * self.power * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h
+                let mult = if go > 0.0 { boost_thrust * (1.0 + 0.45 * launch_surge) } else { 1.0 };
+                let drag = if rolling && surf < 0.72 { along * 0.06 * (1.0 - surf) * share * h } else { 0.0 };
+                go * self.power * mult * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h - drag
             };
-            pushes.push((at, scale(wheel, push.clamp(-base_most, base_most))));
+            pushes.push((at, scale(wheel, push.clamp(-drive_most, drive_most))));
         }
         for (at, push) in pushes {
             kick(b, at, push);
@@ -497,32 +655,44 @@ impl Live {
                 // Crisp drift initiation when pulling handbrake into a corner, holding a heroic ~30-50° drift angle
                 // rather than spinning out uncontrollably.
                 let slip_now = if new_rolls > 15.0 { dot(b.vel, right).atan2(new_rolls) } else { 0.0 };
+                let slip_allow = 0.45 + (1.0 - surf).max(0.0) * 0.35 + 0.08 * sport;
                 if handbrake > 0.1 && self.steer_now.abs() > 0.1 && new_rolls > 25.0 {
                     let over = slip_now.abs();
-                    let hold = (1.0 - ((over - 0.45) / 0.4).clamp(0.0, 1.0)) * handbrake;
-                    let want_yaw = -self.steer_now * (1.1 + (new_rolls / self.top.max(1.0)).min(1.0) * 0.95) * hold;
+                    let hold = (1.0 - ((over - slip_allow) / 0.42).clamp(0.0, 1.0)) * handbrake;
+                    let want_yaw = -self.steer_now * (1.1 + (new_rolls / self.top.max(1.0)).min(1.0) * 0.95) * (1.0 + (1.0 - surf).max(0.0) * 0.35) * hold;
                     b.spin[1] += (want_yaw - b.spin[1]) * (h * 4.2).min(1.0);
                 } else if turning == 0.0 && handbrake < 0.05 {
                     // Gently settle residual yaw rate when straightening out of a slide.
-                    b.spin[1] *= (1.0 - 2.6 * h).max(0.0);
+                    let settle = (2.6 + 1.4 * heavy - 0.4 * sport).max(1.5);
+                    b.spin[1] *= (1.0 - settle * h).max(0.0);
                 }
-                // Expressive, flip-safe weight transfer: rear squats on launch, nose dives on brakes, chassis rolls in corners.
-                // Pure acceleration-driven torque so cruising straight never fights the road's grade or cross-camber.
+                // Expressive, flip-safe weight transfer: rear squats on launch/burnout/boost, nose dives on brakes,
+                // chassis rolls in corners (heavy buses/trucks stay planted with reduced body roll).
                 if self.on as usize >= self.feet.len() {
                     let local_right = cross(FRONTS[self.front as usize], [0.0, 1.0, 0.0]);
                     let body_right = turn(b.rot, local_right);
                     let cur_pitch = front[1] - grade;
                     let cur_roll = dot(body_up, right);
-                    let pitch_torque = if (self.long_acc > 8.0 && cur_pitch < 0.026) || (self.long_acc < -8.0 && cur_pitch > -0.045) {
-                        (self.long_acc / 150.0).clamp(-1.8, 0.95) * h
+                    let max_squat = 0.026 + 0.016 * launch_surge + if self.boost_on { 0.008 } else { 0.0 };
+                    let pitch_mult = 1.0 + 0.45 * launch_surge + if self.boost_on { 0.25 } else { 0.0 };
+                    let pitch_torque = if in_burnout && cur_pitch < 0.016 {
+                        0.45 * self.burnout_charge * h
+                    } else if (self.long_acc > 8.0 && cur_pitch < max_squat) || (self.long_acc < -8.0 && cur_pitch > -0.045) {
+                        (self.long_acc / 150.0 * pitch_mult).clamp(-1.8, 1.45) * h
                     } else {
                         0.0
                     };
-                    let roll_torque = if (self.lat_acc > 12.0 && cur_roll > -0.085) || (self.lat_acc < -12.0 && cur_roll < 0.085) {
-                        -(self.lat_acc / 75.0).clamp(-2.8, 2.8) * h
+                    let max_roll = 0.085 - 0.045 * heavy - 0.012 * sport;
+                    let roll_mult = 1.0 - 0.55 * heavy - 0.15 * sport;
+                    let mut roll_torque = if (self.lat_acc > 12.0 && cur_roll > -max_roll) || (self.lat_acc < -12.0 && cur_roll < max_roll) {
+                        -(self.lat_acc / 75.0 * roll_mult).clamp(-2.8, 2.8) * h
                     } else {
                         0.0
                     };
+                    if heavy > 0.0 && cur_roll.abs() > 0.012 {
+                        // Heavy long-wheelbase anti-roll bar keeps buses and trucks planted in corners.
+                        roll_torque -= (cur_roll * 18.0 * heavy).clamp(-2.8, 2.8) * h;
+                    }
                     if pitch_torque != 0.0 || roll_torque != 0.0 {
                         b.spin = add(b.spin, add(scale(body_right, pitch_torque), scale(flat, roll_torque)));
                     }
@@ -850,6 +1020,24 @@ impl Bodies {
         true
     }
 
+    /// Extra driving state for a living vehicle (#28): nitrous boost (`boost > 0.5`), rain wetness (`0..1`),
+    /// and optional explicit surface grip override (`> 0` overrides `city::top`, `<= 0` uses auto detection).
+    pub fn drive_aux(&mut self, id: u32, boost: f32, wetness: f32, surface_grip: f32) -> bool {
+        let Some(b) = self.living(id) else { return false };
+        let live = b.live.as_mut().unwrap();
+        live.boost_ask = boost.is_finite() && boost > 0.5;
+        if wetness.is_finite() {
+            live.wetness = wetness.clamp(0.0, 1.0);
+        }
+        if surface_grip.is_finite() {
+            live.surface_grip = if surface_grip > 0.0 { surface_grip.clamp(0.3, 1.5) } else { 0.0 };
+        }
+        if live.boost_ask {
+            b.asleep = false;
+        }
+        true
+    }
+
     /// Puts a living thing where it was: its middle of mass at a place, turned so, still. For a world that is
     /// started again, whose bodies are lost: each thing gets up where it last slept.
     pub fn place(&mut self, id: u32, pos: V, rot: Q) -> bool {
@@ -870,6 +1058,9 @@ impl Bodies {
         let live = b.live.as_mut().unwrap();
         live.heading = front[2].atan2(front[0]);
         (live.steer_now, live.prev_rolls, live.long_acc, live.lat_acc) = (0.0, 0.0, 0.0, 0.0);
+        (live.burnout_charge, live.launch_timer, live.launch_power) = (0.0, 0.0, 0.0);
+        (live.boost_ask, live.boost_on, live.boost_fuel, live.boost_cd, live.air_time) = (false, false, 1.0, 0.0, 0.0);
+        (live.surf_cell, live.surf_base) = ([i32::MIN; 2], 1.0);
         // What its feet knew of the road was where it stood before.
         for foot in &mut live.feet {
             (foot.road, foot.rise) = (f32::NAN, 0.0);
@@ -1080,7 +1271,14 @@ impl Bodies {
             let touches = self.touches.iter().filter(|t| t.a == i || t.b == i).count() as u32;
             let told = if live.heard < HOLD { [live.go, live.turn, live.rise] } else { [0.0; 3] };
             let q = live.frame.unwrap_or([0.0, 0.0, 0.0, 1.0]);
-            words.extend([b.id, dot(b.vel, front).to_bits(), live.on, touches, told[0].to_bits(), told[1].to_bits(), told[2].to_bits(), live.aloft as u32, q[0].to_bits(), q[1].to_bits(), q[2].to_bits(), q[3].to_bits()]);
+            let mut flags = live.aloft as u32;
+            if live.rides() {
+                if live.boost_on { flags |= 2; }
+                if live.launch_timer > 0.0 { flags |= 4; }
+                flags |= ((live.boost_fuel.clamp(0.0, 1.0) * 255.0).round() as u32) << 8;
+                flags |= ((live.burnout_charge.clamp(0.0, 1.0) * 255.0).round() as u32) << 16;
+            }
+            words.extend([b.id, dot(b.vel, front).to_bits(), live.on, touches, told[0].to_bits(), told[1].to_bits(), told[2].to_bits(), flags, q[0].to_bits(), q[1].to_bits(), q[2].to_bits(), q[3].to_bits()]);
         }
         if !words.is_empty() {
             self.record(LIVE, &words);
@@ -2112,6 +2310,285 @@ pub mod tests {
         assert!(min_dive < -0.015, "hard braking visibly dives the nose: {min_dive:.4}");
         assert!(max_slip.to_degrees() > 12.0, "handbrake kicks out a real drift slip angle: {:.1} deg", max_slip.to_degrees());
         assert!(max_tip < 18.0, "stays planted and never rolls over: {:.1} deg", max_tip);
+    }
+
+    #[test]
+    fn burnout_launch_beats_cold_start() {
+        // Run A: cold start from rest with full throttle for 1.0 s.
+        let (cold_dist, cold_speed, cold_squat) = {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = car(&mut bodies, low);
+            run(&mut bodies, 1.5, id, [0.0; 3]);
+            let start = the(&bodies, id).pos[0];
+            let mut squat = -1.0f32;
+            for _ in 0..60 {
+                bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                squat = squat.max(turn(the(&bodies, id).rot, FRONTS[0])[1]);
+            }
+            let b = the(&bodies, id);
+            (b.pos[0] - start, dot(b.vel, turn(b.rot, FRONTS[0])), squat)
+        };
+        // Run B: hold throttle + handbrake for 1.2 s (burnout), verify pinned + rear wheel spin + charge,
+        // then release handbrake and measure 1.0 s launch surge.
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        let before_burn = the(&bodies, id).pos[0];
+        for _ in 0..72 {
+            bodies.drive(id, 1.0, 0.0, 1.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        let b = the(&bodies, id);
+        let live = b.live.as_ref().unwrap();
+        let burn_drift = (b.pos[0] - before_burn).abs();
+        let rear_spun = live.feet.iter().filter(|f| !f.steers).map(|f| f.spun).fold(0.0f32, f32::max);
+        let charge = live.burnout_charge;
+        assert!(burn_drift < 8.0, "front brakes hold car during burnout: drifted {burn_drift:.2} cells");
+        assert!(rear_spun > 30.0, "rear tires spin during burnout: spun {rear_spun:.1}");
+        assert!(charge > 0.85, "burnout builds launch charge: {charge:.2}");
+        // Release handbrake and measure launch surge over 1.0 s.
+        let launch_from = the(&bodies, id).pos[0];
+        let (mut launch_squat, mut saw_launch, mut lowest, mut struck, mut max_tip) = (-1.0f32, false, f32::MAX, 0usize, 0.0f32);
+        for _ in 0..60 {
+            bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            struck += records(&bodies.out, STRUCK).iter().filter(|s| s[0] == id && s[1] == 0).count();
+            let b = the(&bodies, id);
+            saw_launch |= b.live.as_ref().unwrap().launch_timer > 0.0;
+            launch_squat = launch_squat.max(turn(b.rot, FRONTS[0])[1]);
+            max_tip = max_tip.max(tipped(b));
+            lowest = lowest.min(clearance(&mut bodies, id));
+        }
+        let b = the(&bodies, id);
+        let (launch_dist, launch_speed) = (b.pos[0] - launch_from, dot(b.vel, turn(b.rot, FRONTS[0])));
+        eprintln!("burnout launch vs cold: dist {launch_dist:.1} vs {cold_dist:.1}, speed {launch_speed:.1} vs {cold_speed:.1}, squat {launch_squat:.4} vs {cold_squat:.4}, lowest {lowest:.2}, tip {max_tip:.1}");
+        assert!(saw_launch, "releasing handbrake activates launch timer");
+        assert!(launch_dist > cold_dist * 1.18, "burnout launch beats cold start distance: {launch_dist:.1} vs {cold_dist:.1}");
+        assert!(launch_speed > cold_speed * 1.12, "burnout launch beats cold start speed: {launch_speed:.1} vs {cold_speed:.1}");
+        assert!(launch_squat > cold_squat, "burnout launch produces extra rear squat: {launch_squat:.4} vs {cold_squat:.4}");
+        assert!(struck == 0 && lowest > 0.1 && max_tip < 15.0, "launch stays upright and clear of the road");
+    }
+
+    #[test]
+    fn nitrous_boost_increases_acceleration_and_top_speed_safely() {
+        let drive_run = |use_boost: bool, seconds: f32| {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = car(&mut bodies, low);
+            run(&mut bodies, 1.5, id, [0.0; 3]);
+            let (mut fastest, mut lowest, mut max_tip, mut struck) = (0.0f32, f32::MAX, 0.0f32, 0usize);
+            let mut speed_at_2s = 0.0f32;
+            for k in 1..=(seconds * 60.0) as usize {
+                bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+                bodies.drive_aux(id, if use_boost { 1.0 } else { 0.0 }, 0.0, 0.0);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                struck += records(&bodies.out, STRUCK).iter().filter(|s| s[0] == id && s[1] == 0).count();
+                let b = the(&bodies, id);
+                let spd = dot(b.vel, turn(b.rot, FRONTS[0]));
+                if k == 120 { speed_at_2s = spd; }
+                fastest = fastest.max(spd);
+                max_tip = max_tip.max(tipped(b));
+                lowest = lowest.min(clearance(&mut bodies, id));
+            }
+            let fuel = the(&bodies, id).live.as_ref().unwrap().boost_fuel;
+            (speed_at_2s, fastest, lowest, max_tip, struck, fuel)
+        };
+        let (base_2s, base_top, _, _, _, _) = drive_run(false, 6.0);
+        // Also test hitting boost once already at cruising speed so full reserve pushes past normal top speed.
+        let (boost_2s, _, lowest_a, tip_a, struck_a, fuel_after_2s) = drive_run(true, 2.2);
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        run(&mut bodies, 10.0, id, [1.0, 0.0, 0.0]);
+        let cruise = dot(the(&bodies, id).vel, turn(the(&bodies, id).rot, FRONTS[0]));
+        let (mut boost_top, mut lowest_b, mut tip_b, mut struck_b) = (0.0f32, f32::MAX, 0.0f32, 0usize);
+        for _ in 0..140 {
+            bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+            bodies.drive_aux(id, 1.0, 0.0, 0.0);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            struck_b += records(&bodies.out, STRUCK).iter().filter(|s| s[0] == id && s[1] == 0).count();
+            let b = the(&bodies, id);
+            boost_top = boost_top.max(dot(b.vel, turn(b.rot, FRONTS[0])));
+            tip_b = tip_b.max(tipped(b));
+            lowest_b = lowest_b.min(clearance(&mut bodies, id));
+        }
+        let fuel_low = the(&bodies, id).live.as_ref().unwrap().boost_fuel;
+        // Release boost and drift + drive clean: verify boost reserve recharges.
+        bodies.drive_aux(id, 0.0, 0.0, 0.0);
+        for _ in 0..90 {
+            bodies.drive(id, 1.0, 1.0, 1.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        let fuel_after_drift = the(&bodies, id).live.as_ref().unwrap().boost_fuel;
+        // Verify jump landing also recharges boost (staying centered on the level strip).
+        let before_jump = fuel_after_drift;
+        bodies.place(id, [low[0] as f32 + 120.0, low[1] as f32 + 5.0, low[2] as f32 + 9.0], [0.0, 0.0, 0.0, 1.0]);
+        bodies.list.iter_mut().find(|b| b.id == id).unwrap().live.as_mut().unwrap().boost_fuel = before_jump;
+        run(&mut bodies, 0.4, id, [0.0; 3]);
+        bodies.kick(id, [0.0, 55.0, 0.0]);
+        for _ in 0..95 {
+            bodies.drive(id, 0.2, 0.0, 0.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        let fuel_after_jump = the(&bodies, id).live.as_ref().unwrap().boost_fuel;
+        eprintln!("boost: 2s {boost_2s:.1} vs {base_2s:.1}, top {boost_top:.1} vs {base_top:.1} (cruise {cruise:.1}), fuel {fuel_low:.2} -> drift {fuel_after_drift:.2} -> jump {fuel_after_jump:.2}, lowest {:.2}/{:.2}, tip {:.1}/{:.1}", lowest_a, lowest_b, tip_a, tip_b);
+        assert!(boost_2s > base_2s * 1.15, "boost increases acceleration: {boost_2s:.1} vs {base_2s:.1}");
+        assert!(boost_top > base_top * 1.10 && boost_top > 215.0, "boost raises temporary top speed past normal top: {boost_top:.1} vs {base_top:.1}");
+        assert!(fuel_after_2s < 0.35 && fuel_low < 0.4, "boost consumes reserve: {fuel_after_2s:.2}, {fuel_low:.2}");
+        assert!(fuel_after_drift > fuel_low + 0.08, "drifting recharges boost: {fuel_low:.2} -> {fuel_after_drift:.2}");
+        assert!(fuel_after_jump > fuel_after_drift + 0.08, "landing a jump recharges boost: {fuel_after_drift:.2} -> {fuel_after_jump:.2}");
+        assert!(struck_a == 0 && struck_b == 0 && lowest_a > 0.1 && lowest_b > 0.1, "boost never scrapes road");
+        assert!(tip_a < 15.0 && tip_b < 15.0, "boost stays completely upright");
+    }
+
+    #[test]
+    fn surface_grip_modulates_drift_angles_and_archetypes_differ() {
+        // Measure peak drift slip angle under dry (1.0), wet rain (0.78), and off-road (0.64) grip.
+        let drift_on = |wetness: f32, grip_override: f32| {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = car(&mut bodies, low);
+            run(&mut bodies, 1.5, id, [0.0; 3]);
+            run(&mut bodies, 2.2, id, [1.0, 0.0, 0.0]);
+            bodies.drive_aux(id, 0.0, wetness, grip_override);
+            let (mut max_slip, mut max_tip) = (0.0f32, 0.0f32);
+            for _ in 0..75 {
+                bodies.drive(id, 1.0, 1.0, 1.0, false, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                let b = the(&bodies, id);
+                let f = turn(b.rot, FRONTS[0]);
+                let flat = unit([f[0], 0.0, f[2]]);
+                let right = [-flat[2], 0.0, flat[0]];
+                let fwd = dot(b.vel, flat);
+                let lat = dot(b.vel, right).abs();
+                if fwd > 10.0 {
+                    max_slip = max_slip.max(lat.atan2(fwd));
+                }
+                max_tip = max_tip.max(tipped(b));
+            }
+            (max_slip.to_degrees(), max_tip)
+        };
+        let (dry_slip, dry_tip) = drift_on(0.0, 0.0);
+        let (wet_slip, wet_tip) = drift_on(1.0, 0.0);
+        let (off_slip, off_tip) = drift_on(0.0, 0.64);
+        eprintln!("surface drift slip deg: dry {dry_slip:.1} (tip {dry_tip:.1}), wet {wet_slip:.1} (tip {wet_tip:.1}), off-road {off_slip:.1} (tip {off_tip:.1})");
+        assert!(wet_slip > dry_slip + 2.0, "wet rain produces wider drift angle than dry asphalt: {wet_slip:.1} vs {dry_slip:.1}");
+        assert!(off_slip > wet_slip + 2.0, "off-road grip produces wider drift angle than wet rain: {off_slip:.1} vs {wet_slip:.1}");
+        assert!(dry_tip < 18.0 && wet_tip < 18.0 && off_tip < 18.0, "all surface drifts stay upright");
+
+        // Verify fast `city::top` auto-detection returns 1.0 on street asphalt and 0.64 on off-road grass/earth/sand.
+        let mut bodies = Bodies::new();
+        let on_street = car(&mut bodies, street());
+        run(&mut bodies, 0.5, on_street, [0.0; 3]);
+        assert!((the(&bodies, on_street).live.as_ref().unwrap().surf_base - 1.0).abs() < 0.01, "street auto-detects paved grip 1.0");
+        // Find a nearby off-road grass/earth/sand column in the generated town.
+        let mut grass_at = None;
+        'find: for dz in -600..600 {
+            for dx in -600..600 {
+                let (x, z) = (X + dx * 4, Z + dz * 4);
+                let m = material(city::top(x, z));
+                if m == GRASS || m == EARTH || m == SAND {
+                    grass_at = Some([x, city::ground(x, z) + 5, z]);
+                    break 'find;
+                }
+            }
+        }
+        let grass_low = grass_at.expect("town has off-road grass/earth/sand");
+        let on_grass = car(&mut bodies, grass_low);
+        run(&mut bodies, 0.5, on_grass, [0.0; 3]);
+        assert!((the(&bodies, on_grass).live.as_ref().unwrap().surf_base - 0.64).abs() < 0.01, "off-road auto-detects grip 0.64");
+
+        // Handling archetypes: sports car (high top speed, short wheelbase) vs heavy long-wheelbase bus.
+        let make_bus = |bodies: &mut Bodies, low: [i32; 3]| {
+            let size = [72usize, 18, 22];
+            let mut cells = shell(size, kind(STEEL, OWN));
+            for y in 0..2 { for z in 0..size[2] { for x in 0..size[0] { cells[x + size[0] * (z + size[2] * y)] = 0; } } }
+            let id = bodies.spawn(cells, size, low, false);
+            let mut numbers = vec![0.0, 1.1, 45.0, 180.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 160.0];
+            for (x, z, front) in [(10.0, 2.5, false), (10.0, 19.5, false), (62.0, 2.5, true), (62.0, 19.5, true)] {
+                numbers.extend([x, 4.0, z, 7.0, front as u32 as f32, !front as u32 as f32]);
+            }
+            assert!(bodies.motor(id, &numbers));
+            id
+        };
+        // Compare corner roll and coasting momentum between sports car and heavy bus at the same cruising speed.
+        let (sport_yaw, sport_roll, sport_coast) = {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = fast_car(&mut bodies, low, 2);
+            run(&mut bodies, 1.5, id, [0.0; 3]);
+            run(&mut bodies, 1.8, id, [1.0, 0.0, 0.0]);
+            let v0 = dot(the(&bodies, id).vel, turn(the(&bodies, id).rot, FRONTS[0]));
+            let mut max_roll = 0.0f32;
+            let yaw0 = { let f = turn(the(&bodies, id).rot, FRONTS[0]); f[2].atan2(f[0]) };
+            for _ in 0..30 {
+                bodies.drive(id, 1.0, 1.0, 0.0, false, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                let b = the(&bodies, id);
+                let up = turn(b.rot, [0.0, 1.0, 0.0]);
+                let f = turn(b.rot, FRONTS[0]);
+                let r = [-f[2], 0.0, f[0]];
+                max_roll = max_roll.max(dot(up, r).abs());
+            }
+            let yaw1 = { let f = turn(the(&bodies, id).rot, FRONTS[0]); f[2].atan2(f[0]) };
+            // Coast test from fresh straight run.
+            let mut bodies2 = Bodies::new();
+            let low2 = level(&mut bodies2);
+            let id2 = fast_car(&mut bodies2, low2, 2);
+            run(&mut bodies2, 1.5, id2, [0.0; 3]);
+            run(&mut bodies2, 1.5, id2, [1.0, 0.0, 0.0]);
+            let c0 = dot(the(&bodies2, id2).vel, turn(the(&bodies2, id2).rot, FRONTS[0]));
+            run(&mut bodies2, 1.0, id2, [0.0; 3]);
+            let c1 = dot(the(&bodies2, id2).vel, turn(the(&bodies2, id2).rot, FRONTS[0]));
+            let _ = v0;
+            ((yaw1 - yaw0).abs(), max_roll, c1 / c0.max(1.0))
+        };
+        let (bus_yaw, bus_roll, bus_coast) = {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = make_bus(&mut bodies, low);
+            run(&mut bodies, 1.5, id, [0.0; 3]);
+            run(&mut bodies, 2.2, id, [1.0, 0.0, 0.0]);
+            let mut max_roll = 0.0f32;
+            let yaw0 = { let f = turn(the(&bodies, id).rot, FRONTS[0]); f[2].atan2(f[0]) };
+            for _ in 0..30 {
+                bodies.drive(id, 1.0, 1.0, 0.0, false, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+                let b = the(&bodies, id);
+                let up = turn(b.rot, [0.0, 1.0, 0.0]);
+                let f = turn(b.rot, FRONTS[0]);
+                let r = [-f[2], 0.0, f[0]];
+                max_roll = max_roll.max(dot(up, r).abs());
+            }
+            let yaw1 = { let f = turn(the(&bodies, id).rot, FRONTS[0]); f[2].atan2(f[0]) };
+            let mut bodies2 = Bodies::new();
+            let low2 = level(&mut bodies2);
+            let id2 = make_bus(&mut bodies2, low2);
+            run(&mut bodies2, 1.5, id2, [0.0; 3]);
+            run(&mut bodies2, 2.2, id2, [1.0, 0.0, 0.0]);
+            let c0 = dot(the(&bodies2, id2).vel, turn(the(&bodies2, id2).rot, FRONTS[0]));
+            run(&mut bodies2, 1.0, id2, [0.0; 3]);
+            let c1 = dot(the(&bodies2, id2).vel, turn(the(&bodies2, id2).rot, FRONTS[0]));
+            ((yaw1 - yaw0).abs(), max_roll, c1 / c0.max(1.0))
+        };
+        eprintln!("archetypes: sport yaw {sport_yaw:.2} rad, roll {sport_roll:.4}, coast {sport_coast:.2} | bus yaw {bus_yaw:.2} rad, roll {bus_roll:.4}, coast {bus_coast:.2}");
+        assert!(sport_yaw > bus_yaw * 1.15, "sports car turns in sharper than heavy bus: {sport_yaw:.2} vs {bus_yaw:.2}");
+        assert!(bus_roll < sport_roll * 0.85 && bus_roll < 0.06, "heavy bus stays planted with low body roll: {bus_roll:.4} vs sport {sport_roll:.4}");
+        assert!(bus_coast > sport_coast, "heavy bus retains stronger coasting momentum: {bus_coast:.2} vs {sport_coast:.2}");
     }
 }
 

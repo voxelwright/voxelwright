@@ -208,13 +208,14 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
   return {
     voice, blast, count, music, sounded, tuned, follows,
     /** Updates the driven vehicle's continuous engine, tire screech, and road roll beds (null silences them). */
-    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number } | null) {
+    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null) {
       voice.set(SET.engineRpm, v ? v.rpm : 0)
       voice.set(SET.engineLoad, v ? v.load : 0)
       voice.set(SET.engineTone, v ? v.tone : 0)
       voice.set(SET.tireSlip, v ? v.slip : 0)
       voice.set(SET.roadRoll, v ? v.roll : 0)
       voice.set(SET.roadRough, v ? v.rough : 0)
+      voice.set(SET.turboBoost, v?.boost ?? 0)
     },
     /** Plays a one-shot vehicle foley sound: door thump, ignition bark, upshift burble, exhaust pop, or landing thud. */
     carEvent(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force = 0.75) {
