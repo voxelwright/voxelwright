@@ -74,7 +74,8 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
-| `input.ts` | Keys, pointer and touch for play. Modes form a stack; a lane pushes its own mode and pops it. |
+| `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
+| `gamepad.ts` | Standard W3C Gamepad API input (analog triggers, steering curves, right-stick orbit, dual-motor haptic rumble) and touch steering curve. Zero polling overhead until `gamepadconnected`. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](plugin-types.md)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](cells.md)). |
