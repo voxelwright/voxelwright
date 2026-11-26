@@ -68,6 +68,7 @@ import { BREAK, HIT, WORLD as WORLD_SOUND } from './sound/kinds.ts'
 import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
+import { createCarSummon } from './summon.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -1141,7 +1142,9 @@ async function main() {
         mapSpeed += (Math.min(120, inst) - mapSpeed) * 0.25
         mapLastX = x; mapLastZ = z; mapLastT = now
       }
-      return { x, y, z, yaw, speed: mapSpeed, driving: !!r, flying: !r && !me.on }
+      const tel = alive.telemetry
+      const liveSpeed = tel ? tel.kmh / 3.6 : mapSpeed
+      return { x, y, z, yaw, speed: liveSpeed, driving: !!r, flying: !r && !me.on, drifting: tel?.drifting ?? false, slip: tel?.slip ?? 0 }
     },
     onEngage: () => {
       if (BAY_ON) loadSfMap(3)
@@ -1990,8 +1993,16 @@ async function main() {
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
+  const carSummon = createCarSummon({
+    land: core, alive, hud: over,
+    origin: () => { const f = me.feet; return f ? { x: f.at[0], z: f.at[2], yaw: f.yaw } : { x: pose.x * M, z: pose.z * M, yaw: pose.yaw } },
+    street: () => streetLife,
+    ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
+  })
+  own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  resetting.add(() => carSummon.clear())
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon() })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({

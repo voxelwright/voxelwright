@@ -79,6 +79,8 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `gamepad.ts` | Standard W3C Gamepad API input (analog triggers, steering curves, right-stick orbit, dual-motor haptic rumble) and touch steering curve. Zero polling overhead until `gamepadconnected`. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
 | `stunts.ts` | Driving stunt and combo tracker (`engine.stunts`): drifts, hill jumps, 180/360 spins, traffic near-misses (`voxelwright:nearmiss`), speed runs, x1–x5 combos, banking chime, and `[data-panel="stunts"]`. |
+| `minimap.ts`, `map-gpu.ts` | Speed-reactive 3D WebGPU minimap, fullscreen 2D/3D map, and GPS navigation. |
+| `summon.ts` | Instant street-level sports coupe delivery (`G` key on foot). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](plugin-types.md)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](cells.md)). |
 
