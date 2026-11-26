@@ -228,6 +228,8 @@ export class World {
   }
   /** How long a maker may say nothing, not even to the page's pings (bay.ts `share`), before it is taken for gone, ms. */
   patience = 10_000
+  /** First level wholly past the far model's reach: made after the near boxes so cold landing fetches only what precedes the handover. */
+  farFrom = Infinity
   /** The core the workers were last told to use (`recore`), for one hired after. */
   private core: string | null = null
   /** Columns made while a tile they need had not come (#450): made again when due, a little later each time. */
@@ -401,9 +403,9 @@ export class World {
           stale ||= state === STALE
         }
         if (y0 > y1) continue
-        // How far the column is from the eye, in this level's sectors: every box fills from its middle outwards, the far ones a little sooner.
+        // How far the column is from the eye, in this level's sectors: every box fills from its middle outwards, the far ones a little sooner (boxes past the far model's handover come last).
         const far = Math.hypot((sx + 0.5) * size - eye[0], (sz + 0.5) * size - eye[2]) / size
-        this.asks.push({ level: level.index, sx, sz, y0, y1, rank: stale ? -1 : far - level.index * 0.05 })
+        this.asks.push({ level: level.index, sx, sz, y0, y1, rank: stale ? -1 : far - level.index * 0.05 + (level.index >= this.farFrom ? 100 : 0) })
         for (let sy = y0; sy <= y1; sy++) {
           const slot = level.slot(sx, sy, sz)
           if (level.state[slot] === MISSING) level.state[slot] = QUEUED
@@ -428,6 +430,20 @@ export class World {
         }
         if (!any) continue
         const reach = this.reach[ask.level]?.get(column(ask.sx, ask.sz)) ?? []
+        if (ask.level >= this.farFrom && reach.length === 0) {
+          // Past the far model's handover with no edits: mark empty air directly without fetching coarse city tiles.
+          for (let sy = ask.y0; sy <= ask.y1; sy++) {
+            const slot = level.slot(ask.sx, sy, ask.sz)
+            if (level.state[slot] !== FLYING && level.state[slot] !== STALE_FLYING) continue
+            if (level.at[slot] >= 0) { this.pool.give(level.at[slot], level.size[slot]); level.at[slot] = -1; level.size[slot] = 0 }
+            level.state[slot] = READY
+            level.show(slot, 0, 0)
+            this.stats.made++
+            this.stats.boxes[ask.level].made++
+          }
+          level.dirty = true
+          continue
+        }
         if (reach.length >= 8) this.tidy(reach, ask.level, ask.sx, ask.sz)
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }

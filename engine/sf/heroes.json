@@ -65,8 +65,8 @@
   {
     "name": "Palace of Fine Arts",
     "sort": 9,
-    "at": [37.80278, -122.44806],
-    "toward": [37.80278, -122.44706],
+    "at": [37.802927, -122.448414],
+    "toward": [37.802927, -122.447414],
     "foot": 1.7,
     "step": 4,
     "from": "The rotunda's place and its height of 49 m (162 feet) as published; the exhibition hall behind is the map's (Overture Maps 2026-10-21.0, © OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 2.68 m NAVD88. Piers, arches, colonnade and planter boxes by eye. The rule is engine/core/src/heroes.rs."

@@ -155,7 +155,7 @@ fn marked(col: vec3f, ro: vec3f, rd: vec3f, t: f32) -> vec3f {
       case 4u: {
         cover = markBoth(side, 0.0, 15.0, wq) * markBand(tt, 2.0, l - 2.0, wu) * markPeriodic(tt - 2.0, 12.0, 6.0, wu);
         if (colour == 2u) {
-          let bar = u32(max(floor((tt - 2.0) / 12.0), 0.0)) % 6u;
+          let bar = min(u32(max(floor(((tt - 2.0) / max(l - 4.0, 12.0)) * 6.0), 0.0)), 5u);
           let bow = array<vec3f, 6>(vec3f(0.62, 0.03, 0.03), vec3f(0.8, 0.25, 0.02), vec3f(0.85, 0.66, 0.05), vec3f(0.05, 0.4, 0.08), vec3f(0.03, 0.12, 0.55), vec3f(0.3, 0.04, 0.4));
           paint = bow[bar];
         }

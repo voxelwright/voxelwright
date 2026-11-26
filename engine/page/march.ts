@@ -1103,11 +1103,11 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
           t = side.z; side.z += each.z; cell.z += toward.z; n = vec3f(0.0, 0.0, -f32(toward.z));
         }
         if (full${world.options.bricks && INLOOP ? ' && through' : ''}) {
-          // Glass lets the sun through (#163): a ray sent through (a line of a sun map) does not stop at it, so a window
-          // lights the room behind it and casts no wall's shadow. Only in the two finest boxes, the copies with rooms in
-          // them: further off a house or a tower of glass is solid, and its glass stands for all of it.
+          // Glass lets the sun through (#163), and fine 2.5 cm overhead wires (FINE | STEEL = 76) do too so aerial
+          // trolley cables don't cast 20 cm solid-voxel sawtooth shadows across streets and crosswalks.
           let nth = before(leafLo, leafHi, bit);
-          if (((pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 15u) != 11u || L > 1u) { hit.t = t; hit.kind = 1u; }
+          let k = (pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu;
+          if (((k & 15u) != 11u && (k & 79u) != 76u) || L > 1u) { hit.t = t; hit.kind = 1u; }
         }
         if (any((cell >> vec3u(2u)) != leaf)) { break; }
         work++;
@@ -1124,7 +1124,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     }
     let out = ((vec3f(low) + ahead * f32(size)) - q0) * k;
     let next = min(out.x, min(out.y, out.z));
-    if (kind != 0u && ((kind & 15u) != 11u || L > 1u)) { hit.t = max(next, t); hit.kind = kind & 0xffffu; }
+    if (kind != 0u && (((kind & 15u) != 11u && (kind & 79u) != 76u) || L > 1u)) { hit.t = max(next, t); hit.kind = kind & 0xffffu; }
     n = -sign(rd) * vec3f(out <= vec3f(next));
     // Not past where the ray leaves the box: 4 x 4 x 4 sectors with nothing in them are stepped over as one, and
     // they are counted from the box's own slots, so the step can reach outside it.
@@ -1564,7 +1564,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       for (var k = 0; k < 24; k++) {
         let s = trace(o, g.sun, past, level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false, false);
         if (s.t < 0.0) { break; }
-        if ((s.kind & 15u) != 11u || s.level > 1u || k == 23) { sunny = 0.0; break; }
+        if (((s.kind & 15u) != 11u && (s.kind & 79u) != 76u) || s.level > 1u || k == 23) { sunny = 0.0; break; }
         past = leaving(o, g.sun, s, false);
         level = s.level;
       }

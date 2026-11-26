@@ -7,7 +7,7 @@
 // The Brotli copies are kept only where worker.mjs sends them (releases/, bay/); the platform compresses the rest.
 //
 //   node deploy/assemble.mjs [--realm engine/dist-sf] [--site site/dist]
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { constants as fsConstants, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { withNotice } from './notice.mjs'
@@ -57,12 +57,19 @@ function worldPage(html) {
 </head>`)
 }
 
+const cloneOrCopy = (from, to) => {
+  if (process.platform === 'linux') {
+    try { linkSync(from, to); return } catch { /* cross-device or existing */ }
+  }
+  try { copyFileSync(from, to, fsConstants.COPYFILE_FICLONE) } catch { cpSync(from, to) }
+}
+
 function assemble(folder, entries, headers, world) {
   const out = join(here, folder)
   rmSync(out, { recursive: true, force: true })
   for (const [path, from] of entries) {
     mkdirSync(dirname(join(out, path)), { recursive: true })
-    if (!world || !path.endsWith('.html')) { cpSync(from, join(out, path)); continue }
+    if (!world || !path.endsWith('.html')) { cloneOrCopy(from, join(out, path)); continue }
     let html = readFileSync(from, 'utf8')
     if (path === 'index.html') html = worldPage(html)
     writeFileSync(join(out, path), withNotice(html))

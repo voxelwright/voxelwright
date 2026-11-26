@@ -491,16 +491,25 @@ for r in roads:
         continue
     L = length(r["line"])
     tagged = signal_node_on(r)
-    s = min(L * 0.8, max(L * 0.3, project(r["line"], tagged))) if tagged else max(L * 0.4, L - 60)
+    s = min(L * 0.85, max(L * 0.3, project(r["line"], tagged))) if tagged else max(L * 0.35, L - 105)
     (x, z), (dx, dz) = at_along(r["line"], s)
     m = math.hypot(dx, dz) or 1
     dx, dz = dx / m, dz / m
     # Right of the way it runs (x east, z south: right of (dx, dz) is (-dz, dx)).
-    k = ray((x, z), (-dz, dx), 250)
+    # Near wide intersections the kerb opens into the cross street; probe back along the straight approach if needed.
+    k = None
+    for back in (0, 60, 120, 180):
+        ps = max(0.0, s - back)
+        (px, pz), (pdx, pdz) = at_along(r["line"], ps)
+        pm = math.hypot(pdx, pdz) or 1
+        hit = ray((px, pz), (-pdz / pm, pdx / pm), 180)
+        if hit is not None and hit >= 28:
+            k = hit
+            break
     way, a, b = r["id"].split("/")
     oneway = f"{way}/{b}/{a}" not in ids
     lanes = int(r.get("lanes") or 1)
-    off = k + 6 if k is not None else (lanes * 33 / 2 if oneway else lanes * 33) + 25
+    off = k + 6 if k is not None else (lanes * 33 / 2 if oneway else lanes * 33) + 32
     out[where].setdefault("heads", []).append([int(way), int(a), int(b), int(round(x - dz * off)), int(round(z + dx * off)), 1 if tagged else 0])
     heads_split["at a mapped signal" if tagged else "6 m short"] += 1
     heads_split["at the kerb" if k is not None else "past the lanes"] += 1

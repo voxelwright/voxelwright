@@ -72,27 +72,35 @@ const INPUTS = [RELEASE, 'bay/sf-450-city/packs/graph', 'kept-cars/shelf/1cb43f5
 if (localPack || process.argv[2] === 'pack') {
   if (sha(readFileSync(join(VILLAGE, RELEASE, 'manifest.json'))) !== pin) fail('staged manifest differs from pin')
   const work = mkdtempSync(join(tmpdir(), 'sf-data-')), index = []
-  for (const input of INPUTS) {
-    const at = join(VILLAGE, input)
-    if (!existsSync(at)) fail(`${at} is missing`)
-    for (const file of statSync(at).isDirectory() ? files(at) : [at]) {
-      const path = relative(VILLAGE, file).split(sep).join('/'), body = readFileSync(file)
-      // The release's own quality-11 copy, which the build made; the rest made here, at quality 9. Without the build's
-      // copies CI would compress the whole release again at quality 11, for longer than its run may take.
-      if (path.startsWith(RELEASE) && !existsSync(cached(body))) fail(`${path} has no quality-11 copy in ${CACHE}: run node engine/sf/build.mjs first`)
-      const brotli = path.startsWith(RELEASE) ? readFileSync(cached(body)) : brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 9, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
-      mkdirSync(dirname(join(work, 'files', path)), { recursive: true })
-      writeFileSync(join(work, 'files', `${path}.br`), brotli)
-      index.push({ path, bytes: body.length, sha256: sha(body), q11: path.startsWith(RELEASE) })
-    }
-  }
-  index.sort((a, b) => (a.path < b.path ? -1 : 1))
-  const listing = JSON.stringify({ pin, files: index }), digest = sha(listing)
-  writeFileSync(join(work, 'index.json'), listing)
-  const tag = `sf-data-${digest.slice(0, 16)}`
-  const archive = join(work, 'data.tar')
-  const record = JSON.stringify({ pin, digest, tag }, null, 2) + '\n'
   try {
+    for (const input of INPUTS) {
+      let at = join(VILLAGE, input), rootBase = VILLAGE
+      if (!existsSync(at)) fail(`${at} is missing`)
+      // Compact-stored city releases keep tiles in `.bay-store`: export verified objects before packing.
+      if (input === RELEASE && existsSync(join(at, '.bay-store')) && !existsSync(join(at, 'tiles'))) {
+        const python = join(VILLAGE, 'bay', 'venv', 'bin', 'python')
+        const exported = join(work, 'exported', RELEASE)
+        execFileSync(python, [join(repo, 'engine/bay/compact_store.py'), join(at, 'manifest.json'), exported], { stdio: 'inherit' })
+        at = exported
+        rootBase = join(work, 'exported')
+      }
+      for (const file of statSync(at).isDirectory() ? files(at) : [at]) {
+        const path = relative(rootBase, file).split(sep).join('/'), body = readFileSync(file)
+        // The release's own quality-11 copy, which the build made; the rest made here, at quality 9. Without the build's
+        // copies CI would compress the whole release again at quality 11, for longer than its run may take.
+        if (path.startsWith(RELEASE) && !existsSync(cached(body))) fail(`${path} has no quality-11 copy in ${CACHE}: run node engine/sf/build.mjs first`)
+        const brotli = path.startsWith(RELEASE) ? readFileSync(cached(body)) : brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 9, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
+        mkdirSync(dirname(join(work, 'files', path)), { recursive: true })
+        writeFileSync(join(work, 'files', `${path}.br`), brotli)
+        index.push({ path, bytes: body.length, sha256: sha(body), q11: path.startsWith(RELEASE) })
+      }
+    }
+    index.sort((a, b) => (a.path < b.path ? -1 : 1))
+    const listing = JSON.stringify({ pin, files: index }), digest = sha(listing)
+    writeFileSync(join(work, 'index.json'), listing)
+    const tag = `sf-data-${digest.slice(0, 16)}`
+    const archive = join(work, 'data.tar')
+    const record = JSON.stringify({ pin, digest, tag }, null, 2) + '\n'
     if (localPack) {
       const directory = process.argv[4]
       mkdirSync(join(directory, tag), { recursive: true })
@@ -129,6 +137,7 @@ if (localPack || process.argv[2] === 'pack') {
     const members = join(work, 'members')
     writeFileSync(members, publicFiles.map(f => `files/${f.path}.br\n`).join(''))
     execFileSync('tar', ['-xf', archive, '-C', work, '-T', members], { stdio: ['ignore', 'ignore', 'pipe'] })
+    rmSync(archive, { force: true })
     mkdirSync(CACHE, { recursive: true })
     for (const f of publicFiles) {
       const member = join(work, 'files', `${f.path}.br`)
@@ -138,6 +147,7 @@ if (localPack || process.argv[2] === 'pack') {
       mkdirSync(dirname(join(VILLAGE, f.path)), { recursive: true })
       writeFileSync(join(VILLAGE, f.path), body)
       if (f.q11) writeFileSync(cached(body), brotli)
+      rmSync(member, { force: true })
     }
     console.log(`${record.tag}: ${publicFiles.length} files restored for pin ${pin.slice(0, 12)} under ${VILLAGE}`)
   } catch (error) {

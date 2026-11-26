@@ -192,6 +192,12 @@ async function main() {
   // The far model: a realm's pinned release holds it where it has one (bay.ts `where`), else beside the page.
   const released = LOCAL?.release ? await where().catch(() => null) : null
   const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
+  // Boxes covering the cells up to the far model's handover: on a full city with a far model, coarser boxes beyond
+  // reach stream after the place is shown so cold load never waits on citywide coarse tiles hidden behind far faces.
+  const nearLevels = farModel.listing && farModel.reach > 0
+    ? world.levels.filter((l) => l.index === 0 || ((l.grid[0] * SIDE) << (l.index - 1)) / 2 < farModel.reach * M)
+    : world.levels
+  world.farFrom = nearLevels.length
   loading.step('skyline')
   // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
   const marine = await fog(device, gpu.format, march)
@@ -213,7 +219,8 @@ async function main() {
   // A realm run alone (local.ts) says where one arrives: the eye there, in the world's cells, and how it faces in radians.
   // (Framed otherwise where the picture is taller than wide, if the realm says how and the address gives no look: local.ts `upright`.)
   const upright = innerHeight > innerWidth && !query.has('look') ? LOCAL?.upright : undefined
-  const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? { ...LOCAL.arrive, ...(upright?.yaw !== undefined ? { yaw: upright.yaw } : {}), ...(upright?.pitch !== undefined ? { pitch: upright.pitch } : {}) } : null
+  const directLL = query.has('ll') && !!BAY_START
+  const arrive = !query.has('at') && !directLL && LOCAL?.arrive?.at.length === 3 ? { ...LOCAL.arrive, ...(upright?.yaw !== undefined ? { yaw: upright.yaw } : {}), ...(upright?.pitch !== undefined ? { pitch: upright.pitch } : {}) } : null
   let startX = arrive ? arrive.at[0] : BAY_START ? BAY_START[0] : BAY_ON ? 519_500 : 700, startZ = arrive ? arrive.at[2]! : BAY_START ? BAY_START[1] : BAY_ON ? 661_150 : 4070
   // Where the Bay comes in tiles, the ones round the start and round where the page was told to stand come first.
   // Before the first picture only the finest round the start (#450): what is asked of the ground there, first on the
@@ -223,11 +230,11 @@ async function main() {
   while (!BAY_ON && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
   // A place given by latitude and longitude may be a roof: the eye starts over what stands there, not inside it.
   const at = arrive ? arrive.at.map((c) => c / M) : numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
-  const look = arrive && !query.has('look') ? [(arrive.yaw * 180) / Math.PI, (arrive.pitch * 180) / Math.PI] : numbers('look', BAY_ON ? [64, 4] : [20, -8])
+  const look = arrive && !query.has('look') ? [(arrive.yaw * 180) / Math.PI, (arrive.pitch * 180) / Math.PI] : numbers('look', directLL ? [0, -10] : BAY_ON ? [64, 4] : [20, -8])
   /** The eye's angle from top to bottom, degrees. */
-  let fov = Number(query.get('fov') ?? (arrive && upright?.fov) ?? LOCAL?.fov ?? 70)
+  let fov = Number(query.get('fov') ?? (arrive && upright?.fov) ?? (directLL ? undefined : LOCAL?.fov) ?? 70)
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
-  const roll = (Number(query.get('roll') ?? LOCAL?.roll ?? 0) * Math.PI) / 180
+  const roll = (Number(query.get('roll') ?? (directLL ? 0 : LOCAL?.roll) ?? 0) * Math.PI) / 180
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
@@ -238,7 +245,7 @@ async function main() {
   // Not after a join the visitor chose (#526: the list's ticket, or the question answered yes in this load): they asked
   // to be in that world, and are. An address alone never skips it, nor does a join that failed.
   const chosen = !!joined && (!!ticket || askedYes)
-  const first = LOCAL ? firstView(!chosen && query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  const first = LOCAL ? firstView(!chosen && !directLL && query.get('first') !== '0' && query.get('boards') !== 'edit') : null
   // The line of numbers is for whoever measures: a realm the page runs alone shows it only when asked (`?debug=1`; first.ts hides it).
   if (LOCAL && query.get('debug') !== '1') document.documentElement.classList.add('plain')
   if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
@@ -756,8 +763,8 @@ async function main() {
     // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
     // view, so that the skyline is in the first picture; then what the view needs past the cut, and once the visitor leaves the first view the rest (leaveLanding).
     // The loader's last stage (loading.ts): how near the least whole box is to the half across its middle that `near` waits for.
-    if (!seen.near) loading.progress(Math.min(...world.levels.flatMap((l) => [0, 2].map((a) => (l.whole.high[a] - l.whole.low[a]) / (l.grid[a] / 2)))))
-    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
+    if (!seen.near) loading.progress(Math.min(...nearLevels.flatMap((l) => [0, 2].map((a) => (l.whole.high[a] - l.whole.low[a]) / (l.grid[a] / 2)))))
+    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && nearLevels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
     leaveLanding()
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
@@ -1632,7 +1639,7 @@ async function main() {
     const road = (px: number, pz: number) => (core.top_at(Math.round(px), Math.round(pz)) & 15) === 6
     const clear = (px: number, pz: number) => { const g = core.ground_at(Math.round(px), Math.round(pz)); for (let y = 2; y <= size[1] + 6; y += 2) if (core.world_kind(Math.round(px), g + y, Math.round(pz))) return false; return true }
     const half = size[0] / 2 + 4, wide = size[2] / 2 + 3, candidates: { at: [number, number]; far: number }[] = []
-    for (const square of await streets().catch(() => [])) for (const way of square.ways) for (let i = 1; i < way.line.length; i++) {
+    for (const square of await streets([x, z], 3200).catch(() => [])) for (const way of square.ways) for (let i = 1; i < way.line.length; i++) {
       const [ax, az] = way.line[i - 1], [bx, bz] = way.line[i], length = Math.hypot(bx - ax, bz - az)
       if (!length || Math.abs(bz - az) / length > 0.25) continue
       for (let d = 0; d <= length; d += 20) { const px = ax + ((bx - ax) * d) / length, pz = az + ((bz - az) * d) / length, far = Math.hypot(px - x, pz - z); if (far < 3000) candidates.push({ at: [px, pz], far }) }
@@ -1786,7 +1793,7 @@ async function main() {
     // panel is as it is unasked (explore.ts folds it again on the roof).
     // In a lobby it stays folded, as it is on the roof alone (#526).
     first?.during(() => { realmUi.fold(true); return () => { if (!joined) realmUi.rest() } })
-    if (joined) realmUi.fold(true)
+    if (joined || directLL) realmUi.fold(true)
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore

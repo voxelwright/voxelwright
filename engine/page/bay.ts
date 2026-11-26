@@ -123,7 +123,7 @@ export function place(lat: number, lon: number): { frame: string; x: number; z: 
 const asked_ll = ll?.split(',').map(Number)
 const there = STREAM && asked_ll?.length === 2 && asked_ll.every(Number.isFinite) ? place(asked_ll[0], asked_ll[1]) : null
 /** The frame this page's cells are counted in, and where it starts in it (the Bay's own start where null). */
-export const FRAME = there?.frame ?? '10n4250'
+export const FRAME = LOCAL?.release ? '10n4250' : (there?.frame ?? '10n4250')
 export const START: [number, number] | null = there ? [there.x, there.z] : WORLD?.release && WORLD.arrive ? [WORLD.arrive.at[0], WORLD.arrive.at[2]] : null
 /** `?bay=earth`: nothing baked from lidar is used, only what is made from the planet's data. */
 const BAKED = asked === '1' && FRAME === '10n4250'
@@ -155,7 +155,7 @@ export interface Source {
   levels: Level[]
   /** A tile's address and what it must be, or null where it is water and nothing is asked. */
   find(level: number, key: string): { url: string; bytes?: number; sha256?: string; listed: boolean } | null
-  names: { url: string; bytes?: number; sha256?: string }[]
+  names: { square: string; url: string; bytes?: number; sha256?: string }[]
   credits: string[] | null
   /** The release this page is pinned to, and its manifest's address (far.ts reads its `far` from it), or null under the page server. */
   release: string | null
@@ -192,7 +192,7 @@ async function released(pointer: URL): Promise<Source> {
     // Water, in the sea list or past what the release holds: nothing is asked.
     lists: (level, key) => !!levels[level]?.tiles[key],
     find: (level, key) => { const r = levels[level]?.tiles[key]; if (r) return { url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256, listed: true }; if (sea[level]?.has(key)) seaKeys++; else unlisted++; return null },
-    names: Object.values(manifest.names).map((r) => ({ url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256 })),
+    names: Object.entries(manifest.names).map(([square, r]) => ({ square, url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256 })),
     credits: releaseCredits(at.release, manifest.credits),
     release: at.release,
     manifest: where.href,
@@ -219,7 +219,7 @@ async function served(): Promise<Source> {
     levels: i.levels,
     lists: () => false,
     find: (level, key) => ({ url: has[level].has(key) ? `${BASE}tiles/${level}/${key}.bay` : `${BASE}earth/${FRAME}/${level}/${key}.bay`, listed: false }),
-    names: (BAKED ? i.squares : []).map((name) => ({ url: `${BASE}${name}.json` })),
+    names: (BAKED ? i.squares : []).map((square) => ({ square, url: `${BASE}${square}.json` })),
     credits: null,
     release: null,
     manifest: null,
@@ -238,7 +238,7 @@ export const where = (): Promise<Source> => (source ??= WORLD?.pointer ? release
 /** How much a device may hold (#450): a phone's tab is killed long before a laptop's. */
 export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4) < 600 ? 'phone' : 'desktop'
 /** What one device class may hold: tiles kept by each core, at each level, and tile bytes the page keeps for its workers. */
-export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } : { keep: [24, 8, 8], bytes: 96 << 20 }
+export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } : { keep: [28, 12, 8], bytes: 96 << 20 }
 
 /** The tiles the page holds for its cores: each fetched once, the last wanted kept up to `HOLD.bytes`. */
 const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number }>()
@@ -480,7 +480,7 @@ const keysOf = (x0: number, z0: number, x1: number, z1: number, level: number, s
 export async function ground(core: object, x0: number, z0: number, x1: number, z1: number, cell: number, within?: number, pins?: object[]): Promise<Unheld | null> {
   if (!STREAM) return null
   const levels = owns ? (await where()).levels : toldLevels, keep = owns ? HOLD.keep : toldKeep
-  const level = cell <= 8 ? 0 : cell <= 64 ? 1 : 2, { size, gstep } = levels[level]
+  const level = cell <= 8 ? 0 : cell <= 16 ? 1 : 2, { size, gstep } = levels[level]
   let mine = held.get(core)
   if (!mine) held.set(core, (mine = new Map()))
   const coming: Promise<boolean>[] = [], wanted: Held[] = [], stamp = ++clock
@@ -556,7 +556,7 @@ function roomIn(core: object, mine: Map<string, Held>, stamp: number): boolean {
 /** Whether a core holds, now, every tile a box needs (has come, as a pack or as water): what is answered there is the place's. Counts as wanting them. */
 export function holds(core: object, x0: number, z0: number, x1: number, z1: number, cell: number): boolean {
   if (!STREAM) return true
-  const mine = held.get(core), level = cell <= 8 ? 0 : cell <= 64 ? 1 : 2, size = (toldLevels[level] ?? LEVELS[level]).size, now = Date.now()
+  const mine = held.get(core), level = cell <= 8 ? 0 : cell <= 16 ? 1 : 2, size = (toldLevels[level] ?? LEVELS[level]).size, now = Date.now()
   for (const { key } of keysOf(x0, z0, x1, z1, level, size)) { const t = mine?.get(key); if (!t?.ready || t.failed) return false; t.seen = now }
   return true
 }
@@ -619,48 +619,91 @@ export async function lists(): Promise<(x: number, z: number) => boolean> {
 }
 
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */
-export const near = (core: object, x: number, z: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1), need(core, x - 12000, z - 12000, x + 12000, z + 12000, 16), need(core, x - 50000, z - 50000, x + 50000, z + 50000, 128)]).then((w) => w.every(Boolean))
+export const near = (core: object, x: number, z: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1), need(core, x - 4000, z - 4000, x + 4000, z + 4000, 16), need(core, x - 8000, z - 8000, x + 8000, z + 8000, 32)]).then((w) => w.every(Boolean))
 
 /** What the page says of a square: its streets by name and its addresses, in cells. */
 export interface Names { square: string; at: [number, number, number]; names: string[]; ways: { name: number; line: [number, number][] }[]; addresses: [number, number, number, string][]; credit: string }
-export const names = async (): Promise<Names[]> => Promise.all((STREAM ? (await where()).names.map((n) => n.url) : SQUARES.map((name) => `${BASE}${name}.json`)).map(async (url) => (await fetch(url)).json() as Promise<Names>))
+const squareBox = (square: string): [number, number, number, number] | null => {
+  const [e, n] = square.split('_').map(Number)
+  if (!Number.isFinite(e) || !Number.isFinite(n)) return null
+  const x0 = Math.round((e * 1000 - 500000) * 10), z1 = Math.round((4250000 - n * 1000) * 10)
+  return [x0, z1 - 10000, x0 + 10000, z1]
+}
+const nearBox = (box: readonly [number, number, number, number] | null, x: number, z: number, margin: number): boolean =>
+  !box || (x >= box[0] - margin && x <= box[2] + margin && z >= box[1] - margin && z <= box[3] + margin)
+const namedCache = new Map<string, Promise<Names | null>>()
+const loadNames = (url: string): Promise<Names | null> => {
+  let p = namedCache.get(url)
+  if (!p) namedCache.set(url, (p = fetch(url).then((r) => (r.ok ? (r.json() as Promise<Names>) : null), () => null)))
+  return p
+}
+export const names = async (nearAt?: readonly [number, number], margin = 1200): Promise<Names[]> => {
+  const entries = STREAM ? (await where()).names : SQUARES.map((square) => ({ square, url: `${BASE}${square}.json` }))
+  const wanted = nearAt ? entries.filter((e) => nearBox(squareBox(e.square), nearAt[0], nearAt[1], margin)) : entries
+  return (await Promise.all(wanted.map((e) => loadNames(e.url)))).filter((n): n is Names => !!n)
+}
 
 /**
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the
  * place is made from. `at` is the eye's place in cells. Nothing here says who lives anywhere: the data does not.
  */
 export async function whereabouts(at: () => [number, number], /** Whose else the place is made from (the far model's, far.ts). */ more: readonly string[] = [], /** Who shows the credits instead of the line under the street's name (first.ts): given each, said once. */ said?: (credits: string[]) => void): Promise<void> {
-  const squares = await names()
+  const src = STREAM ? await where() : null
+  const entries = (src ? src.names : SQUARES.map((square) => ({ square, url: `${BASE}${square}.json` }))).map((e) => ({ ...e, box: squareBox(e.square) }))
   const label = document.createElement('div')
   label.id = 'where'
   label.style.cssText = 'position:fixed;left:16px;bottom:14px;font:600 15px system-ui,sans-serif;color:#fff;text-shadow:0 1px 3px #000c;pointer-events:none;z-index:5'
   const credit = document.createElement('div')
   credit.style.cssText = 'font:400 10px system-ui,sans-serif;opacity:.75;margin-top:2px'
-  // Who the place is made from: the baked squares' sources, and for everything else the planet's (bay/earth.py).
-  // The release's credits where there is one (they name every source in it), else the squares' and the planet's;
-  // with whose else the place is made from (`more`), each said once.
-  const credits = STREAM ? (await where()).credits : null
-  const each = [...new Set([...(credits ?? [...squares.map((s) => s.credit), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])]), ...more].flatMap((c) => c.split('; ')))]
-  if (said) said(each); else credit.textContent = each.join('; ')
   const line = document.createElement('div')
   label.append(line, ...(said ? [] : [credit]))
   document.body.append(label)
-  // Addresses by the patch of 25.6 m they are in.
-  const near = new Map<string, Names['addresses']>()
-  for (const s of squares) for (const a of s.addresses) { const key = `${a[0] >> 8},${a[1] >> 8}`; near.set(key, [...(near.get(key) ?? []), a]) }
-  setInterval(() => {
+  // Loaded lazily per square round the eye (155 squares citywide: never fetch them all at start).
+  const loaded = new Map<string, { data: Names; box: [number, number, number, number] | null; near: Map<string, Names['addresses']> }>()
+  const asked = new Set<string>()
+  const ensure = (x: number, z: number): Promise<unknown>[] => {
+    const coming: Promise<unknown>[] = []
+    for (const e of entries) {
+      if (asked.has(e.square) || !nearBox(e.box, x, z, 600)) continue
+      asked.add(e.square)
+      coming.push(loadNames(e.url).then((data) => {
+        if (!data) { asked.delete(e.square); return }
+        const near = new Map<string, Names['addresses']>()
+        for (const a of data.addresses) { const key = `${a[0] >> 8},${a[1] >> 8}`; const list = near.get(key); if (list) list.push(a); else near.set(key, [a]) }
+        loaded.set(e.square, { data, box: e.box, near })
+      }))
+    }
+    return coming
+  }
+  const initial = at()
+  const firstBatch = ensure(initial[0], initial[1])
+  // Who the place is made from: the release's credits where there is one (they name every source in it), else the
+  // initial square's and the planet's; with whose else the place is made from (`more`), each said once.
+  const credits = src?.credits ?? null
+  if (!credits && firstBatch.length) await Promise.all(firstBatch)
+  const fallbackCredits = credits ?? [...[...loaded.values()].map((s) => s.data.credit), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])]
+  const each = [...new Set([...fallbackCredits, ...more].flatMap((c) => c.split('; ')))].filter(Boolean)
+  if (said) said(each); else credit.textContent = each.join('; ')
+  const update = () => {
     const [x, z] = at()
+    ensure(x, z)
     let street = '', least = 400 ** 2
-    for (const s of squares) for (const w of s.ways) for (let i = 1; i < w.line.length; i++) {
-      const [ax, az] = w.line[i - 1], [bx, bz] = w.line[i], dx = bx - ax, dz = bz - az
-      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1))), far = (x - ax - dx * t) ** 2 + (z - az - dz * t) ** 2
-      if (far < least) { least = far; street = s.names[w.name] }
-    }
     let address: Names['addresses'][number] | null = null, best = 300 ** 2
-    for (let pz = (z >> 8) - 1; pz <= (z >> 8) + 1; pz++) for (let px = (x >> 8) - 1; px <= (x >> 8) + 1; px++) for (const a of near.get(`${px},${pz}`) ?? []) {
-      const far = (a[0] - x) ** 2 + (a[1] - z) ** 2
-      if (far < best) { best = far; address = a }
+    for (const s of loaded.values()) {
+      if (!nearBox(s.box, x, z, 600)) continue
+      for (const w of s.data.ways) for (let i = 1; i < w.line.length; i++) {
+        const [ax, az] = w.line[i - 1], [bx, bz] = w.line[i], dx = bx - ax, dz = bz - az
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1))), far = (x - ax - dx * t) ** 2 + (z - az - dz * t) ** 2
+        if (far < least) { least = far; street = s.data.names[w.name] }
+      }
+      for (let pz = (z >> 8) - 1; pz <= (z >> 8) + 1; pz++) for (let px = (x >> 8) - 1; px <= (x >> 8) + 1; px++) for (const a of s.near.get(`${px},${pz}`) ?? []) {
+        const far = (a[0] - x) ** 2 + (a[1] - z) ** 2
+        if (far < best) { best = far; address = a }
+      }
     }
-    line.textContent = [street, address ? `${address[2]} ${address[3]}` : ''].filter(Boolean).join(' · ')
-  }, 500)
+    const neat = (s: string) => s.replace(/\b0?(\d+)(St|Nd|Rd|Th)\b/g, (_, n: string, suf: string) => n + suf.toLowerCase())
+    line.textContent = [street, address ? `${address[2]} ${address[3]}` : ''].filter(Boolean).map(neat).join(' · ')
+  }
+  void Promise.all(firstBatch).then(update)
+  setInterval(update, 500)
 }

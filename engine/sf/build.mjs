@@ -15,9 +15,10 @@
 // Modules are written as player/build.mjs writes them: Node's own stripper over each module the page reaches, with
 // `.ts` addresses written `.js`, nothing bundled. The tiles, the car and this folder never go in git.
 import { stripTypeScriptTypes } from 'node:module'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { constants as fsConstants, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { homedir } from 'node:os'
+import { availableParallelism, homedir } from 'node:os'
+import { Worker } from 'node:worker_threads'
 import { eggOverlay, landingVideos } from '../../site/lib/egg-overlay.mjs'
 import { memes } from './add-egg.mjs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
@@ -123,6 +124,22 @@ if (!page.includes('src="/page/main.ts"')) fail('page/index.html no longer loads
 
 // ── The city: a release, written by its owner, or as a run staged it ──
 if (realm.release !== 'current.json') fail('sf/realm.json must name its release pointer: "release": "current.json"')
+const cloneFile = (from, to) => {
+  mkdirSync(dirname(to), { recursive: true })
+  if (process.platform === 'linux') {
+    try { linkSync(from, to); return } catch { /* cross-device or existing */ }
+  }
+  try { copyFileSync(from, to, fsConstants.COPYFILE_FICLONE) } catch { copyFileSync(from, to) }
+}
+const cloneTree = (from, to) => {
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) continue
+    const src = join(from, entry.name), dst = join(to, entry.name)
+    if (entry.isDirectory() || (entry.isSymbolicLink() && statSync(src).isDirectory())) cloneTree(src, dst)
+    else cloneFile(src, dst)
+  }
+}
+
 if (staged) {
   // As a run staged it: a pointer and the one release it names. The data lane's folder keeps releases side by side, so
   // from it the page takes the one this checkout pins (sf/pilot/current.json), and moving one checkout's pin leaves
@@ -130,10 +147,20 @@ if (staged) {
   const pointerAt = staged === STAGED ? join(root, 'sf', 'pilot', 'current.json') : join(staged, 'current.json')
   if (!existsSync(pointerAt)) fail(`${pointerAt} is missing`)
   const named = JSON.parse(readFileSync(pointerAt, 'utf8'))
-  if (!existsSync(join(staged, named.manifest))) fail(`${staged} holds no release ${named.release}: stage it (sf/release.md)`)
-  cpSync(pointerAt, join(out, 'sf', 'current.json'))
-  // Not what a run keeps beside it for itself (`.bay-store`, a link to its store of objects): only the release's files.
-  cpSync(join(staged, dirname(named.manifest)), join(out, 'sf', dirname(named.manifest)), { recursive: true, filter: (path) => !basename(path).startsWith('.') })
+  const relManifest = join(staged, named.manifest)
+  if (!existsSync(relManifest)) fail(`${staged} holds no release ${named.release}: stage it (sf/release.md)`)
+  const relSrc = dirname(relManifest), relDst = join(out, 'sf', dirname(named.manifest))
+  mkdirSync(dirname(join(out, 'sf', 'current.json')), { recursive: true })
+  copyFileSync(pointerAt, join(out, 'sf', 'current.json'))
+  // Compact-stored city releases keep tile payloads in `.bay-store`: export verified objects when `tiles/` is absent.
+  if (existsSync(join(relSrc, '.bay-store')) && !existsSync(join(relSrc, 'tiles'))) {
+    if (!existsSync(PYTHON)) fail(`${PYTHON} is missing: needed to export compact release ${named.release}`)
+    const exported = spawnSync(PYTHON, [join(root, 'bay', 'compact_store.py'), relManifest, relDst], { encoding: 'utf8' })
+    if (exported.status !== 0) fail(`bay/compact_store.py failed:\n${exported.stdout}${exported.stderr}`)
+  } else {
+    // Not what a run keeps beside it for itself (`.bay-store`, a link to its store of objects): only the release's files.
+    cloneTree(relSrc, relDst)
+  }
 } else {
   if (!existsSync(PYTHON)) fail(`${PYTHON} is missing: the Bay's Python environment (bay/README.md)`)
   const made = spawnSync(PYTHON, [join(root, 'sf', 'release.py'), from, join(out, 'sf'), ...(far ? ['--far', far] : [])], { encoding: 'utf8' })
@@ -240,26 +267,88 @@ put('sf/CREDITS.txt', [
 
 // ── Brotli beside every file a host sends ──
 // Tiles are immutable by their hash, so each is compressed once on this machine and kept by it (quality 11 takes
-// about 0.4 s a tile).
+// about 0.4 s a tile; parallel workers keep a full-city cold cache build to a few minutes).
 const CACHE = join(VILLAGE, 'sf', 'br')
 mkdirSync(CACHE, { recursive: true })
-let raw = 0, br = 0, code = 0, codeBr = 0, compressed = 0
-for (const file of files(out)) {
-  if (file.endsWith('.br')) continue
+const allFiles = files(out).filter((f) => !f.endsWith('.br'))
+const uncached = []
+const entries = []
+for (const file of allFiles) {
   const body = readFileSync(file), sum = createHash('sha256').update(body).update(`q${quality}`).digest('hex'), cached = join(CACHE, `${sum}.br`)
-  let squeezed
-  if (existsSync(cached)) squeezed = readFileSync(cached)
-  else {
-    squeezed = brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: quality, [constants.BROTLI_PARAM_LGWIN]: 24, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
-    writeFileSync(cached, squeezed)
-    compressed++
-  }
-  // Worth it only where it is smaller, and never for video or music (H.264 and AAC are squeezed already; the eggs').
   const media = /\.(mp4|m4a)$/.test(file)
-  if (squeezed.length < body.length && !media) writeFileSync(`${file}.br`, squeezed)
-  const sent = media ? body.length : Math.min(squeezed.length, body.length)
-  raw += body.length; br += sent
-  if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += body.length; codeBr += sent }
+  entries.push({ file, size: body.length, cached, media })
+  if (!media && !existsSync(cached)) uncached.push({ file, cached })
+}
+// Deduplicate identical bodies across files before compressing in parallel.
+const uniqueUncached = [...new Map(uncached.map((u) => [u.cached, u])).values()]
+if (uniqueUncached.length >= 4) {
+  const nWorkers = Math.min(8, Math.max(1, availableParallelism() - 1), uniqueUncached.length)
+  const workerCode = `
+    const { parentPort, workerData } = require('node:worker_threads')
+    const { readFileSync, renameSync, writeFileSync } = require('node:fs')
+    const { brotliCompressSync, constants } = require('node:zlib')
+    const { quality } = workerData
+    parentPort.on('message', (job) => {
+      if (!job) return process.exit(0)
+      try {
+        const body = readFileSync(job.file)
+        const squeezed = brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: quality, [constants.BROTLI_PARAM_LGWIN]: 24, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
+        const tmp = job.cached + '.' + process.pid + '.' + Math.random().toString(36).slice(2) + '.part'
+        writeFileSync(tmp, squeezed)
+        renameSync(tmp, job.cached)
+        parentPort.postMessage({ ok: true })
+      } catch (err) {
+        parentPort.postMessage({ ok: false, error: String(err) })
+      }
+    })
+  `
+  let next = 0, doneCount = 0
+  await new Promise((resolveDone, rejectDone) => {
+    const pool = []
+    let failed = false
+    const finish = (err) => {
+      if (failed) return
+      failed = true
+      for (const w of pool) void w.terminate()
+      rejectDone(err)
+    }
+    for (let i = 0; i < nWorkers; i++) {
+      const w = new Worker(workerCode, { eval: true, workerData: { quality } })
+      pool.push(w)
+      const sendNext = () => {
+        if (failed) return
+        if (next < uniqueUncached.length) w.postMessage(uniqueUncached[next++])
+        else w.postMessage(null)
+      }
+      w.on('message', (msg) => {
+        if (!msg.ok) return finish(new Error(msg.error))
+        doneCount++
+        if (doneCount === uniqueUncached.length) {
+          for (const wk of pool) void wk.terminate()
+          resolveDone()
+        } else sendNext()
+      })
+      w.on('error', finish)
+      sendNext()
+    }
+  })
+} else {
+  for (const job of uniqueUncached) {
+    const body = readFileSync(job.file)
+    const squeezed = brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: quality, [constants.BROTLI_PARAM_LGWIN]: 24, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
+    const tmp = `${job.cached}.${process.pid}.part`
+    writeFileSync(tmp, squeezed)
+    renameSync(tmp, job.cached)
+  }
+}
+let raw = 0, br = 0, code = 0, codeBr = 0, compressed = uniqueUncached.length
+for (const { file, size, cached, media } of entries) {
+  const brSize = !media && existsSync(cached) ? statSync(cached).size : size
+  // Worth it only where it is smaller, and never for video or music (H.264 and AAC are squeezed already; the eggs').
+  if (!media && brSize < size) cloneFile(cached, `${file}.br`)
+  const sent = media ? size : Math.min(brSize, size)
+  raw += size; br += sent
+  if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += size; codeBr += sent }
 }
 
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`

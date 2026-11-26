@@ -51,13 +51,17 @@ pub fn reach(sort: u32) -> Option<[f32; 6]> {
 
 /// Whether a rule is all there is at a place in its box (its air is air: the lidar's columns under it, which cannot
 /// say an arch or a lattice, are not), or only adds to what the map has there (a bridge over the water).
-pub fn owns(sort: u32, u: f32, _y: f32, w: f32) -> bool {
+pub fn owns(sort: u32, u: f32, y: f32, w: f32) -> bool {
     match sort {
         SALESFORCE | TRANSAMERICA | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL => true,
+        // Suspension spans over land or shore carry lidar cable/deck returns that otherwise extrude to ground as solid
+        // curtains in the far model (y == 0) and high cells; below 22-24 m in cells, shore structures like Fort Point stay.
+        GOLDEN_GATE => (-1095.0..=1095.0).contains(&u) && w.abs() <= 30.0 && (y <= 0.0 || y >= 22.0),
+        BAY_BRIDGE => (BB_WEST..=BB_EAST).contains(&u) && w.abs() <= 26.0 && (y <= 0.0 || y >= 24.0),
         // The rotunda and the colonnade's band, not the exhibition hall behind it.
         FINE_ARTS => {
             let r = (u * u + w * w).sqrt();
-            r < PF_ROTUNDA + 4.0 || ((r - PF_ARC).abs() < 9.0 && pf_on_arc(u, w))
+            r < PF_ROTUNDA + 16.0 || ((r - PF_ARC).abs() < 12.0 && pf_on_arc(u, w))
         }
         _ => false,
     }
@@ -1244,5 +1248,16 @@ mod tests {
             assert_ne!(f[1] >> 16, 0);
         }
         assert!(looks.iter().all(|&n| n > 50), "{looks:?}");
+    }
+
+    #[test]
+    fn suspension_bridges_own_their_spans_in_far_and_high_cells_while_keeping_shore_below() {
+        assert!(owns(GOLDEN_GATE, -800.0, 0.0, 0.0));
+        assert!(owns(GOLDEN_GATE, -800.0, 60.0, 14.0));
+        assert!(!owns(GOLDEN_GATE, -800.0, 10.0, 0.0));
+        assert!(!owns(GOLDEN_GATE, -800.0, 60.0, 40.0));
+        assert!(owns(BAY_BRIDGE, 0.0, 0.0, 0.0));
+        assert!(owns(BAY_BRIDGE, 0.0, 50.0, 10.0));
+        assert!(!owns(BAY_BRIDGE, 0.0, 10.0, 0.0));
     }
 }

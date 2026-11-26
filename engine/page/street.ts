@@ -27,7 +27,7 @@ import { POLISHED } from './spells.ts'
 import { faces as facesOf } from './fine.ts'
 
 /** What street life asks of the land (the core's exports). */
-export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number }
+export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; top_at?(x: number, z: number): number }
 
 type Ring = Float64Array
 interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
@@ -173,7 +173,7 @@ export function street(o: {
   const roads = new Map<string, Road>(), roadsFrom = new Map<number, Road[]>(), roadsTo = new Map<number, Road[]>(), ways = new Map<number, Set<number>>()
   const slots: Slot[] = [], lines: Line[] = []
   /** The signal heads (sf/life.py): where each post stands, and the road whose lights it shows. */
-  const heads: { key: string; x: number; z: number; piece: Piece | null; shown: string }[] = [], headGrid = new Map<number, number[]>()
+  const heads: { key: string; x: number; z: number; piece: Piece | null; shown: string; curbed?: boolean }[] = [], headGrid = new Map<number, number[]>()
   const GRID = 1000
   const walkGrid = new Map<number, number[]>(), roadGrid = new Map<number, Road[]>(), slotGrid = new Map<number, number[]>()
   const cell = (gx: number, gz: number) => gx * 100003 + gz
@@ -741,6 +741,48 @@ export function street(o: {
       if (ahead < -20 || Math.abs(dx * view.forward[2] - dz * view.forward[0]) > (ahead + 20) * view.tanHalf * 2 + 40) continue
       along(r.p, r.cum, r.len, P)
       const ax = P.tx, az = P.tz, phase = lightFor(junctionOf(r.b), ax, az, t), key = phase
+      // Keep every signal post off the asphalt carriageway and railbed onto the nearest sidewalk corner once ground tiles are loaded.
+      if (!h.curbed && o.land.top_at) {
+        const m0 = o.land.top_at(Math.round(h.x), Math.round(h.z)) & 15
+        if (m0 !== 4) {
+          if (m0 === 6 || m0 === 12) {
+            const rx = -az, rz = ax
+            const isSidewalk = (px: number, pz: number) => { const m = o.land.top_at!(px, pz) & 15; return m !== 6 && m !== 12 && m !== 4 }
+            let placed = false
+            // First try stepping right and back along the approach (handles wide cross-street intersections).
+            for (const back of [0, 40, 80, 120, 160]) {
+              for (let step = 4; step <= 130; step += 4) {
+                const px = Math.round(h.x - ax * back + rx * step), pz = Math.round(h.z - az * back + rz * step)
+                if (isSidewalk(px, pz)) {
+                  const nx = px + Math.round(rx * 5), nz = pz + Math.round(rz * 5)
+                  h.x = isSidewalk(nx, nz) ? nx : px; h.z = isSidewalk(nx, nz) ? nz : pz
+                  placed = true
+                  break
+                }
+              }
+              if (placed) break
+            }
+            // Fallback: radial search to nearest sidewalk within 14 m.
+            if (!placed) {
+              for (let rad = 8; rad <= 140 && !placed; rad += 4) {
+                for (let a = 0; a < 16; a++) {
+                  const ang = (a * Math.PI * 2) / 16
+                  const px = Math.round(h.x + Math.cos(ang) * rad), pz = Math.round(h.z + Math.sin(ang) * rad)
+                  if (isSidewalk(px, pz)) {
+                    const nx = px + Math.round(Math.cos(ang) * 4), nz = pz + Math.round(Math.sin(ang) * 4)
+                    h.x = isSidewalk(nx, nz) ? nx : px; h.z = isSidewalk(nx, nz) ? nz : pz
+                    placed = true
+                    break
+                  }
+                }
+              }
+            }
+            h.curbed = placed
+          } else {
+            h.curbed = true
+          }
+        }
+      }
       seen.add(h)
       if (h.shown !== key || !h.piece) {
         h.piece?.destroy()

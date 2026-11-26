@@ -237,12 +237,12 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
             a, b = road.coords[0], road.coords[-1]
             length = max(1, road.length)
             dx, dz = (b[0] - a[0]) / length, (b[1] - a[1]) / length
-            if kind == "stop" and road.distance(pt) < 20 and kerbs:
+            if kind in ("stop", "observedStop") and road.distance(pt) < 40 and kerbs:
                 edge = kerbs[kerb_tree.nearest(pt)]
                 if edge.distance(pt) > 160:
                     continue
-                # OSM's stop node is often on the vehicle path. Place the actual
-                # sign a half metre behind its nearest surveyed kerb.
+                # OSM's stop node (and triangulated photo stops) can sit on the carriageway.
+                # Place the physical sign a half metre behind its nearest surveyed kerb.
                 kerb = nearest_points(pt, edge)[1]
                 vx, vz = kerb.x - x, kerb.y - z
                 size = max(1, math.hypot(vx, vz))
