@@ -47,6 +47,10 @@ const STILL_FOR: f32 = 0.3;
 const OLD: f32 = 8.0;
 /// The most bodies at once: past this, what a blast throws out is dust.
 const MOST: usize = 700;
+/// Past this many loose bodies, new small fragments are dust. Living things do not spend this budget.
+const DEBRIS: usize = 120;
+/// At most this many rigid fragments from one crush, including newly unsupported pieces.
+const CRASH_LUMPS: usize = 3;
 /// A body under this many cells does not break further.
 const WHOLE: usize = 12;
 /// How hard a body must strike the standing world to break it: its weight times the speed it loses. A lump of fifty
@@ -684,6 +688,8 @@ pub struct Body {
     /// The hardest single knock it took in the last step, as a change of speed; and how many times it has broken already.
     knock: f32,
     broken: u8,
+    /// Rolling chassis damage, accumulated from substantial impacts; one means structural collapse.
+    wear: f32,
     /// What most of it is made of.
     stuff: u8,
     /// Whether it is a lump a blast threw out: these are many, and are not tried against each other however big.
@@ -709,11 +715,27 @@ impl Body {
         (0..3).all(|a| c[a] >= 0 && (c[a] as usize) < self.size[a]) && self.cells[self.at(c[0] as usize, c[1] as usize, c[2] as usize)] != 0
     }
 
+    /// Keep collision samples distributed over the whole fragment, not just its first face.
+    fn limit_points(&mut self, limit: usize) {
+        if self.points.len() > limit {
+            let all = std::mem::take(&mut self.points);
+            self.points = (0..limit).map(|k| all[k * all.len() / limit]).collect();
+        }
+    }
+
+    /// A chassis crumples before it fails. `tough` still scales both wear and the catastrophic limit.
+    /// Ignore suspension/curb chatter below 50% of tough; repeated substantial blows consume the reserve.
+    fn crumple(&mut self, knock: f32, tough: f32) -> bool {
+        let severe = ((knock / tough - 0.5) / 0.7).max(0.0);
+        self.wear = (self.wear + severe * severe * 0.25).min(1.0);
+        knock > tough * 1.2 || self.wear >= 1.0
+    }
+
     /// A body from a box of cells whose low corner is at `low` in the world.
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, stuff: 0, lump: false, thrown: false, passing: false, born: low, live: None, asleep: false,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, wear: 0.0, stuff: 0, lump: false, thrown: false, passing: false, born: low, live: None, asleep: false,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -1001,15 +1023,15 @@ impl Bodies {
     /// The same, asked of a box `side` cells across (22 m tall, most of it above the point): a small change needs
     /// only a narrow box, which is quick.
     pub fn release_in(&mut self, at: [i32; 3], radius: i32, side: usize) -> usize {
-        self.release_box(at, radius, [side, SETTLE[1], side])
+        self.release_box(at, radius, [side, SETTLE[1], side], usize::MAX)
     }
 
     /// As `release`, asked in a box of a given size round the place. A thing that reaches the box's top is left alone,
     /// so a blast asks in one as tall as ever, however narrow. A landing's dent asks in a small one: it is asked eight
     /// times a second while a house comes down, and the asking is most of what the solver then does.
-    fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3]) -> usize {
+    fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3], max_bodies: usize) -> usize {
         let side = size[0];
-        let low = [at[0] - side as i32 / 2, at[1] - 48, at[2] - side as i32 / 2];
+        let low = [at[0] - side as i32 / 2, at[1] - 48.min(size[1] as i32 / 2), at[2] - side as i32 / 2];
         #[cfg(test)]
         let t0 = std::time::Instant::now();
         let mut region = self.ground.region(low, size);
@@ -1018,11 +1040,11 @@ impl Bodies {
         let (pieces, dust) = support::release(&mut region, Some((at, radius)));
         #[cfg(test)]
         if std::env::var("TIMES").is_ok() { eprintln!("    release in {size:?}: gathered in {:.0} ms, asked in {:.0} ms, {} pieces", (t1 - t0).as_secs_f32() * 1e3, t1.elapsed().as_secs_f32() * 1e3, pieces.len()) }
-        self.take(pieces, dust, Some((at, radius)))
+        self.take(pieces, dust, Some((at, radius)), max_bodies)
     }
 
     /// Pieces that have come loose leave the world and are bodies; crumbs of them are dust. A blast throws them.
-    fn take(&mut self, pieces: Vec<support::Loose>, dust: Vec<Run>, thrown: Option<([i32; 3], i32)>) -> usize {
+    fn take(&mut self, pieces: Vec<support::Loose>, dust: Vec<Run>, thrown: Option<([i32; 3], i32)>, max_bodies: usize) -> usize {
         let mut taken: Vec<Run> = Vec::new();
         for r in dust.iter().chain(pieces.iter().flat_map(|p| p.runs.iter())) {
             taken.push(Run { kind: 0, ..*r });
@@ -1047,11 +1069,23 @@ impl Bodies {
             loose.sort_unstable_by_key(|&(c, _)| (c[1], c[2], c[0]));
             self.heap(&loose);
         }
-        let made = pieces.len();
+        let mut made = 0;
+        let mut debris = self.list.iter().filter(|b| b.live.is_none()).count();
         for p in pieces {
+            if made >= max_bodies || (p.cells < SMALL && debris >= DEBRIS) {
+                self.record(DUST, &[(p.low[0] as f32).to_bits(), (p.low[1] as f32).to_bits(), (p.low[2] as f32).to_bits(), p.runs[0].kind as u32, p.cells as u32]);
+                continue;
+            }
+            made += 1;
+            debris += 1;
             let size = [(p.high[0] - p.low[0]) as usize, (p.high[1] - p.low[1]) as usize, (p.high[2] - p.low[2]) as usize];
             let mut body = Body::new(self.next, support::grid_of(&p.runs, p.low, size), size, p.low);
             self.next += 1;
+            if max_bodies != usize::MAX {
+                body.limit_points(LUMP_POINTS);
+                body.lump = true;
+                body.passing = body.count < 40;
+            }
             if let Some((at, radius)) = thrown {
                 self.throw(&mut body, at, radius);
             }
@@ -1136,7 +1170,7 @@ impl Bodies {
         #[cfg(test)]
         let t2 = std::time::Instant::now();
         let (n, cells, biggest) = (pieces.len(), pieces.iter().map(|p| p.cells).sum::<usize>(), pieces.iter().map(|p| p.cells).max().unwrap_or(0));
-        let made = self.take(pieces, dust, None);
+        let made = self.take(pieces, dust, None, usize::MAX);
         #[cfg(test)]
         if std::env::var("TIMES").is_ok() { eprintln!("    far at {low:?}: last gather and pieces {:.0} ms, parts {:.0} ms, bodies {:.0} ms; {whole} pieces as {n} bodies of {cells} cells, the biggest {biggest}", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
         let _ = (whole, n, cells, biggest);
@@ -1167,7 +1201,7 @@ impl Bodies {
         let t2 = std::time::Instant::now();
         self.caught(&before, at, radius);
         self.shove(at, radius);
-        let made = self.lumps(&before, &left, at, radius);
+        let made = self.lumps(&before, &left, at, radius, usize::MAX);
         #[cfg(test)]
         if std::env::var("TIMES").is_ok() { eprintln!("    blast of {radius}: before {:.0} ms, push and left {:.0} ms, lumps {:.0} ms", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
         // What can burn round the blast, and is still there, may catch: about one cell in twelve.
@@ -1184,7 +1218,7 @@ impl Bodies {
     /// What a blast emptied (the cells solid in `before` and not in `left`): all but its middle as bodies thrown from
     /// it, lumps a few cells across whose edges wander; and its inner part, and what there can be no body for, as
     /// rubble that falls where it was (`heap`). Glass is dust. Returns how many bodies were made.
-    fn lumps(&mut self, before: &Region, left: &Region, at: [i32; 3], radius: i32) -> usize {
+    fn lumps(&mut self, before: &Region, left: &Region, at: [i32; 3], radius: i32, max_lumps: usize) -> usize {
         let (low, size) = (before.low, before.size);
         let mut lumps: Map<[i32; 3], Vec<([i32; 3], Kind)>> = Map::default();
         let mut loose: Vec<([i32; 3], Kind)> = Vec::new();
@@ -1220,9 +1254,15 @@ impl Bodies {
         let mut keys: Vec<[i32; 3]> = lumps.keys().copied().collect();
         keys.sort_unstable();
         let mut made = 0;
+        let mut debris = self.list.iter().filter(|b| b.live.is_none()).count();
         for key in keys {
             let cells = &lumps[&key];
             // What is too small to be a body, or one more than there can be, falls as rubble too.
+            if made >= max_lumps || (cells.len() < SMALL && debris >= DEBRIS) {
+                let (p, kind) = cells[0];
+                self.record(DUST, &[(p[0] as f32).to_bits(), (p[1] as f32).to_bits(), (p[2] as f32).to_bits(), kind as u32, cells.len() as u32]);
+                continue;
+            }
             if cells.len() < 3 || self.list.len() >= MOST {
                 loose.extend(cells.iter().copied());
                 continue;
@@ -1245,34 +1285,44 @@ impl Bodies {
             // A lump meets only the world, and lies where it lands: a few points do. With all a body's size allows
             // (112 for a lump of a hundred cells) 1,700 bodies were tried at 150,000 points a call, and in the page
             // the solver ran four times behind.
-            if body.points.len() > LUMP_POINTS {
-                let all = std::mem::take(&mut body.points);
-                body.points = (0..LUMP_POINTS).map(|k| all[k * all.len() / LUMP_POINTS]).collect();
-            }
+            body.limit_points(LUMP_POINTS);
+            body.passing = max_lumps != usize::MAX && body.count < 40;
             self.throw(&mut body, at, radius);
             self.born(&body);
             self.list.push(body);
             made += 1;
+            debris += 1;
         }
         loose.sort_unstable_by_key(|&(c, _)| (c[1], c[2], c[0]));
-        self.heap(&loose);
+        if max_lumps == usize::MAX {
+            self.heap(&loose);
+        } else if !loose.is_empty() {
+            // Crash crumbs cost no solver bodies or subsequent world/GPU sector rebuilds.
+            self.record(DUST, &[(at[0] as f32).to_bits(), (at[1] as f32).to_bits(), (at[2] as f32).to_bits(), loose[0].1 as u32, loose.len() as u32]);
+        }
         made
     }
 
     /// A body that lands hard breaks what it lands on: where it struck, the world is emptied as by a small blast (as
     /// far as each material gives), what was there comes out as lumps, and what that leaves unheld comes loose.
     /// `push` is how hard it struck: its weight times the speed it lost.
-    fn crush(&mut self, at: [i32; 3], push: f32) {
+    fn crush(&mut self, at: [i32; 3], push: f32, fragments: bool) {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
-        if self.burst(at, radius) {
-            self.release_box(at, radius, [48, 96, 48]);
+        // Falling intact structures still need the wider support query and solid rubble to topple correctly.
+        // Vehicles and already loose fragments use a bounded, cheap impact path.
+        let budget = if fragments { CRASH_LUMPS } else { usize::MAX };
+        let before = self.next;
+        if self.burst(at, radius, budget) {
+            let size = match radius { 0..=3 if fragments => [20, 32, 20], 4..=5 if fragments => [28, 48, 28], _ => [48, 96, 48] };
+            let remaining = if fragments { budget.saturating_sub((self.next - before) as usize) } else { budget };
+            self.release_box(at, radius, size, remaining);
         }
     }
 
     /// A blast of the solver's own making. It does not go into the world as a blast: what it empties goes in as rows
     /// of the solver's own, which is how the page hears of it, and comes out as lumps and rubble. Whether it emptied
     /// anything.
-    fn burst(&mut self, at: [i32; 3], radius: i32) -> bool {
+    fn burst(&mut self, at: [i32; 3], radius: i32, max_lumps: usize) -> bool {
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
         let (before, left) = self.ground.blasted(at, radius, low, size, false);
@@ -1296,7 +1346,7 @@ impl Bodies {
         }
         self.change(gone);
         self.caught(&before, at, radius);
-        self.lumps(&before, &left, at, radius);
+        self.lumps(&before, &left, at, radius, max_lumps);
         true
     }
 
@@ -1353,7 +1403,7 @@ impl Bodies {
     /// smoke, and what it leaves unheld comes loose as after any charge.
     fn went_off(&mut self, at: [i32; 3], radius: i32) {
         self.record(BURST, &[(at[0] as f32).to_bits(), (at[1] as f32).to_bits(), (at[2] as f32).to_bits(), radius as u32]);
-        self.burst(at, radius);
+        self.burst(at, radius, usize::MAX);
         self.ignite(at, radius + radius / 2, true);
         if radius >= FAR_FROM {
             self.ask_far(at, radius);
@@ -1409,6 +1459,7 @@ impl Bodies {
             shares[near].push(*c);
         }
         self.record(BROKE, &[whole.id]);
+        let mut debris = self.list.iter().filter(|b| b.live.is_none()).count();
         for share in shares {
             let (mut lo, mut hi) = ([usize::MAX; 3], [0usize; 3]);
             for c in &share {
@@ -1420,7 +1471,7 @@ impl Bodies {
             // Where the share's middle is in the whole, and so in the world.
             let middle = share.iter().fold([0.0f32; 3], |m, c| add(m, [c[0] as f32 + 0.5, c[1] as f32 + 0.5, c[2] as f32 + 0.5]));
             let r = turn(whole.rot, sub(scale(middle, 1.0 / share.len().max(1) as f32), whole.com));
-            if share.len() < 4 {
+            if share.len() < 4 || (share.len() < SMALL && debris >= DEBRIS) || self.list.len() >= MOST {
                 if let Some(c) = share.first() {
                     let p = add(whole.pos, r);
                     self.record(DUST, &[p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), whole.cells[whole.at(c[0], c[1], c[2])] as u32, share.len() as u32]);
@@ -1442,7 +1493,10 @@ impl Bodies {
             body.vel = add(whole.speed_at(own), scale(unit(r), 6.0));
             body.spin = whole.spin;
             body.broken = whole.broken + 1;
-            body.passing = whole.passing;
+            body.passing = whole.passing || body.count < 40;
+            body.lump = whole.lump || body.count < 80;
+            body.limit_points(if body.count < 80 { LUMP_POINTS } else { 48 });
+            debris += 1;
             self.born(&body);
             self.list.push(body);
         }
@@ -1642,11 +1696,19 @@ impl Bodies {
         // are shared out, and worked out at every push it was half of all the solver did.
         // For each touch: the three ways, how hard each is to push, and the spin a push of one along each gives its
         // two bodies.
-        // What a touch rubs with: 0.7 of its push, but a person's body hardly at all (#367). Someone goes by their legs,
-        // which hold them to the ground; their body rubbing on a wall as stone rubs on stone, they stopped dead
-        // against any wall met within 35 degrees of square and crept along one met at more. Now they go along it.
+        // Legs handle figures' traction (0.03 body friction); tyres handle rolling vehicles' traction.
+        // Metal bodywork glances at 0.24, while masonry/debris keeps 0.7.
         let person = |i: usize| i != NONE && self.list[i].live.as_ref().is_some_and(|live| live.figure);
-        let rubs: Vec<f32> = self.touches.iter().map(|t| if person(t.a) || person(t.b) { 0.03 } else { 0.7 }).collect();
+        let rides = |i: usize| i != NONE && self.list[i].live.as_ref().is_some_and(|live| live.rides());
+        let vehicles: Vec<bool> = self.touches.iter().map(|t| rides(t.a) || rides(t.b)).collect();
+        let rubs: Vec<f32> = self.touches.iter().enumerate().map(|(i, t)|
+            if person(t.a) || person(t.b) { 0.03 } else if vehicles[i] { 0.24 } else { 0.7 }).collect();
+        // Store approach speeds before any contact is solved. Otherwise earlier points hide the hit from later ones.
+        for t in &mut self.touches {
+            let va = self.list[t.a].speed_at(t.ra);
+            let vb = if t.b == NONE { [0.0; 3] } else { self.list[t.b].speed_at(t.rb) };
+            t.closing = dot(sub(va, vb), t.n);
+        }
         let ways: Vec<([V; 3], [f32; 3], [V; 3], [V; 3])> = self.touches.iter().map(|t| {
             let across = if t.n[1].abs() < 0.9 { unit(cross(t.n, [0.0, 1.0, 0.0])) } else { unit(cross(t.n, [1.0, 0.0, 0.0])) };
             let ds = [t.n, across, cross(t.n, across)];
@@ -1680,12 +1742,14 @@ impl Bodies {
                 };
                 let v = rel(&self.list);
                 let closing = dot(v, n);
-                if round == 0 {
-                    self.touches[t].closing = closing;
-                }
-                let bounce = if closing < -40.0 { 0.12 } else { 0.0 };
+                if round == 0 && !vehicles[t] { self.touches[t].closing = closing; }
+                let approach = self.touches[t].closing;
+                // Keep the small crumple rebound as a target through all iterations: recomputing it from
+                // the residual velocity cancels the bounce on the very next pass.
+                let rebound = if vehicles[t] && approach < -50.0 { -approach * 0.1 } else { 0.0 };
+                let bounce = if !vehicles[t] && closing < -40.0 { 0.12 } else { 0.0 };
                 let was = self.touches[t].pushed;
-                let now = (was - (1.0 + bounce) * closing / weights[0]).max(0.0);
+                let now = (was - ((1.0 + bounce) * closing - rebound) / weights[0]).max(0.0);
                 self.touches[t].pushed = now;
                 let knock = now * self.list[a].inv_mass;
                 self.list[a].knock = self.list[a].knock.max(knock);
@@ -1734,24 +1798,26 @@ impl Bodies {
         // Where a big body struck the standing world hardest, the world breaks too: one such place a step, a few a second.
         self.since_crush += h;
         if self.since_crush > 0.12 && self.list.len() < MOST {
-            let mut worst: Option<([i32; 3], f32, u32, Option<(V, V)>)> = None;
+            let mut worst: Option<([i32; 3], f32, u32, Option<(V, V)>, bool)> = None;
             for t in &self.touches {
                 let body = &self.list[t.a];
                 // A living thing may stand on a pavement for an hour: its weight alone breaks nothing, only a blow.
+                let vehicle = body.live.as_ref().is_some_and(|live| live.rides());
+                if vehicle && (self.since_crush < 0.32 || t.closing >= -35.0) { continue; }
                 if t.b == NONE && body.count >= 60 && t.pushed > HARD && body.live.as_ref().is_none_or(|live| t.closing < -15.0 && !live.figure) && worst.as_ref().is_none_or(|w| t.pushed > w.1) {
                     let p = sub(add(body.pos, t.ra), scale(t.n, 0.5));
-                    worst = Some(([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32], t.pushed, body.id, body.live.is_some().then_some((add(body.pos, t.ra), t.n))));
+                    worst = Some(([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32], t.pushed, body.id, body.live.is_some().then_some((add(body.pos, t.ra), t.n)), vehicle || body.lump || body.broken > 0));
                 }
             }
             // The ground itself is not broken by what lands on it: only what is built.
-            if let Some((at, push, id, live)) = worst {
+            if let Some((at, push, id, live, fragments)) = worst {
                 // A living thing goes fast and what it hits may be thin: the cell it met is looked for.
                 let at = live.and_then(|(p, n)| self.met(p, n)).unwrap_or(at);
                 if !matches!(material(self.ground.kind(at[0], at[1], at[2])), 0 | EARTH | ROCK | GRASS | SAND | WATER | ASPHALT) {
                     self.since_crush = 0.0;
                     self.crushes += 1;
                     self.broke(id, met);
-                    self.crush(at, push);
+                    self.crush(at, push, fragments);
                 }
             }
         }
@@ -1760,17 +1826,26 @@ impl Bodies {
         // What was knocked harder than it can take breaks where it is.
         let mut i = 0;
         while i < self.list.len() {
-            let b = &self.list[i];
-            // A living thing breaks at the knock its motor says, or when a blast has reached it; and then lives no more.
+            let b = &mut self.list[i];
+            // Living damage uses total delta-V: a chassis shares its blow across many contact points.
+            // Rolling bodies spend their crumple reserve; other motors retain their original threshold.
             let (knock, takes) = match &b.live {
                 None => (b.knock, breaks_at(b.stuff) * (1.0 + b.broken as f32)),
                 Some(live) => { let lost = sub(b.vel, live.was); (if live.hurt { f32::MAX } else { dot(lost, lost).sqrt() }, live.tough) }
             };
-            if let Some(live) = &mut self.list[i].live {
+            #[cfg(test)]
+            if b.live.as_ref().is_some_and(|l| l.rides()) && knock > 30.0 && std::env::var_os("CRASH_TRACE").is_some() {
+                let closing = self.touches.iter().filter(|t| t.a == i || t.b == i).map(|t| -t.closing).fold(0.0, f32::max);
+                eprintln!("impact id={} knock={knock:.6} closing={closing:.6}", b.id);
+            }
+            let fails = if b.live.as_ref().is_some_and(|live| live.rides() && !live.hurt) {
+                b.crumple(knock, takes)
+            } else { knock > takes };
+            if let Some(live) = &mut b.live {
                 live.jolt = live.jolt.max(knock);
             }
             let b = &self.list[i];
-            if b.count >= WHOLE && !b.asleep && knock > takes && self.list.len() < MOST && !b.live.as_ref().is_some_and(|live| live.figure) {
+            if b.count >= WHOLE && !b.asleep && fails && !b.live.as_ref().is_some_and(|live| live.figure) {
                 let whole = self.list.swap_remove(i);
                 self.broke(whole.id, met);
                 self.shatter(whole);
@@ -2223,6 +2298,159 @@ mod tests {
 
     fn block(size: [usize; 3], k: Kind) -> Vec<Kind> {
         vec![k; size[0] * size[1] * size[2]]
+    }
+
+    fn has_record(out: &[u32], tag: u32, id: u32) -> bool {
+        let mut i = 0;
+        while i < out.len() {
+            if out[i] == tag && out[i + 2] == id { return true; }
+            i += 2 + out[i + 1] as usize;
+        }
+        false
+    }
+
+    #[test]
+    fn car_survives_oblique_wall_scrape_and_moderate_bump() {
+        for glance in [true, false] {
+            let mut bodies = Bodies::new();
+            let low = living::tests::level(&mut bodies);
+            if glance {
+                let z = low[2] + 22;
+                let wall: Vec<Run> = (2400..2432).map(|y|
+                    Run { x0: low[0] - 20, x1: low[0] + 200, y, z, kind: kind(crate::kinds::STEEL, OWN) }).collect();
+                bodies.ground.push(Edit::Runs(wall), false, None);
+            } else {
+                living::tests::car(&mut bodies, [low[0] + 52, low[1], low[2]]);
+            }
+            let id = living::tests::car(&mut bodies, low);
+            // 76 km/h oblique scrape, or a 54 km/h bump into another car that can give way.
+            bodies.kick(id, if glance { [195.0, 0.0, 80.0] } else { [150.0, 0.0, 0.0] });
+            let out = living::tests::run(&mut bodies, 0.25, id, [1.0, 0.0, 0.0]);
+            assert!(has_record(&out, STRUCK, id) || (!glance && has_record(&out, STRUCK, 1)), "collision must be told");
+            assert!(!has_record(&out, BROKE, id));
+            let b = living::tests::the(&bodies, id);
+            eprintln!("glance={glance}: velocity={:?}, wear={}, jolt={}", b.vel, b.wear, b.live.as_ref().unwrap().jolt);
+            assert!(b.live.is_some() && b.wear < 1.0);
+            assert!(b.wear > 0.0, "a substantial bump consumes some chassis integrity");
+            if glance { assert!(b.vel[0] > 160.0, "a glance keeps forward momentum: {:?}", b.vel); }
+            assert!(bodies.drive(id, -1.0, 0.5, 0.0, false, false), "still drivable");
+        }
+    }
+
+    #[test]
+    fn chassis_wear_accumulates_but_curb_chatter_does_not() {
+        let mut b = Body::new(1, block([4, 4, 4], kind(crate::kinds::STEEL, OWN)), [4, 4, 4], [0; 3]);
+        for _ in 0..1000 { assert!(!b.crumple(30.0, 120.0)); }
+        assert_eq!(b.wear, 0.0);
+        assert!(!b.crumple(125.0, 120.0), "one blow above the former binary threshold is survivable");
+        let mut failed = false;
+        for _ in 0..10 { failed |= b.crumple(125.0, 120.0); }
+        assert!(failed && b.wear == 1.0, "repeated severe blows exhaust the chassis");
+        b.wear = 0.0;
+        assert!(b.crumple(145.0, 120.0), "a catastrophic blow fails a fresh chassis");
+    }
+
+    #[test]
+    fn repeated_survivable_collisions_eventually_break_the_chassis() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let id = living::tests::car(&mut bodies, low);
+        let origin = living::tests::the(&bodies, id).pos;
+        let mut previous = 0.0;
+        for hit in 0..20 {
+            let x = low[0] + 50;
+            let wall: Vec<Run> = (2400..2432).flat_map(|y| (low[2] - 8..low[2] + 30)
+                .map(move |z| Run { x0: x, x1: x + 2, y, z, kind: kind(crate::kinds::STEEL, OWN) })).collect();
+            bodies.ground.push(Edit::Runs(wall), false, None);
+            assert!(bodies.place(id, origin, [0.0, 0.0, 0.0, 1.0]));
+            bodies.kick(id, [100.0, 0.0, 0.0]);
+            let out = living::tests::run(&mut bodies, 0.25, id, [1.0, 0.0, 0.0]);
+            if has_record(&out, BROKE, id) {
+                assert!(hit > 0, "a fresh chassis survives this blow");
+                return;
+            }
+            let b = living::tests::the(&bodies, id);
+            assert!(b.wear > previous && b.live.as_ref().unwrap().jolt < 144.0);
+            previous = b.wear;
+        }
+        panic!("repeated collisions never exhausted chassis integrity");
+    }
+
+    #[test]
+    fn crash_fragments_have_bounded_points_and_small_debris_becomes_dust() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let id = living::tests::car(&mut bodies, low);
+        let whole = bodies.list.pop().unwrap();
+        bodies.shatter(whole);
+        assert!(has_record(&bodies.out, BROKE, id));
+        assert!(bodies.list.iter().all(|b| b.points.len() <= 48 && (b.count >= 80 || b.lump)));
+        while bodies.list.len() < DEBRIS {
+            bodies.list.push(Body::new(bodies.next, block([4, 4, 4], kind(BRICK, OWN)), [4, 4, 4], low));
+            bodies.next += 1;
+        }
+        let whole = Body::new(bodies.next, block([5, 5, 5], kind(BRICK, OWN)), [5, 5, 5], low);
+        bodies.out.clear();
+        bodies.shatter(whole);
+        assert_eq!(bodies.list.len(), DEBRIS, "small pieces do not expand a crowded debris field");
+        assert!(bodies.out.windows(2).any(|w| w == [DUST, 5]));
+    }
+
+    #[test]
+    fn crush_release_reaches_above_impact_and_respects_total_fragment_budget() {
+        let mut bodies = Bodies::new();
+        // A floating brick block entirely above the hit. A short box with the old -48 y offset misses it.
+        let at = [760, 2410, 4055];
+        let rows: Vec<Run> = (at[1]..at[1] + 5).flat_map(|y| (at[2] - 4..at[2] + 5)
+            .map(move |z| Run { x0: at[0] - 4, x1: at[0] + 5, y, z, kind: kind(BRICK, OWN) })).collect();
+        bodies.ground.push(Edit::Runs(rows), false, None);
+        bodies.crush(at, 9000.0, true); // radius two, smallest support scan
+        assert!(!bodies.ground.solid(at[0], at[1] + 4, at[2]), "unsupported brick above the crater releases");
+        assert!(bodies.list.len() <= CRASH_LUMPS);
+        assert!(bodies.list.iter().all(|b| b.points.len() <= LUMP_POINTS && (b.count >= 40 || b.passing)));
+    }
+
+    /// Run alone on the target machine: cargo test --release car_crash_step_time -- --ignored --nocapture.
+    /// Wall rebuilds/spawns are outside the timer; every advance, including collision and settlement, is inside.
+    #[test]
+    #[ignore = "wall-clock budget: run alone, not beside the rest of the suite"]
+    fn car_crash_step_time_stays_within_60fps_budget() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let mut times = Vec::new();
+        let (mut peak, mut hits, mut broken) = (0, 0, 0);
+        for crash in 0..12 {
+            let x = low[0] + 110;
+            let wall: Vec<Run> = (2399..2432).flat_map(|y| (low[2] - 8..low[2] + 30)
+                .map(move |z| Run { x0: x, x1: x + 2, y, z, kind: kind(BRICK, OWN) })).collect();
+            bodies.ground.push(Edit::Runs(wall), false, None);
+            if crash % 2 == 1 {
+                living::tests::car(&mut bodies, [low[0] + 60, low[1], low[2]]);
+            }
+            let id = living::tests::car(&mut bodies, low);
+            bodies.kick(id, [if crash % 3 == 0 { 110.0 } else { 220.0 }, 0.0, 0.0]);
+            for _ in 0..90 {
+                bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+                bodies.out.clear();
+                let start = std::time::Instant::now();
+                bodies.advance(1.0 / 60.0);
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+                peak = peak.max(bodies.list.len());
+                let mut i = 0;
+                while i < bodies.out.len() {
+                    hits += (bodies.out[i] == STRUCK) as usize;
+                    broken += (bodies.out[i] == BROKE) as usize;
+                    i += 2 + bodies.out[i + 1] as usize;
+                }
+            }
+            bodies.vanish(id);
+        }
+        times.sort_by(f64::total_cmp);
+        let (p50, p95, max) = (times[times.len() / 2], times[times.len() * 95 / 100], times[times.len() - 1]);
+        eprintln!("crash advance ms p50={p50:.3} p95={p95:.3} max={max:.3}; peak bodies={peak}, hits={hits}, broke={broken}, crushes={}", bodies.crushes);
+        assert!(hits >= 12 && broken > 0 && bodies.crushes > 0, "must exercise collisions and destruction");
+        assert!(peak <= 128, "pileup has {peak} bodies");
+        assert!(p95 < 5.0 && max < 16.0, "crash advance exceeded the 60 FPS budget");
     }
 
     /// A sector all of one kind is still there to read when 4,096 others have been asked about since the last
