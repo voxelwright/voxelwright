@@ -63,6 +63,8 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
+import { BREAK, HIT, WORLD as WORLD_SOUND } from './sound/kinds.ts'
+import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
 
@@ -1775,7 +1777,28 @@ async function main() {
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
   if (LOCAL?.street && lively && !far) {
-    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    const nearMissWhoosh: Patch = { how: 'struck', hard: 0.1, rough: 1, shape: 'lump', pitch: 95, ring: 0.04, damp: 0.95, air: { from: 1800, to: 220, for: 0.28, gain: 0.9, q: 1.1 }, gain: 0.55 }
+    const life = streetOf({
+      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
+      faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) },
+      onNearMiss: (info) => {
+        const intensity = Math.min(1, Math.max(0.35, (info.speedKmh - 55) / 110) * (1.2 - info.clearance * 0.25))
+        ears?.voice.play(nearMissWhoosh, { at: info.at, force: intensity, size: 1.15, reach: 16, travels: false })
+        window.dispatchEvent(new CustomEvent('voxelwright:nearmiss', { detail: info }))
+      },
+      onCrash: (info) => {
+        debris.burst(info.at, 2.5, Math.round(8 + info.force * 16), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + info.force * 0.5)
+        smoke.glint(info.at, 4 + info.force * 6)
+        ears?.carEvent('thump', Math.min(1, 0.45 + info.force * 0.55))
+        ears?.voice.play(HIT.steel, { at: info.at, force: info.force, size: 1.8, reach: 20, travels: false })
+        if (info.speed > 65) ears?.voice.play(BREAK.glass, { at: info.at, force: Math.min(0.85, (info.speed - 55) / 90), size: 0.95, reach: 16, travels: false })
+        window.dispatchEvent(new CustomEvent('voxelwright:crash', { detail: info }))
+      },
+      onHorn: (info) => {
+        ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch, dur: info.annoyed ? 0.15 : 0.22, force: 0.65, reach: 18, travels: false })
+        if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
+      },
+    })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
     if (query.get('people') !== '0') folk.from.push(life.folk)
