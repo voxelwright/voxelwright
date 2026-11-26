@@ -15,8 +15,8 @@
 //     over it), and every element of the page that is seen over the picture: the kit's own canvases too, which draw a
 //     key's solid past its box. None may meet the body's box.
 //   - on a phone, none may reach into the safe area.
-// By touch it also fails where a thumb's key is larger than the touch guidance asks (game-hud rule 16), where the tools
-// chosen from do not hang tidily from the tool's key (one column upright) or show the tool twice, and where the body is
+// By touch it also fails where a thumb's key is larger than the touch guidance asks (game-hud rule 16), where the wheel's
+// pie is not whole and in the middle of the safe area or shows the tool twice, and where the body is
 // so placed that the stick has no room where the left thumb rests.
 // The realm's old controls (`classic`) are measured and said, not failed: they are what the owner asked to change.
 // A picture with the boxes drawn on (red the body, green what is over the picture) is kept beside each, in `boxes/`.
@@ -130,6 +130,23 @@ try {
         check(m.clash.length === 0, `${name}: no control on another${m.clash.length ? `: ${m.clash.join(', ')}` : ''}`, gate)
         if (phone) check(m.unsafe.length === 0, `${name}: nothing in the safe area${m.unsafe.length ? `: ${[...new Set(m.unsafe.map((s) => s.path || s.id))].join(', ')}` : ''}`, gate)
       }
+      // The wheel is a pie over the middle of the picture (owner, November 24: over the body too, as a game's buy wheel is):
+      // whole within the safe area and in its middle, every tool's picture and name inside the disc, and the held tool
+      // said once (the tool's key is not shown beside it).
+      const pie = async () => {
+        const p = await page.evaluate((safe) => {
+          const tool = globalThis.engine.tool, seen = (el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+          const disc = document.querySelector('#realm .wheel .pie').getBoundingClientRect(), r = disc.width / 2, cx = disc.left + r, cy = disc.top + r
+          const slots = [...document.querySelectorAll('#realm .wheel .slot')].filter(seen).map((el) => { const b = el.getBoundingClientRect(); return Math.max(...[[b.left, b.top], [b.right, b.top], [b.left, b.bottom], [b.right, b.bottom]].map(([x, y]) => Math.hypot(x - cx, y - cy))) / r })
+          const midX = (safe.left + innerWidth - safe.right) / 2, midY = (safe.top + innerHeight - safe.bottom) / 2
+          return { r, off: Math.hypot(cx - midX, cy - midY), within: disc.left >= safe.left - 0.5 && disc.top >= safe.top - 0.5 && disc.right <= innerWidth - safe.right + 0.5 && disc.bottom <= innerHeight - safe.bottom + 0.5, slots, twice: [...document.querySelectorAll('#realm .act .toolkey, #realm .held')].filter((el) => seen(el) && el.textContent.includes(tool)).length }
+        }, safe)
+        check(p.within && p.off < 2, `the pie (radius ${Math.round(p.r)} px) is whole in the safe area and in its middle (${p.off.toFixed(1)} px off)`)
+        check(p.r >= 140, `the pie is large enough to read (radius ${Math.round(p.r)} px)`)
+        check(p.slots.length === 8 && p.slots.every((d) => d <= 1.0), `every tool's picture and name is inside the disc (farthest corner ${Math.max(...p.slots).toFixed(2)} of the radius)`)
+        // (By touch: on a desk the held key in the corner, the one E opens it from, still says the tool.)
+        if (phone) check(p.twice === 0, `the held tool is said once while the wheel is open (${p.twice} keys besides it say it)`)
+      }
       // (The body as it is in play: where it arrives the eye stands off from it, until it walks (explore.ts, sf-explore.mjs).)
       await page.evaluate(() => { globalThis.engine.me.standOff = 0 })
       await page.waitForTimeout(3500)
@@ -167,24 +184,13 @@ try {
           const k = await page.evaluate(() => { const r = document.querySelector('#realm .toolkey')?.getBoundingClientRect(); return r && [r.left + r.width / 2, r.top + r.height / 2] })
           check(!!k, 'the tool\'s key is there to press')
           if (k) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: k[0], y: k[1] }] }); await page.waitForTimeout(350) }
-          await look('choose', 'the tool\'s key down')
-          // The tools hang tidily from the tool's key: one column held upright, a grid on its side, and the held tool said once
-          // (main's showed the key over the column, and its seventh tool alone in a second column).
-          if (wheel) {
-            const hung = await page.evaluate(() => {
-              const tool = globalThis.engine.tool, seen = (el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
-              const slots = [...document.querySelectorAll('#realm .wheel .slot')].filter(seen).map((el) => { const r = el.getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), bottom: Math.round(r.bottom) } })
-              return { slots, twice: [...document.querySelectorAll('#realm .act .toolkey, #realm .held')].filter((el) => seen(el) && el.textContent.includes(tool)).length }
-            })
-            const lefts = new Set(hung.slots.map((b) => b.left)), tops = new Set(hung.slots.map((b) => b.top)), cells = new Set(hung.slots.map((b) => `${b.left},${b.top}`))
-            check(hung.twice === 0, `the held tool is said once while the tools are open (${hung.twice} keys besides the column say it)`)
-            if (upright) check(lefts.size === 1 && hung.slots.every((b, i) => i === 0 || b.top >= hung.slots[i - 1].bottom), `upright, the tools hang in one column (${lefts.size} left edges)`)
-            else check(cells.size === hung.slots.length && lefts.size * tops.size <= hung.slots.length + lefts.size, `on its side, the tools stand in a grid of ${tops.size} rows by ${lefts.size}`)
-          }
+          await look('choose', 'the tool\'s key down', wheel)
+          if (wheel) await pie()
           if (k) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
         } else {
           await page.keyboard.down('KeyE'); await page.waitForTimeout(350)
-          await look('choose', 'E held')
+          await look('choose', 'E held', wheel)
+          if (wheel) await pie()
           // (Held on, the key repeats: a repeat is not another press, and the wheel stays open to aim.)
           if (wheel) { await page.keyboard.down('KeyE'); await page.waitForTimeout(100); check(await page.evaluate(() => globalThis.engine.playHud.choosing), 'E held until it repeats keeps the wheel open') }
         }
@@ -253,23 +259,27 @@ try {
           check(at0 && at1 && Math.hypot(at1[0] - at0[0], at1[2] - at0[2]) < 2, `W held with the wheel open does not walk the body (${at0 && at1 ? (Math.hypot(at1[0] - at0[0], at1[2] - at0[2]) / 10).toFixed(2) : '?'} m)`)
           await page.keyboard.press('Escape')
         }
-        // By touch (wheel): a slide down the column picks where it is let go; a tap leaves it open for a tap on a tool.
+        // By touch (wheel): a slide from the tool's key onto a wedge picks where it is let go; a tap leaves it open for a tap
+        // on a wedge, and a tap away from the disc puts it away as it was.
         if (wheel && phone) {
           const now = () => page.evaluate(() => ({ tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
           const slot = (i) => page.evaluate((i) => { const el = document.querySelectorAll('#realm .wheel .slot')[i], r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, name: el.textContent.replace(/^\d+/, '').trim() } }, i)
           await page.evaluate(() => globalThis.engine.playHud.choose(false))
           const k = await page.evaluate(() => { const r = document.querySelector('#realm .toolkey').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: k[0], y: k[1] }] }); await page.waitForTimeout(150)
-          // (Three down the column; on its side the grid may have that tool under the key itself, so the first from three on that is not.)
-          let to = await slot(3)
-          for (let i = 3; i < 7 && Math.hypot(to.x - k[0], to.y - k[1]) < 40; i++) to = await slot(i)
+          const to = await slot(4)
           for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: k[0] + ((to.x - k[0]) * i) / 8, y: k[1] + ((to.y - k[1]) * i) / 8 }] }); await page.waitForTimeout(30) }
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.waitForTimeout(200)
-          check(!(await now()).choosing && (await now()).tool === to.name, `a slide down to ${to.name} and let go picks it (${(await now()).tool})`)
+          check(!(await now()).choosing && (await now()).tool === to.name, `a slide onto ${to.name} and let go picks it (${(await now()).tool})`)
           await page.touchscreen.tap(k[0], k[1]); await page.waitForTimeout(200)
           const tapped = (await now()).choosing, six = await slot(5)
           await page.touchscreen.tap(six.x, six.y); await page.waitForTimeout(200)
           check(tapped && !(await now()).choosing && (await now()).tool === six.name, `a tap opens it and a tap on ${six.name} picks it (${(await now()).tool})`)
+          // A tap away from the disc: in the bottom left corner, where the left thumb steers.
+          await page.touchscreen.tap(k[0], k[1]); await page.waitForTimeout(200)
+          const away = (await now()).choosing
+          await page.touchscreen.tap(safe.left + 30, vh - safe.bottom - 30); await page.waitForTimeout(200)
+          check(away && !(await now()).choosing && (await now()).tool === six.name, `a tap away from the disc puts it away as it was (${(await now()).tool})`)
         }
         // The wand is the wheel's last choice: chosen, it is in hand, the tool's key says so, and its bar is not over the
         // body; another choice puts it away.

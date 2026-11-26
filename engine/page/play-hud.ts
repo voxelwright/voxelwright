@@ -4,10 +4,11 @@
 // they were before (realm-ui.ts, explore.ts), to compare.
 // The rules they follow, and where each came from, are in .agents/skills/game-hud.
 //
-//   wheel     At rest: the held tool's key and, by touch, the thumb's keys. E (or that key) opens a ring of the tools
-//             in the clear sky over the body: a direction of the mouse picks, as do the numbers, the arrows and Enter,
-//             a click; holding E and letting it go picks what the mouse points at (moved, with the picture holding it, or hovered). By touch the tools drop as a column
-//             from the tool's key, and a slide down it picks. While the picture holds the pointer the corner keys
+//   wheel     At rest: the held tool's key and, by touch, the thumb's keys. E (or that key) opens a pie of the tools
+//             over the middle of the picture (radial.ts): a tap leaves it open until a wedge is clicked; held, letting
+//             go picks the wedge the mouse points at. The numbers, the arrows, Tab and Enter pick too, and Escape
+//             leaves it as it was. By touch a tap on the tool's key opens it for a tap on a wedge, and a slide from
+//             the key onto a wedge picks where it is let go. While the picture holds the pointer the corner keys
 //             step away; by touch the thumb's keys dim when no thumb has been down for three seconds.
 //   context   At rest: what can be done now. On a desk the tools stand in a column down the right edge, and E and the
 //             mouse's wheel go to the next; by touch the tool's key does. Nothing hides itself.
@@ -21,6 +22,7 @@
 // ever laid over the body's parts (`parts()`, which test/sf-hud.mjs reads against every element of the page).
 import type { Input } from './input.ts'
 import type { Me } from './person.ts'
+import { radial } from './radial.ts'
 
 export const HUDS = ['wheel', 'context', 'quiet'] as const
 /** The keys that move the body, let go while a tool is chosen. */
@@ -57,16 +59,12 @@ html:has(#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden]
 #realm .float .cap { position: absolute; left: 50%; top: 50%; inline-size: 48px; block-size: 48px; margin: -24px 0 0 -24px; min-inline-size: 0; padding: 0; pointer-events: none; }
 /* The held tool's key, and the wheel. */
 #realm .held { display: none; }
-#realm .wheel { position: absolute; inset: 0; pointer-events: none !important; }
-#realm .wheel[hidden] { display: none; }
+/* The pie is over the middle of the picture, over the body too (owner, November 24): only its disc takes the pointer. */
+#realm .wheel { z-index: 3; pointer-events: none !important; }
 /* The tools' names as the realm's bank has them (realm-ui.ts, typeface.ts): the smaller key size, 5.5 cells before the words and 4 after. */
-#realm :is(.wheel .slot, .held, .toolkey) { --vx-key-size: var(--vx-key-small); }
-#realm .wheel .slot { position: absolute; left: 0; top: 0; --vx: 3px; min-inline-size: 104px; padding-inline: calc(var(--vx) * 5.5) calc(var(--vx) * 4); pointer-events: auto; white-space: nowrap; }
-#realm .wheel .slot .n { margin-inline-end: 6px; color: var(--vx-ink-quiet); }
-#realm .wheel .slot.at { --vx-key-tint: var(--vx-enamel); }
-@media (pointer: coarse) { #realm .wheel .slot { min-inline-size: 120px; min-block-size: 44px; } }
+#realm :is(.held, .toolkey) { --vx-key-size: var(--vx-key-small); }
 /* Less motion: things still come and go, at once, and nothing slides (where they are placed is their translate, and is kept). */
-@media (prefers-reduced-motion: reduce) { #realm .cue, #realm .float, #realm .wheel .slot, #realm[data-hud] :is(.tools, .act, .act *, .held) { transition: none !important; } #realm .cue { translate: none; } }
+@media (prefers-reduced-motion: reduce) { #realm .cue, #realm .float, #realm[data-hud] :is(.tools, .act, .act *, .held) { transition: none !important; } #realm .cue { translate: none; } }
 
 /* ── wheel ── */
 #realm[data-hud="wheel"] .tools { display: none; }
@@ -80,7 +78,7 @@ html:has(#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden]
 
 /* ── quiet: put away while the picture holds the pointer ── */
 #realm[data-hud="quiet"] .tools { left: auto; right: max(16px, env(safe-area-inset-right)); bottom: auto; top: 50%; transform: translateY(-50%); transition: opacity 0.3s ease-out; }
-html[data-hud].hung #aim { visibility: hidden; }
+html[data-hud].hung #aim, html.choosing #aim { visibility: hidden; }
 #realm[data-hud="quiet"]:not(.flash) .tools { opacity: 0; pointer-events: none; }
 /* On a desk, with the pointer let go of (Esc), the bank is back with the rest. */
 @media (pointer: fine) { html[data-hud="quiet"]:not(.away) #realm[data-hud="quiet"] .tools { opacity: 1; pointer-events: auto; } }
@@ -127,18 +125,13 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(72px, calc(env(safe-
     #realm[data-hud] .act .down { --x: 118px; --y: 108px; }
   }
   /* The tool's key is a secondary control: at the top, under the sky's key (Apple, Game controls: "Place secondary
-     controls, like menus, at the top"). While the tools hang from it, they stand where it was: it is not shown twice. */
+     controls, like menus, at the top"). While the wheel is open its middle says the tool: the key is not shown twice. */
   #realm[data-hud] .act .toolkey { --h: 44px; --w: 96px; --x: 48px; bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 86px); }
   #realm[data-hud].open .act .toolkey { display: none; }
   #realm[data-hud].choosing .act .toolkey { opacity: 0; }
-  /* While the tools are open the thumb's keys step aside: the tools have the right edge down to the foot (eight in one
-     column upright, and two columns of four on a phone on its side, however short its window). */
+  /* While the wheel is open the thumb's keys step aside: it is most of the screen's width. */
   #realm[data-hud].choosing .act :is(.use, .up, .down, .walks) { visibility: hidden; }
   #realm[data-hud="wheel"] .held { display: none; }
-  /* The tools as wide as one another, in their column or their grid: held upright, as wide as all but 3 Big charge, a
-     few px wider (as wide as it, the column met the body); on its side, as wide as it. */
-  #realm[data-hud="wheel"] .wheel .slot { min-inline-size: 124px; }
-  @media (orientation: landscape) { #realm[data-hud="wheel"] .wheel .slot { min-inline-size: 132px; } }
   /* (By touch the tool's key says the tool: the bank is not shown, nor flashed in quiet, where on its side it stood over the thumb's keys.) */
   #realm:is([data-hud="context"], [data-hud="quiet"]) .tools { display: none; }
   /* quiet: the keys faint a moment after the thumbs are lifted. */
@@ -313,39 +306,40 @@ export function playHud(o: {
     if (el.getAttribute('aria-pressed') !== on) el.setAttribute('aria-pressed', on)
   }
 
-  // ── The wheel ──
-  const wheel = document.createElement('div')
-  wheel.className = 'wheel'
-  wheel.hidden = true
-  wheel.setAttribute('role', 'dialog')
-  wheel.setAttribute('aria-label', 'Choose a tool')
-  wheel.innerHTML = `${choices.map((t, i) => `<button class="vx-button slot" type="button" data-i="${i}" aria-keyshortcuts="${i + 1}"><span class="n">${i + 1}</span>${t}</button>`).join('')}`
+  // ── The wheel: a pie over the middle of the picture (radial.ts) ──
+  // Opened by E (or a click on the held key, or by touch the tool's key). A tap leaves it open until a wedge is clicked
+  // (or Escape, or E again); held, letting go picks the wedge pointed at, and a click while held picks too. A direction
+  // points: the mouse's own on a desk (or, while the picture holds the pointer, how far it has moved since the wheel
+  // came, shown by a dot), and by touch the finger's over the disc.
+  const pie = radial(choices, 'Choose a tool')
+  const wheel = pie.el
+  wheel.classList.add('wheel')
   root.append(wheel)
-  const slots = [...wheel.querySelectorAll<HTMLButtonElement>('.slot')]
-  let open = false, at = 0, aim: [number, number] = [0, 0], leave: (() => void) | null = null, openedAt = 0, byHold = false, adopted = false, byKeys = false
-  /** How much wider than tall the desk's wheel is drawn (an ellipse, below): a direction picks by where a tool is drawn. */
-  let squash = 1
-  const angleOf = (i: number) => Math.PI / 2 - (i / n) * Math.PI * 2
-  const point = (i: number) => { at = i; slots.forEach((s, j) => { s.classList.toggle('at', j === i); s.setAttribute('aria-pressed', String(j === current())) }); if (wheel.contains(document.activeElement)) slots[i].focus() }
-  /** Picks by a direction (x right, y up): the slot whose angle is nearest. */
-  const towards = (x: number, y: number) => { const a = Math.atan2(y, x); let best = 0, gap = 9; for (let i = 0; i < n; i++) { const drawn = Math.atan2(Math.sin(angleOf(i)), Math.cos(angleOf(i)) * squash), d = Math.abs(Math.atan2(Math.sin(a - drawn), Math.cos(a - drawn))); if (d < gap) { gap = d; best = i } } if (best !== at) point(best) }
+  const slots = pie.slots
+  let open = false, at = -1, aim: [number, number] = [0, 0], leave: (() => void) | null = null, openedAt = 0, byHold = false, byKeys = false
+  /** Where the mouse was when the wheel came (a cursor at rest where the pie appears is no choice), CSS px, and whether it has moved since. */
+  let from: [number, number] | null = null, moved = false
+  /** How far the mouse may go from the middle while the picture holds it, radians of turn; inside the ring's share of it nothing is marked. */
+  const REACH = 0.12, DEAD = REACH * 0.36
+  const point = (i: number) => { at = i; pie.mark(i); if (i >= 0 && wheel.contains(document.activeElement)) slots[i].focus() }
+  const step = (by: number) => point((((at < 0 ? current() : at) + by) % n + n) % n)
   const choose = (on: boolean, pick = false) => {
     if (on === open) return
-    // (By touch the sky's panel open hides the tool's key the column hangs from: no wheel until it is folded.)
+    // (By touch the sky's panel open hides the tool's key: no wheel until it is folded.)
     if (on && coarse.matches && root.classList.contains('open')) return
     if (!on) {
-      if (pick) take(at)
+      if (pick && at >= 0) take(at)
       // (The focus was on a tool of the wheel, which is now hidden: it goes back to the key that opened it.)
       const focused = wheel.contains(document.activeElement)
-      open = false; wheel.hidden = true; root.classList.remove('choosing'); leave?.(); leave = null; held.setAttribute('aria-expanded', 'false')
+      open = false; pie.show(false); at = -1; root.classList.remove('choosing'); html.classList.remove('choosing'); leave?.(); leave = null; held.setAttribute('aria-expanded', 'false')
       // (Back to the key that opened it when the keyboard did; else the keys go back to the world, as realm-ui's do.)
       if (focused && byKeys) held.focus()
       else if (focused) (document.activeElement as HTMLElement).blur()
       byKeys = false
       return
     }
-    open = true; openedAt = performance.now(); aim = [0, 0]; point(current()); wheel.hidden = false; root.classList.add('choosing'); held.setAttribute('aria-expanded', 'true')
-    if (!adopted) { adopted = true; kitDo((k) => k.adopt(wheel)) }
+    open = true; openedAt = performance.now(); aim = [0, 0]; from = null; moved = false; at = -1
+    pie.held(current()); pie.mark(-1); pie.dot(null); pie.show(true); root.classList.add('choosing'); html.classList.add('choosing'); held.setAttribute('aria-expanded', 'true')
     // While it is open the keys and the mouse are its own: the body stands, and the mouse points at a tool.
     leave = o.input.push({
       // Every key is its own while it is open (`every`: Enter, B, Q and the rest mean nothing else meanwhile), and a key
@@ -355,25 +349,55 @@ export function playHud(o: {
         if (e.repeat) return true
         const d = /^Digit([1-9])$/.exec(code)
         if (d && Number(d[1]) <= n) { point(Number(d[1]) - 1); choose(false, true); return true }
-        if (code === 'ArrowRight' || code === 'ArrowDown') { point((at + 1) % n); return true }
-        if (code === 'ArrowLeft' || code === 'ArrowUp') { point((at + n - 1) % n); return true }
+        if (code === 'ArrowRight' || code === 'ArrowDown') { step(1); return true }
+        if (code === 'ArrowLeft' || code === 'ArrowUp') { step(-1); return true }
         // (Tab goes round the tools and stays in the wheel: the tool focused is always the one marked, which Enter picks.)
-        if (code === 'Tab') { e.preventDefault(); point((at + (e.shiftKey ? n - 1 : 1)) % n); return true }
+        if (code === 'Tab') { e.preventDefault(); step(e.shiftKey ? -1 : 1); return true }
         if (code === 'Space') { e.preventDefault(); return true }
-        // (Not Space: by touch the key that jumps sends one, and a jump is not a choice.)
+        // (Not Space: by touch the key that jumps sends one, and a jump is not a choice.) E again, or Enter, picks what is
+        // marked; with nothing marked it puts the wheel away as it was.
         if (code === 'Enter' || code === 'KeyE') { e.preventDefault(); choose(false, true); return true }
         if (code === 'Escape') { choose(false); return true }
         return true
       },
-      use() { choose(false, true); return true },
-      wheel(dy) { point((at + (dy > 0 ? 1 : n - 1)) % n); return true },
+      // A click while the picture holds the pointer: the wedge pointed at. On none, the wheel stays (it is put away by a choice, Escape or E).
+      use() { if (at >= 0) choose(false, true); return true },
+      wheel(dy) { step(dy > 0 ? 1 : -1); return true },
     })
   }
-  // (A click picks only where it was pressed: a tap on the tool's key opens the column with its first tool under the
-  // finger, and the click of that tap, which lands there, is no choice. A click from the keys has no press: detail 0.)
+  // The mouse, free (no pointer lock): its direction from the middle marks, once it has moved from where it was when the wheel came.
+  addEventListener('pointermove', (e) => {
+    if (!open || e.pointerType === 'touch' || document.pointerLockElement) return
+    if (!from) { from = [e.clientX, e.clientY]; return }
+    if (!moved && Math.hypot(e.clientX - from[0], e.clientY - from[1]) < 4) return
+    moved = true
+    const i = pie.at(e.clientX, e.clientY)
+    if (i !== at) point(i)
+  })
+  // A click or a tap on a wedge picks it where it was pressed: a tap on the tool's key opens the wheel, and the click of
+  // that tap is no choice. (A click from the keys has no press, detail 0: the focused slot's own, below.)
   let pressed = -1
-  slots.forEach((s, i) => { s.addEventListener('pointerdown', () => { pressed = i }); s.addEventListener('click', (e) => { const was = pressed; pressed = -1; if (e.detail > 0 && was !== i) return; point(i); choose(false, true) }); s.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') point(i) }) })
-  addEventListener('keyup', (e) => { if (e.code === 'KeyE' && open && byHold && performance.now() - openedAt > 280) choose(false, true) })
+  const disc = wheel.querySelector<HTMLElement>('.pie')!
+  disc.addEventListener('pointerdown', (e) => { pressed = pie.at(e.clientX, e.clientY, true); if (e.pointerType === 'touch' && pressed >= 0) point(pressed) })
+  disc.addEventListener('click', (e) => {
+    if (e.detail === 0) return
+    const i = pie.at(e.clientX, e.clientY, true), was = pressed
+    pressed = -1
+    if (i >= 0 && i === was) { point(i); choose(false, true) }
+  })
+  slots.forEach((s, i) => s.addEventListener('click', (e) => { if (e.detail === 0) { point(i); choose(false, true) } }))
+  // By touch, a tap away from the disc (not a thumb that steers: a short touch that stays where it was) puts it away as it was.
+  const taps = new Map<number, { x: number; y: number; t: number }>()
+  addEventListener('pointerdown', (e) => { if (open && e.pointerType === 'touch' && !disc.contains(e.target as Node) && e.target !== toolkey) taps.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() }) }, true)
+  addEventListener('pointerup', (e) => { const t = taps.get(e.pointerId); taps.delete(e.pointerId); if (open && t && performance.now() - t.t < 350 && Math.hypot(e.clientX - t.x, e.clientY - t.y) < 12) choose(false) }, true)
+  addEventListener('pointercancel', (e) => taps.delete(e.pointerId), true)
+  // E let go: held and pointed, that is the choice; held a while and pointed at nothing, put away as it was; a tap leaves it open.
+  addEventListener('keyup', (e) => {
+    if (e.code !== 'KeyE' || !open || !byHold) return
+    if (at >= 0) choose(false, true)
+    else if (performance.now() - openedAt > 280) choose(false)
+    else byHold = false
+  })
 
   // Keys: E opens the wheel (wheel) or goes to the next tool (context, quiet); a vehicle or a thing beside takes E first (its mode is over this one).
   const tools = mode === 'wheel' ? null : root.querySelector<HTMLElement>('.tools')
@@ -403,9 +427,9 @@ export function playHud(o: {
     if (e.code !== 'Enter') return
     e.preventDefault(); e.stopPropagation()
     if (e.repeat) return
-    byHold = false; byKeys = true; choose(true); slots[at].focus()
+    byHold = false; byKeys = true; choose(true); point(current()); slots[at].focus()
   })
-  // By touch: down on the tool's key opens the wheel; a slide picks by its direction, a tap leaves it open for a tap on a tool.
+  // By touch: down on the tool's key opens the wheel; a slide onto a wedge and let go picks it, a tap leaves it open for a tap on one.
   let slide: { id: number; x: number; y: number; far: boolean } | null = null
   toolkey.addEventListener('pointerdown', (e) => {
     e.preventDefault()
@@ -413,15 +437,14 @@ export function playHud(o: {
     if (open) { choose(false); return }
     toolkey.setPointerCapture(e.pointerId); byHold = false; slide = { id: e.pointerId, x: e.clientX, y: e.clientY, far: false }; choose(true)
   })
-  // (The thumb is over a tool of the column, or past its end: the nearest.)
+  // (Over the disc only: the key is off to one side of it, and a twitch of the finger there is no direction.)
   toolkey.addEventListener('pointermove', (e) => {
-    if (!slide || slide.id !== e.pointerId || Math.hypot(e.clientX - slide.x, e.clientY - slide.y) < 22) return
+    if (!slide || slide.id !== e.pointerId || (!slide.far && Math.hypot(e.clientX - slide.x, e.clientY - slide.y) < 22)) return
     slide.far = true
-    const mids = slots.map((el) => { const r = el.getBoundingClientRect(); return Math.hypot(r.left + r.width / 2 - e.clientX, r.top + r.height / 2 - e.clientY) })
-    const near = mids.indexOf(Math.min(...mids))
-    if (near !== at) point(near)
+    const i = pie.at(e.clientX, e.clientY, true)
+    if (i !== at) point(i)
   })
-  const lift = (e: PointerEvent) => { if (!slide || slide.id !== e.pointerId) return; const far = slide.far; slide = null; if (far) choose(false, true) }
+  const lift = (e: PointerEvent) => { if (!slide || slide.id !== e.pointerId) return; const far = slide.far; slide = null; if (far) choose(false, at >= 0) }
   toolkey.addEventListener('pointerup', lift)
   // (A slide the system took away, a gesture of its own, is no choice: the wheel closes as it was.)
   toolkey.addEventListener('pointercancel', (e) => { if (!slide || slide.id !== e.pointerId) return; slide = null; choose(false) })
@@ -548,43 +571,16 @@ export function playHud(o: {
     const panelOpen = root.classList.contains('open')
     if (open && panelOpen && !panelWas) choose(false)
     panelWas = panelOpen
-    if (open && touch) {
-      o.input.turn()
-      // Down to the screen's foot (the thumb's keys step aside meanwhile), in rows of a grid read left to right where one
-      // column does not fit (a phone on its side), the grid against the right edge as the column is.
-      const k = toolkey.getBoundingClientRect(), h = slots[0].offsetHeight, gap = 10, top = k.top
-      const foot = vh - s.bottom - 8
-      // (As even as it can be where one column does not fit: eight in two columns of four, not seven and one. And no wider
-      // than the screen: then it goes on down, as far as it must.)
-      const most = Math.max(...slots.map((el) => el.offsetWidth)), across = most + 12 + 9
-      const fits = Math.max(1, Math.min(slots.length, Math.floor((foot - top + gap) / (h + gap)))), wide = Math.max(1, Math.floor((k.right - s.left - 12 + 12 + 9) / across))
-      const cols = Math.min(wide, Math.ceil(slots.length / fits))
-      // (Each to the left edge of its cell, the cells as wide as the widest name and the last against the right edge: a
-      // list read down its left edge, as a menu's is. Set to the right edge, the names' starts wandered.)
-      slots.forEach((el, i) => { const r = Math.floor(i / cols), c = i % cols; place(el, k.right - (cols - 1 - c) * across - most, top + r * (h + gap)) })
-    }
-    // The wheel, in the largest clear room over or beside the body.
-    if (open && !touch) {
-      // The head is not turned while a tool is chosen: what the mouse moved is the aim's (opened by holding E), or nobody's.
+    // The head is not turned while a tool is chosen. With the picture holding the pointer, what the mouse moved is the
+    // wheel's: a direction from the middle, kept within reach, shown by a dot (inside the ring nothing is marked).
+    if (open) {
       const [r, u] = o.input.turn()
-      if (o.input.locked && byHold) { aim = [Math.max(-0.12, Math.min(0.12, aim[0] + r)), Math.max(-0.12, Math.min(0.12, aim[1] + u))]; if (Math.hypot(aim[0], aim[1]) > 0.035) towards(aim[0], aim[1]) }
-      // (A key's solid and its shadow are drawn 6 voxels past its box all round: that is room it takes.)
-      const bleed = 18, sw = (slots[0].offsetWidth || 104) + bleed * 2, sh = (slots[0].offsetHeight || 44) + bleed * 2, pad = 8
-      const area: Box = { left: s.left + pad, top: s.top + pad, right: vw - s.right - pad, bottom: vh - s.bottom - pad }
-      const rooms: Box[] = b ? [{ ...area, bottom: Math.min(area.bottom, b.top - pad) }, { ...area, right: Math.min(area.right, b.left - pad) }, { ...area, left: Math.max(area.left, b.right + pad) }] : [area]
-      // (An ellipse half again and more as wide as it is tall: the names are wider than they are tall, and with eight round
-      // a circle tight enough to read as one thing laid them on one another.)
-      const WIDE = 1.9
-      const fit = (r: Box) => Math.min((r.right - r.left - sw) / 2 / WIDE, (r.bottom - r.top - sh) / 2)
-      // Over the head while there is room for it there (the sky, on a roof): else beside the body, where there is more.
-      const room = fit(rooms[0]) >= 100 ? rooms[0] : rooms.sort((p, q) => fit(q) - fit(p))[0]
-      // (Tight: at 135 px the ring of seven read as one thing; at 170 its keys were seven things over the city.)
-      // (In a room too narrow for it, less wide: a circle at the least.)
-      const ry = Math.max(60, Math.min(115, fit(room))), rx = Math.max(ry, Math.min(ry * WIDE, (room.right - room.left - sw) / 2))
-      squash = rx / ry
-      const cx = Math.max(room.left + rx + sw / 2, Math.min(room.right - rx - sw / 2, b ? (b.left + b.right) / 2 : (room.left + room.right) / 2))
-      const cy = (room.top + room.bottom) / 2
-      slots.forEach((el, i) => place(el, cx + Math.cos(angleOf(i)) * rx - sw / 2 + bleed, cy - Math.sin(angleOf(i)) * ry - sh / 2 + bleed))
+      if (!touch && o.input.locked) {
+        aim = [aim[0] + r, aim[1] - u]
+        const far = Math.hypot(aim[0], aim[1])
+        if (far > REACH) aim = [(aim[0] * REACH) / far, (aim[1] * REACH) / far]
+        if (far > DEAD * 0.4) { pie.dot([(aim[0] / REACH) * 0.94, (aim[1] / REACH) * 0.94]); const i = pie.towards(aim[0], aim[1], DEAD); if (i !== at) point(i) }
+      }
     }
     // quiet: away while the picture holds the pointer (a desk) or a while after the last touch; a tool chosen shows its bank.
     if (mode !== 'context') {
