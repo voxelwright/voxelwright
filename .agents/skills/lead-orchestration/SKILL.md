@@ -150,4 +150,4 @@ proposes how to structure parts so that one edit reaches every use.
 - Things only the owner can do go in one batch at the end: a real phone,
   listening, uploads to Cloudflare, taste vetoes.
 
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"AGENTS.md":"8f537e255199d8a627bd861af8b4f3a5"} -->
+<!-- docs-verified f9a6b0a446ebed84ee4222918f4765d025f53a80 {"AGENTS.md":"5b7a792dc11ff135858ebfa05f0dc8ea"} -->

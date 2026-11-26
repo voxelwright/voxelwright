@@ -5,6 +5,7 @@ import { plain } from '../engine/player/serve.mjs'
 
 const home = resolve('.voxelwright')
 const inputs = { ...process.env, HOME: home, VOXELWRIGHT_EGG_MEDIA: '' }
+delete inputs.GITHUB_REPOSITORY
 delete inputs.GH_TOKEN
 function step(label, script, args, env) {
   const start = performance.now()

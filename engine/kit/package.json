@@ -2,6 +2,7 @@
   "name": "voxelmorphism",
   "version": "0.1.0",
   "description": "A design language where every control is a small solid built from voxels.",
+  "repository": { "type": "git", "url": "https://github.com/voxelwright/voxelwright", "directory": "engine/kit" },
   "license": "Apache-2.0",
   "type": "module",
   "scripts": { "prepare": "node browser.mjs" },

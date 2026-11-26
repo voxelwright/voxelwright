@@ -18,7 +18,7 @@ To walk the city, install Node.js 25 or newer and stable Rust, then add the targ
 ./world
 ```
 
-Open the printed address and choose **Explore** to enter the city. To make new things, add your provider key under **Your AI…** in the realm settings. The pinned city includes street lamps and trolley wires mapped by San Francisco Public Works. See the [sources and licence records](DATA-LICENSES.md). The [quickstart](guide/quickstart.md) covers the release mirror needed before public cutover and running in a Dev Container.
+Open the printed address and choose **Explore** to enter the city. To make new things, add your provider key under **Your AI…** in the realm settings. The pinned city includes street lamps and trolley wires mapped by San Francisco Public Works. See the [sources and licence records](DATA-LICENSES.md). The [quickstart](guide/quickstart.md) covers release mirrors and running in a Dev Container.
 
 Where to go next:
 
@@ -89,7 +89,7 @@ npm run check -- --ci --webgl
 
 Run the last command before merging. See the [runner options](guide/check-cli.md) and
 [check names and prerequisites](guide/checks.md). Logs are written to `.check/`.
-GitHub check workflows are disabled until the public cutover (#534).
+GitHub runs the check workflow on pull requests and pushes to main.
 
 ## Machine hygiene
 

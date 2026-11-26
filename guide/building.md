@@ -25,7 +25,7 @@ flowchart LR
 1. Work is tracked in a GitHub issue. The branch is `feature/<issue>-<name>`. Commit subjects are `[#<issue>] <change>`.
 2. Run the flow you changed, then its own tests. Each part has its own: `npm run check` in `engine/` (core tests, types and page checks in Chrome), `npm test` in `site/`, the Python tests in `engine/bay`.
 3. Merge current main into the branch and run the root gate from the repository root: `npm run check -- --ci --webgl --timeout 240`. Put its result line in the pull request.
-4. GitHub's check workflows are turned off until the public cutover (#534). The run on the owner's Mac is the gate.
+4. GitHub runs the check workflow on pull requests and pushes to main. Include the local Mac result in the pull request.
 5. Reviews are a tool, not a gate. Run `.agents/skills/adversarial-review` when you expect it to find something: a change you cannot fully test, a format others will build on, anything that touches real people's data.
 
 A mocked provider or a saved model reply proves the pipeline, never a model integration. Say which one you ran.
@@ -63,4 +63,4 @@ node scripts/docs.mjs mentions              # paths, links and commands only
 npm run check -- --list                     # every check and whether CI runs it
 ```
 
-<!-- docs-verified 3e4407c8ce8053805cf32fd47fab75b930e62bf6 {"AGENTS.md":"d47241c0c37fd5a829fa6e94aae4bdd6","scripts/check.mjs":"be243050b01166fea23f15b61440cd1d",".claude/hooks/dispatch-log.mjs":"2ef2b07f0b20333d9c59c210e736156c","engine/package.json":"3ac396d1a99821a73b43881eec58f023","site/package.json":"2418d0bb5d8550813a9ca4b17fc344ed","scripts/docs.mjs":"1778d14d1225222326b7370652ece8cb"} -->
+<!-- docs-verified f9a6b0a446ebed84ee4222918f4765d025f53a80 {"AGENTS.md":"8ee0204ca9f15871fc22622357c7c846","scripts/check.mjs":"be243050b01166fea23f15b61440cd1d",".claude/hooks/dispatch-log.mjs":"2ef2b07f0b20333d9c59c210e736156c","engine/package.json":"3ac396d1a99821a73b43881eec58f023","site/package.json":"2418d0bb5d8550813a9ca4b17fc344ed","scripts/docs.mjs":"1778d14d1225222326b7370652ece8cb"} -->

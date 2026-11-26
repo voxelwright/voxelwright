@@ -1,6 +1,7 @@
 {
   "name": "voxelwright",
   "description": "A stack for worlds that people make by talking, and the things built on it.",
+  "repository": { "type": "git", "url": "https://github.com/voxelwright/voxelwright" },
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

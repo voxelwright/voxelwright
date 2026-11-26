@@ -31,7 +31,7 @@ const fail = (why) => { console.error(`data: ${why}`); process.exit(1) }
 // Links are followed: a staged release shares library folders between generations by linking them (sf/release.md).
 const files = (dir) => readdirSync(dir).filter((name) => !name.startsWith('.')).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? files(join(dir, name)) : [join(dir, name)]))
 // The bundle is a release of this repository, wherever the checkout's remote points.
-const REPO = process.env.GITHUB_REPOSITORY ?? 'the private source repository'
+const REPO = process.env.GITHUB_REPOSITORY ?? 'voxelwright/voxelwright'
 const gh = (command, ...args) => execFileSync('gh', ['release', command, '--repo', REPO, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 // macOS's default pax archive adds AppleDouble files and extended attributes for each member.
