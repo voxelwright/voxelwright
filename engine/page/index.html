@@ -71,6 +71,8 @@
   html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="drive-hud"] { display: flex; }
   html:has(#ask.open) [data-panel="drive-hud"] { display: none; }
   [data-panel="drive-hud"] .dh-top { display: flex; align-items: baseline; gap: 6px; }
+  [data-panel="drive-hud"] .dh-cam { font: 700 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(232, 236, 241, 0.82); border-bottom: 1px solid rgba(232, 236, 241, 0.14); padding-bottom: 4px; transition: opacity 0.25s ease-out; }
+  @media (prefers-reduced-motion: reduce) { [data-panel="drive-hud"] .dh-cam { transition: none; } }
   [data-panel="drive-hud"] .dh-spd { font: 700 28px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; min-width: 44px; text-align: right; }
   [data-panel="drive-hud"] .dh-unit { font: 600 10px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.62; margin-right: 4px; }
   [data-panel="drive-hud"] .dh-gear { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px; background: rgba(232, 236, 241, 0.16); font: 700 12px/1 ui-monospace, monospace; color: #f2f5f9; }
