@@ -75,6 +75,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
 | `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
+| `deform.ts` | Vehicle damage: dents, scuffs, cracked glass and engine damage recorded from crashes, packed for `pieces.ts` (see [vehicle damage](#vehicle-damage)). |
 | `fine.ts`, `streetfaces.ts` | Faces of things in cells finer than the world's (vehicles' looks). `facesWithSmooth` also gives each outside face smooth words at its four corners: a normal fitted to the shape round the corner and how open it is (#38). The street's cars get theirs in the `streetfaces.ts` worker. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
@@ -89,6 +90,18 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
+
+## Vehicle damage
+
+A drivable thing that wears a fine look is dented where it is struck (#37). The core reports each crash as a `STRUCK` record with a place, a closing speed and a push, but no direction. `living.ts` keeps the hardest blow each vehicle took in one answer. For a blow at 1.8 m/s or more, it gives each part of the look a dent at that place, pushed in from the side of the part's box nearest the hit. `deform.ts` holds up to six dents a part. Each dent has a centre, a radius, a direction and a depth, all in the part's own cells. Nearby blows deepen an existing dent, and blows near the driver's eye and seats are kept out of it: no dent, however it is moved, reaches that room. The same record holds how scuffed the paint is, how damaged the engine is, and how cracked each window is.
+
+`pieces.ts` draws a struck piece bent, in its vertex shader, with no new meshing:
+
+- A struck piece draws from a copy of its faces cut into rows one cell long. Every corner then lies on the cell lattice, so faces that meet still meet once bent. Merged rows bent only at their ends opened gaps beside their neighbours. A piece never struck draws its merged faces, and the shader returns before any dent work.
+- Paint and lamps keep the unbent position, so a bent panel keeps its own paint.
+- In a dent, paint wears to primer and bare steel and loses its clear coat. Glass near a dent breaks into a mosaic with a web of cracks, and still lets the view through.
+
+Crashes at 2.8 m/s or more throw sparks, dust, chips of the struck paint and, when a window cracked, glass. A damaged engine steams, then smokes and finally burns (`puffs.ts` `engine`). Where `prefers-reduced-motion` is set, the debris is left out and the smoke is lighter. `living.repair(thing)` makes a look as it was made. Dents go with the look when the thing breaks, is taken away, or the world is forgotten, so a new car never inherits them. `node engine/test/dents.mjs` crashes the fine car into a block and checks the dent, the driver's clear room, the picture of the struck corner against the same view repaired, and the repair.
 
 ## Invariants
 

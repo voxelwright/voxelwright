@@ -1007,6 +1007,14 @@ async function main() {
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
       sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
+      // A hard crash (#37): road dust, chips of the paint struck, and shards of a window that cracked.
+      crash: (at, strength, kind, glass) => {
+        const c = hue(kind)
+        smoke.crash(at, strength)
+        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.5, 8, 0.9 + strength * 0.4)
+        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.74, 0.84, 0.88], 0.3, 6, 1.1)
+      },
+      engine: (at, level, dt) => smoke.engine(at, level, dt),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,

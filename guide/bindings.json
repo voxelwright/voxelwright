@@ -464,7 +464,9 @@
     ],
     "engine/page/input.ts": "lines:^export function",
     "engine/page/plugins.ts": "types:Pass",
-    "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed"
+    "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed",
+    "engine/page/deform.ts": "lines:^export const (MAX_DENTS|DEFORM_BYTES)|^export class VehicleDeformation|^recordImpact\\(|^repairVehicle\\(",
+    "engine/page/living.ts": "lines:^const (DENTS_FROM|CRASH_FROM|HEAD_ROOM|ENGINE_SEEN) =|^repair\\(thing\\)"
   },
   "guide/engine-plugins.md": {
     "engine/rules/run.mjs": "lines:^export const (RULES_MOST|SOURCE_MOST)|^const (START_MOST|STRIKES|WAITING_MOST)",
