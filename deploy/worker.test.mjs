@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import worker from './worker.mjs'
 import { takesBrotli } from './encoding.mjs'
 
-const FILES = { '/releases/p/t.bay': 'PLAIN', '/releases/p/t.bay.br': 'BROTLI', '/bay/marks.bin': 'MARKS' }
+const FILES = { '/releases/p/t.bay': 'PLAIN', '/releases/p/t.bay.br': 'BROTLI', '/releases/p/br-only.bay.br': 'ONLY_BR', '/bay/marks.bin': 'MARKS' }
 const env = { ASSETS: { fetch: async (r) => { const p = new URL(r.url).pathname; return p in FILES ? new Response(FILES[p], { headers: { ETag: '"e"' } }) : new Response('not found', { status: 404 }) } } }
 const get = (path, accept, method = 'GET') => worker.fetch(new Request(`https://zahynailo.dev${path}`, { method, headers: accept === undefined ? {} : { 'Accept-Encoding': accept } }), env)
 
@@ -31,6 +31,17 @@ test('a release file goes as its own Brotli copy, kept a year; without Brotli, a
 test('a file with no Brotli copy, and a missing one, go as the assets answer them', async () => {
   assert.equal(await (await get('/bay/marks.bin', 'br')).text(), 'MARKS')
   assert.equal((await get('/releases/p/none.bay', 'br')).status, 404)
+})
+
+test('a Brotli-only binary asset serves br to Brotli clients and 406 with Vary to clients without br', async () => {
+  const ok = await get('/releases/p/br-only.bay', 'gzip, br')
+  assert.equal(ok.status, 200)
+  assert.equal(ok.headers.get('content-encoding'), 'br')
+  assert.equal(await ok.text(), 'ONLY_BR')
+  const noBr = await get('/releases/p/br-only.bay', 'gzip')
+  assert.equal(noBr.status, 406)
+  assert.equal(noBr.headers.get('vary'), 'Accept-Encoding')
+  assert.equal((await get('/releases/p/missing.bay', 'gzip')).status, 404)
 })
 
 test("/weather is the station's latest report of the sky, trimmed, kept five minutes; a failed service is a 502 not kept", async () => {

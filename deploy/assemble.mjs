@@ -23,6 +23,10 @@ if (!existsSync(join(site, 'index.html'))) fail(`${relative(repo, site)} holds n
 if (!existsSync(join(site, 'blog', 'index.html'))) fail(`${relative(repo, site)} holds no blog at blog/: cd site && npm run build`)
 
 const SENT_BY_WORKER = (path) => path.startsWith('releases/') || path.startsWith('bay/')
+// Binary city tiles, far faces and road/map tables are only read by WebGPU browsers (all of which send
+// Accept-Encoding: br): drop their uncompressed copies when a quality-11 .br sibling exists so dist-world stays
+// compact (~800 MB / ~6,800 files instead of ~6.7 GB / ~12,400 files). Text and JSON keep both plain and .br.
+const BROTLI_ONLY_BINARY = (path) => SENT_BY_WORKER(path) && /\.(bay|far|bin)$/.test(path)
 const worldFiles = new Map()
 const placeWorld = (from, path) => {
   if (worldFiles.has(path)) fail(`/${path} comes from both ${relative(repo, worldFiles.get(path))} and ${relative(repo, from)}`)
@@ -32,6 +36,7 @@ for (const file of files(realm)) {
   let path = relative(realm, file).split(sep).join('/')
   if (path.startsWith('sf/')) path = path.slice(3)
   if (path.endsWith('.br') && !SENT_BY_WORKER(path)) continue
+  if (BROTLI_ONLY_BINARY(path) && existsSync(`${file}.br`)) continue
   placeWorld(file, path)
 }
 placeWorld(join(here, 'alpha.js'), 'alpha.js')
