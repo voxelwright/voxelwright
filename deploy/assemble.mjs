@@ -1,4 +1,4 @@
-// Writes deploy/dist, the one folder zahynailo.dev serves (#450):
+// Builds the two static asset folders from one realm and one site build. zahynailo.dev serves:
 //   - the SF realm (engine/dist-sf, from `node engine/sf/build.mjs`) at the root: its sf/ folder (the page, the
 //     release pointer, the release, kept things, eggs, credits) becomes "/", beside the engine's page/, kit/, blocks/
 //     and bay/, so every address the page makes from its own location (../page/main.js, current.json, kept/, eggs/)
@@ -14,13 +14,12 @@ import { withNotice } from './notice.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url)), repo = dirname(here)
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return resolve(repo, at > 0 ? process.argv[at + 1] : fallback) }
-const realm = arg('realm', 'engine/dist-sf'), site = arg('site', 'site/dist'), out = join(here, 'dist')
+const realm = arg('realm', 'engine/dist-sf'), site = arg('site', 'site/dist')
 const fail = (why) => { console.error(`assemble: ${why}`); process.exit(1) }
 const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))
 
 if (!existsSync(join(realm, 'sf', 'index.html'))) fail(`${relative(repo, realm)} holds no realm: node engine/sf/build.mjs`)
 if (!existsSync(join(site, 'blog', 'index.html'))) fail(`${relative(repo, site)} holds no blog at blog/: cd site && npm run build`)
-rmSync(out, { recursive: true, force: true })
 
 /** Where each source file goes, by its published path; two sources for one path is an error. */
 const placed = new Map()
@@ -35,30 +34,59 @@ for (const file of files(realm)) {
   if (path.endsWith('.br') && !SENT_BY_WORKER(path)) continue
   place(file, path)
 }
+place(join(here, 'alpha.js'), 'alpha.js')
+const worldFiles = new Map(placed)
+
 let siteHeaders = ''
 for (const file of files(site)) {
   const path = relative(site, file).split(sep).join('/')
   if (path === '_headers') { siteHeaders = readFileSync(file, 'utf8'); continue }
   place(file, path)
 }
-place(join(here, 'alpha.js'), 'alpha.js')
-for (const [path, from] of placed) {
-  mkdirSync(dirname(join(out, path)), { recursive: true })
-  if (!path.endsWith('.html')) { cpSync(from, join(out, path)); continue }
-  try { writeFileSync(join(out, path), withNotice(readFileSync(from, 'utf8'))) } catch (e) { fail(`/${path}: ${e.message}`) }
+const personal = 'https://zahynailo.dev'
+const worldOrigin = 'https://voxelwright.world'
+function worldPage(html) {
+  // The built realm embeds its board destinations as JSON. Leave third-party and realm asset URLs alone.
+  return html.replace(/(["'])\/blog\//g, `$1${personal}/blog/`).replace('</head>', `<link rel="canonical" href="${worldOrigin}/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="San Francisco">
+<meta property="og:url" content="${worldOrigin}/">
+<meta property="og:image" content="${personal}/blog/og/home.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="${personal}/blog/og/home.png">
+</head>`)
 }
 
-// One _headers for the one folder: the realm's rules, then the site's (already written for /blog/).
-writeFileSync(join(out, '_headers'), [
-  '# The realm (engine/dist-sf). The release pointer is asked for every time, so a new pin shows at once; the release',
-  '# itself and the binary files are sent by worker.mjs, which sets their headers.',
-  '/current.json',
-  '  Cache-Control: no-cache',
-  '',
-  siteHeaders,
-].join('\n'))
+function assemble(folder, entries, headers, world) {
+  const out = join(here, folder)
+  rmSync(out, { recursive: true, force: true })
+  for (const [path, from] of entries) {
+    mkdirSync(dirname(join(out, path)), { recursive: true })
+    if (!path.endsWith('.html')) { cpSync(from, join(out, path)); continue }
+    let html = readFileSync(from, 'utf8')
+    if (world && path === 'index.html') html = worldPage(html)
+    writeFileSync(join(out, path), withNotice(html))
+  }
 
-const all = files(out), bytes = all.reduce((n, f) => n + statSync(f).size, 0), biggest = Math.max(...all.map((f) => statSync(f).size))
-console.log(`deploy/dist: ${all.length} files, ${(bytes / 1048576).toFixed(1)} MB, largest ${(biggest / 1048576).toFixed(1)} MB`)
-if (all.length > 20000) fail('more than 20,000 files: over the Workers Free plan limit for static assets')
-if (biggest > 25 * 1048576) fail('a file over 25 MiB: over the Workers limit for one static asset')
+  // One _headers for the one folder: the realm's rules, then the site's (already written for /blog/).
+  writeFileSync(join(out, '_headers'), [
+    '# The realm (engine/dist-sf). The release pointer is asked for every time, so a new pin shows at once; the release',
+    '# itself and the binary files are sent by worker.mjs, which sets their headers.',
+    '/current.json',
+    '  Cache-Control: no-cache',
+    '',
+    headers,
+  ].join('\n'))
+
+  if (world) {
+    writeFileSync(join(out, 'robots.txt'), 'User-agent: *\nAllow: /\n')
+    writeFileSync(join(out, '404.html'), withNotice(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Page not found · San Francisco</title></head><body><main><h1>Page not found</h1><p><a href="/">Return to San Francisco</a> or visit <a href="${personal}/blog/">Pavlo’s blog</a>.</p></main></body></html>`))
+  }
+  const all = files(out), bytes = all.reduce((n, f) => n + statSync(f).size, 0), biggest = Math.max(...all.map((f) => statSync(f).size))
+  console.log(`deploy/${folder}: ${all.length} files, ${(bytes / 1048576).toFixed(1)} MB, largest ${(biggest / 1048576).toFixed(1)} MB`)
+  if (all.length > 20000) fail('more than 20,000 files: over the Workers Free plan limit for static assets')
+  if (biggest > 25 * 1048576) fail('a file over 25 MiB: over the Workers limit for one static asset')
+}
+
+assemble('dist', placed, siteHeaders, false)
+assemble('dist-world', worldFiles, '', true)

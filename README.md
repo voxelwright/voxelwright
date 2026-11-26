@@ -36,7 +36,7 @@ Start with the [project map](guide/project.md) and [how to keep documentation cu
 - `street/`: the shared street's world process and page. See `street/README.md`.
 - `engine/`: the engine (#140): a world of 10 cm cells drawn with raw WebGPU, its core in Rust. See `engine/README.md`. Its UI kit, Voxelmorphism, is in `engine/kit/`.
 - `site/`: the personal site and blog, served under zahynailo.dev/blog/. It was brought in with `git subtree`, history kept. See `site/README.md`.
-- `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`.
+- `deploy/`: two Cloudflare Workers built together. voxelwright.world serves the SF realm. zahynailo.dev serves the realm at `/` and the personal site under `/blog/`. See `deploy/README.md`.
 - `master/`: the master server (Rust), which lists player-hosted lobbies and passes one WebRTC offer and one answer per join (#526). See `master/README.md`.
 - `guide/`: the quickstart, project map and contributor documentation.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
@@ -125,4 +125,4 @@ Copyright 2026 Pavlo Zahynailo. Project code carries the [Apache License 2.0](LI
 
 Voxelwright and Voxelmorphism are names belonging to Pavlo Zahynailo. Please choose another name for your fork.
 
-<!-- docs-verified 452a182c9cc8fc2ca4ffb8bba4e4c7c943646508 {"site/package.json":"25065cd6f9cdf5bfc5bcd1c193705eab","deploy/assemble.mjs":"0338276fb038a47c9b504192a26606f9","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86","host/package.json":"7a50b8c947871907fef6d025d0f5b639","engine/package.json":"fcff01d1444ba359e1d890232761e78f","home/package.json":"2b43e8013bc6abfbe95c89da9f2a128c","package.json":"8ce1e779c247a7ea73bf057505a56f3a","street/package.json":"631a60c23ff10de35394f84373fe599a","host/src/live.ts":"45499f1073f06a5c713a90a389267a56","world":"2378ea1c03ac32ad3591a785e0f839d2"} -->
+<!-- docs-verified cc73cebc22120466c81784ffcdf0523695062e3c {"site/package.json":"25065cd6f9cdf5bfc5bcd1c193705eab","deploy/assemble.mjs":"005779eab81faed194d4d6d0c88c78d5","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86","host/package.json":"7a50b8c947871907fef6d025d0f5b639","engine/package.json":"fcff01d1444ba359e1d890232761e78f","home/package.json":"2b43e8013bc6abfbe95c89da9f2a128c","package.json":"8ce1e779c247a7ea73bf057505a56f3a","street/package.json":"631a60c23ff10de35394f84373fe599a","host/src/live.ts":"45499f1073f06a5c713a90a389267a56","world":"2378ea1c03ac32ad3591a785e0f839d2"} -->

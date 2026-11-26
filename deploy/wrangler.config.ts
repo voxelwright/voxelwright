@@ -2,4 +2,4 @@
 // Docs: https://developers.cloudflare.com/cf/projects/index.md#how-cf-runs-your-project
 import { defineWranglerConfig } from "wrangler/experimental-config";
 
-export default defineWranglerConfig({ assetsDirectory: "dist" });
+export default defineWranglerConfig(({ mode }) => ({ assetsDirectory: mode === "world" ? "dist-world" : "dist" }));

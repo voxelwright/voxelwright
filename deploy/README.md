@@ -1,11 +1,11 @@
-# zahynailo.dev
+# Deploy the realm and blog
 
-One Cloudflare Worker, `zahynailo`, on the Workers Free plan (#450). The SF realm is the landing at `/`, and the site (`site/`) is under `/blog/`. `.github/workflows/deploy.yml` builds both and deploys them on every push to main, and it can also be run by hand from main (Actions → deploy → Run workflow). Only main deploys.
+The `voxelwright` Worker serves San Francisco at voxelwright.world and www.voxelwright.world. The `zahynailo` Worker serves the same realm at zahynailo.dev and mounts the personal site under `/blog/`. The main-branch workflow builds the realm and blog once, then deploys and checks each Worker. It also runs by hand from Actions → deploy.
 
 ## What is where
 
-- **Static assets** hold everything, about 3,700 files and 830 MB. The realm's `engine/dist-sf/sf/*` goes at the root, beside its `page/`, `kit/`, `blocks/` and `bay/`. `site/dist` adds `blog/`, `robots.txt` and `404.html`. `assemble.mjs` writes this folder, `deploy/dist`. Requests for these files are free and unlimited.
-- **The early-alpha notice:** `assemble.mjs` adds `alpha.js` (served at `/alpha.js`) to every page it publishes, the realm's and the blog's, through `notice.mjs`. One dismissal is kept in `localStorage` and hides it on both. To retire it, delete `alpha.js` and its two lines in `assemble.mjs`.
+- **Static assets** hold everything, about 3,700 files and 830 MB. The realm's `engine/dist-sf/sf/*` goes at the root, beside its `page/`, `kit/`, `blocks/` and `bay/`. `site/dist` adds `blog/`, `robots.txt` and `404.html`. `assemble.mjs` writes this folder, `deploy/dist`. The second folder, `deploy/dist-world`, contains the realm, its own canonical and social metadata, robots policy and 404 page. The personal blog board links to https://zahynailo.dev/blog/.
+- **The early-alpha notice:** `assemble.mjs` adds `alpha.js` (served at `/alpha.js`) to every page it publishes, the realm's and the blog's, through `notice.mjs`. A dismissal is kept in `localStorage` for that origin.
 - **`worker.mjs`** runs only for `/releases/*` (the city's pinned release) and `/bay/*` (the road's marks and the landmarks). It sends the quality-11 Brotli copy that `sf/build.mjs` wrote beside each file, unchanged, so the bytes on the wire are the ones the realm's checks measure. Static assets alone can't do this. Setting `Content-Encoding: br` in `_headers` makes the edge compress the file a second time, and the edge doesn't compress `.bay`, `.far` or `.bin` files at all. The edge compresses the code itself, which comes to about 0.25 MB more than the local quality-11 copies.
 - **`/weather`** also runs `worker.mjs`. It answers San Francisco's weather now for the realm's "SF now" sky: the latest report from the National Weather Service's SFO station that saw the sky, trimmed, kept ten minutes at the edge and five in the browser. If the service fails, it answers 502 and the sky keeps its own weather. To check it after a deploy, run `curl -s https://zahynailo.dev/weather`.
 - **Domains:** `zahynailo.dev` and `www.zahynailo.dev` are custom domains in `cloudflare.config.ts`. A Single Redirect rule on the zone (`www.zahynailo.dev to the apex`) sends www to the apex with a 301 and keeps the path and query. It was set once through the Rulesets API, and deploys don't touch it.
@@ -43,7 +43,7 @@ tag="eggs-overlay-$(printf '%.16s' "$digest")"
 gh release create "$tag" "$work/egg-media.tar" --repo "${PRIVATE_OVERLAY_REPO:?set the private overlay repository}" --title "Egg media overlay (private)" --notes "" --prerelease --latest=false
 ```
 
-The repository variable `EGG_OVERLAY_TAG` names that release. After the upload, point it at the new tag with `gh variable set EGG_OVERLAY_TAG --body "$tag" --repo "${PRIVATE_OVERLAY_REPO:?set the private overlay repository}"`. Leave it unset for public builds.
+The repository variable `EGG_OVERLAY_TAG` names that release. Set that variable on the repository running the workflow. Its `EGG_OVERLAY_REPO` variable selects the release repository (default: the workflow repository). For a separate private repository, supply a production environment secret `EGG_OVERLAY_TOKEN` with contents-read access there. The default token can read releases in the workflow repository. Leave the tag unset to build both realms with procedural eggs alone.
 
 ## When the pin or the city's other data moves
 
@@ -60,19 +60,48 @@ If the pin and `deploy/data.json` disagree, CI fails before it deploys. Don't de
 
 ## Deploy by hand
 
+From the repository root with the pinned data present, run the build once. Set `VOXELWRIGHT_EGG_MEDIA` before building to include the private clips.
+
 ```sh
-cd engine && npm run core && node sf/build.mjs && cd ../site && npm run build && cd ../deploy && npm ci && node assemble.mjs && npx cf deploy
+npm ci --prefix site && npm ci --prefix deploy &&
+npm --prefix engine run core && node engine/sf/build.mjs &&
+npm --prefix site run build && node deploy/assemble.mjs
+```
+
+Then run either line, or both in order. The pinned CLI passes its native project mode to both config files, so both targets share the fetch handler and the same three Worker routes. The default mode retains the original project settings. World mode selects its name, domains and asset directory.
+
+```sh
+(cd deploy && npx cf deploy --mode world)
+(cd deploy && npx cf deploy)
+```
+
+## Send world blog requests to the personal site
+
+After the zone is active and the custom domains are proxied, install this free zone Single Redirect once. It matches both world hostnames and preserves the blog path and query string. Cloudflare evaluates it before the Worker. With a token allowed to edit Single Redirects, run this for a zone with no redirect entry point yet. [Cloudflare Rulesets API](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/)
+
+```sh
+cd deploy
+npx cf rulesets create --zone voxelwright.world --kind zone --phase http_request_dynamic_redirect --name 'World redirects' --rules "$(jq -sc . world-blog-rule.json)"
+```
+
+If that phase already has an entry point, append the rule to its existing ID instead. Read the ID with the first command.
+
+```sh
+npx cf rulesets entrypoint get http_request_dynamic_redirect --zone voxelwright.world
+npx cf rulesets rules create "$RULESET_ID" --zone voxelwright.world --body "$(cat world-blog-rule.json)"
 ```
 
 ## Roll back
 
-Every deploy is a Worker version. To put the previous version back on 100% of traffic, in one command:
+CI deploys voxelwright first, then zahynailo. Each live check reads the version on traffic, the root, the release pointer and the pinned Brotli manifest. The personal Worker also checks the blog and feed. On a failed live check CI attempts to roll that Worker back. The job stops on failure and records each attempted Worker’s outcome in the Actions summary, including its traffic status after an error. A first deployment has no previous version to restore.
+
+For a manual rollback, select the Worker by name. To choose a specific version, add its ID after `rollback`.
 
 ```sh
-cd deploy && CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler rollback --name zahynailo -m "why"
+cd deploy
+npx wrangler deployments list --name voxelwright
+npx wrangler rollback --name voxelwright -m "reason"
 ```
-
-Add a version ID after `rollback` to choose another version. `npx wrangler deployments list --name zahynailo` lists them, and each is labelled with the commit it was built from. The domains and the redirect are not part of a version and stay as they are. A failed run doesn't need it. A step that fails before `cf deploy` deploys nothing, and a failed `cf deploy` makes nothing live. When a new version fails the live check that follows (its version on all traffic, the realm's page, the blog and the release's manifest as Brotli), the workflow rolls it back to the previous version itself, and the run fails.
 
 ## Check what is live
 
@@ -94,6 +123,6 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 
 ## One repository
 
-The realm, the site and the Voxelmorphism kit stay in one repository with one deploy (#534).
+The realm, the site and the Voxelmorphism kit stay in one repository with two Worker targets (#578).
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"deploy/package.json":"28bdf2d986d84d8fa55a27c5df8d9d23","deploy/assemble.mjs":"0338276fb038a47c9b504192a26606f9","deploy/worker.mjs":"4ae8c3551c6dbf8ee63b017d57d87f9a"} -->
+<!-- docs-verified cc73cebc22120466c81784ffcdf0523695062e3c {"deploy/package.json":"28bdf2d986d84d8fa55a27c5df8d9d23","deploy/assemble.mjs":"005779eab81faed194d4d6d0c88c78d5","deploy/worker.mjs":"4ae8c3551c6dbf8ee63b017d57d87f9a"} -->

@@ -1,0 +1,13 @@
+{
+  "ref": "voxelwright_blog",
+  "description": "Send world blog links to zahynailo.dev",
+  "expression": "(http.host in {\"voxelwright.world\" \"www.voxelwright.world\"} and (http.request.uri.path eq \"/blog\" or starts_with(http.request.uri.path, \"/blog/\")))",
+  "action": "redirect",
+  "action_parameters": {
+    "from_value": {
+      "status_code": 301,
+      "target_url": { "expression": "concat(\"https://zahynailo.dev\", http.request.uri.path)" },
+      "preserve_query_string": true
+    }
+  }
+}

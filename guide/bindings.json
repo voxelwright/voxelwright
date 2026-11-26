@@ -131,7 +131,7 @@
     "site/package.json": [
       "dependencies.voxelmorphism"
     ],
-    "deploy/assemble.mjs": "lines:^const realm =",
+    "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
     "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
     "master/src/lib.rs": "lines:^\\.route\\(",
     "host/package.json": [
@@ -158,7 +158,7 @@
     "deploy/package.json": [
       "scripts"
     ],
-    "deploy/assemble.mjs": "lines:^const realm =",
+    "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
     "deploy/worker.mjs": "lines:pathname\\."
   },
   "engine/README.md": {
@@ -225,7 +225,7 @@
     "site/package.json": [
       "dependencies.voxelmorphism"
     ],
-    "deploy/assemble.mjs": "lines:^const realm =",
+    "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
     "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
     "master/src/lib.rs": "lines:^\\.route\\(",
     "host/package.json": [

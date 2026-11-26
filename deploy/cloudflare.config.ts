@@ -1,17 +1,16 @@
-// zahynailo.dev (#450): one Worker with static assets, run by the `cf` CLI. The SF realm is the landing at "/", the
-// site (site/) is under "/blog/". `node assemble.mjs` writes the assets folder (dist/, named in wrangler.config.ts).
+// Both Workers serve the same realm. World mode selects the realm-only origin and asset folder.
 // Docs: https://developers.cloudflare.com/cf/projects/cloudflare-config/index.md
 import { bindings, defineConfig } from "cf/config";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   worker: {
-    name: "zahynailo",
+    name: mode === "world" ? "voxelwright" : "zahynailo",
     compatibilityDate: "2026-11-13",
     observability: { enabled: true },
-    workersDev: true,
-    // www answers too, and a redirect rule on the zone sends it to the apex (deploy/README.md).
-    domains: ["zahynailo.dev", "www.zahynailo.dev"],
-    entrypoint: "./worker.mjs",
+    workersDev: mode !== "world",
+    // Each target binds apex and www. zahynailo.dev also has a zone redirect for www.
+    domains: mode === "world" ? ["voxelwright.world", "www.voxelwright.world"] : ["zahynailo.dev", "www.zahynailo.dev"],
+    entrypoint: mode === "world" ? "./world-worker.mjs" : "./worker.mjs",
     env: { ASSETS: bindings.assets() },
     assets: {
       htmlHandling: "auto-trailing-slash",
@@ -22,4 +21,4 @@ export default defineConfig({
       runWorkerFirst: ["/releases/*", "/bay/*", "/weather"],
     },
   },
-});
+}));
