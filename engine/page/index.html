@@ -66,6 +66,10 @@
   html.riding #aim { display: none; }
   html:not([data-hud]) [data-panel="living"] button { min-width: 84px; min-height: 44px; padding: 12px 14px; border: 0; border-radius: 12px; background: rgba(12, 16, 22, 0.72); color: #e8ecf1; font: 600 14px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   html:not([data-hud]) [data-panel="living"] button[aria-pressed="true"] { background: #e8ecf1; color: #10141a; }
+  /* First-person cockpit glass overlay (cockpit.ts): windshield rain, wipers, and night dash glow. */
+  [data-panel="cockpit"] { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  [data-panel="cockpit"][hidden] { display: none; }
+  [data-panel="cockpit"] canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; pointer-events: none; }
   /* Driving cluster (living.ts): speed, gear, 12-segment RPM bar, and DRIFT badge. Bottom-right on desk, compact top-center by touch. */
   [data-panel="drive-hud"] { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; gap: 5px; padding: 9px 13px 10px; border-radius: 12px; background: rgba(12, 16, 22, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: #f2f5f9; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28); }
   html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="drive-hud"] { display: flex; }
