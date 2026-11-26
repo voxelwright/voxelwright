@@ -84,6 +84,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `stunts.ts` | Driving stunt and combo tracker (`engine.stunts`): drifts, hill jumps, 180/360 spins, traffic near-misses (`voxelwright:nearmiss`), speed runs, x1–x5 combos, banking chime, and `[data-panel="stunts"]`. |
 | `minimap.ts`, `map-gpu.ts` | Speed-reactive 3D WebGPU minimap, fullscreen 2D/3D map, and GPS navigation. |
 | `summon.ts` | Instant street-level sports coupe delivery (`G` key on foot). |
+| `car-sculpt.ts` | The GT coupe sculpted from continuous shapes at any size: the default car's look (`fineCar`), the coupe `G` brings and the SF library's coupe. Also `coarser`, which makes a look coarser without opening its shell, and the leak sealer for gaps between cells that meet only at an edge. |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
 

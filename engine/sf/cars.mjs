@@ -20,7 +20,9 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { read } from '../make/cells.mjs'
+import { coarser } from '../page/car-sculpt.ts'
 import { boxTruck, cableCar, cityBus, HANDLING, sportsCoupe, streetcar, trolleybus, van } from './fleet.mjs'
+import { cleanShell } from './sculpt-cars.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -43,29 +45,6 @@ function runsOf(cells) {
   }
   if (kinds.length > 256) throw new Error(`${kinds.length} kinds: a palette holds 255`)
   return { palette: kinds, runs: Buffer.from(bytes).toString('base64') }
-}
-
-/** A look made coarser by `by` along each side: a coarse cell is filled where a third of its fine cells are, with the kind most of them are. */
-function coarser(kinds, size, by) {
-  const [w, h, d] = size, cs = size.map((v) => Math.ceil(v / by)), out = new Uint16Array(cs[0] * cs[1] * cs[2]), count = new Map()
-  for (let y = 0; y < cs[1]; y++) for (let z = 0; z < cs[2]; z++) for (let x = 0; x < cs[0]; x++) {
-    count.clear()
-    let filled = 0
-    for (let dy = 0; dy < by; dy++) for (let dz = 0; dz < by; dz++) for (let dx = 0; dx < by; dx++) {
-      const X = x * by + dx, Y = y * by + dy, Z = z * by + dz
-      if (X >= w || Y >= h || Z >= d) continue
-      const k = kinds[X + w * (Z + d * Y)]
-      if (!k) continue
-      filled++
-      // Glass counts for less: a coarse window is mostly what frames it.
-      count.set(k, (count.get(k) ?? 0) + ((k & 15) === 11 ? 0.6 : 1))
-    }
-    if (filled * 3 < by * by * by) continue
-    let best = 0, most = -1
-    for (const [k, n] of count) if (n > most) { most = n; best = k }
-    out[x + cs[0] * (z + cs[2] * y)] = best
-  }
-  return { kinds: out, size: cs }
 }
 
 // ── Paint ──
@@ -135,11 +114,17 @@ function kept(id, file, name, kind, colours) {
   if (!existsSync(file)) { console.error(`  ${id}: ${file} is not on this machine: left out`); return }
   const record = JSON.parse(readFileSync(file, 'utf8')), t = read(record.made, { joined: true })
   if (!t.living) throw new Error(`${file} is not a living thing`)
+  // The outside look (the first part is the whole of the body, the others its inside), cleaned of what the bench left
+  // in it (sf/sculpt-cars.mjs) before anything is made from it.
+  const outside = t.living.look?.[0], paint = paintOf(outside?.kinds ?? t.cells)
+  if (outside) {
+    const c = cleanShell(outside.kinds, outside.size, paint)
+    console.log(`  ${id}: cleaned its outside look: ${c.specks} specks taken off, ${c.holes} holes and ${c.leaks} leaks between edges sealed, ${c.pimples} pimples smoothed`)
+    outside.kinds = c.kinds
+  }
   const body = runsOf(t.cells), looks = (t.living.look ?? []).map((l) => ({ size: l.size, per: l.per, low: l.low, ...runsOf(l.kinds) }))
-  // The outside look, coarser: the first part is the whole of the body (the others are its inside).
-  const outside = t.living.look?.[0]
+  // The outside look, coarser, for drawing it further off.
   if (outside) for (const by of [2, 4]) { const c = coarser(outside.kinds, outside.size, by); looks.push({ size: c.size, per: outside.per / by, low: outside.low, ...runsOf(c.kinds) }) }
-  const paint = paintOf(outside?.kinds ?? t.cells)
   body.roles = rolesOf(body.palette, paint, darkRubber)
   for (const l of looks) l.roles = rolesOf(l.palette, paint, darkRubber)
   const variants = colours.map((c) => ({ name: c, body: repaint(body.palette, paint, c), looks: looks.map((l) => repaint(l.palette, paint, c)) }))
@@ -153,7 +138,10 @@ kept('hatch', join(root, 'make/kept/0782ba87f3267813204077d0.json'), 'blue saloo
 // Each look as written, then coarser by halves down to a cell of 10 cm, which is its body. The coupe, van and truck are
 // driven like any kept car (a motor, seats); the rest are driven by the street.
 for (const [id, make, colours] of [['coupe', sportsCoupe, ['white', 'black', 'silver', 'blue', 'green']], ['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
-  const v = make(), looks = [{ size: v.size, per: v.per, low: [0, 0, 0], ...runsOf(v.cells) }]
+  const v = make(), clean = cleanShell(v.cells, v.size, (k) => v.paint.includes(k))
+  if (clean.specks + clean.holes + clean.leaks + clean.pimples) console.log(`  ${id}: cleaned its look: ${clean.specks} specks, ${clean.holes} holes, ${clean.leaks} leaks, ${clean.pimples} pimples`)
+  v.cells = clean.kinds
+  const looks = [{ size: v.size, per: v.per, low: [0, 0, 0], ...runsOf(v.cells) }]
   for (let by = 2; v.per / by >= 1; by *= 2) { const c = coarser(v.cells, v.size, by); looks.push({ size: c.size, per: v.per / by, low: [0, 0, 0], ...runsOf(c.kinds) }) }
   const b = coarser(v.cells, v.size, v.per), body = runsOf(b.kinds), paint = (k) => v.paint.includes(k), tyre = (k) => v.tyre.includes(k)
   body.roles = rolesOf(body.palette, paint, tyre)
