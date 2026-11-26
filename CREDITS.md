@@ -87,6 +87,22 @@ Frank Schulenburg photographed *View of San Francisco from Ina Coolbrith Park-01
 
 Dependencies are fetched by their respective package managers. Their lockfiles identify versions and do not bundle the dependency licence texts. Notable npm terms include MPL-2.0 (lightningcss, node-datachannel and their platform packages), LGPL-3.0-or-later (@img/sharp-libvips-* and combined licences on @img/sharp-win32-* and @img/sharp-wasm32), and Anthropic’s vendor agreements (@anthropic-ai/claude-agent-sdk and its eight platform packages). node-forge offers BSD-3-Clause or GPL-2.0. The Rust crate r-efi offers MIT, Apache-2.0 or LGPL-2.1-or-later. The Python tool dependencies include certifi (MPL-2.0) and soxr (LGPL-2.1-or-later).
 
+## The host archives
+
+`node scripts/packages.mjs` builds archives of the master and of a dedicated server for a host to run (guide/hosting.md). They carry other people's work. Each archive lists it in its `THIRD-PARTY.md` and ships the licence texts beside it: every crate's own files under `licenses/` in the master's, and in the server's `node/LICENSE`, each npm package's own file in its folder and the native libraries' texts under `licenses/`.
+
+| Shipped | Where | Licence | Source |
+| --- | --- | --- | --- |
+| 81 Rust crates, Rust's standard library, and musl libc in the Linux build | `village-master` | MIT, Apache-2.0 or both. memchr is Unlicense OR MIT, matchit MIT AND BSD-3-Clause, unicode-ident adds Unicode-3.0, zerocopy is BSD-2-Clause OR Apache-2.0 OR MIT, and musl is MIT | `master/Cargo.lock` |
+| Node.js 24.22.3, the nodejs.org build | `node/bin/node` | MIT, with the bundled parts' licences in its LICENSE file | [nodejs.org](https://nodejs.org/dist/v24.22.3/) |
+| node-datachannel 0.33.6 and its prebuilt library for the platform | `engine/node_modules` | MPL-2.0 | [v0.33.6](https://github.com/murat-dogan/node-datachannel/tree/v0.33.6) |
+| Inside that library: libdatachannel 0.24.6 and libjuice | the same | MPL-2.0 | [libdatachannel v0.24.6](https://github.com/paullouisageneau/libdatachannel/tree/v0.24.6), with its submodules pinned there |
+| usrsctp and libsrtp 2.8.0 | the same | BSD-3-Clause | as above |
+| plog | the same | MIT | as above |
+| OpenSSL, linked in statically: 3.6.3 in the macOS build, 1.1.1w in the Linux build | the same | 3.6.3 Apache-2.0. 1.1.1w OpenSSL License and SSLeay License | [openssl/openssl](https://github.com/openssl/openssl) |
+| detect-libc 2.1.2 | `engine/node_modules` | Apache-2.0 | npm |
+| quickjs-emscripten-core, @jitl/quickjs-wasmfile-release-sync and @jitl/quickjs-ffi-types 0.32.0 | `engine/node_modules` | MIT | npm |
+
 ## Sound judge reference library
 
 The private listener calibration used MusicEval by Liu et al. (ICASSP 2025). The dataset card specifies “License: cc-by-nc-4.0”. The public judge uses acoustic ranges and hard faults. Listener weights, correlation results and the fitted measure selection live in the optional private overlay. [MusicEval dataset card](https://huggingface.co/datasets/BAAI/MusicEval)

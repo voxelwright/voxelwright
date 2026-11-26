@@ -11,6 +11,7 @@
         "group": "Start here",
         "pages": [
           "quickstart",
+          "hosting",
           "project",
           "building"
         ]

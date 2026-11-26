@@ -27,7 +27,9 @@ nothing here exposes it. Each host holds a socket, so the open-file limit must b
 Packages: `.github/workflows/master.yml` builds release binaries for Linux x64 and arm64
 (static musl), macOS arm64 and x64, and Windows x64 on every push that touches `master/`,
 and keeps them as workflow artifacts for 30 days. Nothing is released or published.
-`docker build -t village-master master` makes an image holding only the static binary.
+`docker build -t village-master master` makes an image holding only the static binary. On a Mac without Actions,
+`node scripts/packages.mjs` (from the repo's root) builds it for macOS arm64 and, with rust-lld, static Linux x64, as
+archives with the crates' licences beside it (`guide/hosting.md`).
 
 ## The protocol (v1)
 

@@ -112,8 +112,9 @@ const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFF
 // ── The ground (#526) ────────────────────────────────────────────────────
 /** The release every world here stands on, read once (ground.mjs), or null: the generated town. */
 const ground = arg('release', '') ? await groundOf(arg('release', ''), { cache: arg('release-cache', undefined), arrive: arrival(arg('arrive', '')) }).catch((e) => { console.error(e.message); process.exit(1) }) : null
-if (ground && !ground.squares) {
+if (ground && !ground.squares && !ground.remote) {
   // A staged release has no road's marks beside it: made from the city's street graphs, as `/bay/marks.bin` always was.
+  // An address's release never reads this machine's bake: without marks beside it, it keeps the bake's paint.
   const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
   try { const m = await import('./sf/marks.mjs'), made = m.marksIn(graphs); ground.marks = m.marksBytes(made); ground.squares = m.squaresBytes(made) } catch (e) { console.error(`no road marks from ${graphs}: ${e.message}: the world and its pages keep the bake's paint`) }
 }

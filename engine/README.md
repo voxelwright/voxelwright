@@ -78,7 +78,12 @@ node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
 - `server.mjs` runs the world's server (`serve.mjs`, bound to 127.0.0.1, `--port`, 5747 unless said) and the door
   (`door.mjs`) in one process: stop it and both stop. Without `--master` it says nobody can find it and runs for this
   machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one until it is closed, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
-  `--reports file` go to `serve.mjs` as they are. A flag it does not know stops it.
+  `--reports file` go to `serve.mjs` as they are. Unsaid, the release's objects are kept beside the world's file, named
+  after it as its realms are (a world `mine.log` keeps them in a folder `mine.releases`), and reports in
+  `<world>.reports.jsonl`, so everything the server writes is beside its world. A flag it does not know stops it.
+- Without a checkout: `node scripts/packages.mjs` (from the repo's root) writes this server, with a Node of its own,
+  and the master as archives for macOS on Apple silicon and Linux x86-64 under `dist-packages/`; what a host reads is
+  [guide/hosting.md](../guide/hosting.md), put in each archive as its README.
 - Where a visitor who joins stands (`page/arrival.ts`): on their feet, on the ground or a roof, round the column
   `--arrive` names, facing its yaw. Its height is never taken: a page stands them on whatever is highest at that
   column. The page checks the place first, as a stranger's data: finite numbers, a tile its own release lists,

@@ -15,6 +15,9 @@
 // to things a minute, things standing and their cells all told, and how far from where their page says they are (cells
 // of 10 cm); admins are held to none of it. Passwords are read from their files, never from the command line.
 // --most, and the last five, go to serve.mjs as they are (a value that starts with "-" is given with "=").
+// What the server keeps lies beside the world's file unless a flag says otherwise (the release's objects in
+// <world>.releases/, named as serve.mjs names <world>.realms/, and reports in <world>.log.reports.jsonl), so a host
+// names one folder and nothing is written outside it (#526: the package a host runs).
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { door } from './door.mjs'
@@ -27,6 +30,8 @@ const { values: a } = parseArgs({ options: {
   'things-minute': string, 'changes-minute': string, things: string, cells: string, reach: string, 'waiting-per-address': string,
 } })
 if (!a.world) { console.error('a server keeps a world: --world <file>'); process.exit(1) }
+a['release-cache'] ??= `${a.world.replace(/\.log$/, '')}.releases`
+a.reports ??= `${a.world}.reports.jsonl`
 const secret = (name) => { const f = a[name]; if (!f) return null; const v = readFileSync(f, 'utf8').replace(/\r?\n$/, ''); if (!v) { console.error(`--${name} names an empty file`); process.exit(1) } return v }
 const password = secret('password-file'), admin = secret('admin-password-file')
 const ports = a['ice-ports']?.split('-').map(Number)

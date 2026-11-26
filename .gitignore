@@ -10,3 +10,4 @@ node_modules/
 .check/
 __pycache__/
 /.voxelwright/
+/dist-packages/

@@ -193,5 +193,18 @@
   },
   "guide/building.md": {
     ".agents/dispatch-log.jsonl": "Local output written when an agent is dispatched."
+  },
+  "guide/hosting.md": {
+    "voxelwright-master-": "A path inside an unpacked archive from scripts/packages.mjs, not in the checkout.",
+    "./village-master": "A path inside an unpacked archive from scripts/packages.mjs, not in the checkout.",
+    "THIRD-PARTY.md": "A path inside an unpacked archive from scripts/packages.mjs, not in the checkout.",
+    "licenses/": "A path inside an unpacked archive from scripts/packages.mjs, not in the checkout.",
+    "node/": "A path inside an unpacked archive from scripts/packages.mjs, not in the checkout.",
+    "page/core.wasm": "Build output in engine/ (npm run core), shipped in the server archive.",
+    "world.log.door.json": "A file the server writes beside the host's world file.",
+    "world.log.people.json": "A file the server writes beside the host's world file.",
+    "world.realms/": "A file the server writes beside the host's world file.",
+    "world.fine/": "A file the server writes beside the host's world file.",
+    "world.releases/": "A file the server writes beside the host's world file."
   }
 }

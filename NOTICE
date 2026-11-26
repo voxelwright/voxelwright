@@ -26,6 +26,7 @@ Ina Coolbrith Park geometry and render: adapted from Frank Schulenburg’s photo
 Salesforce Tower measurements: Overture Maps and Pi.1415926535, San Francisco skyline from Potrero Hill, February 2020 (CC BY-SA 3.0).
 Weather observations: US National Weather Service.
 Bay layers: see DATA-LICENSES.md for source-specific attribution.
+Host archives (scripts/packages.mjs): Node.js (MIT); node-datachannel, libdatachannel and libjuice (MPL-2.0); usrsctp and libsrtp (BSD-3-Clause); plog (MIT); OpenSSL (Apache-2.0, or the OpenSSL and SSLeay licences for 1.1.1); detect-libc (Apache-2.0); quickjs-emscripten (MIT); Rust crates and musl (MIT or Apache-2.0). Each archive's THIRD-PARTY.md lists them with their licence texts.
 See CREDITS.md for sources, changes and licence links.
 
 SunCalc formulas

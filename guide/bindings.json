@@ -423,5 +423,11 @@
       "scripts.test"
     ],
     "scripts/docs.mjs": "lines:^const usage =|^const schema = "
+  },
+  "guide/hosting.md": {
+    "engine/server.mjs": "lines:^a\\['release-cache'\\]|^a\\.reports|^const \\{ values: a \\}|^  world: string|^  master: string|console\\.log\\(`(a dedicated|lobby)",
+    "scripts/packages.mjs": "lines:^const NODE =|^  '(darwin-arm64|linux-x64)':|^const NATIVE =|^  'page/core.wasm'|^    '#!/bin/sh'",
+    "engine/ground.mjs": "lines:^export async function ground|^const FETCH_MOST",
+    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:"
   }
 }

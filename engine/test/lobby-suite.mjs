@@ -19,8 +19,8 @@ const BASE = Number(arg('ports', '6500')), dist = arg('dist', 'dist-sf-lobby')
 const ALL = [
   ['arrival', 'test/arrival.mjs', []],
   ['door-silent', 'test/door-silent.mjs', ['--ports', String(BASE)]],
-  ['door', 'test/door.mjs', ['--ports', String(BASE + 10)]],
-  ['door-make', 'test/door-make.mjs', ['--ports', String(BASE + 20)]],
+  ['door', 'test/door.mjs', ['--ports', String(BASE + 10), '--release', dist]],
+  ['door-make', 'test/door-make.mjs', ['--ports', String(BASE + 20), '--release', dist]],
   ['sf-lobbies', 'test/sf-lobbies.mjs', ['--ports', String(BASE + 30), '--release', dist]],
   ['sf-lobbies-phone', 'test/sf-lobbies.mjs', ['--ports', String(BASE + 40), '--release', dist, '--phone']],
 ]
@@ -30,7 +30,8 @@ if (unknown.length) { console.error(`no such check: ${unknown.join(', ')} (there
 const run = ALL.filter(([name]) => !only.length || only.includes(name))
 if (has('list')) { console.log(run.map(([n]) => n).join(', ')); process.exit(0) }
 
-if (run.some(([name]) => name.startsWith('sf-')) && !has('no-build')) {
+// (The door's checks read the release from the built realm too: in a checkout with no dist-sf they did not start.)
+if (run.some(([, , args]) => args.includes('--release')) && !has('no-build')) {
   console.log(`· the realm, built into ${dist}`)
   const built = spawnSync(process.execPath, ['sf/build.mjs', '--out', dist], { cwd: here, encoding: 'utf8' })
   if (built.status !== 0) { console.error(`${built.stdout ?? ''}${built.stderr ?? ''}`.slice(-2000)); console.error('the realm did not build'); process.exit(1) }
