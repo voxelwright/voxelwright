@@ -78,6 +78,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
 | `gamepad.ts` | Standard W3C Gamepad API input (analog triggers, steering curves, right-stick orbit, dual-motor haptic rumble) and touch steering curve. Zero polling overhead until `gamepadconnected`. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
+| `stunts.ts` | Driving stunt and combo tracker (`engine.stunts`): drifts, hill jumps, 180/360 spins, traffic near-misses (`voxelwright:nearmiss`), speed runs, x1–x5 combos, banking chime, and `[data-panel="stunts"]`. |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](plugin-types.md)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](cells.md)). |
 

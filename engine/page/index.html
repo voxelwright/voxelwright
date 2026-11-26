@@ -92,6 +92,49 @@
   @media (pointer: coarse) and (orientation: portrait) {
     [data-panel="drive-hud"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 98px); transform: none; }
   }
+  /* Driving stunt & combo HUD (stunts.ts): completely hidden until scoring, banking, or busting. */
+  [data-panel="stunts"] { position: absolute; left: 50%; top: max(22px, calc(env(safe-area-inset-top, 0px) + 14px)); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 4px; min-width: 196px; max-width: min(380px, calc(100vw - 32px)); padding: 8px 16px 10px; border-radius: 13px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(12, 16, 22, 0.76); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f4f7fb; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.34); overflow: hidden; opacity: 1; transition: opacity 0.22s ease-out, border-color 0.2s ease-out; }
+  /* On non-plain workshop pages where #hud status line is shown top-left, sit cleanly below it. */
+  @media (pointer: fine) { html:not(.plain) [data-panel="stunts"] { top: 48px; } }
+  html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="stunts"]:is([data-state="active"], [data-state="banked"], [data-state="busted"]) { display: flex; }
+  html:has(#ask.open) [data-panel="stunts"] { display: none; }
+  [data-panel="stunts"].fading { opacity: 0; }
+  [data-panel="stunts"][data-state="active"] { border-color: rgba(255, 174, 52, 0.32); }
+  [data-panel="stunts"][data-state="banked"] { border-color: rgba(98, 235, 159, 0.48); }
+  [data-panel="stunts"][data-state="busted"] { border-color: rgba(255, 69, 58, 0.48); }
+  [data-panel="stunts"] .st-row { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
+  [data-panel="stunts"] .st-label { font: 800 12px/1.1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(244, 247, 251, 0.86); white-space: nowrap; }
+  [data-panel="stunts"][data-state="banked"] .st-label { color: #62eb9f; }
+  [data-panel="stunts"][data-state="busted"] .st-label { color: #ff6961; }
+  [data-panel="stunts"] .st-score { font: 800 24px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; color: #fff; white-space: nowrap; }
+  [data-panel="stunts"][data-state="banked"] .st-score { color: #62eb9f; }
+  [data-panel="stunts"][data-state="busted"] .st-score { color: rgba(244, 247, 251, 0.42); text-decoration: line-through; }
+  [data-panel="stunts"] .st-mult { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 22px; padding: 0 7px; border-radius: 6px; background: rgba(232, 236, 241, 0.16); color: #f4f7fb; font: 800 12px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.02em; }
+  [data-panel="stunts"] .st-mult[data-tier="2"] { background: #ffc845; color: #10141a; }
+  [data-panel="stunts"] .st-mult[data-tier="3"] { background: #ff9f2e; color: #10141a; }
+  [data-panel="stunts"] .st-mult[data-tier="4"] { background: #ff6b2b; color: #10141a; }
+  [data-panel="stunts"] .st-mult[data-tier="5"] { background: #ff453a; color: #fff; }
+  [data-panel="stunts"] .st-mult[hidden] { display: none; }
+  [data-panel="stunts"] .st-chain { font: 600 11px/1.2 -apple-system, system-ui, sans-serif; color: rgba(232, 236, 241, 0.68); letter-spacing: 0.02em; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  [data-panel="stunts"] .st-chain[hidden] { display: none; }
+  [data-panel="stunts"] .st-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.1); }
+  [data-panel="stunts"] .st-bar > i { display: block; width: 100%; height: 100%; transform-origin: left center; background: linear-gradient(90deg, #ffae34, #ff7a1a); will-change: transform; }
+  [data-panel="stunts"]:not([data-state="active"]) .st-bar { display: none; }
+  @keyframes st-pop { 0% { transform: translateX(-50%) scale(1.06); } 100% { transform: translateX(-50%) scale(1); } }
+  [data-panel="stunts"].pop { animation: st-pop 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+  @media (pointer: coarse) {
+    [data-panel="stunts"] { top: calc(env(safe-area-inset-top, 0px) + 74px); min-width: 164px; padding: 6px 12px 8px; border-radius: 11px; gap: 3px; }
+    [data-panel="stunts"] .st-label { font-size: 11px; }
+    [data-panel="stunts"] .st-score { font-size: 19px; }
+    [data-panel="stunts"] .st-mult { min-width: 24px; height: 19px; font-size: 11px; }
+    [data-panel="stunts"] .st-chain { font-size: 10px; }
+  }
+  @media (pointer: coarse) and (orientation: portrait) {
+    [data-panel="stunts"] { top: calc(env(safe-area-inset-top, 0px) + 212px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-panel="stunts"], [data-panel="stunts"].pop { animation: none !important; transition: opacity 0.12s linear !important; }
+  }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }
   #card p.note { margin: -2px 0 6px; color: #9aa5b1; font-size: 12px; }

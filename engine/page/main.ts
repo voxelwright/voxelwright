@@ -19,6 +19,7 @@ import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
 import { wheel } from './wheel.ts'
 import { car, fineCar, living, type Making } from './living.ts'
+import { stunts } from './stunts.ts'
 import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
@@ -696,6 +697,7 @@ async function main() {
     controls.poll?.(dt)
     shot?.before?.()
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
+    stuntHud.frame(dt)
     shot?.after(dt)
     steer(rate ? Math.max(1000 / rate, screenMs) : fastestMs, gap, resting)
     const v = view(), to = fit()
@@ -976,6 +978,7 @@ async function main() {
       horn: (on) => ears?.horn(on),
     },
   })
+  const stuntHud = stunts({ alive, hud: over, sound: () => ears?.voice ?? null })
   /** Where under each living thing the ground is darkened (under.ts): its footprint, turned as it is, and how far it is off the ground. */
   const shades = () => alive.things.flatMap((t) => {
     const w = alive.where(t)
@@ -1988,7 +1991,7 @@ async function main() {
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, fineCar, me, tempo, shots: streaks, map: mapSys })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
