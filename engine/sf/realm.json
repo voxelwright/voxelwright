@@ -1,7 +1,7 @@
 {
   "id": "sf",
   "name": "San Francisco",
-  "about": "The city at true size, from open data. Single player: each visitor has a world of their own, and nothing made from words.",
+  "about": "The city at true size, from open data. Make things from words with your own AI, or explore alone.",
   "world": {
     "bay": "1"
   },
@@ -30,7 +30,7 @@
   },
   "rules": {
     "models": false,
-    "making": "preview",
+    "making": true,
     "lobbies": "preview"
   },
   "kept": [

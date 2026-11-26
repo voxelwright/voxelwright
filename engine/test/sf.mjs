@@ -303,11 +303,11 @@ try {
   await page.screenshot({ path: join(shots, 'reset.png') })
   f.reset = reset
   check(reset.edits === 0 && reset.solidWithin3m > (broken?.solid ?? Infinity) && reset.things === 1, `reset: ${reset.edits} edits left beyond the ${reset.boards} that lay the billboards, ${reset.solidWithin3m} solid cells within 3 m of the blast again (${broken?.solid} after it), ${reset.things} kept car set down again, in ${reset.ms} ms`)
-  // No model: however a helper was offered, it is not known and nothing is sent to it.
-  const models = await page.evaluate(async () => { const e = globalThis.engine; const done = await e.ask({ wish: 'a park bench' }).catch((x) => String(x)); return { rules: e.rules, known: e.asker.known, done: done?.state ?? done, bar: getComputedStyle(document.querySelector('#ask')).display } })
+  // No helper: however a helper was offered, rules.models is false, an untyped non-kept ask is refused, and nothing is sent off-site.
+  const models = await page.evaluate(async () => { const e = globalThis.engine; const done = await e.ask({ wish: 'a purple submarine' }).catch((x) => String(x)); return { rules: e.rules, done: done?.state ?? done, bar: getComputedStyle(document.querySelector('#ask')).display } })
   await page.waitForTimeout(1000)
   f.models = { ...models, requestsAway: away.length }
-  check(!models.rules.models && !models.known && away.length === 0 && models.bar === 'none', `no models: rules ${JSON.stringify(models.rules)}, helper known ${models.known}, an ask ${models.done}, ask bar ${models.bar}, ${away.length} requests off the site`)
+  check(!models.rules.models && models.rules.making === true && models.done === 'refused' && away.length === 0 && models.bar !== 'none', `no helper: rules ${JSON.stringify(models.rules)}, untyped ask ${models.done}, ask bar ${models.bar}, ${away.length} requests off the site`)
 
   // ── What the page carries on through ──
   phase('faults', 5)

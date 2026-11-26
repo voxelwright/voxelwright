@@ -18,7 +18,7 @@ step('Data fetch and verification', 'deploy/data.mjs', ['fetch'], inputs)
 step('Realm build', 'engine/sf/build.mjs', [], inputs)
 try {
   const site = await plain(resolve('engine/dist-sf'), '127.0.0.1', 5760)
-  console.log(`Open ${site.url}/sf/index.html?making=1`)
+  console.log(`Open ${site.url}/sf/index.html`)
 } catch (error) {
   console.error(`Could not serve the realm on port 5760 (${error.code ?? error.message}).`)
   process.exitCode = 1

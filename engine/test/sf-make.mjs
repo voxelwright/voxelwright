@@ -5,12 +5,11 @@
 //
 // It fails unless:
 //   - on the roof where the way in leaves a visitor, on foot, a kept thing asked for by the keys alone is made there,
-//     on what they stand on;
-//   - in the realm Enter, pressed as a person presses it, opens the bar to make on, and the slash the line to the city;
-//   - without `?making=1` (the realm's rule is "preview") there is no bar, nothing of the maker or its shelf is asked
-//     for, by the bar or by anything said on it, and words sent to be made make nothing;
-//   - with it, in the realm: the bar is there; typing the words for a kept car shows its ghost, Enter makes it, and
-//     there is one living thing more than before, which drives a metre and more;
+//     on what they stand on (with no `?making=1` query flag);
+//   - in the first view (before exploring) there is no bar, and nothing of the maker or its shelf is asked for;
+//   - once in the realm: the bar is there, nothing of the maker is asked for until it is used, Enter opens the bar to
+//     make on and the slash opens the line to the city; typing the words for a kept car shows its ghost, Enter makes
+//     it, and there is one living thing more than before, which drives a metre and more;
 //   - words for a kept thing of cells make it: its record is in `engine.things`, and its cells are in the page's own
 //     core at places sampled from that record;
 //   - `engine.unmake()` takes the last one out (record and cells), and "undo" on the bar takes out the car;
@@ -86,7 +85,7 @@ const type = async (page, words) => {
 // refused, "there is no ground near there to stand it on": only the land's own height counted as a place, and the
 // visitor's first wish is made from a roof, looking at a sign and the sky.)
 {
-  const { context, page } = await open('?making=1', { roof: true })
+  const { context, page } = await open('', { roof: true })
   const stood = await page.evaluate(() => { const e = globalThis.engine, f = e.me.feet?.at; return f ? { feet: f.map(Math.round), on: e.me.on } : null })
   await page.keyboard.press('Enter'); await page.waitForTimeout(600)
   await page.keyboard.type('a car', { delay: 40 }); await page.waitForTimeout(2500)
@@ -101,25 +100,23 @@ const type = async (page, words) => {
   await context.close()
 }
 
-// ── Without ?making=1 ──
+// ── In the first view (before exploring) ──
 {
-  const { context, page, from, before } = await open('')
-  const off = await page.evaluate(async () => {
-    const e = globalThis.engine, bar = getComputedStyle(document.querySelector('#ask')).display
-    const done = await e.ask({ wish: 'a car', typed: true }).catch((x) => ({ state: String(x) }))
-    return { bar, known: e.asker.known, done: done.state, unmake: typeof e.unmake, alive: e.alive.things.length, things: e.things.all.size }
-  })
-  await page.waitForTimeout(1500)
-  check(off.bar === 'none' && !off.known && off.unmake === 'undefined', `without ?making=1: no bar (${off.bar}), no helper known, no unmake`)
-  check(off.done === 'refused' && off.things === 0, `words sent to be made make nothing (${off.done}, ${off.things} things)`)
-  check(before === 0 && makerAsked(from).length === 0, `nothing of the maker or its shelf asked for (${makerAsked(from).join(', ') || 'none'})`)
+  const context = await browser.newContext({ viewport: { width: 1280, height: 720 } }), page = await context.newPage()
+  page.on('pageerror', (e) => errors.push(e.message))
+  const from = Date.now()
+  await page.goto(`${site.url}/sf/index.html`)
+  await page.waitForFunction(() => globalThis.engine?.explore && globalThis.engine.seen?.whole > 0, null, { timeout: 300_000 })
+  const firstView = await page.evaluate(() => ({ bar: getComputedStyle(document.querySelector('#ask')).display, engaged: !!globalThis.engine.first?.engaged }))
+  check(!firstView.engaged && firstView.bar === 'none', `in the first view: no bar (${firstView.bar}, engaged ${firstView.engaged})`)
+  check(makerAsked(from).length === 0, `in the first view: nothing of the maker or its shelf asked for (${makerAsked(from).join(', ') || 'none'})`)
   await context.close()
 }
 
-// ── With ?making=1 ──
+// ── In the realm (no ?making=1 needed) ──
 {
-  const { context, page, from, before } = await open('?making=1')
-  check(before === 0, `with ?making=1, nothing of the maker asked for before the park is shown and the visitor is in (${before})`)
+  const { context, page, from, before } = await open('')
+  check(before === 0, `nothing of the maker asked for before the park is shown and the visitor is in (${before})`)
   const bar = await page.evaluate(() => getComputedStyle(document.querySelector('#ask')).display)
   check(bar !== 'none' && makerAsked(from).length === 0, `in the realm the bar is there (${bar}), and nothing of the maker is asked for until it is used`)
   // As a person does it, on the keys: Enter opens the bar to make on, not the line to the city (eggs.ts), which keeps

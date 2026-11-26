@@ -14,6 +14,6 @@ Exploring needs no account or key. To make something new, open the realm setting
 
 The command downloads the pinned SF release bundle and verifies its contents. Each map layer retains its [data licence](../DATA-LICENSES.md). The default download comes from the public city release in [the project repository](https://github.com/voxelwright/voxelwright). To use a mirror, set `VOXELWRIGHT_DATA_URL` to an HTTPS release mirror with the pinned tag and data.tar under it. Local testing also accepts an HTTP loopback mirror. A maintainer can create the same mirror layout with `node deploy/data.mjs pack-local PIN DIRECTORY` after building a staged release.
 
-In a Dev Container, forward port 5760 and run the same command in its terminal. Open the forwarded port at `/sf/index.html?making=1`.
+In a Dev Container, forward port 5760 and run the same command in its terminal. Open the forwarded port at `/sf/index.html`.
 
-<!-- docs-verified 452a182c9cc8fc2ca4ffb8bba4e4c7c943646508 {"world":"2378ea1c03ac32ad3591a785e0f839d2","scripts/world.mjs":"57f1658d01ef15afab6b08906273937d","deploy/data.mjs":"15bd42d30cf7f5fd7a248656d73c6af1","engine/page/realm-ui.ts":"50f922f5cf756bae80e066aebab8c939",".devcontainer/devcontainer.json":"ebccba2df47ccded145c15adee4d311b"} -->
+<!-- docs-verified 03409093aefc4d710098470b694c6d44640b7a94 {"world":"2378ea1c03ac32ad3591a785e0f839d2","scripts/world.mjs":"6bb7423eb75caa8f17690348fcb1206d","deploy/data.mjs":"15bd42d30cf7f5fd7a248656d73c6af1","engine/page/realm-ui.ts":"50f922f5cf756bae80e066aebab8c939",".devcontainer/devcontainer.json":"ebccba2df47ccded145c15adee4d311b"} -->

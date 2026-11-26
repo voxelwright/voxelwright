@@ -86,8 +86,8 @@ const bannerSeen = (page, ms = 12_000) => page.evaluate(async (ms) => {
 }, ms)
 /** Until an egg is running (a picture or a video is fetched when it starts). */
 const started = (page, egg) => page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg, egg, { timeout: 30_000 }).catch(() => null)
-/** Says something on the line, as a visitor does: Enter, the words, Enter. */
-const sayTo = async (page, words) => { await page.keyboard.press('Enter'); await page.keyboard.type(words, { delay: 25 }); await page.keyboard.press('Enter') }
+/** Says something on the line, as a visitor does: slash (Enter is the Make bar when making is on), the words, Enter. */
+const sayTo = async (page, words) => { await page.keyboard.press('/'); await page.keyboard.type(words, { delay: 25 }); await page.keyboard.press('Enter') }
 
 /** The canvas as a grid of 64 x 36 cells, each its mean linear-ish rgb (0 to 255); saved as a picture too. */
 const grid = async (page, name) => {
@@ -676,7 +676,7 @@ try {
 
   // ── The Matrix, from the line: the banner shows what is typed; code rain on the windows, its music, a green night under cloud ──
   console.log('\nthe Matrix')
-  await page.keyboard.press('Enter')
+  await page.keyboard.press('/')
   await page.keyboard.type('wake up', { delay: 25 })
   s = await state(page)
   check(s.typing && s.signs.banner === '> wake up_', `what is typed shows on the banner as it is typed ("${s.signs.banner}")`)
@@ -914,7 +914,7 @@ try {
   await page.screenshot({ path: join(shots, 'meme-player.png') })
   await sayTo(page, 'stop')
   // The line's ideas: four when it opens, “Surprise me” first; letters typed narrow them; a click says one.
-  await page.keyboard.press('Enter')
+  await page.keyboard.press('/')
   const opened = await page.evaluate(() => [...document.querySelectorAll('.egg-ideas button')].map((b) => b.textContent))
   await page.keyboard.type('skr', { delay: 25 })
   const narrowed = await page.evaluate(() => [...document.querySelectorAll('.egg-ideas button')].map((b) => b.textContent))
