@@ -398,7 +398,14 @@ export function living(o: {
   }
   // A thing's fine look (#245): a piece for each part, kept each frame where the body is, the body's own cells not drawn.
   // Its glass is seen through (pieces.ts), from the seat as from the street.
-  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number }
+  /** glass: where its glass cells are, three numbers a cell (#37: where a crack starts). */
+  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number; glass: Int16Array }
+  /** Where a look's glass cells are (kind 11), three numbers a cell. */
+  const glassOf = (kinds: Uint16Array, [w, , d]: readonly number[]) => {
+    const at: number[] = []
+    for (let i = 0; i < kinds.length; i++) if ((kinds[i] & 15) === 11) at.push(i % w, Math.floor(i / (w * d)), Math.floor(i / w) % d)
+    return Int16Array.from(at)
+  }
   // Its dents (#37): one record a part, by the thing's body and the part's place in its look.
   const dents = new VehicleDeformation()
   const dentId = (thing: Thing, part: number) => thing.id * FINE_PARTS + part
@@ -418,7 +425,7 @@ export function living(o: {
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
-      return { piece, kinds, size: f.size, low: f.low, per: f.per }
+      return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: glassOf(kinds, f.size) }
     }))
   }
   const unwear = (thing: Thing) => {
@@ -452,8 +459,17 @@ export function living(o: {
       const out = local.map((v, a) => { const d = Math.max(-1, Math.min(1, (v / cell - w.size[a] / 2) / (w.size[a] / 2))); return d * d * d * (a === 1 ? 0.5 : 1) })
       if (Math.hypot(out[0], out[1], out[2]) < 1e-6) out[0] = 1
       const cabin = { min: lo.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number], max: hi.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number] }
+      const was = Math.max(0, ...(dents.get(dentId(thing, i))?.glassCrack ?? []))
       const state = dents.recordImpact(dentId(thing, i), { pos: at, rot: [rot[0], rot[1], rot[2], rot[3]], cell, born: { com: [0, 0, 0], size: w.size }, front: thing.motor.front as 0 | 1 | 2 | 3 }, s.at, turned(rot, out), s.speed, s.push, cabin)
-      if (state) w.piece.deform = state
+      if (!state) return
+      w.piece.deform = state
+      // A blow that cracked its glass more: the cracks start at the glass nearest it.
+      if (Math.max(...state.glassCrack) > was && w.glass.length) {
+        let best = Infinity, near = 0
+        const x = local[0] / cell, y = local[1] / cell, z = local[2] / cell
+        for (let g = 0; g < w.glass.length; g += 3) { const far = (w.glass[g] - x) ** 2 + (w.glass[g + 1] - y) ** 2 + (w.glass[g + 2] - z) ** 2; if (far < best) { best = far; near = g } }
+        w.piece.crackAt = [w.glass[near] + 0.5, w.glass[near + 1] + 0.5, w.glass[near + 2] + 0.5]
+      }
     })
   }
   const setLamps = (thing: Thing | null, lamps?: [number, number, number, number]) => {
@@ -720,7 +736,7 @@ export function living(o: {
     },
     damage: (thing) => dents.get(dentId(thing, 0)) ?? null,
     repair(thing) {
-      looks.get(thing)?.forEach((_, i) => dents.repairVehicle(dentId(thing, i)))
+      looks.get(thing)?.forEach((w, i) => { dents.repairVehicle(dentId(thing, i)); w.piece.crackAt = undefined })
     },
     frame(dt) {
       follow()

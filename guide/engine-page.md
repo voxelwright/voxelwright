@@ -99,7 +99,7 @@ A drivable thing that wears a fine look is dented where it is struck (#37). The 
 
 - A struck piece draws from a copy of its faces cut into rows one cell long. Every corner then lies on the cell lattice, so faces that meet still meet once bent. Merged rows bent only at their ends opened gaps beside their neighbours. A piece never struck draws its merged faces, and the shader returns before any dent work.
 - Paint and lamps keep the unbent position, so a bent panel keeps its own paint.
-- In a dent, paint wears to primer and bare steel and loses its clear coat. Glass near a dent breaks into a mosaic with a web of cracks, and still lets the view through.
+- In a dent, the outside paint is scraped to primer and bare steel and loses some of its clear coat. Inside the cabin, nothing is scraped. A blow that cracks a window marks the glass cell nearest it (`Piece.crackAt`). The glass breaks into a mosaic with a web of cracks spreading from that cell, wider for a harder blow, and the view still shows through.
 
 Crashes at 2.8 m/s or more throw sparks, dust, chips of the struck paint and, when a window cracked, glass. A damaged engine steams, then smokes and finally burns (`puffs.ts` `engine`). Where `prefers-reduced-motion` is set, the debris is left out and the smoke is lighter. `living.repair(thing)` makes a look as it was made. Dents go with the look when the thing breaks, is taken away, or the world is forgotten, so a new car never inherits them. `node engine/test/dents.mjs` crashes the fine car into a block and checks the dent, the driver's clear room, the picture of the struck corner against the same view repaired, and the repair.
 

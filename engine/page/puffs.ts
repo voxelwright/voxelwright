@@ -278,7 +278,8 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
       if (Math.random() < dt * 9) {
         const grey = rnd(0.1, 0.2)
-        puff(at, 1.8, rnd(1, 4), rnd(10, 20), { size: rnd(2, 3.4), grow: rnd(5, 8), life: rnd(1.8, 3.2), heat: 0, cool: 0, rise: 16, drag: 1.2, colour: [grey, grey, grey * 1.02], cover: 0.42 })
+        // (Quick to climb and thin: from the seat a thick slow plume sat over the road ahead.)
+        puff(at, 1.8, rnd(1, 4), rnd(16, 26), { size: rnd(1.6, 2.8), grow: rnd(5, 8), life: rnd(1.4, 2.4), heat: 0, cool: 0, rise: 24, drag: 1.2, colour: [grey, grey, grey * 1.02], cover: 0.32 })
       }
       // Burning: tongues of flame in the smoke, small (a blast's fire is bigger).
       if (level > 0.92 && Math.random() < dt * 10) puff(at, 1.2, rnd(1, 3), rnd(14, 28), { size: rnd(1.2, 2.4), grow: rnd(1, 2.5), life: rnd(0.3, 0.6), heat: 0.66, cool: rnd(1, 1.5), rise: 50, drag: 1.5, colour: [0.05, 0.045, 0.04], cover: 0.25 })

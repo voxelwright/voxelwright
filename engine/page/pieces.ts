@@ -36,7 +36,8 @@ struct U {
   c1: vec3f, lampHead: f32,
   c2: vec3f, lampAxis: f32,
   // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them.
-  smoothOn: f32, pad0: f32, pad1: f32, pad2: f32,
+  // crack: where its glass was struck (#37), in its own cells; far below it (-1e5) where it was not.
+  smoothOn: f32, crackX: f32, crackY: f32, crackZ: f32,
   // Its dents (#37): none for a piece that was never struck, and then nothing of them is worked out.
   deform: Deform,
 }
@@ -250,14 +251,15 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var rough = m.rough;
   var open = in.open;
   var coat = 1.0;
-  if (in.wear.x > 0.005 || in.wear.y > 0.005) {
-    // (Its scratches a few centimetres apart and the width of a pixel or two at the length of a car: finer, they
-    // sparkled.)
-    let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y, in.at * u.cell * 0.3, 1.0 - smoothstep(25.0, 70.0, length(in.seen)));
+  // Only its outside (the faces with smooth words): the seats inside a struck door are not scraped. Scrapes are bands a
+  // couple of centimetres wide, 17 cm apart, fading out by 9 m: finer, they were a sparkle of single pixels. Most of
+  // the clear coat stays, so a dent shows as its bent reflections more than as a dark patch.
+  if (in.hasSmooth != 0u && (in.wear.x > 0.005 || in.wear.y > 0.005)) {
+    let worn = deformPaintSeen(albedo, in.wear.x * 0.7, in.wear.y * 0.5, in.at * u.cell * 0.1, 1.0 - smoothstep(30.0, 90.0, length(in.seen)));
     albedo = worn.albedo;
-    rough = min(1.0, rough + worn.roughBoost);
-    open *= 1.0 - 0.3 * clamp(in.wear.y, 0.0, 1.0);
-    coat = worn.clearcoatKeep;
+    rough = min(1.0, rough + worn.roughBoost * 0.6);
+    open *= 1.0 - 0.12 * clamp(in.wear.y, 0.0, 1.0);
+    coat = 1.0 - 0.45 * clamp(in.wear.x, 0.0, 1.0);
   }
   var direct = max(dot(n, u.sun), 0.0);
   if (direct > 0.0) {
@@ -315,31 +317,29 @@ fn crackNet(p: vec2f) -> f32 {
   }
   return 1.0 - smoothstep(0.03, 0.09, d2 - d1);
 }
-// How cracked a pane is here (#37): broken round the nearest dent, as far out as nearly three times its reach, for as much as the
-// worst-hit window is cracked (deform.ts keeps no more than that for the GPU), with a web of cracks out from it. Both
-// lie across the way the dent was struck, so they run on unbroken over a pane's stair of faces. 0 on a piece never
-// struck.
+// How cracked a pane is here (#37): broken round where its glass was struck, for as much as its worst-hit window is
+// cracked (deform.ts keeps no more than that for the GPU), out to 30 cm for a knock and over a metre for a hard blow,
+// with a web of cracks out from that point. Both lie across the way it was struck, so they run on unbroken over a
+// pane's stair of faces. 0 on a piece whose glass was never struck.
 fn paneCrack(in: Out) -> f32 {
   let crack = u.deform.status.w;
-  if (crack <= 0.01 && in.wear.x <= 0.01) { return 0.0; }
+  if (crack <= 0.01 || u.crackX < -1000.0) { return 0.0; }
+  let origin = vec3f(u.crackX, u.crackY, u.crackZ);
   var best = 1e9;
   var closest = 0u;
   for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
-    let gap = distance(in.at, u.deform.posR[i].xyz);
+    let gap = distance(origin, u.deform.posR[i].xyz);
     if (gap < best) { best = gap; closest = i; }
   }
-  let zone = u.deform.posR[closest];
-  let along = u.deform.dirD[closest].xyz;
   // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
-  let p = (in.at - zone.xyz) * u.cell * 4.0;
-  let a = abs(along);
+  let p = (in.at - origin) * u.cell * 4.0;
+  let a = abs(u.deform.dirD[closest].xyz);
   var across = vec3f(p.x, p.y, 0.0);
   if (a.x >= a.y && a.x >= a.z) { across = vec3f(p.z, p.y, 0.0); }
   else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
-  // (A struck front flexes the whole frame of its windscreen: as far as nearly three times the dent's reach.)
-  let reach = 1.0 - smoothstep(zone.w, 2.8 * zone.w, best);
-  let amount = max(in.wear.x, crack * reach);
-  return max(deformGlass(max(crack, in.wear.x), amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
+  let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
+  if (amount <= 0.0) { return 0.0; }
+  return max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
 }
 @fragment fn fs_tint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -390,6 +390,8 @@ export interface Piece {
   lamps?: [number, number, number, number]
   /** Its dents, scuffs and cracks (#37, deform.ts), kept by whoever records what struck it; none or no dents draws it as made. */
   deform?: DeformState
+  /** Where its glass was struck, in its own cells (#37): where its cracks spread from. None: its glass is whole. */
+  crackAt?: [number, number, number]
   destroy(): void
 }
 
@@ -546,6 +548,8 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
         f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
+        const crack = piece.crackAt
+        f[45] = crack ? crack[0] : -1e5; f[46] = crack ? crack[1] : -1e5; f[47] = crack ? crack[2] : -1e5
         packDeformUniforms(piece.deform, f, DEFORM_AT)
         // (Copied when called: one block serves every piece.)
         device.queue.writeBuffer(piece.uniforms, 0, block)
