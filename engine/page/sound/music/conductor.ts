@@ -61,6 +61,19 @@ export function conductor(voice: Sound, seed = (Math.random() * 2 ** 31) | 0) {
       if (mood !== wanted) { wanted = mood; since = now ? -Infinity : t }
       pace = beats
     },
+    /** Cuts straight to a new mood (car radio station switch): hushes current music notes and begins the new groove after `delay` seconds. */
+    cut(mood: string | null, delay = 0.09) {
+      const t = voice.context.currentTime
+      wanted = mood
+      since = -Infinity
+      quiet = 0
+      pace = 0
+      piece = null
+      next = null
+      voice.hush(BUS.music)
+      if (!mood) { state.mood = null; return }
+      if (on) piece = begin(mood, t + delay, true)
+    },
     /** How much of the music is in, 0 to 1 (null: a piece builds and thins by itself), and whether pieces follow with no quiet between. */
     set drive(v: number | null) { drive = v === null ? null : Math.min(1, Math.max(0, v)) },
     get drive() { return drive },

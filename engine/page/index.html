@@ -145,6 +145,33 @@
   @media (prefers-reduced-motion: reduce) {
     [data-panel="stunts"], [data-panel="stunts"].pop { animation: none !important; transition: opacity 0.12s linear !important; }
   }
+  /* Procedural car radio station toast (sound/radio.ts): auto-fading pill shown briefly on tune, hidden when idle. */
+  [data-panel="radio-toast"] { --radio-accent: #ff4fa0; position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 96px); display: none; align-items: center; gap: 7px; padding: 6px 12px 6px 10px; border-radius: 999px; background: rgba(12, 16, 22, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.12); color: #f2f5f9; pointer-events: auto; cursor: pointer; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); opacity: 0; transform: translateY(6px); transition: opacity 0.22s ease, transform 0.22s ease; white-space: nowrap; }
+  html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="radio-toast"]:not([hidden]) { display: inline-flex; }
+  html:has(#ask.open) [data-panel="radio-toast"] { display: none !important; }
+  [data-panel="radio-toast"].show { opacity: 1; transform: translateY(0); }
+  [data-panel="radio-toast"] .rt-note { color: var(--radio-accent); font: 700 13px/1 -apple-system, system-ui, sans-serif; }
+  [data-panel="radio-toast"] .rt-name { font: 700 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; color: #f2f5f9; }
+  [data-panel="radio-toast"].is-off .rt-name { color: #b5bec9; }
+  [data-panel="radio-toast"] .rt-freq { font: 600 10px/1 ui-monospace, monospace; color: rgba(232, 236, 241, 0.6); padding-left: 4px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
+  [data-panel="radio-toast"] .rt-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; margin-left: 2px; }
+  [data-panel="radio-toast"] .rt-bars i { display: block; width: 2px; height: 4px; border-radius: 1px; background: var(--radio-accent); animation: rt-eq 0.75s ease-in-out infinite alternate; }
+  [data-panel="radio-toast"] .rt-bars i:nth-child(2) { height: 9px; animation-delay: 0.18s; }
+  [data-panel="radio-toast"] .rt-bars i:nth-child(3) { height: 6px; animation-delay: 0.34s; }
+  @keyframes rt-eq { 0% { transform: scaleY(0.35); } 100% { transform: scaleY(1); } }
+  @media (pointer: coarse) {
+    [data-panel="radio-toast"] { left: auto; bottom: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 14px); transform: translateY(-4px); padding: 5px 10px 5px 8px; }
+    [data-panel="radio-toast"].show { transform: translateY(0); }
+  }
+  @media (pointer: coarse) and (orientation: portrait) {
+    [data-panel="radio-toast"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 152px); transform: translateY(-4px); }
+    [data-panel="radio-toast"].show { transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-panel="radio-toast"] { transform: none; transition: opacity 0.15s ease; }
+    [data-panel="radio-toast"].show { transform: none; }
+    [data-panel="radio-toast"] .rt-bars i { animation: none; }
+  }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }
   #card p.note { margin: -2px 0 6px; color: #9aa5b1; font-size: 12px; }

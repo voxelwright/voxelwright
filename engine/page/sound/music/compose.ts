@@ -87,13 +87,28 @@ const flute: Patch = { how: 'blown', hard: 0.45, rough: 0.2, shape: 'hollow', pi
 const heart: Patch = { how: 'struck', hard: 0.2, rough: 0.05, shape: 'skin', pitch: 46, ring: 0.5, damp: 0.9, bend: 0.6, gain: 0.8 }
 const low: Patch = { how: 'rubbed', hard: 0.2, rough: 0.1, shape: 'string', pitch: 73, ring: 0.6, damp: 0.6, waver: 0.2, gain: 0.3 }
 
+// ── Car radio station instruments: strictly-validated patches (patch.ts) ──
+const synthBass: Patch = { how: 'blown', hard: 0.84, rough: 0.05, shape: 'string', pitch: 73, ring: 0.14, damp: 0.38, gain: 0.56 }
+const synthPad: Patch = { how: 'blown', hard: 0.08, rough: 0.04, shape: 'tube', pitch: 220, ring: 1.4, damp: 0.68, waver: 0.42, gain: 0.24 }
+const synthArp: Patch = { how: 'struck', hard: 0.78, rough: 0.02, modes: [[1, 1], [2, 0.42], [3, 0.2], [4, 0.12], [6, 0.05]], pitch: 440, ring: 0.65, damp: 0.32, gain: 0.46 }
+const synthLead: Patch = { how: 'blown', hard: 0.68, rough: 0.08, shape: 'tube', pitch: 440, ring: 0.35, damp: 0.36, waver: 0.48, gain: 0.34 }
+const snare: Patch = { how: 'struck', hard: 0.88, rough: 0.92, modes: [[1, 0.55], [1.62, 0.24]], pitch: 205, ring: 0.07, damp: 0.9, air: { from: 3800, to: 1500, for: 0.14, gain: 0.82, q: 1.15 }, gain: 0.44 }
+const rhodes: Patch = { how: 'struck', hard: 0.36, rough: 0.02, modes: [[1, 1], [2, 0.28], [3, 0.08], [7, 0.04], [13.5, 0.014]], pitch: 262, ring: 2.1, damp: 0.56, gain: 0.54 }
+const warmBass: Patch = { how: 'plucked', hard: 0.22, rough: 0, shape: 'string', pitch: 55, ring: 1.35, damp: 0.8, where: 0.38, gain: 0.82 }
+const softKick: Patch = { how: 'struck', hard: 0.24, rough: 0.1, shape: 'skin', pitch: 48, ring: 0.28, damp: 0.9, bend: 1.1, gain: 0.86 }
+const rim: Patch = { how: 'struck', hard: 0.78, rough: 0.68, shape: 'bar', pitch: 620, ring: 0.04, damp: 0.95, air: { from: 3200, to: 1400, for: 0.085, gain: 0.52, q: 1.3 }, gain: 0.36 }
+const funkBass: Patch = { how: 'plucked', hard: 0.72, rough: 0.04, shape: 'string', pitch: 55, ring: 0.75, damp: 0.58, where: 0.14, gain: 0.86 }
+const brass: Patch = { how: 'blown', hard: 0.88, rough: 0.12, shape: 'string', pitch: 294, ring: 0.14, damp: 0.32, waver: 0.18, gain: 0.34 }
+const clav: Patch = { how: 'plucked', hard: 0.84, rough: 0.05, shape: 'string', pitch: 294, ring: 0.48, damp: 0.52, where: 0.12, gain: 0.5 }
+const funkKick: Patch = { how: 'struck', hard: 0.44, rough: 0.15, shape: 'skin', pitch: 54, ring: 0.24, damp: 0.88, bend: 1.55, gain: 0.9 }
+
 const rules = (...list: Rule<never>[]) => list
 const as = <T>(r: Rule<T>, weight = r.weight) => ({ ...r, weight }) as unknown as Rule<never>
 const L = R.lineRhythm
 const melody = (rest: number) => rules(as(R.inKey), as(R.bySteps), as(R.leapsTurnBack), as(R.oneSummit), as(R.keepsItsRange), as(R.onTheChord), as(R.comesHome), as(R.leavesRoom, rest), as(R.returnsToItsFigure), as(R.doesNotStammer))
 const under = rules(as(R.rootsDown), as(R.onTheChord), as(R.fewNotes), as(R.leavesRoom, 1.5), as(L(R.pushes), 1), as(R.bySteps, 0.5))
 
-const DORIAN = [0, 2, 3, 5, 7, 9, 10], LYDIAN = [0, 2, 4, 6, 7, 9, 11], AEOLIAN = [0, 2, 3, 5, 7, 8, 10], PHRYGIAN = [0, 1, 3, 5, 7, 8, 10], PENTA = [0, 2, 4, 7, 9]
+const DORIAN = [0, 2, 3, 5, 7, 9, 10], LYDIAN = [0, 2, 4, 6, 7, 9, 11], MIXOLYDIAN = [0, 2, 4, 5, 7, 9, 10], AEOLIAN = [0, 2, 3, 5, 7, 8, 10], PHRYGIAN = [0, 1, 3, 5, 7, 8, 10], PENTA = [0, 2, 4, 7, 9]
 
 /** The music of each place. The tonic is D for all of them. */
 export const MOODS: Record<string, Mood> = {
@@ -151,9 +166,49 @@ export const MOODS: Record<string, Mood> = {
   ] },
 }
 
+/**
+ * Procedural car radio stations (#31): three distinct driving grooves composed through the same rule-and-search
+ * engine on tonic D with zero silence between pieces. Kept separate from place MOODS so realm music rules and the
+ * 54-clip acoustic benchmark stay unchanged, while `resolve()` finds both.
+ */
+export const RADIO_MOODS: Record<string, Mood> = {
+  baydrive: {
+    name: 'baydrive', idiom: 'retro synthwave outrun: pulsing bass and shimmering arps', bpm: 116, steps: 16, beat: 4, bars: 4, tonic: 50, scale: DORIAN, minor: true, colour: 5, sections: 10, gap: [0, 0], swing: 0, room: 0.24, voices: [
+      { name: 'pad', kind: 'pad', patch: synthPad, layer: 1, gain: 0.42, low: 0, want: 1, rules: [] },
+      { name: 'bass', kind: 'bass', patch: synthBass, layer: 1, gain: 0.88, low: -12, want: 0.62, rules: rules(as(R.rootsDown), as(R.onTheChord), as(R.fewNotes), as(R.leavesRoom, 1.5), as(L(R.repeats), 1.5), as(R.bySteps, 0.5)) },
+      { name: 'kick', kind: 'beat', patch: kick, layer: 1, gain: 0.88, low: 0, want: 4, rules: rules(as(R.onTheFloor), as(R.amount)) },
+      { name: 'snare', kind: 'beat', patch: snare, layer: 2, gain: 0.55, pan: -0.08, low: 0, want: 2, rules: rules(as(R.backbeat), as(R.amount)) },
+      { name: 'hat', kind: 'beat', patch: hat, layer: 2, gain: 0.44, pan: 0.22, low: 0, want: 8, rules: rules(as(R.fillsGaps), as(R.amount), as(R.even), as(R.repeats), as(R.loudAndSoft)) },
+      { name: 'arp', kind: 'line', patch: synthArp, layer: 2, gain: 0.62, pan: -0.24, low: 12, want: 0.6, span: 10, bars: 2, rules: rules(as(R.inKey), as(R.onTheChord, 2.5), as(R.leavesRoom, 1.5), as(R.keepsItsRange), as(R.doesNotStammer), as(L(R.even), 1.5)) },
+      { name: 'lead', kind: 'line', patch: synthLead, layer: 3, gain: 0.58, pan: 0.22, low: 12, want: 0.36, span: 9, bars: 4, rules: melody(2) },
+    ],
+  },
+  twinpeaks: {
+    name: 'twinpeaks', idiom: 'warm Rhodes lo-fi sunset cruising groove', bpm: 86, steps: 16, beat: 4, bars: 4, tonic: 50, scale: LYDIAN, minor: false, colour: 3, sections: 8, gap: [0, 0], swing: 0.11, room: 0.34, voices: [
+      { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.38, low: 0, want: 1, rules: [] },
+      { name: 'rhodes', kind: 'stab', patch: rhodes, layer: 1, gain: 0.66, pan: -0.2, low: 12, want: 3, rules: rules(as(R.amount), as(R.pushes, 3), as(R.fillsGaps, 1), as(R.likeATradition), as(R.loudAndSoft, 0.5)) },
+      { name: 'bass', kind: 'bass', patch: warmBass, layer: 1, gain: 0.92, low: -12, want: 0.38, rules: under },
+      { name: 'kick', kind: 'beat', patch: softKick, layer: 1, gain: 0.82, low: 0, want: 3, rules: rules(as(R.likeATradition, 2.5), as(R.amount), as(R.pushes, 1.5)) },
+      { name: 'rim', kind: 'beat', patch: rim, layer: 2, gain: 0.48, pan: -0.14, low: 0, want: 2, rules: rules(as(R.backbeat), as(R.amount)) },
+      { name: 'shaker', kind: 'beat', patch: shaker, layer: 2, gain: 0.32, pan: 0.26, low: 0, want: 8, rules: rules(as(R.likeATradition, 2.5), as(R.amount), as(R.even), as(R.loudAndSoft)) },
+      { name: 'lead', kind: 'line', patch: rhodes, layer: 3, gain: 0.68, pan: 0.2, low: 12, want: 0.34, span: 8, bars: 4, rules: melody(2.4) },
+    ],
+  },
+  fillmore: {
+    name: 'fillmore', idiom: 'punchy syncopated funk bass and brassy horn stabs', bpm: 108, steps: 16, beat: 4, bars: 4, tonic: 50, scale: MIXOLYDIAN, minor: false, colour: 6, sections: 10, gap: [0, 0], swing: 0.09, room: 0.16, voices: [
+      { name: 'bass', kind: 'bass', patch: funkBass, layer: 1, gain: 0.95, low: -12, want: 0.54, rules: rules(as(R.rootsDown), as(R.onTheChord), as(R.fewNotes), as(R.leavesRoom, 1.5), as(L(R.pushes), 2), as(R.bySteps, 0.5)) },
+      { name: 'kick', kind: 'beat', patch: funkKick, layer: 1, gain: 0.9, low: 0, want: 4, rules: rules(as(R.likeATradition, 2), as(R.amount), as(R.pushes, 1.5)) },
+      { name: 'snare', kind: 'beat', patch: snare, layer: 1, gain: 0.58, pan: -0.1, low: 0, want: 2, rules: rules(as(R.backbeat), as(R.amount)) },
+      { name: 'hat', kind: 'beat', patch: hat, layer: 2, gain: 0.45, pan: 0.24, low: 0, want: 8, rules: rules(as(R.fillsGaps), as(R.amount), as(R.even), as(R.repeats), as(R.loudAndSoft)) },
+      { name: 'brass', kind: 'stab', patch: brass, layer: 2, gain: 0.54, pan: -0.24, low: 0, want: 3, rules: rules(as(R.amount), as(R.pushes, 3), as(R.fillsGaps, 1.5), as(R.likeATradition), as(R.loudAndSoft, 0.5)) },
+      { name: 'lead', kind: 'line', patch: clav, layer: 3, gain: 0.64, pan: 0.22, low: 12, want: 0.44, span: 8, bars: 2, rules: melody(1.8) },
+    ],
+  },
+}
+
 /** The modes a mood may be put in, all on D: the scale, whether its third is minor, and the degree that makes it itself. */
 export const MODES: Record<string, { scale: number[]; minor: boolean; colour: number }> = {
-  major: { scale: [0, 2, 4, 5, 7, 9, 11], minor: false, colour: 6 }, lydian: { scale: LYDIAN, minor: false, colour: 3 }, mixolydian: { scale: [0, 2, 4, 5, 7, 9, 10], minor: false, colour: 6 },
+  major: { scale: [0, 2, 4, 5, 7, 9, 11], minor: false, colour: 6 }, lydian: { scale: LYDIAN, minor: false, colour: 3 }, mixolydian: { scale: MIXOLYDIAN, minor: false, colour: 6 },
   dorian: { scale: DORIAN, minor: true, colour: 5 }, minor: { scale: AEOLIAN, minor: true, colour: 5 }, phrygian: { scale: PHRYGIAN, minor: true, colour: 1 }, pentatonic: { scale: PENTA, minor: false, colour: 2 },
 }
 /** How slow and how fast music may be asked to go, beats a minute. */
@@ -169,7 +224,8 @@ export const moodKey = (like: string, pace = 0, mode = '') => (pace || mode ? `$
 export function resolve(key: string): Mood {
   const known = made.get(key)
   if (known) return known
-  const [like, pace, mode] = String(key).split('|'), base = Object.hasOwn(MOODS, like) ? MOODS[like] : MOODS.town
+  const [like, pace, mode] = String(key).split('|')
+  const base = Object.hasOwn(MOODS, like) ? MOODS[like] : Object.hasOwn(RADIO_MOODS, like) ? RADIO_MOODS[like] : MOODS.town
   const bpm = Number(pace) > 0 ? Math.min(PACE[1], Math.max(PACE[0], Number(pace))) : base.bpm, m = mode && Object.hasOwn(MODES, mode) ? MODES[mode] : null
   const mood: Mood = bpm === base.bpm && !m ? base : { ...base, name: key, bpm, ...(m ?? {}) }
   if (made.size > 64) made.clear()
