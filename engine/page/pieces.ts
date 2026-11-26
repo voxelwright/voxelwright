@@ -8,11 +8,17 @@
 // mirrors off its glass is a pale face as the world's is. A thing of finer cells may carry a smooth word a face (#38,
 // fine.ts `facesWithSmooth`): its outside is then lit by a normal from the shape round it, darkened in its hollows,
 // and its paint and glass mirror as a car's do, where a face lit by its square normal showed each step of a curve.
+// A vehicle that has been struck (#37, deform.ts) is drawn bent: up to six dents move its corners and turn its normals,
+// its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only a struck piece pays for it:
+// it draws from a copy of its faces split into rows a cell long, so every corner lies on the cells' lattice and faces
+// that meet still meet once bent (a merged row bent at its two ends only would open a gap beside its neighbours).
 import { shader, type Target } from '../probe/gpu.ts'
+import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
 import type { Born } from './told.ts'
 
 const CODE = /* wgsl */ `
+${DEFORM_STRUCT}
 struct U {
   eye: vec3f, tanHalf: f32,
   right: vec3f, aspect: f32,
@@ -30,7 +36,10 @@ struct U {
   c1: vec3f, lampHead: f32,
   c2: vec3f, lampAxis: f32,
   // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them.
-  smoothOn: f32, pad0: f32, pad1: f32, pad2: f32,
+  // crack: where its glass was struck (#37), in its own cells; far below it (-1e5) where it was not.
+  smoothOn: f32, crackX: f32, crackY: f32, crackZ: f32,
+  // Its dents (#37): none for a piece that was never struck, and then nothing of them is worked out.
+  deform: Deform,
 }
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
 struct Looks { palette: array<vec4f, 256>, material: array<Material, 16> }
@@ -44,6 +53,7 @@ ${GLOBALS}
 ${SUNLIT}
 ${LIGHT}
 ${GLASS}
+${DEFORM_WGSL}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) at: vec3f,
@@ -58,6 +68,8 @@ struct Out {
   @location(5) lit: vec3f,
   @location(6) open: f32,
   @location(7) @interpolate(flat) hasSmooth: u32,
+  // How scuffed and how creased it is here by its dents (#37): 0 on a piece never struck.
+  @location(8) wear: vec2f,
 }
 const NEAR = 1.0;
 const FAR = 100000.0;
@@ -85,26 +97,32 @@ fn unfold(word: u32) -> vec3f {
   else if (axis == 2u) { p += vec3f(cu * long, cv, side); n = vec3f(0.0, 0.0, side * 2.0 - 1.0); }
   else { p += vec3f(side, cv, cu * long); n = vec3f(side * 2.0 - 1.0, 0.0, 0.0); }
   let turned = mat3x3f(u.c0, u.c1, u.c2);
-  let world = u.pos + turned * ((p - u.com) * u.cell) - u.eye;
-  let d = dot(world, u.forward);
   var out: Out;
-  out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
-  out.at = p;
-  out.n = n;
-  out.facing = turned * n;
-  out.seen = world;
-  out.kind = b >> 16u;
-  out.lit = out.facing;
   out.open = 1.0;
   // (Only on things finer than the world's cells: the core's bodies, a held block of the world, stay as they were.)
   let word = words[v & 3u];
   out.hasSmooth = select(0u, word >> 31u, u.smoothOn != 0.0 && u.cell < 1.0);
+  var lit = n;
   if (out.hasSmooth != 0u) {
     // Taken over the square normal as far as its blend says (7 of 7: all the way). How open it is lights it from
     // 0.38 shut in to 1 in the open.
-    out.lit = normalize(turned * mix(n, unfold(word), f32((word >> 28u) & 7u) / 7.0));
+    lit = normalize(mix(n, unfold(word), f32((word >> 28u) & 7u) / 7.0));
     out.open = mix(0.38, 1.0, f32((word >> 20u) & 255u) / 255.0);
   }
+  // Bent by its dents (#37; at once back for a piece never struck). Where the cell is, for its paint and its lamps,
+  // stays where it was made: a bent panel keeps its own paint.
+  let bent = deformPoint(p, lit, u.deform);
+  let world = u.pos + turned * ((bent.pos - u.com) * u.cell) - u.eye;
+  let d = dot(world, u.forward);
+  out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
+  out.at = p;
+  out.n = n;
+  out.seen = world;
+  out.kind = b >> 16u;
+  out.lit = turned * bent.norm;
+  // A face lit by its square normal is lit by it bent.
+  out.facing = select(out.lit, turned * n, out.hasSmooth != 0u);
+  out.wear = vec2f(bent.scuff, bent.crease);
   return out;
 }
 // Whether a face is lit smooth: it has smooth words, and its smooth normal looks at the eye. One that looks away is a
@@ -228,6 +246,21 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   if (polished && soft) { albedo = factoryPaint(in.kind, in.at - in.n * 0.5); }
   else { albedo = paint(in.kind, vec3i(floor(inside)) + u.cells, in.n, 1.0, fract(inside), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022)); }
   let n = select(in.facing, litBy(in, rd), soft);
+  // Where it is dented (#37): primer and bare steel scratched through its paint, rougher, darker in its folds, and its
+  // clear coat worn away there, beside paint that still mirrors bent.
+  var rough = m.rough;
+  var open = in.open;
+  var coat = 1.0;
+  // Only its outside (the faces with smooth words): the seats inside a struck door are not scraped. Scrapes are bands a
+  // centimetre or two wide, 11 cm apart, fading out by 9 m: finer, they were a sparkle of single pixels. Most of
+  // the clear coat stays, so a dent shows as its bent reflections more than as a dark patch.
+  if (in.hasSmooth != 0u && (in.wear.x > 0.005 || in.wear.y > 0.005)) {
+    let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y * 0.5, in.at * u.cell * 0.15, 1.0 - smoothstep(30.0, 90.0, length(in.seen)));
+    albedo = worn.albedo;
+    rough = min(1.0, rough + worn.roughBoost * 0.6);
+    open *= 1.0 - 0.12 * clamp(in.wear.y, 0.0, 1.0);
+    coat = 1.0 - 0.45 * clamp(in.wear.x, 0.0, 1.0);
+  }
   var direct = max(dot(n, u.sun), 0.0);
   if (direct > 0.0) {
     // In the world's shadow where the sun's maps say so; where they cannot say, in the sun. (Read by the square normal:
@@ -236,9 +269,9 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     if (sunny >= 0.0) { direct *= sunny; }
   }
   let dynLamp = stuff == 15u && u.lampAxis != 0.0;
-  var col = shade(albedo, n, rd, u.sun, direct, in.open, select(m.rough, 0.18, dynLamp), select(m.glow, 0.0, dynLamp));
+  var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow, 0.0, dynLamp));
   if (dynLamp) { col += vehicleLamp(in, albedo); }
-  if (polished) { col = select(carPaint(col, in.facing, rd, direct), clearCoat(col, albedo, n, rd, direct, in.open), soft); }
+  if (polished) { col = mix(col, select(carPaint(col, in.facing, rd, direct), clearCoat(col, albedo, n, rd, direct, open), soft), coat); }
   let lit = tone(col);
   // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
   let glowAlpha = select(1.0, 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0), dynLamp);
@@ -265,13 +298,62 @@ fn paneMirror(rd: vec3f, n: vec3f, soft: bool) -> f32 {
   let facing = min(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 0.4);
   return looks.material[11].mirror * (0.08 + 0.92 * pow(facing, 5.0));
 }
+// Glass broken into pieces (#37): the edges between cells of a scatter of points, about 6 cm apart (p in 2.5 cm cells).
+// The web of deform.ts alone was lines a few millimetres wide round a point on the bumper, and from the seat it did
+// not show.
+fn crackNet(p: vec2f) -> f32 {
+  let q = p / 2.4;
+  let c = floor(q);
+  let f = fract(q);
+  var d1 = 8.0;
+  var d2 = 8.0;
+  for (var j = -1; j <= 1; j++) {
+    for (var i = -1; i <= 1; i++) {
+      let o = vec2f(f32(i), f32(j));
+      let h = vec2f(deformHash(vec3f(c + o, 3.0)), deformHash(vec3f(c + o, 9.0)));
+      let d = length(o + h - f);
+      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+    }
+  }
+  return 1.0 - smoothstep(0.03, 0.09, d2 - d1);
+}
+// How cracked a pane is here (#37): broken round where its glass was struck, for as much as its worst-hit window is
+// cracked (deform.ts keeps no more than that for the GPU), out to 30 cm for a knock and over a metre for a hard blow,
+// with a web of cracks out from that point. Both lie across the way it was struck, so they run on unbroken over a
+// pane's stair of faces. 0 on a piece whose glass was never struck.
+fn paneCrack(in: Out) -> f32 {
+  let crack = u.deform.status.w;
+  if (crack <= 0.01 || u.crackX < -1000.0) { return 0.0; }
+  let origin = vec3f(u.crackX, u.crackY, u.crackZ);
+  var best = 1e9;
+  var closest = 0u;
+  for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
+    let gap = distance(origin, u.deform.posR[i].xyz);
+    if (gap < best) { best = gap; closest = i; }
+  }
+  // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
+  let p = (in.at - origin) * u.cell * 4.0;
+  let a = abs(u.deform.dirD[closest].xyz);
+  var across = vec3f(p.x, p.y, 0.0);
+  if (a.x >= a.y && a.x >= a.z) { across = vec3f(p.z, p.y, 0.0); }
+  else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
+  let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
+  if (amount <= 0.0) { return 0.0; }
+  // Its lines are finer than a pixel from the street: there they glittered, so further than 3 m they give way to an
+  // even whitening of the broken glass.
+  let seenNear = 1.0 - smoothstep(30.0, 90.0, length(in.seen));
+  let lines = max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
+  return mix(amount * 0.3, lines, seenNear);
+}
 @fragment fn fs_tint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
   let rd = normalize(in.seen);
   // (A picture already toned: what lets a share through of the light lets about that share's root through of the picture.)
   let soft = smoothSeen(in, rd);
   let n = select(in.facing, litBy(in, rd), soft);
-  return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - paneMirror(rd, n, soft)), vec3f(0.4545)), 1.0);
+  // A crack lets less through: it is white, and lit (fs_glint).
+  let through = 1.0 - 0.6 * paneCrack(in);
+  return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - paneMirror(rd, n, soft)) * through, vec3f(0.4545)), 1.0);
 }
 @fragment fn fs_glint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -288,7 +370,8 @@ fn paneMirror(rd: vec3f, n: vec3f, soft: bool) -> f32 {
   // Its own faint film, and the sun's glint off it.
   let own = shade(m.colour, n, rd, u.sun, direct, in.open, m.rough, 0.0);
   // Added to a picture already toned: as much as it would add to a thing of middling brightness behind it.
-  let add = own * 0.1 + sky * paneMirror(rd, n, soft);
+  let cracked = paneCrack(in);
+  let add = own * 0.1 + sky * paneMirror(rd, n, soft) + shade(vec3f(0.72, 0.75, 0.76), n, rd, u.sun, direct, in.open, 0.7, 0.0) * cracked * 0.5;
   return vec4f(tone(add + 0.3) - tone(vec3f(0.3)), 0.0);
 }
 `
@@ -309,6 +392,10 @@ export interface Piece {
    * `frontAxis` 1:+x, 2:-x, 3:+z, 4:-z (0 or omitted: inactive static lamp material).
    */
   lamps?: [number, number, number, number]
+  /** Its dents, scuffs and cracks (#37, deform.ts), kept by whoever records what struck it; none or no dents draws it as made. */
+  deform?: DeformState
+  /** Where its glass was struck, in its own cells (#37): where its cracks spread from. None: its glass is whole. */
+  crackAt?: [number, number, number]
   destroy(): void
 }
 
@@ -324,6 +411,41 @@ export interface Pieces {
   readonly faces: number
   /** Whether faces with smooth words are lit by them (#38); off draws every face by its square normal. */
   smooth: boolean
+}
+
+/** A piece's own numbers (struct U): twelve rows of four, then its dents. */
+const OWN = 192, DEFORM_AT = OWN / 4, UNIFORMS = OWN + DEFORM_BYTES
+
+/**
+ * A look's faces as the GPU takes them, six words a face: the solid ones first, then the glass, each with its corners'
+ * smooth words (#38), 0 where it has none. `unit`: every row cut into faces a cell long (#37), for a piece that is bent;
+ * a row of smooth faces is merged only where its corners' words are alike, so each piece of it keeps its first ones and
+ * the last keeps the row's last.
+ */
+function sortFaces(born: Born, unit: boolean) {
+  const all = born.faces, smooth = born.smooth, total = all.length / 2
+  let size = total
+  if (unit) { size = 0; for (let f = 0; f < total; f++) size += (all[f * 2 + 1] & 255) || 1 }
+  const sorted = new Uint32Array(size * 6)
+  let at = 0, glass = 0
+  for (const glassy of [false, true]) for (let f = 0; f < total; f++) {
+    const a = all[f * 2], b = all[f * 2 + 1]
+    if ((((b >>> 16) & 15) === 11) !== glassy) continue
+    const long = unit ? (b & 255) || 1 : 1, axis = (b >>> 8) & 3
+    for (let k = 0; k < long; k++) {
+      // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
+      const start = axis === 0 ? a + (k << 20) : a + k
+      sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
+      if (smooth) {
+        sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
+        const last = k === long - 1
+        sorted[at * 6 + 3] = smooth[f * 4 + (last ? 1 : 0)]; sorted[at * 6 + 5] = smooth[f * 4 + (last ? 3 : 2)]
+      }
+      at++
+      if (glassy) glass++
+    }
+  }
+  return { sorted, count: at, glass }
 }
 
 export async function pieces(device: GPUDevice, format: GPUTextureFormat, march: Marcher): Promise<Pieces> {
@@ -349,25 +471,22 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     return lit.group
   }
   /** count: all its faces; glass: how many of them, the last ones, are glass; held: its faces' buffer, and how many pieces draw from it. */
-  interface Shared { faces: GPUBuffer; count: number; glass: number; users: number }
+  interface Faces { faces: GPUBuffer; count: number; glass: number }
+  /** unit: the same faces a cell long, made the first time one of its pieces is drawn bent (#37). */
+  interface Shared extends Faces { users: number; unit?: Faces }
   interface Held extends Piece { faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number; glass: number; held: Shared }
   /** A look's faces on the GPU: the solid ones first, then the glass, each with its corners' smooth words. */
-  const upload = (born: Born) => {
-    // The solid faces first, then the glass ones; each with its corners' smooth words (#38), 0 where it has none.
-    const all = born.faces, smooth = born.smooth, total = all.length / 2, sorted = new Uint32Array(total * 6)
-    let at = 0
-    for (const glassy of [false, true]) for (let f = 0; f < total; f++) {
-      if ((((all[f * 2 + 1] >>> 16) & 15) === 11) !== glassy) continue
-      sorted[at * 6] = all[f * 2]; sorted[at * 6 + 1] = all[f * 2 + 1]
-      if (smooth) sorted.set(smooth.subarray(f * 4, f * 4 + 4), at * 6 + 2)
-      at++
-    }
-    let glass = 0
-    for (let f = 0; f < total; f++) if (((all[f * 2 + 1] >>> 16) & 15) === 11) glass++
-    const solid = total - glass
+  const upload = (born: Born, unit = false): Faces => {
+    const { sorted, count, glass } = sortFaces(born, unit)
     const faces = device.createBuffer({ size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
     device.queue.writeBuffer(faces, 0, sorted)
-    return { faces, count: solid + glass, glass }
+    return { faces, count, glass }
+  }
+  const release = (held: Shared) => { held.faces.destroy(); held.unit?.faces.destroy() }
+  /** The faces a piece is drawn from now: a cell long once it is bent. */
+  const facesOf = (piece: Held): Faces => {
+    if (!piece.deform?.dentCount) return piece
+    return piece.held.unit ??= upload(piece.born, true)
   }
 
   const live = new Set<Held>()
@@ -378,7 +497,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     get smooth() { return smooth },
     set smooth(on: boolean) { smooth = on },
     get count() { return live.size },
-    get faces() { let n = 0; for (const p of live) n += p.count; return n },
+    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount && p.held.unit ? p.held.unit : p).count; return n },
     add(born, share = false) {
       let made = share ? common.get(born.faces) : undefined
       if (!made) {
@@ -386,16 +505,16 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         if (share) common.set(born.faces, made)
       }
       made.users++
-      const held = made, uniforms = device.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+      const held = made, uniforms = device.createBuffer({ size: UNIFORMS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: own, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); if (--piece.held.users === 0) { piece.held.faces.destroy(); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
+      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
       live.add(piece)
       return piece
     },
     refit(p, faces, smooth) {
       const piece = p as Held
       if (!live.has(piece) || piece.held.users !== 1 || common.get(piece.born.faces) === piece.held) return
-      piece.held.faces.destroy()
+      release(piece.held)
       piece.born.faces = faces
       piece.born.smooth = smooth
       piece.held = { ...upload(piece.born), users: 1 }
@@ -404,7 +523,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     draw(encoder, to, view, sun, timing, mirrors = true) {
       if (!live.size) return
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64)
-      const block = new ArrayBuffer(192), f = new Float32Array(block), i32 = new Int32Array(block)
+      const block = new ArrayBuffer(UNIFORMS), f = new Float32Array(block), i32 = new Int32Array(block)
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun, 0])
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
@@ -433,20 +552,26 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
         f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
-        device.queue.writeBuffer(piece.uniforms, 0, block.slice(0))
+        const crack = piece.crackAt
+        f[45] = crack ? crack[0] : -1e5; f[46] = crack ? crack[1] : -1e5; f[47] = crack ? crack[2] : -1e5
+        packDeformUniforms(piece.deform, f, DEFORM_AT)
+        // (Copied when called: one block serves every piece.)
+        device.queue.writeBuffer(piece.uniforms, 0, block)
+        const faces = facesOf(piece)
         pass.setBindGroup(0, piece.bind)
-        pass.setVertexBuffer(0, piece.faces)
+        pass.setVertexBuffer(0, faces.faces)
         // The solid faces; with mirrors off the glass too, as pale faces.
-        pass.draw(4, mirrors ? piece.count - piece.glass : piece.count)
+        pass.draw(4, mirrors ? faces.count - faces.glass : faces.count)
       }
       // The glass of those that have any: what is behind it tinted, then what it adds of itself.
       if (mirrors) for (const panes of [tint, glint]) {
         pass.setPipeline(panes)
         for (const piece of live) {
           if (!piece.glass || !piece.cell) continue
+          const faces = facesOf(piece)
           pass.setBindGroup(0, piece.bind)
-          pass.setVertexBuffer(0, piece.faces)
-          pass.draw(4, piece.glass, 0, piece.count - piece.glass)
+          pass.setVertexBuffer(0, faces.faces)
+          pass.draw(4, faces.glass, 0, faces.count - faces.glass)
         }
       }
       pass.end()

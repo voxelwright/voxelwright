@@ -5,13 +5,14 @@
 // them with the thing; nothing here is run.
 import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import { cockpit, type CockpitState } from './cockpit.ts'
+import { VehicleDeformation, type DeformState } from './deform.ts'
 import { createDriveCam, type DriveCamMode } from './drive-cam.ts'
 import { touchSteerCurve } from './gamepad.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
 import type { Piece } from './pieces.ts'
-import type { Struck, Told } from './told.ts'
+import type { Placed, Struck, Told } from './told.ts'
 import type { Link } from './link.ts'
 import type { Things } from './things.ts'
 import { carveWheelWells, type WheelProfile } from './wheels.ts'
@@ -185,6 +186,10 @@ export interface Living {
   readonly telemetry: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number; boost: number; boosting: boolean; burnout: number; surface: 'paved' | 'wet' | 'offroad' } | null
   /** First-person cockpit immersion state (inertia, windshield rain/wipers, night dash glow). */
   readonly cockpit: CockpitState
+  /** How a vehicle's look is dented (#37, deform.ts): the dents of its first part, or null if it was never struck hard. */
+  damage(thing: Thing): DeformState | null
+  /** Makes a vehicle's look as it was made: no dents, scuffs or cracks, and its engine quiet. */
+  repair(thing: Thing): void
   /** Live wheel-animation inputs while driving a wheeled vehicle, or null (wheels.ts). */
   readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
 }
@@ -196,6 +201,12 @@ const AHEADS = [Math.PI / 2, -Math.PI / 2, Math.PI, 0]
 const SITTING_EYE = 12
 /** How far outside its thing's own box a driver's eye may be (cells). */
 const EYE_OUT = 6
+/** How fast a vehicle must close on what it strikes to be dented (cells a second: 1.8 m/s), and to throw sparks and chips (2.8 m/s). */
+const DENTS_FROM = 18, CRASH_FROM = 28
+/** How near the eye a damaged engine must be to steam or smoke (cells). */
+const ENGINE_SEEN = 900
+/** How far round a driver's eye and each seat the look is kept from being bent into (cells): the head as it turns and leans. */
+const HEAD_ROOM = 2
 const turned = (q: readonly number[], v: readonly number[]): [number, number, number] => {
   const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
   return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
@@ -237,6 +248,10 @@ export function living(o: {
     lift(wheel?: number): void
     light(at: readonly [number, number, number], dir: readonly [number, number], size: readonly [number, number], colour: readonly [number, number, number], alpha: number): void
     sparks(at: readonly [number, number, number], strength: number): void
+    /** A hard crash (#37): dust, chips of the paint it was struck on (`kind`), and shards of glass if a window cracked. */
+    crash?(at: readonly [number, number, number], strength: number, kind: number, glass: boolean): void
+    /** A damaged engine under the bonnet (#37), for one frame of `dt` seconds: steam, then dark smoke, then flames as `level` goes from 0.35 to 1. */
+    engine?(at: readonly [number, number, number], level: number, dt: number): void
     rain(): number
     day(): number
     surface(x: number, z: number): number
@@ -383,7 +398,17 @@ export function living(o: {
   }
   // A thing's fine look (#245): a piece for each part, kept each frame where the body is, the body's own cells not drawn.
   // Its glass is seen through (pieces.ts), from the seat as from the street.
-  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number }
+  /** glass: where its glass cells are, three numbers a cell (#37: where a crack starts). */
+  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number; glass: Int16Array }
+  /** Where a look's glass cells are (kind 11), three numbers a cell. */
+  const glassOf = (kinds: Uint16Array, [w, , d]: readonly number[]) => {
+    const at: number[] = []
+    for (let i = 0; i < kinds.length; i++) if ((kinds[i] & 15) === 11) at.push(i % w, Math.floor(i / (w * d)), Math.floor(i / w) % d)
+    return Int16Array.from(at)
+  }
+  // Its dents (#37): one record a part, by the thing's body and the part's place in its look.
+  const dents = new VehicleDeformation()
+  const dentId = (thing: Thing, part: number) => thing.id * FINE_PARTS + part
   const looks = new Map<Thing, Worn[]>()
   const wear = (thing: Thing, parts: { kinds: Uint16Array; size: [number, number, number]; per: number; low: [number, number, number] }[]) => {
     if (!o.look || !thing.alive || !things.includes(thing) || looks.has(thing) || !parts.length) return
@@ -400,10 +425,53 @@ export function living(o: {
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
-      return { piece, kinds, size: f.size, low: f.low, per: f.per }
+      return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: glassOf(kinds, f.size) }
     }))
   }
-  const unwear = (thing: Thing) => { for (const w of looks.get(thing) ?? []) w.piece.destroy(); looks.delete(thing) }
+  const unwear = (thing: Thing) => {
+    // Its dents go with its look: a body's id may be given to another thing later.
+    looks.get(thing)?.forEach((w, i) => { w.piece.destroy(); dents.clearVehicle(dentId(thing, i)) })
+    looks.delete(thing)
+  }
+  /** Where a part of a thing's look is when its body is at `pos` turned `rot` (as `follow` places it). */
+  const partAt = (thing: Thing, body: Piece, w: Worn, pos: readonly number[], rot: readonly number[]): [number, number, number] => {
+    const b = body.born, v = turned(rot, [w.low[0] - (b.low[0] - thing.low[0]) - b.com[0], w.low[1] - (b.low[1] - thing.low[1]) - b.com[1], w.low[2] - (b.low[2] - thing.low[2]) - b.com[2]])
+    return [pos[0] + v[0], pos[1] + v[1], pos[2] + v[2]]
+  }
+  /**
+   * A vehicle struck hard (#37): each part of its look is dented where it was struck, pushed in from where it was
+   * struck. The core says where and how fast, not which way: the way out of the look's own box at that place, so
+   * a corner is struck from both its sides. The driver's eye and every seat are kept clear, with room for the head.
+   */
+  const dent = (thing: Thing, s: Struck, pose: Placed | undefined) => {
+    const worn = looks.get(thing), body = o.piece(thing.id)
+    if (!worn || !body) return
+    const pos = pose?.pos ?? body.pos, rot = pose?.rot ?? body.rot
+    const eye = eyeOf(thing), lo = [eye[0] - HEAD_ROOM, eye[1] - SITTING_EYE / 2, eye[2] - HEAD_ROOM], hi = [eye[0] + HEAD_ROOM, eye[1] + HEAD_ROOM, eye[2] + HEAD_ROOM]
+    for (const seat of thing.seats ?? []) for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], seat[a] - (a === 1 ? 0 : HEAD_ROOM))
+      hi[a] = Math.max(hi[a], seat[a] + (a === 1 ? SITTING_EYE + HEAD_ROOM : HEAD_ROOM))
+    }
+    worn.forEach((w, i) => {
+      const at = partAt(thing, body, w, pos, rot), cell = 1 / w.per
+      // Where it was struck in the part's own cells, and from there the way out of its box.
+      const local = turned([-rot[0], -rot[1], -rot[2], rot[3]], [s.at[0] - at[0], s.at[1] - at[1], s.at[2] - at[2]])
+      const out = local.map((v, a) => { const d = Math.max(-1, Math.min(1, (v / cell - w.size[a] / 2) / (w.size[a] / 2))); return d * d * d * (a === 1 ? 0.5 : 1) })
+      if (Math.hypot(out[0], out[1], out[2]) < 1e-6) out[0] = 1
+      const cabin = { min: lo.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number], max: hi.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number] }
+      const was = Math.max(0, ...(dents.get(dentId(thing, i))?.glassCrack ?? []))
+      const state = dents.recordImpact(dentId(thing, i), { pos: at, rot: [rot[0], rot[1], rot[2], rot[3]], cell, born: { com: [0, 0, 0], size: w.size }, front: thing.motor.front as 0 | 1 | 2 | 3 }, s.at, turned(rot, out), s.speed, s.push, cabin)
+      if (!state) return
+      w.piece.deform = state
+      // A blow that cracked its glass more: the cracks start at the glass nearest it.
+      if (Math.max(...state.glassCrack) > was && w.glass.length) {
+        let best = Infinity, near = 0
+        const x = local[0] / cell, y = local[1] / cell, z = local[2] / cell
+        for (let g = 0; g < w.glass.length; g += 3) { const far = (w.glass[g] - x) ** 2 + (w.glass[g + 1] - y) ** 2 + (w.glass[g + 2] - z) ** 2; if (far < best) { best = far; near = g } }
+        w.piece.crackAt = [w.glass[near] + 0.5, w.glass[near + 1] + 0.5, w.glass[near + 2] + 0.5]
+      }
+    })
+  }
   const setLamps = (thing: Thing | null, lamps?: [number, number, number, number]) => {
     if (!thing) return
     const body = o.piece(thing.id)
@@ -634,6 +702,9 @@ export function living(o: {
         if (riding === thing) mount(null)
       }
       for (const state of told.live) { const thing = things.find((t) => t.id === state.id); if (thing) thing.state = state }
+      // The hardest blow each vehicle wearing a look took in this answer (#37): the core tells a pair's meeting each
+      // step, and one crash is several of them.
+      let hardest: Map<Thing, Struck> | null = null
       for (const s of told.struck) {
         struck.push(s)
         if (struck.length > 64) struck.shift()
@@ -644,10 +715,41 @@ export function living(o: {
           o.fx?.sparks(s.at, hit)
           o.input.pulse?.('crash', hit)
         }
+        if (s.speed < DENTS_FROM) continue
+        for (const id of [s.a, s.b]) {
+          const thing = id ? things.find((t) => t.id === id) : undefined
+          if (!thing || !looks.has(thing) || (thing.controls ?? 'drive') !== 'drive') continue
+          hardest ??= new Map()
+          if ((hardest.get(thing)?.speed ?? 0) < s.speed) hardest.set(thing, s)
+        }
       }
+      if (hardest) for (const [thing, s] of hardest) {
+        const cracked = Math.max(...(dents.get(dentId(thing, 0))?.glassCrack ?? [0]))
+        dent(thing, s, told.moves.find((m) => m.id === thing.id))
+        if (s.speed >= CRASH_FROM && !reducedMotion.matches) {
+          const hit = Math.min(1, s.speed / 120)
+          // The ridden one already threw its sparks above.
+          if (thing !== riding) o.fx?.sparks(s.at, hit)
+          o.fx?.crash?.(s.at, hit, s.a === thing.id ? s.kindA : s.kindB, Math.max(...(dents.get(dentId(thing, 0))?.glassCrack ?? [0])) > cracked + 0.05)
+        }
+      }
+    },
+    damage: (thing) => dents.get(dentId(thing, 0)) ?? null,
+    repair(thing) {
+      looks.get(thing)?.forEach((w, i) => { dents.repairVehicle(dentId(thing, i)); w.piece.crackAt = undefined })
     },
     frame(dt) {
       follow()
+      // A struck engine steams, then smokes, then burns (#37), under the bonnet at its front: only near the eye, and
+      // gentler where motion is to be reduced.
+      if (o.fx?.engine) for (const [thing, worn] of looks) {
+        let level = 0
+        for (const w of worn) level = Math.max(level, w.piece.deform?.hoodDamage ?? 0)
+        if (level < 0.35) continue
+        const f = FRONTS[thing.motor.front], half = (thing.motor.front < 2 ? thing.size[0] : thing.size[2]) * 0.5
+        const at = placeOf(thing, [thing.size[0] / 2 + f[0] * half * 0.62, thing.size[1] * 0.8, thing.size[2] / 2 + f[2] * half * 0.62])
+        if (at && Math.hypot(at[0] - o.pose.x * M, at[1] - o.pose.y * M, at[2] - o.pose.z * M) < ENGINE_SEEN) o.fx.engine(at, level, reducedMotion.matches ? dt * 0.4 : dt)
+      }
       // Near is near the body when there is one (#367): by the eye, which rides three metres behind someone on foot, a kart
       // right beside them was out of reach and E did nothing until they had walked past it.
       const eye = o.body?.() ?? [o.pose.x * M, o.pose.y * M, o.pose.z * M]
