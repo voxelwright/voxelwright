@@ -5,7 +5,7 @@ description: Rules for the controls laid over a game's picture while someone pla
 
 # Game HUD
 
-Version 2, 2026-11-22 for #450 (version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
+Version 3, 2026-11-24 (the pie wheel; version 2 2026-11-22 for #450, version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
 browser, on a desk (keyboard and mouse, pointer lock) and on a phone (touch, upright and on its side). It does not
 cover menus (the Sky panel open is one: what it covers is measured and said, not failed), the first view or the
 kit's own look (`engine/kit/SPEC.md`, `DESIGN.md`).
@@ -13,6 +13,13 @@ kit's own look (`engine/kit/SPEC.md`, `DESIGN.md`).
 **Direction (owner, November 22):** the wheel, as the lead recommended. It is what the page has with no switch;
 `?hud=classic` keeps the controls as they were, and `?hud=context` and `?hud=quiet` stay to compare. The wand is a
 tool: it is the wheel's last choice, and has no key of its own with the wheel.
+
+**Direction (owner, November 24):** the wheel is a pie over the middle of the picture, as a game's buy wheel is
+(`engine/page/radial.ts`): a dark disc of wedges, each with a white picture and a name, a ring round the middle, an
+accent arc on the rim over the wedge pointed at. A tap of E (or a click on the held key, or by touch a tap on the tool
+key) leaves it open until a wedge is clicked; held, letting go picks the wedge pointed at, and a click while held
+picks too. It is the same pie on a phone. While it is open it is over the body: rules 1 and 2 hold for everything
+else, and `sf-hud` reports the wheel as a menu.
 
 Each rule says where it comes from. **Fetched** means the page was opened and the fact is from its text.
 **Snippet** means it came from a search summary or a secondary outlet. **Unverified** means nobody opened a
@@ -23,7 +30,7 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 ### The body comes first
 
 1. **Nothing is laid over the character's box, in any state.** That covers standing, falling with arms out,
-   under the canopy and choosing a tool. The box is `engine.playHud.body()`, a projection of the figure's
+   under the canopy (choosing a tool is the exception, by the owner's direction of November 24). The box is `engine.playHud.body()`, a projection of the figure's
    corners. `engine/test/sf-hud.mjs` fails if any seen element meets it, kit canvases included. Kit canvases
    draw a key's solid up and to the left of its DOM box, so measure the canvas, not the button.
    *Source:* Apple HIG, Game controls: "reduce the amount of virtual controls that overlap your game content"
@@ -53,7 +60,8 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 6. **Hold to open, and offer a tap that latches.** Holding and releasing is how console wheels work (RDR2:
    hold to open, snippet). GAG asks to "avoid / provide alternatives to requiring buttons to be held down"
    (fetched, [GAG full list](https://gameaccessibilityguidelines.com/full-list/)). In Voxelwright a tap of E or of
-   the tool key leaves the wheel open, and a hold of over 280 ms picks on release.
+   the tool key leaves the wheel open, and on release a hold picks the wedge pointed at (pointed at nothing, a
+   hold of over 280 ms puts it away as it was).
 7. **Time slowing while a wheel is open is reported, not confirmed.** For GTA V the evidence is a mod page that
    removes the slowdown. Ratchet & Clank comes from snippets, and Tears of the Kingdom is unverified (see
    [sources.md](sources.md)). Voxelwright stops the body (a solid input mode) but not the world.
@@ -137,19 +145,19 @@ boxes drawn on).
   (y ≈ 390). By touch the eye now stands further back and higher, over the body's middle (person.ts `BEHIND`:
   4.8 m back, 1 m up, 0.1 m left): standing, x 174 to 237 and y 478 to 680, between the thumbs, and the stick has
   room low on the left. On its side (844 x 390) the body is in the middle, x 407 to 452.
-- **Upright phone: no ring of seven keys fits.** Above the body it runs into the top keys, and beside it there is
+- **(Before November 24) Upright phone: no ring of seven keys fits.** Above the body it runs into the top keys, and beside it there is
   less than 200 px. The touch form of the wheel is a column that hangs from where the tool's key is (the key is not
   shown meanwhile, so the tool is not said twice), its names' left edges in one line, picked by sliding down. The
   thumb's keys step aside while it is open, so eight fit in one column. On its side it is a grid, two columns of four.
 - **A tap's click lands where the column has just come.** Opened by a press on the tool's key, the first tool is
   under the finger, and the tap's click went to it and picked it. A tool is picked by a click only where it was pressed.
-- **Eight round a circle tight enough to read as one thing lay on one another.** On a desk the wheel is an ellipse
+- **(Before November 24) Eight round a circle tight enough to read as one thing lay on one another.** On a desk the wheel is an ellipse
   1.9 times as wide as it is tall (115 px up and down).
 - **The thumb's keys go in one column at the right edge.** A fall's arms-out box reaches 240 px from the left, so
   an arc round Use met it.
 - **`env()` needs one CDP session.** `Emulation.setSafeAreaInsetsOverride` set on one session was 0 on the page
   once a second session was opened.
-- **A plate under the desk wheel read as a dialog over the city.** A tight ring (radius 135 px) reads as one thing.
+- **(Before November 24, when the wheel was keys beside the body) A plate under the desk wheel read as a dialog over the city.** A tight ring (radius 135 px) reads as one thing.
 - **Put the stick away with a margin either way.** Deciding at the edge every frame made it flicker as the body
   bobbed there. Deciding once per touch left it over a body that walked under a still thumb. It is put away when
   the well meets the body and comes back once it is 16 px clear.
