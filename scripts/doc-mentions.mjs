@@ -27,7 +27,7 @@ export const workingTree = {
 }
 
 const sourceFile = /\.(?:[cm]?js|jsx|tsx?|py|rs|sh|mdx?|toml|html|ya?ml|css|json|txt|lock|csv|svg|wasm)$/i
-const generatedDir = /(?:^|\/)(?:screenshots|\.shots|dist|\.sound-lab|node_modules)(?:\/|$)/
+const generatedDir = /(?:^|\/)(?:screenshots|\.shots|dist(?:-[\w-]+)?|\.sound-lab|node_modules)(?:\/|$)/
 const interpreter = /(?:^|[\s(])(?:node|python3?)\s+(?:--[\w-]+\s+)*['"]?([.\w/][.\w/-]*)['"]?(?=$|[\s)])/
 // Git paths and shell tokens are treated as text. Never run commands from a page.
 const repoPath = /(?:^|[\s`'"])((?:\.{1,2}\/|[\w.-]+\/)(?:[\w./-]*[\w/-])?)(?=$|[\s`'"])/g

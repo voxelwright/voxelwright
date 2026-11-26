@@ -1,6 +1,6 @@
 # The core
 
-The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. `npm run core` in `engine/` builds it once for `wasm32-unknown-unknown` with SIMD into `engine/page/core.wasm`. The page's workers, the mover and the shared world process all load that same file. Read [the engine](engine.md) first for where it sits.
+The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. `npm run core` in `engine/` builds it once for `wasm32-unknown-unknown` with SIMD into `engine/page/core.wasm`. The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes. The page's workers, the mover and the shared world process all load that same file. Read [the engine](engine.md) first for where it sits.
 
 ## Concepts
 
@@ -79,4 +79,4 @@ cd engine && npm run core && npm run check
 
 A core can be swapped into a running server without a restart: build it, then `POST /core/look`. Each world process starts the new module and replays the kept edits. Bodies in flight are lost.
 
-<!-- docs-verified cc92103ace26412f9a674455c432ef9c452fb3a3 {"engine/core/src/lib.rs":"0dfff0725a0f36b05e7a3acedacf8615","engine/core/src/tree.rs":"2b36ff2da4a2d3e1c196eca9b069764a","engine/core/src/kinds.rs":"c30ebd4301c6126c7b5c00a10dcd272b","engine/core/build.mjs":"f03d723b1338e7b602b3e0d820adbfd2","engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/page/edits.ts":"41ecf2c88d16227f32797a4371ee5a48"} -->
+<!-- docs-verified 4c2a4e6d8b95192626cedd0357e54cf9d8673015 {"engine/core/src/lib.rs":"0dfff0725a0f36b05e7a3acedacf8615","engine/core/src/tree.rs":"2b36ff2da4a2d3e1c196eca9b069764a","engine/core/src/kinds.rs":"c30ebd4301c6126c7b5c00a10dcd272b","engine/core/build.mjs":"f2e002ecf190fe86bf660486e1e58d40","engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/page/edits.ts":"41ecf2c88d16227f32797a4371ee5a48"} -->

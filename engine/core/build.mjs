@@ -22,6 +22,16 @@ const place = (from, to) => {
   renameSync(part, to)
 }
 
+/** Panic messages name source files. They are written as /rustc, /cargo and /core, never this machine's home, so the
+ * served wasm carries no user name and another machine builds the same bytes. Given to cargo as configuration, which
+ * adds to the target's own flags in .cargo/config.toml (an environment variable would replace them, SIMD included). */
+const REMAPPED = 'remap1'
+const remap = () => {
+  const from = { [process.env.CARGO_HOME ?? join(homedir(), '.cargo')]: '/cargo', [run('rustc', ['--print', 'sysroot'])]: '/rustc', [core.replace(/\/$/, '')]: '/core' }
+  const flags = Object.entries(from).map(([path, name]) => `--remap-path-prefix=${path}=${name}`)
+  return ['--config', `target.wasm32-unknown-unknown.rustflags=${JSON.stringify(flags)}`]
+}
+
 /** The key of what is committed under core/ and the compiler, or null when core/ has changes or git cannot say. */
 const key = () => {
   if (process.argv.includes('--no-cache')) return null
@@ -29,7 +39,7 @@ const key = () => {
     if (run('git', ['status', '--porcelain', '--', '.']) !== '') return null
     const tree = run('git', ['rev-parse', 'HEAD:./'])
     const rustc = run('rustc', ['-V']).replace(/[^\w.-]+/g, '_')
-    return `${tree}-${rustc}`
+    return `${tree}-${rustc}-${REMAPPED}`
   } catch { return null }
 }
 
@@ -38,7 +48,7 @@ if (kept && existsSync(kept)) {
   place(kept, out)
   console.log(`core: kept build ${k.slice(0, 12)}`)
 } else {
-  execFileSync('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown'], { cwd: core, stdio: 'inherit' })
+  execFileSync('cargo', ['build', '--release', '--target', 'wasm32-unknown-unknown', ...remap()], { cwd: core, stdio: 'inherit' })
   place(built, out)
   if (kept) { mkdirSync(cache, { recursive: true }); place(built, kept) }
 }

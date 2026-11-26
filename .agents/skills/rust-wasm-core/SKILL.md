@@ -20,6 +20,8 @@ WebAssembly JS API, and the probes below.
   by hand yet: what there is comes from the compiler.
 - `npm run core` (in `engine/`) builds release wasm and copies it to `engine/page/core.wasm`,
   which is ignored by git. A fresh checkout needs it before the city page works.
+- The build passes `--remap-path-prefix` through `cargo --config`, which adds to the target's flags in
+  `.cargo/config.toml`. Do not move it to `RUSTFLAGS`: an environment variable replaces those flags and SIMD goes with them.
 - Release profile: `opt-level 3`, `lto`, one codegen unit, `panic = "abort"`. The wasm is 79 kB.
 
 ## How it is called
@@ -70,4 +72,4 @@ WebAssembly JS API, and the probes below.
 Refresh this when the Rust toolchain or edition changes, when a dependency is added, or when
 the core starts to use threads.
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/core/Cargo.toml":"db826952f1bc68e63fecdbd3990fd738","engine/core/build.mjs":"3da36bcee495e94eaa59a898cbe3f42c"} -->
+<!-- docs-verified 4c2a4e6d8b95192626cedd0357e54cf9d8673015 {"engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/core/Cargo.toml":"db826952f1bc68e63fecdbd3990fd738","engine/core/build.mjs":"d752bdc64344c073cd463569fd905dae"} -->
