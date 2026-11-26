@@ -106,6 +106,9 @@
     "inspections/": "Generated directory under the build, evidence or installation root described on this page.",
     "accepted/": "Generated directory under the build, evidence or installation root described on this page."
   },
+  "engine/ears/README.md": {
+    ".venv/": "Python virtual environment created by uv sync, ignored by git."
+  },
   "engine/landing/ina/README.md": {
     "engine/page/matte.ts": "Original renderer in the historical Ina checkout."
   },
