@@ -239,11 +239,12 @@ export function living(o: {
     day(): number
     surface(x: number, z: number): number
   }
-  /** Driving audio hooks: continuous engine/tire/road beds, one-shot events, and horn. */
+  /** Driving audio hooks: continuous engine/tire/road beds, one-shot events, horn, and car radio. */
   audio?: {
     drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null): void
     event(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force?: number): void
     horn(on: boolean): void
+    radio?(action: 'next' | 'enter' | 'exit'): void
   }
 }): Living {
   const M = 10
@@ -519,7 +520,8 @@ export function living(o: {
       if (was?.ref) o.world?.ride(was.ref, false)
       if (riding?.ref) o.world?.ride(riding.ref, true)
       // Off: the seat's keys go first, and then the person is on their feet again (#367).
-      if (!riding) { leave?.(); leave = null; if (was && (was.controls ?? 'drive') === 'drive') o.audio?.event('door', 0.65) }
+      if (!riding) { leave?.(); leave = null; if (was && (was.controls ?? 'drive') === 'drive') { o.audio?.radio?.('exit'); o.audio?.event('door', 0.65) } }
+      else if (was && (was.controls ?? 'drive') === 'drive' && (riding.controls ?? 'drive') !== 'drive') o.audio?.radio?.('exit')
       if (!was !== !riding) o.ridden?.(!!riding)
     }
     const at = riding && where(riding)
@@ -533,20 +535,21 @@ export function living(o: {
       o.pose.pitch = isDrive ? -0.135 : -0.22
       if (isDrive && was !== riding) {
         const mounted = riding
+        o.audio?.radio?.('enter')
         o.audio?.event('door', 0.72)
         setTimeout(() => { if (riding === mounted) o.audio?.event('start', 0.85) }, 140)
       }
     }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
     const refreshCard = () => {
-      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn']] : []
+      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio']] : []
       o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     }
     refreshCard()
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && code === 'KeyN') { if (!e?.repeat) o.audio?.radio?.('next'); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }
