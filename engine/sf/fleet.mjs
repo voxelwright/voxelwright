@@ -131,11 +131,116 @@ function bus(name, kind, poles) {
 export const cityBus = () => bus('city bus', 'bus', false)
 export const trolleybus = () => bus('trolleybus', 'trolley', true)
 
+/**
+ * Tuned SF vehicle handling archetypes (lengths in 10 cm cells; speeds in cells/s where 1 cell/s = 0.36 km/h).
+ * Shared by `sf/cars.mjs` and `sf/fleet.mjs` so every vehicle class has distinct, responsive San Francisco feel:
+ *   - coupe:  blistering acceleration & drift-happy rear balance (212 km/h)
+ *   - saloon: punchy, planted, nimble executive saloon (171 km/h)
+ *   - hatch:  nimble city saloon & SF taxi (160 km/h)
+ *   - suv:    confident, high-grip hill climber (151 km/h)
+ *   - van:    weighty, torquey urban delivery van (124 km/h)
+ *   - truck:  heavy, torquey, unstoppable freight hauler (106 km/h)
+ *   - bus:    heavy transit reference spec (kept ready if >96-cell living bodies are enabled)
+ */
+export const HANDLING = {
+  coupe:  { power: 142, top: 590, grip: 1.24, steer: 0.62, tough: 220 },
+  saloon: { power: 112, top: 475, grip: 1.38, steer: 0.58, tough: 210 },
+  hatch:  { power: 100, top: 445, grip: 1.42, steer: 0.60, tough: 200 },
+  suv:    { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 280 },
+  van:    { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 360 },
+  truck:  { power: 76,  top: 295, grip: 1.28, steer: 0.42, tough: 500 },
+  bus:    { power: 70,  top: 265, grip: 1.35, steer: 0.38, tough: 620 },
+}
+
 /** A motor for something driven on four wheels, its feet at the wheels' middles (body cells), front two steering. */
-const motorOf = (length, width, wheelX, top) => ({
-  front: 0, grip: 1.25, power: 55, top, steer: 0.5, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 160,
-  feet: [[wheelX[0], 1], [wheelX[0], width - 1], [wheelX[1], 1], [wheelX[1], width - 1]].map(([x, z], i) => ({ at: [x, 3.2, z], reach: 6, steers: i >= 2, drives: i < 2 })),
+const motorOf = (length, width, wheelX, spec, opts = {}) => ({
+  front: 0,
+  grip: spec.grip,
+  power: spec.power,
+  top: spec.top,
+  steer: spec.steer,
+  hover: 0, lift: 0, upright: 0, turns: 0, jump: 0,
+  tough: spec.tough,
+  feet: [[wheelX[0], 1], [wheelX[0], width - 1], [wheelX[1], 1], [wheelX[1], width - 1]].map(([x, z], i) => ({
+    at: [x, opts.footY ?? 3.2, z],
+    reach: opts.reach ?? 6,
+    steers: i >= 2,
+    drives: opts.awd ? true : i < 2,
+  })),
 })
+
+/** A sleek 2-seat sports coupe: 4.4 m long, low wide stance, sloped fastback glass, rear spoiler, alloy rims, twin exhausts. */
+export function sportsCoupe() {
+  const per = 4, L = 4.4, Wd = 1.96, H = 1.26, g = grid(L, H, Wd, per)
+  const PAINT = k(STEEL, hue(0, 4)), DARK = k(ROOFING, grey(13)), TRIM = k(STEEL, grey(12))
+  const TYRE = k(ROOFING, grey(14)), RIM = k(STEEL, grey(5)), CAP = k(STEEL, grey(10))
+  const GLASS_ = k(GLASS, grey(12)), HEAD = k(LAMP, 1), TAIL = k(LAMP, hue(0, 4)), SEAT = k(ROOFING, grey(11))
+  // Low sculpted wedge body with aggressive front splitter and tapered rear deck.
+  g.rounded(0.08, L - 0.06, 0.22, 0.72, 0.04, Wd - 0.04, 0.18, PAINT)
+  // Tapered front nose & bonnet sloping smoothly down toward the front grille.
+  for (let i = 0; i < 14; i++) {
+    const t = i / 14
+    g.rounded(L - 1.35 + t * 1.25, L - 0.04, 0.56 - t * 0.16, 0.78 - t * 0.22, 0.08, Wd - 0.08, 0.16, PAINT)
+  }
+  // Rear muscular haunches & decklid.
+  g.rounded(0.12, 1.35, 0.64, 0.80, 0.06, Wd - 0.06, 0.16, PAINT)
+  // Fastback cabin greenhouse: sloped windscreen, sleek roof, sweeping rear glass.
+  for (let i = 0; i < 16; i++) {
+    const t = i / 16
+    const y0 = 0.72 + t * 0.50, y1 = y0 + 0.04
+    const x0 = 0.85 + t * 0.58, x1 = 3.10 - t * 0.65
+    const inset = 0.14 + t * 0.16
+    g.rounded(x0, x1, y0, y1, inset, Wd - inset, 0.12, t > 0.84 ? PAINT : GLASS_)
+    // Crisp A-pillars and C-pillars framing the glass.
+    g.box(x1 - 0.07, x1, y0, y1, inset, inset + 0.07, PAINT)
+    g.box(x1 - 0.07, x1, y0, y1, Wd - inset - 0.07, Wd - inset, PAINT)
+    g.box(x0, x0 + 0.09, y0, y1, inset, inset + 0.08, PAINT)
+    g.box(x0, x0 + 0.09, y0, y1, Wd - inset - 0.08, Wd - inset, PAINT)
+  }
+  // Roof panel.
+  g.rounded(1.42, 2.46, 1.18, H, 0.28, Wd - 0.28, 0.10, PAINT)
+  // Rear carbon-black wing spoiler on twin uprights so the coupe silhouette pops cleanly from chase cam.
+  for (const z of [0.36, Wd - 0.44]) g.box(0.14, 0.28, 0.78, 0.90, z, z + 0.08, DARK)
+  g.box(0.06, 0.26, 0.88, 0.94, 0.12, Wd - 0.12, DARK)
+  // Front splitter, rear diffuser, side skirts, side air intakes, and twin chrome exhaust tips.
+  g.box(L - 0.18, L, 0.18, 0.28, 0.08, Wd - 0.08, DARK)
+  g.box(0.02, 0.20, 0.18, 0.34, 0.14, Wd - 0.14, DARK)
+  for (const [z0, z1] of [[0.04, 0.10], [Wd - 0.10, Wd - 0.04]]) {
+    g.box(0.95, L - 1.15, 0.18, 0.28, z0, z1, DARK)
+    g.box(1.30, 1.65, 0.34, 0.60, z0, z1, DARK)
+  }
+  for (const z of [0.44, Wd - 0.56]) g.box(0, 0.12, 0.22, 0.30, z, z + 0.12, RIM)
+  // Front air intake grille, sleek LED headlamps, full-width crimson tail-light bar.
+  g.box(L - 0.04, L, 0.28, 0.46, 0.36, Wd - 0.36, DARK)
+  for (const z of [0.12, Wd - 0.44]) g.box(L - 0.05, L, 0.44, 0.54, z, z + 0.32, HEAD)
+  g.box(0.02, 0.08, 0.58, 0.66, 0.14, Wd - 0.14, TAIL)
+  // Hollow shell before placing interior seats, dash, steering wheel & wheels.
+  g.hollow()
+  g.box(1.15, 2.95, 0.24, 0.30, 0.16, Wd - 0.16, DARK)
+  for (const z of [0.28, Wd - 0.82]) {
+    g.box(1.55, 2.15, 0.30, 0.48, z, z + 0.54, SEAT)
+    g.box(1.42, 1.62, 0.48, 0.96, z, z + 0.54, SEAT)
+  }
+  g.box(2.48, 2.86, 0.56, 0.78, 0.18, Wd - 0.18, TRIM)
+  g.box(2.34, 2.48, 0.66, 0.86, 0.44, 0.74, DARK)
+  // Wheel arches carved & lined dark, wide performance tyres with bright alloy hubs.
+  for (const xm of [0.92, L - 0.92]) {
+    for (let y = g.c(0.18); y <= g.c(0.76); y++) for (let x = g.c(xm - 0.42); x <= g.c(xm + 0.42); x++) {
+      const d = Math.hypot(x - g.c(xm), y - g.c(0.34))
+      if (d < 0.37 * g.s) for (const z of [0, 1, 2, 3, g.D - 4, g.D - 3, g.D - 2, g.D - 1]) g.set(x, y, z, 0)
+      else if (d < 0.43 * g.s) for (const z of [0, 1, g.D - 2, g.D - 1]) if (g.get(x, y, z)) g.set(x, y, z, DARK)
+    }
+    for (const [z0, z1] of [[0, 0.24], [Wd - 0.24, Wd]]) g.wheel(xm, 0.34, z0, z1, 0.34, TYRE, RIM, CAP)
+  }
+  const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
+  return {
+    name: 'sports coupe', kind: 'car', per, cells: g.cells, size: [g.W, g.H, g.D], body: size,
+    motor: motorOf(size[0], size[2], [9, 35], HANDLING.coupe, { footY: 3.0, reach: 5.5 }),
+    seats: [[20, -1.2, 5.5], [20, -1.2, 14.0]],
+    eye: [19.5, 9.8, 5.5],
+    paint: [PAINT], tyre: [TYRE],
+  }
+}
 
 /** A delivery van: 6 m, a tall white box with a sloped nose, sliding door, back doors. Driven like a car. */
 export function van() {
@@ -179,7 +284,7 @@ export function van() {
     for (const [z0, z1] of [[0, 0.22], [Wd - 0.22, Wd]]) g.wheel(xm, 0.36, z0, z1, 0.36, TYRE, k(STEEL, grey(10)), k(STEEL, grey(6)))
   }
   const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
-  return { name: 'delivery van', kind: 'van', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [11, 47], 140), seats: [[42, 4.5, 6.5], [42, 4.5, 14]], paint: [WHITE], tyre: [TYRE] }
+  return { name: 'delivery van', kind: 'van', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [11, 47], HANDLING.van), seats: [[42, 4.5, 6.5], [42, 4.5, 14]], paint: [WHITE], tyre: [TYRE] }
 }
 
 /** A box truck: 8 m, a cab and a dry-freight box behind it on six wheels. Driven like a car, more slowly. */
@@ -254,7 +359,7 @@ export function boxTruck() {
   // The arches over the front wheels in the cab's sides.
   for (let y = g.c(0.5); y <= g.c(1.1); y++) for (let x = g.c(L - 1.75); x <= g.c(L - 0.45); x++) { const d = Math.hypot(x - g.c(L - 1.1), y - g.c(0.48)); if (d > 0.5 * g.s && d < 0.6 * g.s) for (let z = 0; z < g.D; z++) if (g.get(x, y, z) === CAB) g.set(x, y, z, BLACK) }
   const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
-  return { name: 'box truck', kind: 'truck', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [16, 69], 110), seats: [[66, 9, 7], [66, 9, 17]], paint: [CAB, BOX], tyre: [TYRE] }
+  return { name: 'box truck', kind: 'truck', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [16, 69], HANDLING.truck), seats: [[66, 9, 7], [66, 9, 17]], paint: [CAB, BOX], tyre: [TYRE] }
 }
 
 /**
