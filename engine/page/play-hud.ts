@@ -161,6 +161,12 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(72px, calc(env(safe-
      meanwhile (the settings key folds it again). */
   html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .home-key, #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
   html[data-hud] #where { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 136px); left: max(16px, env(safe-area-inset-left)) !important; }
+  /* Riding (living.ts): the thing's keys are kit keys where the thumb's keys stood, a column on the corner from the bottom up,
+     44 px tall (rule 16) and 19 px apart (each solid stands 9 px up and to the left of its face). On its side five keys
+     are too tall for the picture: they stand in two columns, the first three on the right. */
+  html[data-hud] [data-panel="living"] { right: calc(env(safe-area-inset-right, 0px) + 14px); bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); gap: 19px; }
+  html[data-hud] [data-panel="living"] .vx-button { --vx: 3px; --vx-key-size: var(--vx-key-small); min-inline-size: 72px; min-block-size: 44px; padding: 0 calc(var(--vx) * 4); justify-content: center; }
+  @media (orientation: landscape) { html[data-hud] [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 19px); inline-size: calc(2 * 96px + 19px); column-gap: 19px; } }
 }
 `
 
@@ -183,6 +189,8 @@ export function playHud(o: {
   wand?: { held: boolean }
   /** Back to the view (explore.ts `back`), and whether it can be gone back from here: by touch the wheel has a key for it. */
   back?: { go(): void; can(): boolean }
+  /** While riding (living.ts): the corners of the thing ridden (cells), which are kept clear as the body is; none with the eye in the seat. Null on foot. */
+  vehicle?: () => readonly (readonly [number, number, number])[] | null
 }): PlayHud {
   const asked = new URLSearchParams(location.search).get('hud')
   const mode = asked === 'classic' ? null : (HUDS as readonly string[]).includes(asked ?? '') ? (asked as HudMode) : 'wheel'
@@ -190,6 +198,13 @@ export function playHud(o: {
 
   /** Boxes round what is drawn of the body (CSS px): the figure, and under a canopy its lines and its dome, each turned as it faces. */
   const parts = (): Box[] => {
+    const ridden = o.vehicle?.()
+    if (ridden) {
+      const seen = ridden.map((c) => o.project(c))
+      if (!seen.length || seen.some((p) => !p)) return []
+      const xs = seen.map((p) => p![0]), ys = seen.map((p) => p![1])
+      return [{ left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) }]
+    }
     const f = o.me.feet
     if (!f || o.me.view === 'head') return []
     const ax = Math.cos(f.yaw), az = Math.sin(f.yaw), fx = Math.sin(f.yaw), fz = -Math.cos(f.yaw)
@@ -293,6 +308,7 @@ export function playHud(o: {
   // ── The wand's key: wand.ts makes it in a panel of its own once the wand is ready. Here it becomes a kit key as the
   // others are, latched down while the wand is in hand (wand.ts marks that `on`). ──
   let wandKey: HTMLButtonElement | null = null
+  const ridingKeys = new WeakSet<HTMLElement>()
   const wandKeyed = () => {
     const el = wandKey ?? document.querySelector<HTMLButtonElement>('[data-panel="wand-take"] button')
     if (!el) return
@@ -479,6 +495,8 @@ export function playHud(o: {
     if (home.hidden === homeShown) { home.hidden = !homeShown; if (homeShown) o.ui.kit?.refresh?.(home) }
     if (!o.engaged()) return
     wandKeyed()
+    // The keys of a thing ridden (living.ts makes them each time one is got on): kit keys as the others are, once shown.
+    if (coarse.matches) for (const el of document.querySelectorAll<HTMLElement>('[data-panel="living"] .vx-button')) if (!ridingKeys.has(el)) { ridingKeys.add(el); kitDo((k) => k.adopt(el)) }
     // (Come in: where one is, said once on arrival.)
     if (!inside) { inside = true; named(); since = performance.now(); wasOn = o.me.on }
     if (tools && tools.dataset.vxWay !== 'down') { tools.dataset.vxWay = 'down'; o.ui.kit?.refresh?.(tools) }
@@ -498,9 +516,13 @@ export function playHud(o: {
     // What has been done, for the cues.
     if (o.me.canopy && !wasCanopy) did.chute++
     wasCanopy = o.me.canopy
-    if (!o.me.on && wasOn) { did.flew = true; flyingSince = now }
-    if (o.me.on && !wasOn) did.landed++
-    wasOn = o.me.on
+    // (Riding takes the body off its feet and puts it down again: that is neither a flight nor a landing.)
+    if (o.vehicle?.()) wasOn = true
+    else {
+      if (!o.me.on && wasOn) { did.flew = true; flyingSince = now }
+      if (o.me.on && !wasOn) did.landed++
+      wasOn = o.me.on
+    }
     // (Off one's feet for more than half a second is a fall; a hop on a roof is over before then.)
     const off = o.me.on && o.me.aloft && !o.me.canopy
     if (!off) offSince = 0

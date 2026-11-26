@@ -70,7 +70,12 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 
 8. **Show a control only while it can do something.** Apple: "hide controls when an action isn't available or
    relevant" (fetched). In Voxelwright the parachute cue shows while falling, the fly cue while standing and never
-   flown, and the walk cue just after taking off. A cue goes once it has been used a few times.
+   flown, and the walk cue just after taking off. A cue goes once it has been used a few times. Riding (#11) is the
+   plainest case: the keys of one on foot, the tool's key, the tools and the cues step aside (`html.riding`, set by
+   `living.ts`), and by touch the thing's own keys (Down, Up, what it does once, Seat, Get off) stand where the
+   thumb's keys stood, a kit key each. By touch the card of keyboard keys is not shown. While riding, the thing
+   ridden is the body that nothing may cover (`parts()`), and `sf-hud.mjs` measures it riding a car and a
+   hovering thing (`--ride-only` runs just that).
 9. **A cue stands beside the thing it is about.** XAG 101 shows Fenyx's "Y Collect" over the character, outlined
    (fetched,
    [XAG 101](https://learn.microsoft.com/en-us/gaming/accessibility/xbox-accessibility-guidelines/101)). No
