@@ -14,19 +14,19 @@ const CODE = /* wgsl */ `
 struct U {
   eye: vec3f, tanHalf: f32,
   right: vec3f, aspect: f32,
-  up: vec3f, pad0: f32,
-  forward: vec3f, pad1: f32,
-  sun: vec3f, pad2: f32,
+  up: vec3f, midX: f32,
+  forward: vec3f, midY: f32,
+  sun: vec3f, midZ: f32,
   // The body's middle of mass from the anchor, and in its own cells; where its low corner was in the world when
   // it came loose (its cells keep their shades); and how it is turned, as the three columns of a matrix.
   // cell: how big one of the body's cells is, in the world's (1 for what came loose from it; less for a thing made finer).
   pos: vec3f, cell: f32,
   // ghost: not 0 for a thing not yet made, drawn pale and seen through (the ask bar's ghost, #220).
   cells: vec3i, ghost: i32,
-  com: vec3f, pad5: f32,
-  c0: vec3f, pad6: f32,
-  c1: vec3f, pad7: f32,
-  c2: vec3f, pad8: f32,
+  com: vec3f, lampBrake: f32,
+  c0: vec3f, lampRev: f32,
+  c1: vec3f, lampHead: f32,
+  c2: vec3f, lampAxis: f32,
 }
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
 struct Looks { palette: array<vec4f, 256>, material: array<Material, 16> }
@@ -96,9 +96,56 @@ fn behindPane(in: Out) -> vec3f {
   let pane = textureLoad(panes, vec2i(in.pos.xy), 0);
   return select(vec3f(1.0), pow(pane.rgb, vec3f(0.4545)), pane.a > 0.0 && length(in.seen) > pane.a);
 }
+// Dynamic vehicle lamp emissive (#26): front headlights (warm white, low/high beam), rear tail/brake lamps (crimson,
+// blazing >1.0 HDR into glow.ts when braking/handbraking), and crisp white reverse lamps when gear == -1.
+fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
+  let ax = i32(round(u.lampAxis));
+  var fwd = vec3f(1.0, 0.0, 0.0);
+  if (ax == 2) { fwd = vec3f(-1.0, 0.0, 0.0); }
+  else if (ax == 3) { fwd = vec3f(0.0, 0.0, 1.0); }
+  else if (ax == 4) { fwd = vec3f(0.0, 0.0, -1.0); }
+  let lat = vec3f(-fwd.z, 0.0, fwd.x);
+  let mid = vec3f(u.midX, u.midY, u.midZ);
+  let rel = (in.at - in.n * 0.5) - mid;
+  let halfLen = max(abs(dot(mid, fwd)), 1.0);
+  let halfWide = max(abs(dot(mid, lat)), 1.0);
+  let along = dot(rel, fwd) / halfLen;
+  let across = abs(dot(rel, lat)) / halfWide;
+  let faceFwd = dot(in.n, fwd);
+  let head = max(u.lampHead, 0.0);
+  let brake = max(u.lampBrake, 0.0);
+  let rev = max(u.lampRev, 0.0);
+  // Front lamps: warm intense white headlights (crisper & hotter on high beam > 1.0), amber markers kept amber.
+  if (along > 0.35 && faceFwd > -0.5) {
+    if (head <= 0.01) { return vec3f(0.0); }
+    let amber = albedo.r > albedo.g * 1.4 && albedo.g > albedo.b * 2.2;
+    if (amber) { return vec3f(1.8, 0.78, 0.08) * min(head, 1.2); }
+    let hi = clamp(head - 1.0, 0.0, 1.0);
+    let tint = mix(vec3f(1.0, 0.88, 0.66), vec3f(1.0, 0.97, 0.90), hi);
+    return tint * (min(head, 1.0) * 2.8 + hi * 6.5);
+  }
+  // Rear lamps: dedicated white reverse lenses, inner reverse zone on red clusters when reversing, steady crimson tails, blazing crimson brakes.
+  if (along < -0.35 && faceFwd < 0.5) {
+    let whiteLens = albedo.g > albedo.r * 0.65 && albedo.b > albedo.r * 0.55;
+    if (whiteLens) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
+    let amber = albedo.g > albedo.r * 0.25 && albedo.b < albedo.r * 0.25;
+    if (amber) { return vec3f(1.5, 0.64, 0.06) * min(head, 1.0); }
+    if (rev > 0.05 && across < 0.62) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
+    let tail = min(head, 1.0) * 1.9;
+    let stop = brake * 9.5;
+    let redPower = max(tail, stop);
+    if (redPower <= 0.01) { return vec3f(0.0); }
+    let hot = clamp(brake, 0.0, 1.0);
+    return vec3f(1.0, 0.004 + hot * 0.003, 0.001 + hot * 0.001) * redPower;
+  }
+  // Side/roof marker lamps: gentle warm marker glow when headlights are on.
+  if (head > 0.05) { return albedo * (1.8 * min(head, 1.0)); }
+  return vec3f(0.0);
+}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   // (Glass faces come here only with mirrors off: a pale face.)
-  let m = looks.material[in.kind & 15u];
+  let stuff = in.kind & 15u;
+  let m = looks.material[stuff];
   // The cell as it was in the world when the body came loose, and the face as it then looked.
   // Paint goes by the world's cells: a finer thing's boards and bricks are the size the town's are.
   let inside = (in.at - in.n * 0.5) * u.cell;
@@ -109,16 +156,20 @@ fn behindPane(in: Out) -> vec3f {
     let sunny = sunlit(in.seen + u.eye, in.facing, 0u);
     if (sunny >= 0.0) { direct *= sunny; }
   }
-  var col = shade(albedo, in.facing, normalize(in.seen), u.sun, direct, 1.0, m.rough, m.glow);
+  let dynLamp = stuff == 15u && u.lampAxis != 0.0;
+  var col = shade(albedo, in.facing, normalize(in.seen), u.sun, direct, 1.0, select(m.rough, 0.18, dynLamp), select(m.glow, 0.0, dynLamp));
+  if (dynLamp) { col += vehicleLamp(in, albedo); }
   if ((in.kind & 128u) != 0u) { col = carPaint(col, in.facing, normalize(in.seen), direct); }
   let lit = tone(col);
+  // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
+  let glowAlpha = select(1.0, 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0), dynLamp);
   if (u.ghost != 0) {
     // Every other pixel, in a grain that drifts upward, and paler: the world shows through.
     let p = vec2u(in.pos.xy);
     if (((p.x + p.y + u32(in.at.y * u.cell * 4.0)) & 1u) == 0u) { discard; }
     return vec4f(mix(lit, vec3f(0.75, 0.88, 1.0), 0.45) * behindPane(in), 1.0);
   }
-  return vec4f(lit * behindPane(in), 1.0);
+  return vec4f(lit * behindPane(in), glowAlpha);
 }
 // A pane of a body's glass, the face of it that looks at the eye (one face a pane, from inside or out). Two passes,
 // so that panes need no order among themselves: what is already drawn behind is multiplied by what comes through
@@ -165,6 +216,12 @@ export interface Piece {
   cell: number
   /** A thing not yet made, drawn pale and seen through. */
   ghost?: boolean
+  /**
+   * Dynamic vehicle lamp state (#26): `[brake, reverse, headlight, frontAxis]`.
+   * `brake` 0..1.5 (1 braking, >1 handbrake), `reverse` 0..1, `headlight` 0..2 (1 low beam, >1 high beam),
+   * `frontAxis` 1:+x, 2:-x, 3:+z, 4:-z (0 or omitted: inactive static lamp material).
+   */
+  lamps?: [number, number, number, number]
   destroy(): void
 }
 
@@ -243,15 +300,22 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       for (const piece of live) {
         // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
         if (!piece.cell || !piece.count) continue
-        const [x, y, z, w] = piece.rot, b = piece.born
+        const [x, y, z, w] = piece.rot, b = piece.born, lamps = piece.lamps
+        f[11] = b.size[0] * 0.5
+        f[15] = b.size[1] * 0.5
+        f[19] = b.size[2] * 0.5
         f.set([piece.pos[0] - anchor[0], piece.pos[1] - anchor[1], piece.pos[2] - anchor[2], piece.cell], 20)
         i32.set(b.low, 24)
         i32[27] = piece.ghost ? 1 : 0
         f.set(b.com, 28)
+        f[31] = lamps ? lamps[0] : 0
         // The turn as a matrix, a column at a time.
         f.set([1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)], 32)
+        f[35] = lamps ? lamps[1] : 0
         f.set([2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)], 36)
+        f[39] = lamps ? lamps[2] : 0
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
+        f[43] = lamps ? lamps[3] : 0
         device.queue.writeBuffer(piece.uniforms, 0, block.slice(0))
         pass.setBindGroup(0, piece.bind)
         pass.setVertexBuffer(0, piece.faces)
