@@ -6,6 +6,7 @@ import { buildKit } from "./kit.mjs";
 import { loadPosts } from "./posts.mjs";
 import { renderPost, ContentError } from "./markdown.mjs";
 import { homePage } from "./landing.mjs";
+import { personalHomeOn, buildFrontAssets, frontPage } from "./front.mjs";
 import { voxelmorphismPage } from "./voxelmorphism.mjs";
 import { layout, blogPage, tagsPage, tagPage, postPage, notFoundPage } from "./pages.mjs";
 import { llmsTxt, atomFeed, sitemap, robotsTxt } from "./feeds.mjs";
@@ -27,11 +28,12 @@ const ROOT = path.resolve(import.meta.dirname, "..");
  * @returns {Promise<{ posts: object[], pages: object[] }>}
  * @throws {ContentError} listing every content problem found.
  */
-export async function build({ outDir, drafts = false, dev = false, postsDir = path.join(ROOT, "posts"), featuresDir = path.join(ROOT, "features"), site }) {
+export async function build({ outDir, drafts = false, dev = false, personalHome = personalHomeOn(), postsDir = path.join(ROOT, "posts"), featuresDir = path.join(ROOT, "features"), site }) {
   site ??= (await import(path.join(ROOT, "site.config.mjs"))).default;
   site = { ...site, origin: site.origin.replace(/\/+$/, ""), base: normalizeBase(site.base) };
   const { base } = site;
   const mounted = isMounted(base);
+  const front = mounted && Boolean(personalHome);
 
   const { posts, errors } = loadPosts(postsDir, { includeDrafts: drafts });
   const loaded = await loadFeatures(site, { featuresDir, dev });
@@ -56,6 +58,7 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   // merge its files into it, or replace them.
   if (mounted) {
     const own = new Set(fs.readdirSync(path.join(ROOT, "static")));
+    if (!front) own.delete("front");
     own.add("vendor");
     for (const post of posts) if (own.has(post.slug)) errors.push(`${post.file}: a post cannot be called "${post.slug}"; ${sitePath(base, `/${post.slug}/`)} holds the site's own files. Rename its folder.`);
   }
@@ -98,9 +101,10 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   fs.mkdirSync(outDir, { recursive: true });
   for (const entry of fs.readdirSync(outDir)) fs.rmSync(path.join(outDir, entry), { recursive: true, force: true });
   const siteDir = path.join(outDir, base);
+  const frontStatic = path.join(ROOT, "static/front");
   fs.cpSync(path.join(ROOT, "static"), siteDir, {
     recursive: true,
-    filter: (src) => src !== path.join(ROOT, "static/landing/eggs"),
+    filter: (src) => src !== path.join(ROOT, "static/landing/eggs") && src !== frontStatic,
   });
   const vendor = path.join(siteDir, "vendor/village");
   await buildKit(vendor);
@@ -135,6 +139,14 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   write(outDir, sitePath(base, "/sitemap.xml"), sitemap(site, pages, posts));
   // crawlers read robots.txt only at the origin's root, wherever the site is mounted
   write(outDir, "robots.txt", robotsTxt(site));
+
+  // Optional personal front page at "/" while the blog stays mounted under its base.
+  if (front) {
+    const frontCss = await buildFrontAssets(outDir, base);
+    const home = frontPage(site, { dev, css: frontCss });
+    write(outDir, "index.html", home.html);
+    write(outDir, "index.md", home.markdown);
+  }
 
   // Feature files go in last, so they can be checked against everything the site itself wrote.
   const taken = [];

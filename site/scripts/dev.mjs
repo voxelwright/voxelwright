@@ -6,13 +6,14 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { startServer } from "./serve.mjs";
+import { personalHomeOn } from "../generator/front.mjs";
 import { normalizeBase } from "../lib/paths.mjs";
 import site from "../site.config.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DEV_DIR = ".dev";
 const PORT = Number(process.env.PORT ?? 4321);
-const BASE = normalizeBase(site.base); // the site is served at its mount, as in production
+const BASE = personalHomeOn() ? "/" : normalizeBase(site.base); // the site is served at its mount, or "/" when the personal front page is on
 const RELOAD_PORT = PORT + 1; // the dev pages listen here (see generator/pages.mjs)
 const WATCH = ["posts", "static", "generator", "lib", "src", "site.config.mjs"];
 

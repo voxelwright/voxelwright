@@ -16,6 +16,7 @@
     "cards": "node scripts/cards.mjs",
     "flag-proof": "node scripts/flag-proof.mjs",
     "check": "node scripts/check.mjs && node --test \"test/*.test.mjs\"",
+    "check-home": "node scripts/check-home.mjs",
     "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {

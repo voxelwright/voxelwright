@@ -32,5 +32,6 @@ export default {
     { name: "X", url: "https://x.com/pasha_knz" },
     { name: "LinkedIn", url: "https://www.linkedin.com/in/pavlo-zahynailo/" },
     { name: "Twitch", url: "https://www.twitch.tv/p_bender" },
+    { name: "GitHub", url: "https://github.com/zahynailo" },
   ],
 };

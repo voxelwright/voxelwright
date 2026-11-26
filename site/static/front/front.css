@@ -1,0 +1,146 @@
+/* Personal front page layout on Voxelmorphism.
+   Colours, ground, lettering, keycaps and groove come from the kit's tokens and sheets;
+   this file only places them in a calm, centered column with zero hardcoded colours. */
+
+html:has(> body.front-page) {
+  background: var(--vx-ground);
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+.front-page {
+  margin: 0;
+  min-block-size: 100dvh;
+  overflow-x: clip;
+  background: var(--vx-ground);
+  color: var(--vx-ink);
+  font: 400 1rem/1.55 var(--vx-font);
+  -webkit-tap-highlight-color: transparent;
+  display: grid;
+  place-items: center;
+  padding: calc(var(--vx) * 10) clamp(20px, 6vw, calc(var(--vx) * 12)) calc(var(--vx) * 16);
+  box-sizing: border-box;
+}
+
+.front-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  inline-size: 100%;
+  max-inline-size: calc(var(--vx) * 124); /* 496 px: fits "PAVLO ZAHYNAILO" on one line so the groove aligns flush */
+  min-inline-size: 0;
+}
+
+.front-head {
+  display: grid;
+  gap: calc(var(--vx) * 5);
+  justify-items: start;
+  inline-size: 100%;
+  min-inline-size: 0;
+}
+
+.front-name {
+  position: relative;
+  z-index: 2;
+  max-inline-size: 100%;
+}
+
+.front-bio {
+  margin: 0;
+  max-inline-size: 44ch;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--vx-ink-quiet);
+  text-wrap: pretty;
+}
+
+/* Primary key bank: Voxelwright World (enamel main key) followed by Blog (Ridgeline ordinary key).
+   Offset 4 voxels inline-start so the 8-course keycap's cabinet-projected left bevel sits flush with the column rail. */
+.front-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--vx) * 6) calc(var(--vx) * 7);
+  inline-size: 100%;
+  margin: calc(var(--vx) * 12) 0 0;
+  padding: 0 0 0 calc(var(--vx) * 4);
+  box-sizing: border-box;
+  list-style: none;
+}
+
+.front-links > li {
+  display: flex;
+  align-items: center;
+  min-inline-size: 0;
+}
+
+.front-world {
+  padding-inline: calc(var(--vx) * 6);
+}
+
+.front-blog {
+  padding-inline: calc(var(--vx) * 6);
+}
+
+.front-rule {
+  inline-size: 100%;
+  margin-block: calc(var(--vx) * 10) calc(var(--vx) * 2);
+}
+
+.front-socials {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 calc(var(--vx) * 6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.front-socials a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: calc(var(--vx) * 11);
+  color: var(--vx-ink-quiet);
+  font: 400 0.875rem/1.4 var(--vx-mono);
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  text-underline-offset: 0.24em;
+  transition: color 140ms ease;
+}
+
+.front-socials a:focus-visible {
+  outline: 2px solid var(--vx-focus);
+  outline-offset: calc(var(--vx) * 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .front-socials a:hover {
+    color: var(--vx-ink);
+    text-decoration: underline;
+    text-decoration-thickness: 1.5px;
+  }
+}
+
+@media (max-width: 35rem) {
+  .front-page {
+    padding: calc(var(--vx) * 8) calc(var(--vx) * 6) calc(var(--vx) * 12);
+  }
+  .front-bio {
+    font-size: 1rem;
+  }
+  .front-links {
+    margin-block-start: calc(var(--vx) * 10);
+    gap: calc(var(--vx) * 5) calc(var(--vx) * 6);
+  }
+  .front-rule {
+    margin-block: calc(var(--vx) * 8) calc(var(--vx) * 1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .front-socials a {
+    transition: none;
+  }
+}
