@@ -147,6 +147,7 @@ export const HANDLING = {
   saloon: { power: 112, top: 475, grip: 1.38, steer: 0.58, tough: 210 },
   hatch:  { power: 100, top: 445, grip: 1.42, steer: 0.60, tough: 200 },
   suv:    { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 280 },
+  waitwhat: { power: 108, top: 440, grip: 1.52, steer: 0.58, tough: 270 },
   van:    { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 360 },
   truck:  { power: 76,  top: 295, grip: 1.28, steer: 0.42, tough: 500 },
   bus:    { power: 70,  top: 265, grip: 1.35, steer: 0.38, tough: 620 },
@@ -400,4 +401,64 @@ export function cableCar() {
   g.box(0.3, L - 0.3, 2.95, 3.05, 0.4, Wd - 0.4, ROOF)
   for (const x of [0.1, L - 0.2]) { g.box(x, x + 0.1, 2.75, 3.15, 0.7, Wd - 0.7, BLUE); g.box(x - 0.01, x + 0.11, 2.85, 3.05, 0.85, Wd - 0.85, k(PLASTER, grey(0))) }
   return { name: 'cable car', kind: 'cable', per, cells: g.cells, size: [g.W, g.H, g.D], paint: [MAROON, CREAM, BLUE], tyre: [] }
+}
+
+/** A WaitWhat autonomous electric crossover robotaxi (#57): pearl white, mint livery, perimeter LiDAR pods & clean sculpted hood. */
+export function waitwhat() {
+  const per = 4, L = 4.68, Wd = 1.98, H = 1.78, g = grid(L, H, Wd, per), midZ = Wd / 2
+  const WHITE = k(STEEL, grey(0)), SILVER = k(STEEL, grey(4)), SLATE = k(STEEL, grey(11))
+  const OBSIDIAN = k(ROOFING, grey(13)), TYRE = k(ROOFING, grey(14)), MINT = k(STEEL, hue(10, 4))
+  const NAVY = k(STEEL, hue(15, 6)), GLASS_ = k(GLASS, grey(12)), HEAD = k(LAMP, 1)
+  const TAIL = k(LAMP, hue(0, 4)), AMBER = k(LAMP, hue(2, 4)), CYAN = k(LAMP, hue(11, 4))
+  const SEAT = k(ROOFING, grey(11)), WHITE_LAMP = k(LAMP, grey(0))
+  g.rounded(0.10, L - 0.14, 0.30, 0.62, 0.04, Wd - 0.04, 0.24, WHITE)
+  g.rounded(0.05, 0.45, 0.33, 0.62, 0.09, Wd - 0.09, 0.18, WHITE)
+  g.rounded(L - 0.34, L - 0.04, 0.27, 0.35, 0.12, Wd - 0.12, 0.14, OBSIDIAN)
+  g.rounded(0.06, 0.30, 0.27, 0.41, 0.12, Wd - 0.12, 0.12, OBSIDIAN)
+  g.rounded(0.12, L - 0.22, 0.31, 0.88, 0.04, Wd - 0.04, 0.20, WHITE)
+  g.rounded(0.18, L - 0.62, 0.88, 0.93, 0.07, Wd - 0.07, 0.20, WHITE)
+  g.rounded(0.18, L - 1.24, 0.93, 1.00, 0.08, Wd - 0.08, 0.20, WHITE)
+  g.rounded(L - 0.36, L - 0.08, 0.31, 0.82, 0.08, Wd - 0.08, 0.20, WHITE)
+  g.rounded(L - 0.18, L - 0.03, 0.33, 0.72, 0.12, Wd - 0.12, 0.16, WHITE)
+  for (let i = 0; i < 20; i++) {
+    const t = i / 19, y0 = 0.98 + t * 0.56, y1 = y0 + 0.045, x0 = 0.36 + t * 0.58, x1 = 3.40 - t * 0.66, inset = 0.10 + t * 0.18
+    g.rounded(x0, x1, y0, y1, inset, Wd - inset, 0.16, t > 0.86 ? WHITE : GLASS_)
+    g.box(x1 - 0.08, x1, y0, y1, inset, inset + 0.08, OBSIDIAN)
+    g.box(x1 - 0.08, x1, y0, y1, Wd - inset - 0.08, Wd - inset, OBSIDIAN)
+    g.box(1.98, 2.12, y0, y1, inset, inset + 0.06, OBSIDIAN)
+    g.box(1.98, 2.12, y0, y1, Wd - inset - 0.06, Wd - inset, OBSIDIAN)
+  }
+  g.rounded(0.92, 2.78, 1.50, 1.58, 0.26, Wd - 0.26, 0.14, WHITE)
+  for (const [z0, z1] of [[0.03, 0.07], [Wd - 0.07, Wd - 0.03]]) {
+    g.box(0.32, L - 0.34, 0.29, 0.39, z0, z1, OBSIDIAN)
+    g.box(1.14, L - 1.22, 0.41, 0.48, z0, z1, MINT)
+    g.box(1.14, L - 1.22, 0.48, 0.52, z0, z1, NAVY)
+  }
+  g.box(L - 0.14, L - 0.02, 0.37, 0.64, 0.50, Wd - 0.50, OBSIDIAN)
+  g.rounded(L - 0.09, L, 0.47, 0.60, midZ - 0.18, midZ + 0.18, 0.05, OBSIDIAN)
+  g.box(L - 0.03, L, 0.51, 0.57, midZ - 0.11, midZ + 0.11, CYAN)
+  for (const z of [0.28, Wd - 0.58]) { g.box(L - 0.16, L - 0.02, 0.62, 0.78, z - 0.04, z + 0.34, OBSIDIAN); g.box(L - 0.10, L - 0.01, 0.65, 0.75, z, z + 0.30, HEAD); g.box(L - 0.10, L - 0.01, 0.73, 0.76, z, z + 0.30, WHITE_LAMP) }
+  for (const z of [0.06, Wd - 0.26]) g.box(L - 0.32, L - 0.04, 0.64, 0.77, z, z + 0.20, AMBER)
+  g.box(0.12, 0.20, 0.80, 0.90, 0.28, Wd - 0.28, TAIL)
+  for (const z of [0.04, Wd - 0.28]) g.box(0.10, 0.34, 0.76, 0.92, z, z + 0.24, AMBER)
+  for (const [z0, z1, s0, s1] of [[0.0, 0.12, 0.06, 0.24], [Wd - 0.12, Wd, Wd - 0.24, Wd - 0.06]]) { g.rounded(3.18, 3.44, 0.82, 0.96, z0, z1, 0.05, OBSIDIAN); g.box(2.98, 3.10, 0.95, 1.04, s0, s1, OBSIDIAN); g.box(2.96, 3.12, 0.98, 1.12, z0, z1, OBSIDIAN); g.box(3.02, 3.12, 1.02, 1.08, z0, z1, AMBER) }
+  g.hollow()
+  g.box(1.05, 3.12, 0.36, 0.42, 0.18, Wd - 0.18, OBSIDIAN)
+  for (const z of [0.28, Wd - 0.80]) { g.box(2.12, 2.66, 0.42, 0.60, z, z + 0.52, SEAT); g.box(2.02, 2.18, 0.60, 1.14, z, z + 0.52, SEAT) }
+  g.box(1.94, 2.00, 0.86, 1.08, midZ - 0.20, midZ + 0.20, CYAN)
+  g.box(2.74, 2.82, 0.94, 1.14, midZ - 0.22, midZ + 0.22, OBSIDIAN)
+  g.box(2.72, 2.78, 0.96, 1.12, midZ - 0.19, midZ + 0.19, CYAN)
+  g.rounded(1.52, 2.38, 1.56, 1.66, 0.36, Wd - 0.36, 0.14, WHITE)
+  g.rounded(1.66, 2.24, 1.64, 1.72, 0.56, Wd - 0.56, 0.12, OBSIDIAN)
+  g.rounded(1.74, 2.14, 1.68, 1.77, midZ - 0.20, midZ + 0.20, 0.18, OBSIDIAN)
+  for (const xm of [0.90, L - 0.88]) {
+    for (let y = g.c(0.26); y <= g.c(0.88); y++) for (let x = g.c(xm - 0.46); x <= g.c(xm + 0.46); x++) {
+      const d = Math.hypot(x - g.c(xm), y - g.c(0.43))
+      if (d < 0.39 * g.s) for (const z of [0, 1, 2, 3, g.D - 4, g.D - 3, g.D - 2, g.D - 1]) g.set(x, y, z, 0)
+      else if (d < 0.46 * g.s) for (const z of [0, 1, g.D - 2, g.D - 1]) if (g.get(x, y, z)) g.set(x, y, z, OBSIDIAN)
+    }
+    for (const [z0, z1] of [[0, 0.24], [Wd - 0.24, Wd]]) g.wheel(xm, 0.43, z0, z1, 0.36, TYRE, SILVER, SLATE)
+  }
+  const size = [Math.ceil(L * 10), Math.ceil(H * 10), Math.ceil(Wd * 10)]
+  return { name: 'WaitWhat', kind: 'waitwhat', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [10, size[0] - 10], HANDLING.waitwhat, { awd: true, footY: 3.4, reach: 6.2 }), seats: [[23, 0.2, 5.5], [23, 0.2, 14.3], [14, 0.2, 5.5], [14, 0.2, 14.3]], eye: [22.5, 11.8, 5.5], paint: [WHITE, MINT], tyre: [TYRE] }
 }

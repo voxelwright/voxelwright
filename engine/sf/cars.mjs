@@ -20,7 +20,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { read } from '../make/cells.mjs'
-import { boxTruck, cableCar, cityBus, HANDLING, sportsCoupe, streetcar, trolleybus, van } from './fleet.mjs'
+import { boxTruck, cableCar, cityBus, HANDLING, sportsCoupe, streetcar, trolleybus, van, waitwhat } from './fleet.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -152,7 +152,7 @@ kept('hatch', join(root, 'make/kept/0782ba87f3267813204077d0.json'), 'blue saloo
 // ── The fleet, written by hand (sf/fleet.mjs): what no kept record has ──
 // Each look as written, then coarser by halves down to a cell of 10 cm, which is its body. The coupe, van and truck are
 // driven like any kept car (a motor, seats); the rest are driven by the street.
-for (const [id, make, colours] of [['coupe', sportsCoupe, ['white', 'black', 'silver', 'blue', 'green']], ['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
+for (const [id, make, colours] of [['coupe', sportsCoupe, ['white', 'black', 'silver', 'blue', 'green']], ['waitwhat', waitwhat, []], ['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
   const v = make(), looks = [{ size: v.size, per: v.per, low: [0, 0, 0], ...runsOf(v.cells) }]
   for (let by = 2; v.per / by >= 1; by *= 2) { const c = coarser(v.cells, v.size, by); looks.push({ size: c.size, per: v.per / by, low: [0, 0, 0], ...runsOf(c.kinds) }) }
   const b = coarser(v.cells, v.size, v.per), body = runsOf(b.kinds), paint = (k) => v.paint.includes(k), tyre = (k) => v.tyre.includes(k)

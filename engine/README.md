@@ -1758,7 +1758,8 @@ node test/player.mjs          # measures it in Chrome and WebKit; pictures in ~/
 The SF realm (`sf/realm.json`, built by `node sf/build.mjs` into `dist-sf/`) has people on the real pavements and crossings, cars parked at the kerbs and driving the lanes, and cable cars on Powell. All of it comes from plain files beside the page (`page/street.ts`):
 
 - `sf/pilot-life/<square>.json` is each square's street graph cut down to what is walked and driven, with how busy each pavement is. It is made from `sf/pilot-graph` and the land use in `~/.village/engine/bay/450-inputs`: `~/.village/engine/bay/venv/bin/python engine/sf/life.py`.
-- `sf/cars.mjs` writes the kept vehicles (grey saloon, grey SUV, blue saloon, cable car) as runs with core kinds. The build runs it.
+- `sf/cars.mjs` and `sf/fleet.mjs` write the kept vehicles (including the `waitwhat` autonomous robotaxi) as runs with core kinds. The build runs it.
+- `page/waitwhat.ts` builds the procedural **WaitWhat** autonomous robotaxi (spinning roof LiDAR turret, 4-way amber hazard blinkers, empty driver seat) and **WaitWhat Station** (charging bays, dispatch gantry, and circulating depot fleet on Stockton St between Beach and North Point, listed in `sf/map.mjs`). WaitWhats drive smoothly through traffic and circulate out of WaitWhat Station (where their local spawn share surges), occasionally freezing at intersections or narrow streets with flashing hazards while blocked cars honk and nearby pedestrians stop to yell and film them. Check: `node test/sf-waitwhat.mjs [--no-build]`.
 
 On foot (B) beside a parked car, E gets in. A car that stops for you can be taken the same way. `?street=0` turns street life off.
 

@@ -44,6 +44,7 @@ const PLACES = [
   ['Coit Tower', 37.80241, -122.40582, 'landmark'],
   ['Lombard Street', 37.80214, -122.41874, 'landmark'],
   ['Pier 39', 37.80867, -122.40982, 'landmark'],
+  ['WaitWhat Station', 37.80745, -122.41062, 'landmark'],
   ['Golden Gate Bridge', 37.8078, -122.4748, 'landmark'],
   ['Painted Ladies', 37.7763, -122.4328, 'landmark'],
   ['Twin Peaks', 37.7544, -122.4477, 'landmark'],

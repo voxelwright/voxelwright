@@ -42,7 +42,7 @@ flowchart TD
 | Appearance and paint (`appearance.py`, `frontage.py`, `paint_*.py`) | Packs, NAIP, Mapillary panoramas | Colours and facade cues written into packs and level-0 tiles |
 | `engine/bay/tiles.py` | Packs. `earth.py` makes tiles from Overture and Mapterhorn where no square reaches. | Tiles at level 0 (250 m), level 1 (1 km) and level 2 (4 km), each a `BAY1` pack, and `index.json` |
 | `engine/sf/release.py ROOT OUT` | `full_run.py`'s verified output, and optionally the far model, street life and cars | A staged release in `OUT`. With `--panel RECEIPT` it also moves `OUT/current.json`. |
-| `engine/sf/build.mjs` | The release pinned in `engine/sf/pilot/current.json`, street graphs, a kept car | `engine/dist-sf`: the page's modules with types stripped, the realm's record from `engine/sf/realm.json`, the release, and a Brotli copy beside every file |
+| `engine/sf/build.mjs` | The release pinned in `engine/sf/pilot/current.json`, street graphs, map places (`engine/sf/map.mjs`, including WaitWhat Station), fleet definitions (`engine/sf/fleet.mjs`, `engine/sf/cars.mjs`), and a kept car | `engine/dist-sf`: the page's modules with types stripped, the realm's record from `engine/sf/realm.json`, the release, and a Brotli copy beside every file |
 | `deploy/data.mjs pack` | The pinned release and the other build inputs under `~/.village/engine` | A `data.tar` uploaded as GitHub Release `sf-data-<digest>`, and `deploy/data.json` |
 | `deploy/data.mjs fetch` | `deploy/data.json` and the release asset | The same files restored under `~/.village/engine`, each checked by length and SHA-256 |
 
