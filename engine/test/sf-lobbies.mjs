@@ -317,6 +317,15 @@ step('arriving')
   // Ahead of each, along where the eye looks: the first solid at its height, level.
   const facing = await Promise.all(pair.map((p) => p.page.evaluate(() => { const e = globalThis.engine, v = e.view(), out = []; for (let d = 6; d <= 200; d += 4) out.push(e.kind(Math.round(v.eye[0] + v.forward[0] / Math.hypot(v.forward[0], v.forward[2]) * d), Math.round(v.eye[1]), Math.round(v.eye[2] + v.forward[2] / Math.hypot(v.forward[0], v.forward[2]) * d))); const near = out.findIndex(Boolean); return near < 0 ? null : 6 + near * 4 })))
   check(facing.every((d) => d === null || d > 100), `each looks at something, not at a wall: the first solid straight ahead at eye height is ${facing.map((d) => (d === null ? 'past 20 m' : `${(d / 10).toFixed(1)} m`)).join(' and ')} off`)
+  // Where each look falls: on the ground some 10 m ahead of their own feet (a wish made at once is made there), not
+  // down the hill past the crest. Read from the eye as it rides, a moment after arriving.
+  await wait(1500)
+  const falls = await Promise.all(pair.map((p, i) => p.page.evaluate((feet) => {
+    const e = globalThis.engine, v = e.view(), n = Math.hypot(v.forward[0], v.forward[1], v.forward[2])
+    for (let t = 5; t <= 3000; t += 5) { const x = v.eye[0] + (v.forward[0] / n) * t, y = v.eye[1] + (v.forward[1] / n) * t, z = v.eye[2] + (v.forward[2] / n) * t; if (y <= e.feet(Math.round(x), Math.round(z))) return Math.hypot(x - feet[0], z - feet[2]) / 10 }
+    return null
+  }, stood[i].at)))
+  check(falls.every((d) => d !== null && d >= 5 && d <= 18), `each looks at the ground about 10 m ahead of their feet (${falls.map((d) => (d === null ? 'nowhere within 300 m' : `${d.toFixed(1)} m`)).join(' and ')})`)
   for (const p of pair) await shot(p, `arrived-${p.name.toLowerCase()}`)
   // A wish there, by the keys (a thumb on the bar on a phone): Enter, "a car", Enter makes the kept car, no model.
   const [w, o] = pair

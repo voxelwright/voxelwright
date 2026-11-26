@@ -19,7 +19,7 @@ import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
 import { wheel } from './wheel.ts'
 import { car, fineCar, living, type Making } from './living.ts'
-import { person } from './person.ts'
+import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
@@ -1043,10 +1043,17 @@ async function main() {
     const stood = () => !!me.feet && Math.abs(me.feet.at[1] - f) <= 10 && Math.hypot(me.feet.at[0] - x, me.feet.at[2] - z) <= 10
     for (const until = performance.now() + 8000; performance.now() < until && !stood();) await new Promise((r) => setTimeout(r, 100))
     if (!stood()) { me.walk(false); Object.assign(pose, { x: x / M, y: (f + 16.5) / M, z: z / M }); return arrived('eye') }
-    // The look from the eye as it now rides (behind and over the body; higher and further back on a phone held upright):
+    // The look from where the eye rides (behind and over the body; higher and further back on a phone held upright):
     // at the ground 10 m ahead of the feet, so that a wish made at once is made there and not down the hill beyond.
+    // Where it rides turns on the look itself (person.ts `behindAt`), so the two are found together, from the feet;
+    // not from where the eye is this frame, which may be on its way there still (the look then fell 10.4 or 11.4 m
+    // ahead by which frame it was).
     const ax = x + Math.sin(found.yaw) * 100, az = z - Math.cos(found.yaw) * 100, ay = core.feet_at(Math.round(ax), Math.round(az))
-    if (Number.isFinite(ay)) pose.pitch = Math.max(-0.6, Math.min(0.05, Math.atan2(ay - pose.y * M, Math.hypot(ax - pose.x * M, az - pose.z * M))))
+    if (Number.isFinite(ay)) {
+      let pitch = found.pitch
+      for (let i = 0; i < 8; i++) { const eye = behindAt([x, f, z], found.yaw, pitch); pitch = Math.max(-0.6, Math.min(0.05, Math.atan2(ay - eye[1], Math.hypot(ax - eye[0], az - eye[2])))) }
+      pose.pitch = pitch
+    }
     Object.assign(arrival, { round: found.round, at: found.at, yaw: found.yaw })
     arrived('standing')
   }
