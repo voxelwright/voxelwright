@@ -516,9 +516,13 @@ export function playHud(o: {
     // What has been done, for the cues.
     if (o.me.canopy && !wasCanopy) did.chute++
     wasCanopy = o.me.canopy
-    if (!o.me.on && wasOn) { did.flew = true; flyingSince = now }
-    if (o.me.on && !wasOn) did.landed++
-    wasOn = o.me.on
+    // (Riding takes the body off its feet and puts it down again: that is neither a flight nor a landing.)
+    if (o.vehicle?.()) wasOn = true
+    else {
+      if (!o.me.on && wasOn) { did.flew = true; flyingSince = now }
+      if (o.me.on && !wasOn) did.landed++
+      wasOn = o.me.on
+    }
     // (Off one's feet for more than half a second is a fall; a hop on a roof is over before then.)
     const off = o.me.on && o.me.aloft && !o.me.canopy
     if (!off) offSince = 0

@@ -57,7 +57,7 @@
   #card { position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(max(12px, env(safe-area-inset-top)) + 46px); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
   /* The keys of a thing ridden, by touch only (living.ts): a column on the corner under the right thumb, from the bottom up.
      (In a realm they are the kit's keys and play-hud.ts places them; this is how they look on a page without the kit.) */
-  [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: auto; }
+  [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(110px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: auto; }
   @media (pointer: coarse) { html.riding [data-panel="living"] { display: flex; } }
   /* By touch the ask bar steps aside while riding, unless it is open: on its side it lay across the thing ridden and the
      keys beside the thumb. Getting off brings it back. */

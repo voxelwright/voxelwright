@@ -102,8 +102,9 @@ const STYLE = /* css */ `
    (play-hud.ts), and in the first view it is not there. In a lobby the lobby's tag stands here instead. */
 #realm .lobbies { position: absolute; left: max(24px, env(safe-area-inset-left)); top: max(24px, env(safe-area-inset-top)); min-block-size: 44px; }
 html.first #realm .lobbies { display: none; }
-/* The card a thing ridden shows on a desk (living.ts) stands under the servers key: at its own place it was under the key's foot. */
-html:has(#realm .lobbies) #card { top: calc(max(24px, env(safe-area-inset-top)) + 60px); }
+/* The card a thing ridden shows on a desk (living.ts) stands under the servers key, or in a lobby its tag (lobbies.ts): at
+   its own place it was under the key's foot. */
+html:has(#realm .lobbies, #lobby-tag) #card { top: calc(max(24px, env(safe-area-inset-top)) + 60px); }
 html:is([data-hud="quiet"], [data-hud="wheel"]).away #realm .lobbies { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease-out; }
 /* Riding (living.ts sets html.riding): the keys of one on foot, the tools and the cues beside the body step aside in every
    way of having the controls; by touch the thing's own keys stand where they stood. */

@@ -209,8 +209,8 @@ try {
         }
         const off = await until(page, () => !globalThis.engine.alive.riding, 3000)
         await page.waitForTimeout(600)
-        const after = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, afoot: [...document.querySelectorAll(matchMedia('(pointer: coarse)').matches ? '#realm .act .use' : '#realm .held')].some((el) => el.checkVisibility({ visibilityProperty: true })) }))
-        check(off && !after.choosing && after.afoot, `${scheme}: ${phone ? 'Get off' : 'E'} sets the body down, the wheel not opened, and the keys of one on foot are back (${JSON.stringify({ off, ...after })})`)
+        const after = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, ask: !!document.querySelector('#ask-row')?.checkVisibility({ visibilityProperty: true }), afoot: [...document.querySelectorAll(matchMedia('(pointer: coarse)').matches ? '#realm .act .use' : '#realm .held')].some((el) => el.checkVisibility({ visibilityProperty: true })) }))
+        check(off && !after.choosing && after.afoot && after.ask, `${scheme}: ${phone ? 'Get off' : 'E'} sets the body down, the wheel not opened, and the keys of one on foot and the ask bar are back (${JSON.stringify({ off, ...after })})`)
         await page.evaluate(() => { const e = globalThis.engine; for (const t of e.alive.things) if (t.alive) e.alive.vanish(t); document.querySelector('#realm .lobbies.stand-in')?.remove() })
       }
       if (mode === 'default') { await ride('drive'); await ride('hover'); await page.waitForTimeout(1500) }
