@@ -59,10 +59,10 @@ The core in each place is the same `page/core.wasm`. The page instantiates it wi
 
 1. Move the eye and step what the page simulates itself (people, the wand, street life).
 2. `world.update` decides which sectors each box needs around the eye. It sends asks to the sector workers and uploads finished trees into the GPU pool.
-3. One command encoder records the drawing, in this order: `march.draw` (the world's cells), the far model of distant tiles, sea fog, water, shade under things, falling pieces, people, crumbs, smoke, then every plugin pass (`pluginDraws.draw`), then the wand's marker.
+3. One command encoder records the drawing, in this order: `march.draw` (the world's cells), the far model of distant tiles, sea fog, water, shade under things, road tracks, vehicle wheels, falling pieces, people, crumbs, smoke, then every plugin pass (`pluginDraws.draw`), then the wand's marker.
 4. A final blit grades the picture onto the canvas, and `device.queue.submit` sends it.
 
-Above a fixed height the planet view replaces the march. To measure what one step costs, leave it out from the browser console with `engine.off.add('people')`. The names are `water`, `under`, `pieces`, `people`, `crumbs`, `puffs`, `flames` and `spoil`.
+Above a fixed height the planet view replaces the march. To measure what one step costs, leave it out from the browser console with `engine.off.add('people')`. The names are `water`, `under`, `wheels`, `pieces`, `people`, `crumbs`, `puffs`, `flames` and `spoil`.
 
 ## A shared world
 
@@ -80,4 +80,4 @@ node test/all.mjs --changed   # only the checks that cover your branch's changes
 
 `node test/bench.mjs` (in `engine/`) measures frame cost. Run it before and after a change to the march or the frame.
 
-<!-- docs-verified 13b2f77f06751d55ddcb322bb0effe9444dde16b {"engine/page/main.ts":"1001dafb9cbfa737d710f93756c21cef","engine/page/bay.ts":"1d6f3b4eef9ce809f9e1dee89c7da251","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/serve.mjs":"2d5671d556d6b81fdfcfc2b9f7efa827","engine/package.json":"8893b007c397bfd634d8b0b6589fa6b1"} -->
+<!-- docs-verified 3351fa1b50cbe8f10801d860752f5fd32e583365 {"engine/page/main.ts":"08b27338e74ce5c370338986ba165220","engine/page/bay.ts":"1d6f3b4eef9ce809f9e1dee89c7da251","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/serve.mjs":"2d5671d556d6b81fdfcfc2b9f7efa827","engine/package.json":"8893b007c397bfd634d8b0b6589fa6b1"} -->

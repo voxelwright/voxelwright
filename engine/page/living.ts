@@ -14,6 +14,7 @@ import type { Piece } from './pieces.ts'
 import type { Struck, Told } from './told.ts'
 import type { Link } from './link.ts'
 import type { Things } from './things.ts'
+import { carveWheelWells, type WheelProfile } from './wheels.ts'
 
 /** A foot: where its ray starts (cells from the thing's own low corner), how far down it reaches, whether it steers and drives. */
 export interface Foot { at: [number, number, number]; reach: number; steers?: boolean; drives?: boolean }
@@ -139,7 +140,7 @@ export function factsLine(value: unknown): string {
   const top = pick('top_kmh'), sprint = pick('zero_to_100_s')
   return [top !== undefined ? `${Math.round(top)} km/h` : '', sprint !== undefined ? `0 to 100 in ${sprint.toFixed(1)} s` : ''].filter(Boolean).join(', ')
 }
-export interface Thing extends Making { id: number; alive: boolean; /** One line of what it was measured doing, for its card (`factsLine`). */ facts?: string; /** In a shared world: its look's parts as its record says them, fetched from the world. */ kept?: FineKept[]; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number] }
+export interface Thing extends Making { id: number; alive: boolean; /** One line of what it was measured doing, for its card (`factsLine`). */ facts?: string; /** In a shared world: its look's parts as its record says them, fetched from the world. */ kept?: FineKept[]; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number]; /** Measured wheel-well dimensions from carving static wheels out of a fine look (wheels.ts). */ wheelProfile?: WheelProfile }
 
 export interface Living {
   /** Brings a thing to life. Resolves when the solver has made it; its id is 0 if it could not. */
@@ -182,6 +183,8 @@ export interface Living {
   readonly telemetry: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number } | null
   /** First-person cockpit immersion state (inertia, windshield rain/wipers, night dash glow). */
   readonly cockpit: CockpitState
+  /** Live wheel-animation inputs while driving a wheeled vehicle, or null (wheels.ts). */
+  readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
@@ -258,6 +261,7 @@ export function living(o: {
   let lightMode: 'auto' | 'off' | 'low' | 'high' = 'auto'
   const lampState: [number, number, number, number] = [0, 0, 0, 0]
   let telemetryNow: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number } | null = null
+  let wheelDriveNow: Living['wheelDrive'] = null
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
   let cue: { thing: Thing; remove(): void } | null = null, leave: (() => void) | null = null
@@ -308,6 +312,7 @@ export function living(o: {
     gear = 1; rpm = 0.16; shiftCool = 0; popCool = 0; wasThrottle = 0; smokeAcc = 0
     lightMode = 'auto'; lampState[0] = lampState[1] = lampState[2] = lampState[3] = 0
     telemetryNow = null
+    wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
     cabin.reset()
     o.lens?.(0, 0, 0)
@@ -373,12 +378,16 @@ export function living(o: {
     let filled = 0
     for (const f of parts) for (let i = 0; i < f.kinds.length; i++) if (f.kinds[i]) filled++
     if (!fineWithin(parts) || filled > FINE_FILLED) { console.warn(`a look of ${parts.length} parts with ${filled} filled cells is more than a look may be: the thing is drawn as its own cells`); return }
+    const carveWheels = (thing.controls ?? 'drive') === 'drive' && thing.motor.feet.length >= 2 && !(thing.motor.steer === 0 && thing.motor.upright > 0)
     looks.set(thing, parts.map((f) => {
-      const piece = o.look!(f.kinds, f.size)
+      const carved = carveWheels ? carveWheelWells(f.kinds, f.size, f.per, f.low, thing.motor, thing.size) : null
+      if (carved && !thing.wheelProfile) thing.wheelProfile = carved.profile
+      const kinds = carved ? carved.kinds : f.kinds
+      const piece = o.look!(kinds, f.size)
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
-      return { piece, kinds: f.kinds, size: f.size, low: f.low, per: f.per }
+      return { piece, kinds, size: f.size, low: f.low, per: f.per }
     }))
   }
   const unwear = (thing: Thing) => { for (const w of looks.get(thing) ?? []) w.piece.destroy(); looks.delete(thing) }
@@ -543,6 +552,7 @@ export function living(o: {
     get inside() { return inside && !!riding },
     get telemetry() { return telemetryNow },
     get cockpit() { return cabin.state },
+    get wheelDrive() { return wheelDriveNow },
     look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, per: w.per } }) }),
     get rider() {
       const at = riding && where(riding)
@@ -771,6 +781,7 @@ export function living(o: {
         o.input.rumble?.({ rpm, slip: slipAmt, rough, speed: horizSpeed, grounded, drifting, boost: gp?.boost ?? 0 })
         updateDriveHud(kmh, gear, rpm, drifting)
         telemetryNow = { kmh, gear, rpm, slip: slipAmt, drifting, cam: cam.mode, fovAdd: cam.fovAdd }
+        wheelDriveNow = { id: riding.id, steer: axes.turn, throttle: axes.go, brake: braking ? Math.min(1, Math.abs(axes.go)) : 0, handbrake: handbraking, fwdSpeed, latSpeed, slip: slipAmt, drifting, burnout, decel: Math.max(0, -longAcc) }
         // Sync dynamic vehicle lamp emissives (brake, reverse, headlights) on the vehicle body & fine look pieces.
         const dark = o.fx ? Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15)) : 0
         const headLevel = headlightLevel(dark)
@@ -818,8 +829,9 @@ export function living(o: {
             o.fx.light(beamPos, dir2, [hi ? 104 : 74, halfWide + (hi ? 34 : 26)], hi ? [1.0, 0.97, 0.90] : [1.0, 0.93, 0.78], (0.12 + dark * 0.88) * (hi ? 0.52 : 0.34) + (wet ? 0.12 * dark : 0))
           }
         }
-      } else if (telemetryNow) {
+      } else if (telemetryNow || wheelDriveNow) {
         telemetryNow = null
+        wheelDriveNow = null
         o.audio?.drive(null)
         o.input.rumble?.(null)
       }

@@ -30,6 +30,7 @@ import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
 import { tracks } from './tracks.ts'
+import { wheels, type WheelVehicle } from './wheels.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
@@ -212,6 +213,8 @@ async function main() {
   const shade = await under(device, gpu.format)
   // Tire skidmarks and ground vehicle light pools (tracks.ts).
   const roadTracks = await tracks(device, gpu.format)
+  // Animated 3D mechanical wheels for driven vehicles (wheels.ts).
+  const carWheels = await wheels(device, gpu.format)
   const folk = await people(device, gpu.format, march)
   // The wand (#246): how a spell is aimed.
   const staff = await wand(device, gpu.format, march, core, controls, over)
@@ -457,6 +460,7 @@ async function main() {
     smoke.light(sun, day)
     debris.light(sun, day)
     water.light(sun, day)
+    carWheels.light(sun, day)
   }
   const setHour = (h: number | null) => {
     hour = h === null ? null : ((h % 24) + 24) % 24
@@ -726,6 +730,7 @@ async function main() {
     gathering.step(dt)
     smoke.step(dt * tempo.rate)
     roadTracks.step(dt * tempo.rate)
+    if (!off.has('wheels')) carWheels.step(dt * tempo.rate, wheelVehicles(), groundUnder)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
@@ -741,6 +746,7 @@ async function main() {
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
       if (!off.has('under')) roadTracks.draw(encoder, to, v, groundUnder)
+      if (!off.has('wheels')) carWheels.draw(encoder, to, v)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
@@ -988,6 +994,27 @@ async function main() {
     const top = groundUnder(w.at[0], w.at[1], w.at[2]), q = w.rot
     return [{ at: w.at, yaw: Math.atan2(-2 * (q[0] * q[2] - q[1] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2])), half: [t.size[0] / 2, t.size[2] / 2] as const, high: t.size[1], lift: Math.max(0, w.at[1] - t.size[1] / 2 - top) }]
   })
+  /** Active drivable wheeled vehicles fed to the 3D wheel pass (wheels.ts). */
+  const wheelVehicles = (): WheelVehicle[] => {
+    const out: WheelVehicle[] = []
+    const drive = alive.wheelDrive
+    for (const t of alive.things) {
+      if (!t.alive || t.motor.feet.length < 2 || (t.controls ?? 'drive') !== 'drive' || (t.motor.steer === 0 && t.motor.upright > 0)) continue
+      const piece = moving.get(t.id)
+      if (!piece) continue
+      const active = drive && drive.id === t.id ? drive : null
+      const st = !active && t.state ? t.state : null
+      const stBrake = st && ((st.go < -0.1 && st.speed > 8) || (st.go > 0.1 && st.speed < -8)) ? Math.min(1, Math.abs(st.go)) : 0
+      out.push({
+        id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
+        bornLow: piece.born.low, bornCom: piece.born.com,
+        front: t.motor.front, steerLimit: t.motor.steer, topSpeed: t.motor.top,
+        feet: t.motor.feet, hasFine: !!(t.fine?.length || t.kept?.length), profile: t.wheelProfile,
+        ...(active ? { steerInput: active.steer, throttle: active.throttle, brake: active.brake, handbrake: active.handbrake, fwdSpeed: active.fwdSpeed, latSpeed: active.latSpeed, slip: active.slip, drifting: active.drifting, burnout: active.burnout, decel: active.decel } : st ? { steerInput: st.turn, throttle: st.go, brake: stBrake, handbrake: st.rise > 0.1, fwdSpeed: st.speed } : {}),
+      })
+    }
+    return out
+  }
   /** The top of what is under a place, looked for down from `y` (cells): a kerb, a roof, a bridge as well as the ground. */
   const groundUnder = (x: number, y: number, z: number) => {
     const ix = Math.floor(x), iz = Math.floor(z)
@@ -1866,6 +1893,7 @@ async function main() {
     const afoot = me.on
     alive.forget()
     roadTracks.clear()
+    carWheels.clear()
     if (afoot) me.walk(false)
     mover.postMessage({ forget: true } satisfies Ask)
     moverAge++
@@ -1895,6 +1923,7 @@ async function main() {
     const afoot = me.on
     alive.forget()
     roadTracks.clear()
+    carWheels.clear()
     if (afoot) me.walk(false)
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
@@ -2002,7 +2031,7 @@ async function main() {
   own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
   resetting.add(() => carSummon.clear())
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon() })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon(), wheels: carWheels })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
