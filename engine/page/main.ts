@@ -1187,11 +1187,34 @@ async function main() {
   // ── 3D Minimap, Full-Screen Map & GPS Navigation ────────────────────────
   let mapLastX = pose.x, mapLastZ = pose.z, mapLastT = performance.now(), mapSpeed = 0
   let townCenter: [number, number] | null = null
-  const loadSfMap = (tries: number): void => void mapData().then((bytes) => {
+  let entryCtrl: import('./entry.ts').EntryController | null = null
+  let sfMapPromise: Promise<boolean> | null = null
+  const loadSfMap = (tries: number): Promise<boolean> => mapData().then((bytes) => {
     const parsed = bytes ? parseMap(bytes, LOCAL?.name ?? 'San Francisco') : null
-    if (parsed) mapSys?.setMapData(parsed)
-    else if (tries > 1) setTimeout(() => loadSfMap(tries - 1), 8000)
+    if (parsed) { mapSys?.setMapData(parsed); return true }
+    if (tries > 1) return new Promise<boolean>((r) => setTimeout(() => void loadSfMap(tries - 1).then(r), 8000))
+    return false
   })
+  const ensureMap = (): Promise<boolean> => {
+    if (mapSys?.ready) return Promise.resolve(true)
+    if (!BAY_ON) { townCenter = [pose.x, pose.z]; mapSys?.setMapData(buildTownMap(core, pose.x, pose.z)); return Promise.resolve(true) }
+    return (sfMapPromise ??= loadSfMap(3).then((ok) => { if (!ok) sfMapPromise = null; return ok }))
+  }
+  const classicVisit = async (x: number, z: number, name: string) => {
+    const gx = Math.round(x * M), gz = Math.round(z * M)
+    over.notice(`Going to ${name}…`, 2500)
+    if (alive.riding) alive.mount(null)
+    if (me.on) me.walk(false)
+    if (STREAM) {
+      mover.postMessage({ bay: [gx, gz] } as never)
+      shadow?.postMessage({ bay: [gx, gz] } as never)
+      await Promise.race([underfoot(inner, gx, gz), new Promise((r) => setTimeout(r, 6000))])
+      void near(inner, gx, gz)
+    }
+    const floor = Math.max(core.ground_at(gx, gz), core.feet_at(gx, gz)) / M
+    Object.assign(pose, { x, y: Math.max(12, floor + 22), z, pitch: -0.22 })
+    over.notice(`Arrived at ${name}`, 3000)
+  }
   mapSys = createMapSystem({
     device, format: gpu.format, input: controls, hud: over,
     day: () => march.day,
@@ -1214,24 +1237,11 @@ async function main() {
       const liveSpeed = tel ? tel.kmh / 3.6 : mapSpeed
       return { x, y, z, yaw, speed: liveSpeed, driving: !!r, flying: !r && !me.on, drifting: tel?.drifting ?? false, slip: tel?.slip ?? 0 }
     },
-    onEngage: () => {
-      if (BAY_ON) loadSfMap(3)
-      else { townCenter = [pose.x, pose.z]; mapSys?.setMapData(buildTownMap(core, pose.x, pose.z)) }
-    },
-    onVisit: async (x, z, name) => {
-      const gx = Math.round(x * M), gz = Math.round(z * M)
-      over.notice(`Going to ${name}…`, 2500)
-      if (alive.riding) alive.mount(null)
-      if (me.on) me.walk(false)
-      if (STREAM) {
-        mover.postMessage({ bay: [gx, gz] } as never)
-        shadow?.postMessage({ bay: [gx, gz] } as never)
-        await Promise.race([underfoot(inner, gx, gz), new Promise((r) => setTimeout(r, 6000))])
-        void near(inner, gx, gz)
-      }
-      const floor = Math.max(core.ground_at(gx, gz), core.feet_at(gx, gz)) / M
-      Object.assign(pose, { x, y: Math.max(12, floor + 22), z, pitch: -0.22 })
-      over.notice(`Arrived at ${name}`, 3000)
+    onEngage: () => { void ensureMap() },
+    onOpen: () => { entryCtrl?.cancelDive() },
+    onVisit: async (x, z, name, cam) => {
+      if (entryCtrl) await entryCtrl.visit(x, z, name, cam)
+      else await classicVisit(x, z, name)
     },
   })
   watchers.add((gap) => {
@@ -2022,22 +2032,29 @@ async function main() {
       watchers.delete(hatch)
       // The kept sky, once the park is shown: the loader clears onto the day it was pictured in, and the clock goes on from there.
       realmUi.modes?.start()
-      if (first && leads && signboards && !first.engaged) void import('./explore.ts').then(({ explore }) => {
-        way = explore({
+      if (first && leads && signboards && !first.engaged) void Promise.all([import('./entry.ts'), lists()]).then(([{ createEntry }, within]) => {
+        entryCtrl = createEntry({
           board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi, home: firstEye, alight: () => { if (alive.riding) alive.mount(null) },
           fov: () => fov, setFov: (v) => { fov = v },
           feet: (x, z) => core.feet_at(x, z),
-          // Round the roof: this page's own core and the mover hold it, and the finest tiles the makers of sectors
+          // Round the destination: this page's own core and the mover hold it, and the finest tiles the makers of sectors
           // will want there are fetched ahead of them (as far out as the boxes of cells up to 80 cm reach: bay.ts `need`).
-          // (The mover, whose body it is, does nothing it is asked until its own tiles there have been asked for: mover.ts `here`.)
-          near: (x, z) => { mover.postMessage({ bay: [x, z] } as never); return Promise.all([near(inner, x, z), warm(x, z, (grid[0] * SIDE * 8) / 2 + 96)]).then(([had]) => had) },
+          near: (x, z) => { mover.postMessage({ bay: [x, z] } as never); shadow?.postMessage({ bay: [x, z] } as never); return Promise.all([near(inner, x, z), warm(x, z, (grid[0] * SIDE * 8) / 2 + 96)]).then(([had]) => had) },
           focus: (at) => { ahead = at }, whole: () => world.stats.wanted === 0 && world.stats.stale === 0 && farModel.whole,
           shot: (by) => { shot = by }, watch: (each) => { watchers.add(each); return () => void watchers.delete(each) },
           hush: () => { deaf = true },
+          map: mapSys,
+          ensureMap,
+          leaveFar: () => farModel.left(),
+          ground: { within, feet: (x, z) => core.feet_at(Math.round(x), Math.round(z)), kind: (x, y, z) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)) },
+          terrainAt: (x, z) => core.ground_at(Math.round(x), Math.round(z)),
+          hold: (x, z) => { mover.postMessage({ bay: [x, z] } as never); shadow?.postMessage({ bay: [x, z] } as never); return STREAM ? underfoot(inner, x, z) : Promise.resolve(true) },
+          day: () => march.day,
         })
-        Object.assign((globalThis as unknown as { engine: object }).engine, { explore: way })
+        way = entryCtrl.explore
+        Object.assign((globalThis as unknown as { engine: object }).engine, { explore: way, entry: entryCtrl })
         if (meant) void way.go()
-      }).catch(noWayIn)
+      }).catch((e) => { console.error('entry init failed:', e); noWayIn() })
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: said = eggs({
           device, march, controls, makes: makesHere, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
