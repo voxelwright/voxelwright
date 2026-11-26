@@ -1,15 +1,18 @@
-# The engine
+---
+title: The engine
+description: The engine at a glance. Its parts, how a frame is made and where a shared world runs.
+---
 
 The engine in `engine/` stores a world as cells and draws it in the browser. Its core is Rust compiled to WebAssembly. The page that draws is TypeScript on raw WebGPU, with no framework. A world can also run in a server process that many pages share. People and models change a running world through rules and plugins.
 
 ## Concepts
 
-- **Cell.** The world's unit of space: 10 cm a side in the finest copy of the world. A cell holds one **kind**, a 16-bit number. Kind 0 is air. See [the core](engine-core.md).
-- **Sector.** A cube of 64 × 64 × 64 cells, stored as a tree of 32-bit words. Sectors are what the core makes, what the page keeps on the GPU and what the ray marcher reads. See [worlds as cells](cells.md).
+- **Cell.** The world's unit of space: 10 cm a side in the finest copy of the world. A cell holds one **kind**, a 16-bit number. Kind 0 is air. See [the core](/engine-core).
+- **Sector.** A cube of 64 × 64 × 64 cells, stored as a tree of 32-bit words. Sectors are what the core makes, what the page keeps on the GPU and what the ray marcher reads. See [worlds as cells](/cells).
 - **Level.** A copy of the world whose cells are 2^level times larger. Level 0 holds the finest cells. The page keeps one box of sectors per level around the eye.
 - **Edit.** Something done to the world, written as whole numbers: a ball of one kind, a blast, or rows of cells. Every core applies the same edits in the same order and gets the same cells.
-- **Pass.** A drawing step in the frame. A plugin can add its own; see [page plugin types](plugin-types.md).
-- **Rule.** A script that a person or their model wrote, run in a sandbox beside a shared world. **Plugin.** Engine code from the checkout that gives rules something new to hear or do. See [plugins and rules](engine-plugins.md).
+- **Pass.** A drawing step in the frame. A plugin can add its own; see [page plugin types](/plugin-types).
+- **Rule.** A script that a person or their model wrote, run in a sandbox beside a shared world. **Plugin.** Engine code from the checkout that gives rules something new to hear or do. See [plugins and rules](/engine-plugins).
 
 ## Parts
 
@@ -79,5 +82,3 @@ node test/all.mjs --changed   # only the checks that cover your branch's changes
 ```
 
 `node test/bench.mjs` (in `engine/`) measures frame cost. Run it before and after a change to the march or the frame.
-
-<!-- docs-verified 3351fa1b50cbe8f10801d860752f5fd32e583365 {"engine/page/main.ts":"08b27338e74ce5c370338986ba165220","engine/page/bay.ts":"1d6f3b4eef9ce809f9e1dee89c7da251","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/serve.mjs":"2d5671d556d6b81fdfcfc2b9f7efa827","engine/package.json":"8893b007c397bfd634d8b0b6589fa6b1"} -->

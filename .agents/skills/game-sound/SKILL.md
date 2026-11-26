@@ -350,5 +350,3 @@ Refresh when a phone has played it, when the core reports impacts, or when a che
 - Each rule has one lean, lasting 1 to 120 s (20 unless said). Leans of several rules are added and held to -1..1,
   so two that agree push further, two that pull apart cancel, and none takes another's away. It goes with its rule.
 - Mode and mood are not leant on: a darker scale under tension is still the realm's rule's to say.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/page/sound/sound.ts":"50669d9d08740e08b9425e284acca451"} -->

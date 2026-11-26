@@ -138,5 +138,3 @@ NAT is inferred from parts); WebTransport throughput across a real network; weri
 packaged server binary; the wording of Chrome's local-network prompt (not captured);
 Firefox. Refresh when a pinned version changes, when Safari or Chrome change local network
 rules, or when a probe contradicts a line above.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"probes/lobby-transport/package.json":"ba2468a3402e625e3153a2002425ee3d"} -->

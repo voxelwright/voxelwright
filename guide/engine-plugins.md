@@ -1,6 +1,9 @@
-# Plugins and rules
+---
+title: Plugins and rules
+description: Rules run in a sandbox and ask the world for things. Plugins are trusted engine code. How both work.
+---
 
-A shared world (see [the engine](engine.md)) changes while it runs, in two ways. A **rule** is a script anyone or their model wrote. It runs in a sandbox and can only ask the world for things. A **plugin** is trusted engine code from the checkout's `engine/plugins` folder. It adds something new that rules can hear or do, and it can draw on the page. Neither needs a restart or a page reload.
+A shared world (see [the engine](/engine)) changes while it runs, in two ways. A **rule** is a script anyone or their model wrote. It runs in a sandbox and can only ask the world for things. A **plugin** is trusted engine code from the checkout's `engine/plugins` folder. It adds something new that rules can hear or do, and it can draw on the page. Neither needs a restart or a page reload.
 
 ## Concepts
 
@@ -56,7 +59,7 @@ Nothing is bound into the interpreter: it has no timers, network, files or impor
 | File | Contract |
 | --- | --- |
 | `world.mjs` | `export default (world) => ({ does, dropped, state, close, recored })`. Each entry of `does` is `name(rule, want, now, wrong)`, and a rule calls it as `world.<name>({...})`. Treat every field of `want` as a stranger's. The return value is ignored. To refuse, call `wrong(why)`: the rule hears `refused` and `GET /world/rules` shows the reason. A throw is caught and reported the same way. One file: it may import engine modules, but no file from its own folder. |
-| `page.ts` | Optional. `export default ({ engine, link }) => ({ state, once, close })`, typed as `PagePlugin` in [page plugin types](plugin-types.md). To draw, add a pass to `engine.draws` and remove it in `close` ([drawing from a page plugin](render-passes.md)). |
+| `page.ts` | Optional. `export default ({ engine, link }) => ({ state, once, close })`, typed as `PagePlugin` in [page plugin types](/plugin-types). To draw, add a pass to `engine.draws` and remove it in `close` ([drawing from a page plugin](/render-passes)). |
 | `guide.txt` | The plugin's lines of the guide. No blank lines, no lines in capitals only, and no lines that start with `GET` or `POST`. At most `GUIDE_MOST` characters. |
 | `check.mjs` | Its check against a real server, built on `engine/test/plugkit.mjs`. |
 
@@ -83,5 +86,3 @@ node plugins/gone/check.mjs     # one plugin's check
 node test/plugged.mjs           # every plugin's check; a world side with no check fails
 node test/rules.mjs             # rules run, change while running, survive a restart, stay in their box
 ```
-
-<!-- docs-verified cc92103ace26412f9a674455c432ef9c452fb3a3 {"engine/rules/run.mjs":"fc019064e956918701a48a39e88f4086","engine/rules/box.mjs":"44753d68692cadc5f6b1ed820024b197","engine/world.mjs":"dcd2961a04bbedb561c1035f1d9bd81f","engine/plugins.mjs":"243ba508a54cb0538d10b8917dc53da2","engine/page/plugins.ts":"553079615786f9ee2fe5b4bafafba46f","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/plugins/gone/world.mjs":"bc023bf1e7882cb0758007145bc694e2","engine/plug.mjs":"843b060dfc1e38c859ffc6ddebfcfdea"} -->

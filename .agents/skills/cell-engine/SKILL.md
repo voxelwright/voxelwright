@@ -3106,5 +3106,3 @@ version, so San Francisco has no water edge.
   its parts, lowest first; a building crossing a map tile's edge comes in two pieces.
 - Not built: a frame's edge (walking out of a zone), street names and addresses outside the baked squares,
   the sitting's `street` part in the Bay (it stands at the town's coordinates), packs in `world.mjs`.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/core/src/tree.rs":"de32709e544145c628a2122a1d3b30a8"} -->

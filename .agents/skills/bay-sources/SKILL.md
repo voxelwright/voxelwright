@@ -200,5 +200,3 @@ On macOS 27.2.1, `swift engine/bay/lookaround.swift <latitude> <longitude> <loca
 Google Street View Static metadata is free to request and requires an enabled API key. A Dogpatch metadata lookup here returned `REQUEST_DENIED`; no image was fetched. Distinguish a denied request from a street without coverage. [Google Street View metadata](https://developers.google.com/maps/documentation/streetview/metadata)
 
 For storage-only #450 city changes, see `engine/sf/release.md` and `engine/bay/compact_store.py`. The macOS jobs use zstd CLI 1.5.7 at level 3 with independent frames. Every decoded SHA-256 must match the checkpoint before unlinking a raw base. A truncated frame failed the resume regression and left its original available. Recheck the executable and real pack/three-level tile round trips when changing encoders. [Versioned zstd CLI manual](https://github.com/facebook/zstd/blob/v1.5.7/programs/zstd.1.md)
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/bay/fetch.py":"968794059b05a96173d16f1d5077f5f0"} -->

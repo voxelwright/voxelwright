@@ -1,6 +1,9 @@
-# Making
+---
+title: Making
+description: How a typed wish becomes a thing made of cells, using the asker's own model, and what a model may do.
+---
 
-Making turns a typed wish ("a market stall with a striped awning") into a thing built from the world's own cells. The model belongs to the person who asked, on their subscription or their API key. The engine treats a model's reply as data: it reads it, checks it, turns it into cells and sends it to the world as one ordinary edit. The world's server never runs a model. Rules that models write are covered in [plugins and rules](engine-plugins.md).
+Making turns a typed wish ("a market stall with a striped awning") into a thing built from the world's own cells. The model belongs to the person who asked, on their subscription or their API key. The engine treats a model's reply as data: it reads it, checks it, turns it into cells and sends it to the world as one ordinary edit. The world's server never runs a model. Rules that models write are covered in [plugins and rules](/engine-plugins).
 
 ## Concepts
 
@@ -75,7 +78,7 @@ A model writes text, and nothing more. Each boundary below is enforced by code, 
 
 ## The ask
 
-<!-- schema engine/page/ask.ts Ask -->
+{/* schema engine/page/ask.ts Ask */}
 ```ts
 export interface Ask {
     wish?: string;
@@ -104,5 +107,3 @@ node test/models.mjs         # the browser's provider requests
 ```
 
 `--reply FILE` stands in a saved reply for the model, on `make.mjs` and on the helper. A check that passes with a saved reply proves the pipeline, not a model. Say which one you ran.
-
-<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"engine/page/ask.ts":"174d7235c4ea8ad4cb693abfada14a3b","engine/make/form.mjs":"31a88c43de77486a4f2474a75d07fe8a","engine/make/cells.mjs":"b75e3d3d96c23a9f599fa235f6e62250","engine/make/program.mjs":"d239a24bd1eb2458879352756ff3265a","engine/make/model.mjs":"6d09e7ed11a6844251d5a7b5e2ccc07e","engine/page/models.ts":"75f800abbf34adbefb9bf0d19770a060","engine/make/maker.mjs":"330062a3955b5cd6534350a2dbf96122","engine/make.mjs":"b9ca534b6fabc3dd78fa1f7a07c5fc80","engine/helper.mjs":"cf9a75d4e068e840eb8979086ad950b9","engine/page/maker.ts":"e938bf8e37552ed0237386443a50b404","engine/make/served.mjs":"a7cff994b04b8422986595f90869763d","engine/make/place.mjs":"9d2932bdc2d1cab056ac11c8a97c1f0c","engine/page/local.ts":"db878f789a3608c684e66c4f4f0bce2b"} -->

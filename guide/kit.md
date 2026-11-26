@@ -1,6 +1,9 @@
-# The kit
+---
+title: The kit
+description: Voxelmorphism, the UI kit where every control is a small solid object built from voxels.
+---
 
-Voxelmorphism is a design language in which every control is a small solid object built from voxels, such as a keycap, a knob in a slot or a lamp in a collar. The `voxelmorphism` package in `engine/kit` implements it for web pages. Plain HTML and CSS carry the interface. Where a renderer is available, the script draws each control as voxels behind its content. The rules of the language are in [SPEC.md](../engine/kit/SPEC.md); how to build a part is in [BUILDING.md](../engine/kit/BUILDING.md). Read [DESIGN.md](../DESIGN.md) before you build UI.
+Voxelmorphism is a design language in which every control is a small solid object built from voxels, such as a keycap, a knob in a slot or a lamp in a collar. The `voxelmorphism` package in `engine/kit` implements it for web pages. Plain HTML and CSS carry the interface. Where a renderer is available, the script draws each control as voxels behind its content. The rules of the language are in [SPEC.md](https://github.com/voxelwright/voxelwright/blob/main/engine/kit/SPEC.md); how to build a part is in [BUILDING.md](https://github.com/voxelwright/voxelwright/blob/main/engine/kit/BUILDING.md). Read [DESIGN.md](https://github.com/voxelwright/voxelwright/blob/main/DESIGN.md) before you build UI.
 
 ## Concepts
 
@@ -77,5 +80,3 @@ PORT=5989 node tools/default.mjs        # which renderer draws in each case
 ```
 
 Then run `npm test` (in `site/`) for the tailored build. For any visual change, follow the `ui-craft` skill's screenshot and review loop (`.agents/skills/ui-craft/SKILL.md`).
-
-<!-- docs-verified b084209ad7a5eaa8eb88a0fca9365bf4f69749a2 {"engine/kit/package.json":"1bf5aeaec199d0d6540caeb23cb85c94","engine/kit/src/index.js":"114146c170e12b847719fa1f298e6250","engine/kit/src/engine.js":"dcbfe6b3ef55b652a45df665ea5f5e38","engine/kit/css/_kit.css":"162e395a8d43b801f2cc231be21cc0b4","engine/kit/browser.mjs":"736510ef5fe3d02d9ca421678b37d51e","engine/kit/src/components/kbd.js":"ba5bbd027fd07afac971ae8f1a093296","site/generator/kit.mjs":"64af4955becec6afd350de4761b80e86","site/package.json":"d3fe18dc832220d9a28dbeb2eb08786d","site/test/kit.test.mjs":"317248655f9509518e4e65c22102ea4e"} -->

@@ -2137,5 +2137,3 @@ What is rough there:
 Not tested: an iPhone; a tab really hidden and come back to; Firefox.
 
 Facts paid for are in `.agents/skills/raw-webgpu` ("Many small transparent pictures").
-
-<!-- docs-verified ce4d9e7e518e41e40612cda85199e5ee8dc19000 {"engine/package.json":"8559b0f8264142bdc2e799f3b61c8d9a"} -->

@@ -997,5 +997,3 @@ module; a drawing reaches Moss's turn as an image with no route and the
 data note; the conversation keeps a reference, not the bytes; nothing reached
 Sam; a drawing with a route, from an unlisted person, with a path id, as a
 string, or missing is refused; the list folds made and given).
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"host/package.json":"1e74ea9dae16e7576f3f243d1dd2d246"} -->

@@ -1,4 +1,7 @@
-# Repository checks
+---
+title: Repository checks
+description: Every check the root runner knows, whether CI runs it, and what it needs.
+---
 
 Use a name with `npm run check -- --only NAME`. The default CI run excludes local and skipped checks. A file prerequisite must exist even for a named run.
 
@@ -8,7 +11,9 @@ Use a name with `npm run check -- --only NAME`. The default CI run excludes loca
 | `build-addroom` | local |  |
 | `build-plan` | local |  |
 | `docs` | ci |  |
+| `docs-coverage` | ci |  |
 | `docs-mentions` | ci |  |
+| `docs-site` | ci |  |
 | `engine-no-page` | ci |  |
 | `entries` | local |  |
 | `home-build` | ci |  |
@@ -66,5 +71,3 @@ Use a name with `npm run check -- --only NAME`. The default CI run excludes loca
 | `villager-gen` | local |  |
 | `villager-motion` | local |  |
 | `voxels` | ci |  |
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"scripts/checks.mjs":"6dd10fff06f4c72081c33e3173c3c751"} -->

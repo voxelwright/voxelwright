@@ -1,6 +1,9 @@
-# The city pipeline
+---
+title: The city pipeline
+description: How public San Francisco data becomes the pinned, content-addressed release a realm loads.
+---
 
-San Francisco in the engine is baked from public data. Python scripts in `engine/bay` fetch the sources for each 1 km square, bake each square into a pack, and cut the packs into tiles. `engine/sf/release.py` pins the tiles as a content-addressed release. `engine/sf/build.mjs` turns the pinned release into a static realm that any file host can serve. The formats each stage writes are in [worlds as cells](cells.md).
+San Francisco in the engine is baked from public data. Python scripts in `engine/bay` fetch the sources for each 1 km square, bake each square into a pack, and cut the packs into tiles. `engine/sf/release.py` pins the tiles as a content-addressed release. `engine/sf/build.mjs` turns the pinned release into a static realm that any file host can serve. The formats each stage writes are in [worlds as cells](/cells).
 
 Raw and baked data live under `~/.village/engine/bay`, never in git. Git holds the code, the square inventory (`engine/bay/sf-squares.json`), the pin (`engine/sf/pilot/current.json`) and the manifest of each release that has been pinned (`engine/sf/pilot/releases/<sha256>/manifest.json`). The tiles themselves are never in git.
 
@@ -52,15 +55,15 @@ Two small files tie a checkout to its data:
 - `engine/sf/pilot/current.json` names the release this checkout's realm uses: `{manifest, release, version}`. Moving it is the change that ships new city data.
 - `deploy/data.json` names the bundle that holds that release for machines without `~/.village`: `{pin, digest, tag}`. `fetch` refuses to run when `pin` is not the release in `current.json`, and refuses a bundle whose index does not hash to `digest`. It checks each file's length and SHA-256 after decompressing it and before writing it.
 
-`./world` (the [quickstart](quickstart.md)) runs `engine/core/build.mjs`, `deploy/data.mjs fetch` and `engine/sf/build.mjs` in that order, then serves `engine/dist-sf`.
+`./world` (the [quickstart](/quickstart)) runs `engine/core/build.mjs`, `deploy/data.mjs fetch` and `engine/sf/build.mjs` in that order, then serves `engine/dist-sf`.
 
 ## Promotion
 
-`release.py` stages a candidate and prints its digest. A person or agent scores fixed cameras from `engine/bay/neighbourhoods.json` against reference photographs, at street level and at 100 m. The receipt names the candidate, the previous pin, the tested core's hash and a score pair for each of the sixteen places. `--panel RECEIPT` moves the pointer only if no score falls below the previous pin or the committed floors in `engine/bay/panel-floors.json`; `release.py` checks this with `check` from `engine/bay/panel_gate.py`. The full contract is in [engine/sf/release.md](../engine/sf/release.md).
+`release.py` stages a candidate and prints its digest. A person or agent scores fixed cameras from `engine/bay/neighbourhoods.json` against reference photographs, at street level and at 100 m. The receipt names the candidate, the previous pin, the tested core's hash and a score pair for each of the sixteen places. `--panel RECEIPT` moves the pointer only if no score falls below the previous pin or the committed floors in `engine/bay/panel-floors.json`; `release.py` checks this with `check` from `engine/bay/panel_gate.py`. The full contract is in [engine/sf/release.md](https://github.com/voxelwright/voxelwright/blob/main/engine/sf/release.md).
 
 ## Licences
 
-Every layer keeps its own terms, listed in [DATA-LICENSES.md](../DATA-LICENSES.md). Rules that hold for all of it are in the `bay-sources` skill (`.agents/skills/bay-sources/SKILL.md`):
+Every layer keeps its own terms, listed in [DATA-LICENSES.md](https://github.com/voxelwright/voxelwright/blob/main/DATA-LICENSES.md). Rules that hold for all of it are in the `bay-sources` skill (`.agents/skills/bay-sources/SKILL.md`):
 
 - Requests carry a generic client name and no personal detail.
 - A source that needs a key is not used until the owner provides one. Keys live under `~/.village/engine/bay/keys/`, never in git or a log.
@@ -80,5 +83,3 @@ cd engine && npm run sf      # the realm's checks in Chrome
 ```
 
 A change to `bake.py` or `tiles.py` changes tile bytes, so it needs a new release and a new panel pass before the pin moves. A change to how `bay.rs` reads a pack must keep reading the pinned release's tiles, or move the pin in the same change.
-
-<!-- docs-verified 3e4407c8ce8053805cf32fd47fab75b930e62bf6 {"engine/bay/fetch.py":"968794059b05a96173d16f1d5077f5f0","engine/bay/street_inputs.py":"7dc7026bcd982c4c2ad8dd7eabb23515","engine/bay/full_run.py":"7af98d764f27e3197b224e3d55e8ed47","engine/bay/tiles.py":"033cfed90bc28ca58c540298fa18fb16","engine/sf/release.py":"fadaff1f9fb8de1e183527e67f560085","engine/sf/build.mjs":"ebe036b3a32abd7288ddbab036163277","deploy/data.mjs":"ba58b01fa6153e130e18d9579e4af9d5","scripts/world.mjs":"d61adc1411ad8c5d338b65fbd653b096","DATA-LICENSES.md":"73f5a7f95d97ed2e3f294aac42d3a85f","engine/bay/panel-floors.json":"fe4b7c6330bbed7385480377104e29c4"} -->

@@ -1,6 +1,9 @@
-# The page
+---
+title: The page
+description: The browser side of the engine. Sectors live on the GPU, a ray is marched per pixel, and everything else draws over that.
+---
 
-`engine/page` is the browser side of [the engine](engine.md). It keeps the sectors around the eye on the GPU, draws them by marching a ray per pixel in WGSL, and draws everything else over that picture. It uses raw WebGPU with no framework or bundler: `engine/serve.mjs` serves the TypeScript files with Node's type stripping. Start it with `npm run serve` (in `engine/`) and open `/city`.
+`engine/page` is the browser side of [the engine](/engine). It keeps the sectors around the eye on the GPU, draws them by marching a ray per pixel in WGSL, and draws everything else over that picture. It uses raw WebGPU with no framework or bundler: `engine/serve.mjs` serves the TypeScript files with Node's type stripping. Start it with `npm run serve` (in `engine/`) and open `/city`.
 
 ## Concepts
 
@@ -32,7 +35,7 @@ sequenceDiagram
 
 A worker keeps nothing between asks. Each ask carries every edit that reaches its column, so any worker can answer any ask, and a worker that fails is replaced and its asks sent again (`hire` in `world.ts`). An answer to an older ask for the same slot is dropped.
 
-<!-- schema engine/page/worker.ts Ask,Answer -->
+{/* schema engine/page/worker.ts Ask,Answer */}
 ```ts
 export interface Ask {
     id: number;
@@ -61,7 +64,7 @@ export interface Answer {
 }
 ```
 
-In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](engine-core.md#the-edit-format). `lacking` means a San Francisco tile did not arrive, so the column was made as water and will be asked for again.
+In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](/engine-core#the-edit-format). `lacking` means a San Francisco tile did not arrive, so the column was made as water and will be asked for again.
 
 ## Files to know
 
@@ -81,8 +84,8 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `stunts.ts` | Driving stunt and combo tracker (`engine.stunts`): drifts, hill jumps, 180/360 spins, traffic near-misses (`voxelwright:nearmiss`), speed runs, x1–x5 combos, banking chime, and `[data-panel="stunts"]`. |
 | `minimap.ts`, `map-gpu.ts` | Speed-reactive 3D WebGPU minimap, fullscreen 2D/3D map, and GPS navigation. |
 | `summon.ts` | Instant street-level sports coupe delivery (`G` key on foot). |
-| `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](plugin-types.md)). |
-| `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](cells.md)). |
+| `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
+| `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
 
 ## Invariants
 
@@ -100,5 +103,3 @@ node test/bench.mjs               # frame cost before and after
 ```
 
 Add `?pool=`, `?grid=` or `?levels=` to `/city` to try other sizes for the pool, the boxes and the number of levels.
-
-<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"engine/page/worker.ts":"e99afb289778a685cc5c0fc996cc3c2e","engine/page/world.ts":"9ddf726d184807da7cbb5267b9f8fb4b","engine/page/march.ts":"2dd1ea66bf0292768b2f55c8749524ee","engine/page/main.ts":"4db19705b2d4d1cd08864bb529d3159c","engine/package.json":"83c296e8585f38f1346548d6aed7e5bb","engine/page/input.ts":"87ea91747fb483c7955adaed7cde6121","engine/page/plugins.ts":"bccd33977348a0dc89afed82531a0a2f","engine/page/explore.ts":"0125e7ca46dc9c20396443fc70f93c22"} -->

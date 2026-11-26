@@ -9,5 +9,3 @@ Public API remains `sound(true)` / `sound(false)` / `sound()` and
 `cue('press')` / `cue('release')`, exported from src/index.js.
 Enable from a user gesture. Samples load once after consent; interactions before
 readiness stay silent and are never replayed. Other cues retain their existing synthesis.
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/kit/src/core/sound.js":"59c67c352f6eb1927b48a627a36c2295","engine/kit/src/core/audio/press.wav":"e2ca47320b52c65b84ed0e2aecdb5890","engine/kit/src/core/audio/release.wav":"543821fac75ea4534a37e66d6bb6334e"} -->
