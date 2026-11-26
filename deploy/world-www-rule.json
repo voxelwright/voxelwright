@@ -1,0 +1,13 @@
+{
+  "ref": "voxelwright_www",
+  "description": "www.voxelwright.world to the apex (#578, deploy/README.md)",
+  "expression": "(http.host eq \"www.voxelwright.world\")",
+  "action": "redirect",
+  "action_parameters": {
+    "from_value": {
+      "status_code": 301,
+      "target_url": { "expression": "concat(\"https://voxelwright.world\", http.request.uri.path)" },
+      "preserve_query_string": true
+    }
+  }
+}

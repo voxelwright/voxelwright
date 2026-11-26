@@ -75,13 +75,13 @@ Then run either line, or both in order. The pinned CLI passes its native project
 (cd deploy && npx cf deploy)
 ```
 
-## Send world blog requests to the personal site
+## The world's two redirects
 
-After the zone is active and the custom domains are proxied, install this free zone Single Redirect once. It matches both world hostnames and preserves the blog path and query string. Cloudflare evaluates it before the Worker. With a token allowed to edit Single Redirects, run this for a zone with no redirect entry point yet. [Cloudflare Rulesets API](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/)
+Two free Single Redirect rules sit on the voxelwright.world zone, and Cloudflare evaluates them before the Worker. `world-blog-rule.json` sends `/blog` and everything under it, on either hostname, to zahynailo.dev. `world-www-rule.json` sends www.voxelwright.world to the apex, so the page keeps one address and one browser store. Both keep the path and the query string. They were installed on November 25, 2026 with the command below and deploys do not touch them. With a token allowed to edit Single Redirects, run this for a zone with no redirect entry point yet. [Cloudflare Rulesets API](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/)
 
 ```sh
 cd deploy
-npx cf rulesets create --zone voxelwright.world --kind zone --phase http_request_dynamic_redirect --name 'World redirects' --rules "$(jq -sc . world-blog-rule.json)"
+npx cf rulesets create --zone voxelwright.world --kind zone --phase http_request_dynamic_redirect --name 'World redirects' --rules "$(jq -sc . world-blog-rule.json world-www-rule.json)"
 ```
 
 If that phase already has an entry point, append the rule to its existing ID instead. Read the ID with the first command.

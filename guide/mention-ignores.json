@@ -79,6 +79,7 @@
   },
   "deploy/README.md": {
     "404.html": "Generated site response.",
+    "deploy/dist-world": "Build output of deploy/assemble.mjs for the voxelwright Worker.",
     "robots.txt": "Generated deploy response."
   },
   "engine/README.md": {
