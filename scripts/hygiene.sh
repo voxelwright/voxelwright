@@ -19,8 +19,8 @@
 # A HEAD that no branch contains gets refs/backup/wt-<name> first.
 set -uo pipefail
 
-REPO="${VILLAGE_REPO:-$HOME/Developer/Village}"
-WORKTREES="${VILLAGE_WORKTREES:-$HOME/.t3/worktrees/Village}"
+REPO="${VILLAGE_REPO:-$HOME/Developer/voxelwright}"
+WORKTREES="${VILLAGE_WORKTREES:-$HOME/.t3/worktrees/Voxelwright}"
 LOG="$HOME/.village/hygiene.log"
 LABEL="village.hygiene"
 STALE_DAYS=3

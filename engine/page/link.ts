@@ -68,7 +68,7 @@ export interface Link {
   /** Does something a rule offers: which, whether it goes down or comes up, where the eyes are and which way they look. */
   act(rule: string, id: string, phase: 'down' | 'up', from: readonly [number, number, number], to: readonly [number, number, number]): void
   /** Says what a living thing is to do (go, turn and rise from -1 to 1), held by the world for a second. */
-  drive(id: string, go: number, turn: number, rise: number, once?: 'roll' | 'jump', boost?: boolean): void
+  drive(id: string, go: number, turn: number, rise: number, once?: 'roll' | 'jump', boost?: boolean, wetness?: number): void
   /** This page's person has got on a living thing, or off it. */
   ride(id: string, on: boolean): void
   /** An ask in the world's own words (`GET /world/` says which): a thing with its cells, a change to a thing's fields. Resolves to whether it was taken. */
@@ -171,7 +171,7 @@ export function link(base = '/world', via: Via | null = null): Link {
     set onoffers(f: ((offers: Offer[]) => void) | null) { hears = f; f?.(offers) },
     act(rule, id, phase, from, to) { void fetch(`${base}/act`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, phase, from, to }) }).catch(() => {}) },
     ride(id, on) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, on }) }).catch(() => {}) },
-    drive(id, go, turn, rise, once, boost) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump', ...(boost ? { boost: true } : {}) }) }).catch(() => {}) },
+    drive(id, go, turn, rise, once, boost, wetness) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump', ...(boost !== undefined ? { boost } : {}), ...(wetness !== undefined ? { wetness } : {}) }) }).catch(() => {}) },
     ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
     here(at, yaw, name, frame) { void fetch(`${base}/here`, { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw, frame }) }).catch(() => {}) },
     // A page's body is its own to place, so the world has it as a page's; to speak it takes a seat's voice under the page's name.

@@ -67,7 +67,7 @@ Redaction runs before anything is written, and the build checks every session ag
 
 `site.config.mjs` holds the title, description, origin (`https://zahynailo.dev`), `base: "/blog/"`, social links, `flags` and `negotiateMarkdown`.
 
-`negotiateMarkdown` turns on `src/worker.mjs`, which answers `Accept: text/markdown` on page routes with the page's `.md` twin. Only `npm run dev` runs that Worker (`cloudflare.config.ts`). The deployed zahynailo.dev is `deploy/`'s assets-only Worker, so the switch changes nothing there. The `.md` addresses and alternate links work either way.
+`negotiateMarkdown` turns on `src/worker.mjs`, which answers `Accept: text/markdown` on page routes with the page's `.md` twin. Both `npm run dev` (`site/cloudflare.config.ts`) and `deploy/cloudflare.config.ts` read it (off by default so zahynailo.dev stays an assets-only Worker). The `.md` addresses and alternate links work either way.
 
 ## Rules
 

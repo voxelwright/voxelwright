@@ -96,7 +96,7 @@ export const components = [
 for (const def of components) if (def.plain) plainPart(def.selector, def.plain);
 let stage = null;
 
-// The renderer. By default it is the Village engine's (WebGPU, src/engine.js). use() hands the
+// The renderer. By default it is the Voxelwright engine's (WebGPU, src/engine.js). use() hands the
 // kit another. Where there is no WebGPU the kit's own WebGL2 renderer (core/gl.js) still stands
 // in; it goes once the plain version looks right, and such a browser then gets the plain page.
 let given;          // undefined: the default; null: none, the page stays plain; else a renderer

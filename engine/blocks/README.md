@@ -44,17 +44,16 @@ node blocks/serve.mjs --port 5991
 | `--port` | `5990` | Port on 127.0.0.1. |
 | `--reports` | `~/.village/engine/blocks/reports.jsonl` | Where a page's `POST /report` lines are appended. Real Safari can be opened but not driven, so a measuring page reports itself. |
 
-The server only sends files under `blocks/`, `probe/` and `kit/`, strips types from `.ts`, and
+The server only sends files under `blocks/`, `probe/`, `kit/`, `landing/`, `page/` and `core/`, strips types from `.ts`, and
 answers only requests addressed to `127.0.0.1`, `localhost` or a `.ts.net` name. The root path is not mapped: open
-`/kit/showcase/` or `/blocks/proof/check.html`.
+`/kit/showcase/`, `/blocks/proof/` or `/blocks/proof/check.html`.
 
 The kit's own server (`../kit/tools/serve.mjs`) also serves this renderer and is the one the
 kit's tools expect. Use this one when you work on the renderer itself.
 
-## Not working
+## Proof scripts
 
-The other pages and scripts in `proof/` (`index.html`, `proof.js`, `run.mjs`, `look.mjs`,
-`showcase.mjs`, `cost.mjs`, `stand.mjs`) still load the kit from its old package path, and some
-expect the server to have been started with an `--as kit` flag it does not have. They do not run as they are. They were the measurements behind
-choosing one canvas per part. The findings are in the guide page and in the `raw-webgpu` skill
+The pages and scripts in `proof/` (`index.html`, `proof.js`, `run.mjs`, `look.mjs`,
+`showcase.mjs`, `cost.mjs`, `stand.mjs`) run against `node blocks/serve.mjs` (default port `5990`).
+They were the measurements behind choosing one canvas per part. The findings are in the guide page and in the `raw-webgpu` skill
 (`../../.agents/skills/raw-webgpu/SKILL.md`).

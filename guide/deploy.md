@@ -29,7 +29,7 @@ flowchart TD
   ZR -- otherwise --> ZA[static assets in dist]
 ```
 
-Cloudflare runs a zone's Single Redirect rules before either Worker. Then each Worker answers from its static assets, except for the three path patterns that `runWorkerFirst` hands to `worker.mjs`. Every one of those calls counts against the Workers Free plan's 100,000 requests a day. The `zahynailo` Worker runs no code, so it never counts.
+Cloudflare runs a zone's Single Redirect rules before either Worker. Then each Worker answers from its static assets, except for the three path patterns that `runWorkerFirst` hands to `worker.mjs`. Every one of those calls counts against the Workers Free plan's 100,000 requests a day. With `negotiateMarkdown: false` (the default in `site/site.config.mjs`), the `zahynailo` Worker runs no code, so it never counts; setting `negotiateMarkdown: true` wires `site/src/worker.mjs` in for page routes.
 
 ## Assembly
 

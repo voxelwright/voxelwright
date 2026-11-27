@@ -32,7 +32,7 @@ It builds the core, downloads and verifies the pinned city data, builds the real
 | [master/](master/README.md) | The master server, which lists player-hosted lobbies and passes one WebRTC offer and one answer per join. |
 | [site/](site/README.md) | The site generator for the owner's front page and blog at zahynailo.dev. |
 | [deploy/](deploy/README.md) | The two Cloudflare Workers: the realm at voxelwright.world and the site at zahynailo.dev. |
-| `guide/` | The documentation, published with Mintlify. |
+| `guide/` | The documentation, published with Mintlify at [voxelwright.mintlify.app](https://voxelwright.mintlify.app/). |
 | `.agents/` | Skills for the agents that build the project. [AGENTS.md](AGENTS.md) holds the working rules. |
 
 Read next:

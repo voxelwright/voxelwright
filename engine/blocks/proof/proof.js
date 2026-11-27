@@ -3,8 +3,8 @@
 //
 //   ?run=gl,own   who draws: one after another in this tab (with &auto), or the first alone
 //   &frames=120  &dark  &shots (opens the dialog and the menu at the end, for a picture)
-import { use, adopt, ready } from '/kit/packages/voxelmorphism/src/index.js'
-import { Renderer as GL } from '/kit/packages/voxelmorphism/src/core/gl.js'
+import { use, adopt, ready } from '/kit/src/index.js'
+import { Renderer as GL } from '/kit/src/core/gl.js'
 import { renderer } from '../renderer.ts'
 
 const q = new URLSearchParams(location.search)

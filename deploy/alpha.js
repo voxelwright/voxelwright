@@ -1,4 +1,4 @@
-// The early-alpha notice on every page of zahynailo.dev (#450): the realm at / and the blog under /blog/. assemble.mjs
+// The early-alpha notice added by assemble.mjs to published pages (#450). assemble.mjs
 // adds this script to each page it publishes, so the engine's and the site's own pages stay as they are. One origin,
 // so one dismissal hides it on both. To retire it: delete this file and its tag in assemble.mjs.
 //

@@ -1,14 +1,14 @@
 // Pictures of the kit's panel standing in the landing world (#430, step 4), at several hours, from the street's
-// own home view and from close by. Needs `npm run player` and `node blocks/serve.mjs --port 5991 --as kit`.
+// own home view and from close by. Needs `npm run core` and `node blocks/serve.mjs --port 5990`.
 //
-//   node blocks/proof/stand.mjs [--hours 10.4,17.6,22] [--port 5991]
+//   node blocks/proof/stand.mjs [--hours 10.4,17.6,22] [--port 5990]
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { arg, CHROME, turn } from '../../test/kit.mjs'
 
-const dir = join(homedir(), '.village', 'engine', 'blocks', 'world'), port = arg('port', '5991')
+const dir = join(homedir(), '.village', 'engine', 'blocks', 'world'), port = arg('port', '5990')
 mkdirSync(dir, { recursive: true })
 await turn()
 const browser = await chromium.launch(CHROME)
@@ -16,7 +16,7 @@ for (const hour of arg('hours', '10.4,17.6,22').split(',')) {
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })).newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message)); page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text().slice(0, 200)) })
-  await page.goto(`http://127.0.0.1:${port}/engine/landing/index.html?kit=/packages/voxelmorphism/&hour=${hour}&scale=1`)
+  await page.goto(`http://127.0.0.1:${port}/landing/index.html?kit=/kit/&hour=${hour}&scale=1`)
   await page.waitForFunction(() => globalThis.landing?.on.seen.whole > 0 && document.querySelector('#standing'), null, { timeout: 90000 }).catch((e) => errors.push(String(e).split('\n')[0]))
   await page.keyboard.press('Escape') // the flight in is cut short
   await page.waitForTimeout(2500)

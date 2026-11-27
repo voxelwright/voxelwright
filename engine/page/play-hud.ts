@@ -1104,9 +1104,7 @@ export function playHud(o: {
       if (far > 32) { dx *= 32 / far; dy *= 32 / far }
       cap.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`
     }
-    // By touch, held upright, no ring of seven keys fits clear of the body and the top keys (measured at 390 x 844): the
-    // tools hang in a column from where the tool's key is (it is not shown meanwhile), along the right edge, and a slide
-    // down the column picks. While a tool is chosen the body stands: what is held to move it is let go each frame, before
+    // While the radial tool wheel is open, the body stands: what is held to move it is let go each frame, before
     // it is read (person.ts). (Keys only: by touch a thumb on the stick still steers, as one moves while changing a weapon
     // in a game on a phone.)
     if (open) for (const code of MOVES) o.input.hold(code, false)

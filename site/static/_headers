@@ -1,5 +1,5 @@
 # How long browsers keep the site's files (Workers static assets reads this at deploy, without
-# running the Worker; scripts/serve.mjs follows it locally; test/cache.test.mjs holds the rules).
+# running the Worker; scripts/serve.mjs follows it locally).
 # A file not named here keeps the platform default, "public, max-age=0, must-revalidate" with an
 # ETag: the browser checks before reusing it, so a deploy shows at once. Pages, Markdown twins,
 # feeds and every unhashed script stay that way. Only a file whose name changes when its bytes do

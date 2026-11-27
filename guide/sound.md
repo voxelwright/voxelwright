@@ -310,7 +310,7 @@ Commands, setup and every file are in the [ears README](https://github.com/voxel
 
 ## Checks
 
-The first six are in `npm run check` in `engine/`. `radio.mjs` is not in `test/all.mjs` yet, so run it by hand. To run one:
+All seven are in `npm run check` in `engine/`. To run one:
 
 ```sh
 cd engine

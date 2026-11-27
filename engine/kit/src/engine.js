@@ -1,4 +1,4 @@
-// The Village engine's renderer for the kit: WebGPU, one canvas per part.
+// The Voxelwright engine's renderer for the kit: WebGPU, one canvas per part.
 //
 //   import { use, adopt } from './index.js';
 //   import { renderer } from './engine.js';

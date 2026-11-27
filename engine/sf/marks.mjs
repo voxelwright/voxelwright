@@ -1,4 +1,4 @@
-// The paint and rails on San Francisco's roads (#450), from the city run's street graphs, its rails (sf/rails.py) and
+// The paint and rails on San Francisco's roads (#450), from the city run's street graphs, its street tags (sf/street-tags.json) and
 // the colours OSM gives crossings (sf/crossing-colours.mjs); sf/build.mjs writes them as `bay/marks.bin` beside the
 // tiles, and the page server (serve.mjs) the same for its own. The march draws them as lines (page/marks.ts); the core
 // reads only the squares they cover, where the bake's own paint is not drawn (bay.rs `marks`).

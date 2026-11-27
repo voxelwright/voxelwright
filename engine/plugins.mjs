@@ -14,7 +14,7 @@
 //   state     () => any        what to hand the next version of this plugin when it is picked up again (`world.was`)
 //   close     () => {}         it is being replaced or taken away: stop timers
 //   recored   () => {}         the core was swapped for another build (serve.mjs `coreLook`): set again what was set in it
-// The doors (`world`): core() (the core's exports, as they are now: ask each time, never keep it), folk (everyone with a body, by name), text (cleans what someone wrote), tell (says where a
+// The doors (`world`): builds (rules/built.mjs), core() (the core's exports, as they are now: ask each time, never keep it), folk (everyone with a body, by name), living(id) (a living thing's current position, or null), text (cleans what someone wrote), tell (says where a
 // body is to pages), release (lets a taken resident go), look and stand (the world's cells), tall, happen(event, e)
 // (every rule that listens hears it), hear(ruleId, event, e) (one rule hears it), pages.state(any) (this plugin's
 // page side on every page is given it, late joiners too: latest wins) and pages.once(any) (given to pages there now,

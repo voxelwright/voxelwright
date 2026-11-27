@@ -1,6 +1,6 @@
-// The page's one owner of keys, pointer and touch (#243, #244). Nothing else listens for them: `main.ts`
-// and every lane read what is held and what was turned from here, and add a mode to say what a key or a
-// click means for the time being.
+// The page's primary owner of keys, pointer and touch (#243, #244). `main.ts` and most lanes read what is
+// held and what was turned from here (a few overlays such as the minimap and radial HUD add their own key
+// listeners), and add a mode to say what a key or a click means for the time being.
 //
 // Modes are a stack. The page's own (`moving`) is at the bottom; a lane pushes one over it:
 //
