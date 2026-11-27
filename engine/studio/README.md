@@ -66,7 +66,7 @@ Built-in extensions (`voxel-inspector`, `render-lab`, `city-tiles`, `sound-lab`,
 ## Security
 
 - Studio Bridge binds strictly to `127.0.0.1`, refuses foreign `Host` and `Origin` headers (`403`), and requires `X-Studio-Secret` (`401`).
-- `/studio/api/worktree/core.wasm` serves only registered `git worktree list` paths of this repository.
+- `/studio/api/worktree/core.wasm` serves built core WebAssembly binaries only from registered `git worktree list` paths of this repository.
 - `engine/page/main.ts` imports Studio lazily with a computed specifier gated by `!LOCAL`, so `sf/build.mjs` bundles zero Studio bytes into public deployments.
 
 ## Check

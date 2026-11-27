@@ -15,7 +15,7 @@ flowchart LR
   Bridge <-->|Game-Use WS| Headless["Headless WebGPU Chrome<br/>(game_session_spawn)"]
 ```
 
-- **Studio Bridge (`engine/studio/bridge.mjs`)**: loopback-only local daemon (`127.0.0.1:5764`) with per-launch `X-Studio-Secret` auth, foreign-origin rejection, CORP-safe T3 asset proxying (`/studio/api/t3/asset` for COEP pages), voice transcription, binary attachment upload, worktree `engine/page/core.wasm` hot-swap, and Streamable HTTP `/mcp`.
+- **Studio Bridge (`engine/studio/bridge.mjs`)**: loopback-only local daemon (`127.0.0.1:5764`) with per-launch `X-Studio-Secret` auth, foreign-origin rejection, CORP-safe T3 asset proxying (`/studio/api/t3/asset` for COEP pages), voice transcription, binary attachment upload, worktree WebAssembly hot-swap, and Streamable HTTP `/mcp`.
 - **T3 Protocol Client (`engine/studio/t3-client.mjs`, `engine/studio/dpop.mjs`, `engine/page/studio/transport.ts`)**: speaks T3 Code's wire protocol natively — local server discovery (`~/.t3/userdata/server-runtime.json`), CLI pairing, RFC 9449 ES256 DPoP token exchange, `/api/auth/websocket-ticket/rpc`, and Effect RPC JSON over `/ws?orchestrationProtocol=2&frameParts=1` (including `\u001e` multi-part frame reassembly). Also supports direct browser-to-T3 mode over WebCrypto when no local bridge is running.
 - **Game-Use Control Plane (`engine/studio/game-hub.mjs`, `engine/studio/session-control.mjs`, `engine/studio/mcp.mjs`)**: exposes 19 core `game_*` MCP tools plus dynamic extension tools over both live user browser tabs and spawned headless WebGPU Chrome sessions.
 
@@ -32,7 +32,7 @@ Open `http://127.0.0.1:5740/city`. The page loads Studio automatically and disco
 - **`F9` — Bug in View**: freezes the live WebGPU frame into an annotation canvas (Pin + 3D ray-pick, Box, Freehand Pen, optional Raymarch Heatmap), attaches structured T3 `UnknownContextRecord`s (`game-frame`, `game-pick`, `game-timeline`, plus extension collectors) and PNG uploads, and launches an isolated worktree thread in T3 Code.
 - **`F10` — What Just Happened?**: captures the last 30 s `engine.recorder` flight-recorder trace, passive anomalies, and optional rolling 15 s WebM clip into a T3 fix thread.
 - **Auto-Catch Faults & Playtest Mode**: watches WebGPU faults and high/critical `engine.recorder` anomalies to offer a one-click fix toast; Playtest Mode records voice-dictated bookmarks, toggles 3D spatial thread pins via `hud.cue()`, and dispatches fixes without leaving the game.
-- **Verify Fix Here**: in **Review & Verify**, hot-swaps a fix worktree's `engine/page/core.wasm` live via `engine.recore()` (or opens its preview server), displays an interactive **Before / After** split-wipe and blink comparator, and generates a runnable `engine/test/<slug>.mjs` regression check.
+- **Verify Fix Here**: in **Review & Verify**, hot-swaps a fix worktree's built core WebAssembly binary live via `engine.recore()` (or opens its preview server), displays an interactive **Before / After** split-wipe and blink comparator, and generates a runnable `engine/test/<slug>.mjs` regression check.
 
 ## T3 Code iOS parity inside the game
 

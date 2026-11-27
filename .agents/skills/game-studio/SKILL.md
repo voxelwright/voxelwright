@@ -22,7 +22,7 @@ Prefer `voxelwright-game` MCP tools over hand-rolled Playwright scripts whenever
    - `game_perf(benchmark: true)` measures paced GPU frame timings and per-pass WebGPU breakdown.
    - `game_flight_recorder()` reads the 30 s `engine.recorder` trace, events, edits, and passive anomalies.
    - `game_assert(noGpuFaults: true, noCriticalAnomalies: true, maxFrameMs: ...)` validates invariants.
-   - `game_worktree_verify(worktreePath)` hot-swaps `engine/page/core.wasm` via `engine.recore()` when only `engine/core/` changed, reloads plugins when only `engine/plugins/` changed, or boots a worktree preview server.
+   - `game_worktree_verify(worktreePath)` hot-swaps the built core WebAssembly binary via `engine.recore()` when only `engine/core/` changed, reloads plugins when only `engine/plugins/` changed, or boots a worktree preview server.
 4. **Always close spawned sessions**: call `game_session_close(sessionId)` when done so the GPU turn is released immediately.
 
 ## Local interactive development
