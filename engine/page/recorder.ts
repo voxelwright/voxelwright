@@ -982,7 +982,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
               kmh: r1(tel?.kmh ?? Math.abs(riding.state?.speed ?? 0) * 0.36),
               gear: tel?.gear ?? 0, rpm: r2(tel?.rpm ?? 0), slip: r2(tel?.slip ?? 0),
               drifting: !!tel?.drifting, surface: tel?.surface ?? 'paved',
-              dents: dmg?.dents.length ?? 0,
+              dents: dmg?.dentCount ?? 0,
             } : null,
             perf: {
               frameMs: r1(p.frameMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs), scale: r2(p.scale),

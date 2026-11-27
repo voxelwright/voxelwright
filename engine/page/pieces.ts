@@ -10,9 +10,9 @@
 // fine.ts `facesWithSmooth`): its outside is then lit by a normal from the shape round it, darkened in its hollows,
 // and its paint and glass mirror as a car's do, where a face lit by its square normal showed each step of a curve.
 // A vehicle that has been struck (#37, deform.ts) is drawn bent: up to six dents move its corners and turn its normals,
-// its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only a struck piece pays for it:
-// it draws from a copy of its faces split into rows a cell long, so every corner lies on the cells' lattice and faces
-// that meet still meet once bent (a merged row bent at its two ends only would open a gap beside its neighbours).
+// its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only rows whose bounding box
+// overlaps an active dent sphere or torn opening are split into 1-cell unit faces so bent faces meet without exploding
+// undamaged regions; pieces are frustum- and backface-culled so off-screen and back-facing quads pay nothing.
 import type { CrashOpening } from './crash-opening.ts'
 import { shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
@@ -93,8 +93,11 @@ fn unfold(word: u32) -> vec3f {
   let long = f32(b & 255u);
   let axis = (b >> 8u) & 3u;
   let side = f32((b >> 10u) & 1u);
-  let cu = f32(v & 1u);
-  let cv = f32((v >> 1u) & 1u);
+  // Orient all six face directions consistently CCW outward so hardware backface culling drops back-facing quads.
+  let flip = select(side > 0.5, side < 0.5, axis == 2u);
+  let vi = select(v, v ^ 1u, flip);
+  let cu = f32(vi & 1u);
+  let cv = f32((vi >> 1u) & 1u);
   var p = start;
   var n = vec3f(0.0);
   if (axis == 1u) { p += vec3f(cu * long, side, cv); n = vec3f(0.0, side * 2.0 - 1.0, 0.0); }
@@ -104,7 +107,7 @@ fn unfold(word: u32) -> vec3f {
   var out: Out;
   out.open = 1.0;
   // (Only on things finer than the world's cells: the core's bodies, a held block of the world, stay as they were.)
-  let word = words[v & 3u];
+  let word = words[vi & 3u];
   out.hasSmooth = select(0u, word >> 31u, u.smoothOn != 0.0 && u.cell < 1.0);
   var lit = n;
   if (out.hasSmooth != 0u) {
@@ -564,14 +567,73 @@ const OWN = 192, DEFORM_AT = OWN / 4, CRACKS_BYTES = 16 * 4, CRACKS_AT = (OWN + 
 
 /**
  * A look's faces as the GPU takes them, six words a face: the solid ones first, then the glass, each with its corners'
- * smooth words (#38), 0 where it has none. `unit`: every row cut into faces a cell long (#37), for a piece that is bent;
- * a row of smooth faces is merged only where its corners' words are alike, so each piece of it keeps its first ones and
- * the last keeps the row's last.
+ * smooth words (#38), 0 where it has none. When `deform` is supplied, only merged rows whose bounding box overlaps an
+ * active dent sphere (with conservative displacement margin) or a torn opening are split into 1-cell unit faces (#37);
+ * undamaged regions stay merged, cutting dented-vehicle vertex load several-fold with identical geometry.
  */
-function sortFaces(born: Born, unit: boolean, openings: readonly CrashOpening[]) {
+function sortFaces(born: Born, deform: DeformState | undefined, openings: readonly CrashOpening[]) {
   const all = born.faces, smooth = born.smooth, total = all.length / 2
+  const spheres: number[] = []
+  if (deform?.dentCount) {
+    const n = Math.min(deform.dentCount, deform.dents.length)
+    for (let i = 0; i < n; i++) {
+      const d = deform.dents[i]
+      if (d.radius <= 0.0001) continue
+      const r = d.radius + 1.2 * d.depth + 2.0
+      spheres.push(d.center[0], d.center[1], d.center[2], r * r)
+    }
+  }
+  const boxes: number[] = []
+  for (const op of openings) {
+    if (!op.removed.size) continue
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity
+    for (const where of op.removed) {
+      const x = where & 1023, y = (where >>> 10) & 1023, z = (where >>> 20) & 1023
+      if (x < x0) x0 = x; if (x > x1) x1 = x
+      if (y < y0) y0 = y; if (y > y1) y1 = y
+      if (z < z0) z0 = z; if (z > z1) z1 = z
+    }
+    boxes.push(x0, y0, z0, x1, y1, z1)
+  }
+  const hasSplit = spheres.length > 0 || boxes.length > 0
+  const needsSplit = (a: number, b: number): boolean => {
+    const long = (b & 255) || 1
+    if (long <= 1 && !boxes.length) return false
+    const sx = a & 1023, sy = (a >>> 10) & 1023, sz = (a >>> 20) & 1023
+    const axis = (b >>> 8) & 3
+    // Cell-coordinate bounding box of the row's cells [x0..x1] x [y0..y1] x [z0..z1] (inclusive cell indices).
+    const x1 = axis === 0 ? sx : sx + long - 1
+    const z1 = axis === 0 ? sz + long - 1 : sz
+    for (let i = 0; i < boxes.length; i += 6) {
+      if (x1 >= boxes[i] && sx <= boxes[i + 3] && sy >= boxes[i + 1] && sy <= boxes[i + 4] && z1 >= boxes[i + 2] && sz <= boxes[i + 5]) return true
+    }
+    if (long <= 1) return false
+    // Vertex-coordinate AABB of the quad row for dent sphere overlap test.
+    const vx1 = x1 + 1, vy1 = sy + 1, vz1 = z1 + 1
+    for (let i = 0; i < spheres.length; i += 4) {
+      const cx = spheres[i], cy = spheres[i + 1], cz = spheres[i + 2], r2 = spheres[i + 3]
+      const dx = cx < sx ? sx - cx : cx > vx1 ? cx - vx1 : 0
+      const dy = cy < sy ? sy - cy : cy > vy1 ? cy - vy1 : 0
+      const dz = cz < sz ? sz - cz : cz > vz1 ? cz - vz1 : 0
+      if (dx * dx + dy * dy + dz * dz <= r2) return true
+    }
+    return false
+  }
+  let splitMask: Uint8Array | null = null
   let size = total
-  if (unit) { size = 0; for (let f = 0; f < total; f++) size += (all[f * 2 + 1] & 255) || 1 }
+  if (hasSplit) {
+    splitMask = new Uint8Array(total)
+    size = 0
+    for (let f = 0; f < total; f++) {
+      const a = all[f * 2], b = all[f * 2 + 1]
+      if (needsSplit(a, b)) {
+        splitMask[f] = 1
+        size += (b & 255) || 1
+      } else {
+        size++
+      }
+    }
+  }
   const sorted = new Uint32Array((size + openings.reduce((sum, opening) => sum + opening.walls.length / 2, 0)) * 6)
   let at = 0, glass = 0
   for (const glassy of [false, true]) {
@@ -585,12 +647,23 @@ function sortFaces(born: Born, unit: boolean, openings: readonly CrashOpening[])
     for (let f = 0; f < total; f++) {
       const a = all[f * 2], b = all[f * 2 + 1]
       if ((((b >>> 16) & 15) === 11) !== glassy) continue
-      const long = unit ? (b & 255) || 1 : 1, axis = (b >>> 8) & 3
+      const split = splitMask !== null && splitMask[f] === 1
+      if (!split) {
+        sorted[at * 6] = a; sorted[at * 6 + 1] = b
+        if (smooth) {
+          sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 3] = smooth[f * 4 + 1]
+          sorted[at * 6 + 4] = smooth[f * 4 + 2]; sorted[at * 6 + 5] = smooth[f * 4 + 3]
+        }
+        at++
+        if (glassy) glass++
+        continue
+      }
+      const long = (b & 255) || 1, axis = (b >>> 8) & 3
       for (let k = 0; k < long; k++) {
         // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
         const start = axis === 0 ? a + (k << 20) : a + k
         if (openings[0]?.removed.has(start) || openings[1]?.removed.has(start)) continue
-        sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
+        sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = ((b & ~255) | 1) >>> 0
         if (smooth) {
           sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
           const last = k === long - 1
@@ -601,7 +674,7 @@ function sortFaces(born: Born, unit: boolean, openings: readonly CrashOpening[])
       }
     }
   }
-  return { sorted, count: at, glass }
+  return { sorted: at * 6 < sorted.length ? sorted.subarray(0, at * 6) : sorted, count: at, glass }
 }
 
 export async function pieces(device: GPUDevice, format: GPUTextureFormat, march: Marcher): Promise<Pieces> {
@@ -616,7 +689,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     label: `pieces ${entryPoint}`, layout,
     vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: 24, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'uint32' }, { shaderLocation: 1, offset: 4, format: 'uint32' }, { shaderLocation: 2, offset: 8, format: 'uint32x4' }] }] },
     fragment: { module, entryPoint, targets: [{ format, ...(glass ? { blend: { color: glass, alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' } } } : {}) }] },
-    primitive: { topology: 'triangle-strip', cullMode: 'none' },
+    primitive: { topology: 'triangle-strip', cullMode: 'back' },
     // The glass after everything solid, read against its depth and not written to it.
     depthStencil: { format: 'depth24plus', depthWriteEnabled: !glass, depthCompare: 'less' },
   })
@@ -628,11 +701,9 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   }
   /** count: all its faces; glass: how many of them, the last ones, are glass; held: its faces' buffer, and how many pieces draw from it. */
   interface Faces { faces: GPUBuffer; count: number; glass: number }
-  /** unit: the same faces a cell long, made the first time one of its pieces is drawn bent (#37). */
-  interface Shared extends Faces { users: number; unit?: Faces }
+  interface Shared extends Faces { users: number }
   interface Held extends Piece {
-    tear?: { state: DeformState; revision: number; opening?: CrashOpening }
-    pocket?: { nose?: CrashOpening; fender?: CrashOpening; mesh: Faces }
+    bent?: { state: DeformState; revision: number; nose?: CrashOpening; mesh: Faces }
     faces: GPUBuffer
     uniforms: GPUBuffer
     bind: GPUBindGroup
@@ -641,40 +712,42 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     held: Shared
   }
   /** A look's faces on the GPU: the solid ones first, then the glass, each with its corners' smooth words. */
-  const upload = (born: Born, unit = false, openings: readonly CrashOpening[] = []): Faces => {
-    const { sorted, count, glass } = sortFaces(born, unit, openings)
+  const upload = (born: Born, deform?: DeformState, openings: readonly CrashOpening[] = []): Faces => {
+    const { sorted, count, glass } = sortFaces(born, deform, openings)
     const faces = device.createBuffer({ label: openings.length ? 'torn body mesh' : 'piece faces', size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
     device.queue.writeBuffer(faces, 0, sorted)
     return { faces, count, glass }
   }
-  const release = (held: Shared) => { held.faces.destroy(); held.unit?.faces.destroy() }
-  /** The faces a piece is drawn from now: a cell long once it is bent. */
+  const release = (held: Shared) => { held.faces.destroy() }
+  /** The faces a piece is drawn from now: rows overlapping active dents or torn openings are split to 1 cell, undamaged rows stay merged. */
   const facesOf = (piece: Held): Faces => {
     const state = piece.deform
-    const nose = state?.dentCount && state.hoodDamage >= 0.35 ? piece.opening : undefined
-    if (piece.pocket && piece.pocket.nose !== nose) {
-      piece.pocket.mesh.faces.destroy()
-      piece.pocket = undefined
+    if (!state?.dentCount) {
+      if (piece.bent) { piece.bent.mesh.faces.destroy(); piece.bent = undefined }
+      return piece
     }
-    if (!state?.dentCount) { piece.tear = undefined; return piece }
-    if (nose) {
-      if (!piece.pocket) {
-        piece.pocket = { nose, mesh: upload(piece.born, true, [nose]) }
-      }
-      return piece.pocket.mesh
+    const nose = state.hoodDamage >= 0.35 ? piece.opening : undefined
+    if (piece.bent && (piece.bent.state !== state || piece.bent.revision !== state.revision || piece.bent.nose !== nose)) {
+      piece.bent.mesh.faces.destroy()
+      piece.bent = undefined
     }
-    return piece.held.unit ??= upload(piece.born, true)
+    if (!piece.bent) {
+      piece.bent = { state, revision: state.revision, nose, mesh: upload(piece.born, state, nose ? [nose] : []) }
+    }
+    return piece.bent.mesh
   }
 
   const live = new Set<Held>()
   /** Faces already on the GPU, by the array they came from: many pieces of one look (the street's cars, #450) draw from one buffer. */
   const common = new WeakMap<Uint32Array, Shared>()
+  const block = new ArrayBuffer(UNIFORMS), f = new Float32Array(block), i32 = new Int32Array(block)
+  const visible: { piece: Held; faces: Faces }[] = []
   let smooth = true
   return {
     get smooth() { return smooth },
     set smooth(on: boolean) { smooth = on },
     get count() { return live.size },
-    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount ? p.pocket?.mesh ?? p.held.unit ?? p : p).count; return n },
+    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount ? p.bent?.mesh ?? p : p).count; return n },
     add(born, share = false) {
       let made = share ? common.get(born.faces) : undefined
       if (!made) {
@@ -684,7 +757,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       made.users++
       const held = made, uniforms = device.createBuffer({ size: UNIFORMS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: own, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); piece.pocket?.mesh.faces.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
+      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); piece.bent?.mesh.faces.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
       live.add(piece)
       return piece
     },
@@ -692,7 +765,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       const piece = p as Held
       if (!live.has(piece) || piece.held.users !== 1 || common.get(piece.born.faces) === piece.held) return
       release(piece.held)
-      piece.pocket?.mesh.faces.destroy(); piece.pocket = undefined
+      piece.bent?.mesh.faces.destroy(); piece.bent = undefined
       piece.born.faces = faces
       piece.born.smooth = smooth
       piece.held = { ...upload(piece.born), users: 1 }
@@ -700,9 +773,16 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     },
     draw(encoder, to, view, sun, timing, mirrors = true) {
       if (!live.size) return
-      const anchor = view.eye.map((e) => Math.floor(e / 64) * 64)
-      const block = new ArrayBuffer(UNIFORMS), f = new Float32Array(block), i32 = new Int32Array(block)
-      f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun, 0])
+      const aspect = to.size[0] / to.size[1]
+      const tanV = view.tanHalf, tanH = tanV * aspect
+      const secV = Math.hypot(1, tanV), secH = Math.hypot(1, tanH)
+      const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
+      const anchorX = Math.floor(ex / 64) * 64, anchorY = Math.floor(ey / 64) * 64, anchorZ = Math.floor(ez / 64) * 64
+      const rx = view.right[0], ry = view.right[1], rz = view.right[2]
+      const ux = view.up[0], uy = view.up[1], uz = view.up[2]
+      const fx = view.forward[0], fy = view.forward[1], fz = view.forward[2]
+      f.set([ex - anchorX, ey - anchorY, ez - anchorZ, tanV, rx, ry, rz, aspect, ux, uy, uz, 0, fx, fy, fz, 0, sun[0], sun[1], sun[2], 0])
+      visible.length = 0
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
@@ -713,22 +793,36 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       for (const piece of live) {
         // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
         if (!piece.cell || !piece.count) continue
-        const [x, y, z, w] = piece.rot, b = piece.born, lamps = piece.lamps
-        f[11] = b.size[0] * 0.5
-        f[15] = b.size[1] * 0.5
-        f[19] = b.size[2] * 0.5
-        f.set([piece.pos[0] - anchor[0], piece.pos[1] - anchor[1], piece.pos[2] - anchor[2], piece.cell], 20)
+        const [x, y, z, w] = piece.rot, b = piece.born, cell = piece.cell
+        const m00 = 1 - 2 * (y * y + z * z), m10 = 2 * (x * y + z * w), m20 = 2 * (x * z - y * w)
+        const m01 = 2 * (x * y - z * w), m11 = 1 - 2 * (x * x + z * z), m21 = 2 * (y * z + x * w)
+        const m02 = 2 * (x * z + y * w), m12 = 2 * (y * z - x * w), m22 = 1 - 2 * (x * x + y * y)
+        // Conservative world-space bounding sphere frustum cull: skips behind-camera & off-screen vehicles before uniform upload or draw.
+        const midX = b.size[0] * 0.5, midY = b.size[1] * 0.5, midZ = b.size[2] * 0.5
+        const ox = (midX - b.com[0]) * cell, oy = (midY - b.com[1]) * cell, oz = (midZ - b.com[2]) * cell
+        const dx = piece.pos[0] + m00 * ox + m01 * oy + m02 * oz - ex
+        const dy = piece.pos[1] + m10 * ox + m11 * oy + m12 * oz - ey
+        const dz = piece.pos[2] + m20 * ox + m21 * oy + m22 * oz - ez
+        const rad = Math.hypot(midX, midY, midZ) * cell + (piece.deform?.dentCount ? 2.0 : 0.0)
+        const dist = dx * fx + dy * fy + dz * fz
+        if (dist + rad < 1.0) continue
+        const upD = Math.abs(dx * ux + dy * uy + dz * uz)
+        if (upD > Math.max(0, dist) * tanV + rad * secV) continue
+        const rightD = Math.abs(dx * rx + dy * ry + dz * rz)
+        if (rightD > Math.max(0, dist) * tanH + rad * secH) continue
+        const lamps = piece.lamps
+        f[11] = midX
+        f[15] = midY
+        f[19] = midZ
+        f.set([piece.pos[0] - anchorX, piece.pos[1] - anchorY, piece.pos[2] - anchorZ, cell], 20)
         i32.set(b.low, 24)
         i32[27] = piece.ghost ? 1 : 0
         f.set(b.com, 28)
         f[31] = lamps ? lamps[0] : 0
         // The turn as a matrix, a column at a time.
-        f.set([1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)], 32)
-        f[35] = lamps ? lamps[1] : 0
-        f.set([2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)], 36)
-        f[39] = lamps ? lamps[2] : 0
-        f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
-        f[43] = lamps ? lamps[3] : 0
+        f[32] = m00; f[33] = m10; f[34] = m20; f[35] = lamps ? lamps[1] : 0
+        f[36] = m01; f[37] = m11; f[38] = m21; f[39] = lamps ? lamps[2] : 0
+        f[40] = m02; f[41] = m12; f[42] = m22; f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
         f[45] = mirrors ? 1 : 0
         f[46] = (piece.deform?.front ?? 0) >= 2 ? 1 : 0
@@ -743,18 +837,19 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         // (Copied when called: one block serves every piece.)
         device.queue.writeBuffer(piece.uniforms, 0, block)
         const faces = facesOf(piece)
+        visible.push({ piece, faces })
         pass.setBindGroup(0, piece.bind)
         pass.setVertexBuffer(0, faces.faces)
         // The solid faces.
-        pass.draw(4, faces.count - faces.glass)
+        if (faces.count > faces.glass) pass.draw(4, faces.count - faces.glass)
       }
       // The glass of those that have any: what is behind it tinted, then what it adds of itself. With mirrors off
       // it is still seen through (#74): a pale face there was a car's every window opaque from its own seat.
       for (const panes of mirrors ? [tint, glint] : [tint]) {
         pass.setPipeline(panes)
-        for (const piece of live) {
-          if (!piece.glass || !piece.cell) continue
-          const faces = facesOf(piece)
+        for (let i = 0; i < visible.length; i++) {
+          const { piece, faces } = visible[i]
+          if (!faces.glass) continue
           pass.setBindGroup(0, piece.bind)
           pass.setVertexBuffer(0, faces.faces)
           pass.draw(4, faces.glass, 0, faces.count - faces.glass)
