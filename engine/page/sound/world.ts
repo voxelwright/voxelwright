@@ -56,6 +56,12 @@ interface Body { born: { cells: number; faces: Uint32Array } }
 const BLOW = 30
 /** The most blows played as themselves in one telling; the rest go into the rubble's bed. */
 const BLOWS = 5
+/** The player car's dual-tone horn voices (Ab4 + C5 major third), shared by player and traffic horns. */
+export const HORN_TONES = [
+  { pitch: 415, force: 0.75, gain: 0.55 },
+  { pitch: 523, force: 0.7, gain: 0.48 },
+] as const
+
 const M = 10, G = 98
 
 export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }: { music: boolean; query?: URLSearchParams }) {
@@ -243,13 +249,21 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
     horn(on: boolean) {
       radio.setHorn(on)
       if (on && !hornIds.length) {
-        const a = voice.hold(WORLD.carHorn, { pitch: 415, force: 0.75, gain: 0.55, room: 0.2, bus: 0 })
-        const b = voice.hold(WORLD.carHorn, { pitch: 523, force: 0.7, gain: 0.48, room: 0.2, bus: 0 })
-        if (a) hornIds.push(a)
-        if (b) hornIds.push(b)
+        for (const t of HORN_TONES) {
+          const id = voice.hold(WORLD.carHorn, { ...t, room: 0.2, bus: 0 })
+          if (id) hornIds.push(id)
+        }
       } else if (!on && hornIds.length) {
         for (const id of hornIds) voice.release(id)
         hornIds = []
+      }
+    },
+    /** Plays a spatialized short blast (or double-honk when annoyed) using the player car's dual-tone horn. */
+    trafficHorn(at: readonly [number, number, number], annoyed = false) {
+      const dur = annoyed ? 0.15 : 0.22
+      for (const t of HORN_TONES) {
+        voice.play(WORLD.carHorn, { ...t, at, dur, reach: 18, travels: false, room: 0.2, bus: 0 })
+        if (annoyed) voice.play(WORLD.carHorn, { ...t, at, dur: 0.18, after: 0.21, reach: 18, travels: false, room: 0.2, bus: 0 })
       }
     },
     /** How far the music is leant on now, eased (-1 to 1). */

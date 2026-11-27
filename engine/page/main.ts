@@ -70,7 +70,6 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
-import { WORLD as WORLD_SOUND } from './sound/kinds.ts'
 import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
@@ -2167,8 +2166,7 @@ async function main() {
         window.dispatchEvent(new CustomEvent('voxelwright:crash', { detail: info }))
       },
       onHorn: (info) => {
-        ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch, dur: info.annoyed ? 0.15 : 0.22, force: 0.65, reach: 18, travels: false })
-        if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
+        ears?.trafficHorn(info.at, info.annoyed)
       },
       onShout: (info) => {
         window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
