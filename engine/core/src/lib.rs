@@ -296,6 +296,14 @@ pub extern "C" fn bay_marks() -> i32 {
     bay::marks()
 }
 
+/// Takes surveyed kerb polylines from the street graph in the room (`bay_room`; bay.rs `kerbs`): every core of a world
+/// is told the same before its sectors are made so sidewalks follow surveyed edges at sub-cell precision. Returns how
+/// many polylines it holds, or -1 where the bytes are not kerbs.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_kerbs() -> i32 {
+    bay::kerbs()
+}
+
 /// Lets go of one pack, named by where its ground starts and how far apart its samples are. Returns how many are held.
 #[unsafe(no_mangle)]
 pub extern "C" fn bay_drop(x0: i32, z0: i32, gstep: i32) -> i32 {
