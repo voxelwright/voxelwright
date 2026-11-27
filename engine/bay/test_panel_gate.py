@@ -11,10 +11,101 @@ from unittest.mock import patch
 from panel_gate import HERE
 
 sys.path.insert(0, str(HERE.parent / "sf"))
-from release import generate
+from release import encode, generate, restock
 
 
 class PanelPromotion(unittest.TestCase):
+    def test_landing_restock_leaves_shared_far_library_intact(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            original = root / "shared" / "landing" / "1_2.far"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"old faces")
+            manifest = encode({"far": {"tiles": {"1_2": [None, None, None]}}})
+            base = hashlib.sha256(manifest).hexdigest()
+            old = root / "releases" / base
+            old.mkdir(parents=True)
+            (old / "manifest.json").write_bytes(manifest)
+            (old / "far").symlink_to("../../shared")
+            cut = root / "cut"
+            path = "far/landing/1_2.far"
+            (cut / path).parent.mkdir(parents=True)
+            body = b"new faces"
+            (cut / path).write_bytes(body)
+            row = dict(path=path, sha256=hashlib.sha256(body).hexdigest(), bytes=len(body))
+            (cut / "landing.json").write_bytes(encode(dict(version=1, eye=[0, 0, 0], tiles={"1_2": row})))
+            digest = restock(root, landing=cut, base=base)
+            self.assertEqual((root / "releases" / digest / path).read_bytes(), body)
+            self.assertEqual((old / path).read_bytes(), b"old faces")
+
+    def test_far_restock_carries_the_landmarks_only_tiles(self):
+        # Without them page/far.ts hands the Golden Gate's Marin tiles over and their ground is drawn as sea (#60).
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            far = {"version": 1, "size": 5000, "bands": [4, 1, 0], "lods": [16],
+                   "tiles": {k: [None, None, None] for k in ("91_125", "91_126")},
+                   "landmarks": ["91_126"]}
+            manifest = encode({"far": {**far, "credit": "original survey"}, "credits": ["street data", "original survey"]})
+            base = hashlib.sha256(manifest).hexdigest()
+            old = root / "releases" / base
+            old.mkdir(parents=True)
+            (old / "manifest.json").write_bytes(manifest)
+            packed = root / "packed"
+            path = "far/0/91_125.far"
+            (packed / path).parent.mkdir(parents=True)
+            body = b"bridge faces"
+            (packed / path).write_bytes(body)
+            row = dict(path=path, sha256=hashlib.sha256(body).hexdigest(), bytes=len(body))
+            (packed / "far.json").write_bytes(encode({**far, "tiles": {"91_125": [row, None, None]}, "landmarks": ["91_125"], "credit": "original survey; OSM inland water"}))
+            digest = restock(root, far=packed / "far.json", base=base)
+            staged = json.loads((root / "releases" / digest / "manifest.json").read_text())
+            self.assertEqual(staged["far"]["landmarks"], ["91_125", "91_126"])
+            self.assertEqual(staged["far"]["tiles"]["91_125"][0], row)
+            self.assertEqual(staged["credits"], ["street data", "original survey; OSM inland water"])
+            self.assertEqual(staged["far"]["credit"], "original survey; OSM inland water")
+            # Repacking identical old bands alongside a new key cannot turn a known bridge into surveyed ground.
+            legacy = {k: v for k, v in far.items() if k != "landmarks"}
+            legacy["credit"] = "older survey"
+            (packed / "far.json").write_bytes(encode({**legacy, "tiles": {"91_125": [row, None, None]}}))
+            same = restock(root, far=packed / "far.json", base=digest)
+            kept = json.loads((root / "releases" / same / "manifest.json").read_text())
+            self.assertEqual(kept["far"]["landmarks"], ["91_125", "91_126"])
+            # A later survey replaces the bridge-only tile with real ground. The other key was never restocked.
+            (packed / path).write_bytes(b"survey ground")
+            row.update(sha256=hashlib.sha256(b"survey ground").hexdigest(), bytes=len(b"survey ground"))
+            grounded = {k: v for k, v in far.items() if k != "landmarks"}
+            (packed / "far.json").write_bytes(encode({**grounded, "tiles": {"91_125": [row, None, None]}}))
+            next_digest = restock(root, far=packed / "far.json", base=digest)
+            changed = json.loads((root / "releases" / next_digest / "manifest.json").read_text())
+            self.assertEqual(changed["far"]["landmarks"], ["91_126"])
+
+    def test_partial_restock_replaces_only_the_supplied_ground_coverage(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            spec = dict(version=1, size=5000, bands=[4, 1, 0], lods=[16])
+            keys = {k: [None, None, None] for k in ("91_125", "97_131", "98_131")}
+            path = "far/0/91_125.far"
+            body = b"packed faces"
+            (root / path).parent.mkdir(parents=True)
+            (root / path).write_bytes(body)
+            keys["91_125"][0] = dict(path=path, bytes=len(body), sha256=hashlib.sha256(body).hexdigest())
+            far = {**spec, "tiles": keys, "ground": ["97_131", "98_131"], "landmarks": ["91_125"]}
+            manifest = encode({"far": far})
+            base = hashlib.sha256(manifest).hexdigest()
+            old = root / "releases" / base
+            old.mkdir(parents=True)
+            (old / "manifest.json").write_bytes(manifest)
+            incoming = root / "far.json"
+            replacement = {**spec, "tiles": {k: keys[k] for k in ("91_125", "97_131")}}
+            incoming.write_bytes(encode({**replacement, "ground": ["91_125"]}))
+            digest = restock(root, far=incoming, base=base)
+            result = json.loads((root / "releases" / digest / "manifest.json").read_bytes())["far"]
+            self.assertEqual(result["ground"], ["91_125", "98_131"])
+            self.assertNotIn("91_125", result.get("landmarks", []))
+            incoming.write_bytes(encode({**replacement, "ground": ["90_125"]}))
+            with self.assertRaisesRegex(ValueError, "ground"):
+                restock(root, far=incoming, base=base)
+
     def test_one_lower_view_or_an_unscored_core_preserves_the_pin(self):
         scores = json.loads((HERE / "panel-floors.json").read_text())
         with TemporaryDirectory() as folder:

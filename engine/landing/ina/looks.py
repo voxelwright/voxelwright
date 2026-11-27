@@ -51,6 +51,11 @@ KNOWN = {
 }
 
 
+def mark_pyramid(faces, footprint):
+    """Preserve all five Ina colours while identifying the quartz and metal skin for the realm."""
+    faces[footprint, 2] |= np.uint32(1 << 29)
+
+
 def evidence(folder=None):
     """What the photographs say of each building (bay/facade_evidence.py records), by the city's building number.
     Nothing unless a records folder is named (VILLAGE_FACADE_EVIDENCE), so a bake without one is as it was."""

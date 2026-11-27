@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import subprocess
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -13,6 +14,7 @@ from shapely.ops import transform, unary_union
 SHORE = "https://data.sf.gov/resource/txuc-3kzm.geojson"
 EPT = "https://usgs-lidar-public.s3.amazonaws.com/CA_SanFrancisco_1_B23"
 FRAME_E, FRAME_N = 500000, 4250000
+RADIUS = (500, 4000, 16000)  # desktop clip boxes, in metres
 
 
 def get(url):
@@ -49,13 +51,15 @@ def build():
                 tile = box(x, y, x + 1000, y + 1000)
                 if poly.intersects(tile):
                     rows[f"{i}.7_{j}.5"] = land.intersection(tile).intersects(covered)
-    return {
+    inventory = {
         "shore": SHORE,
         "shore_sha256": hashlib.sha256(shore).hexdigest(),
         "hierarchy_sha256": hashlib.sha256(hierarchy).hexdigest(),
         "lidar": sorted(k for k, v in rows.items() if v),
         "planet": sorted(k for k, v in rows.items() if not v),
     }
+    inventory["landmarkExtras"] = landmark_extras(inventory)
+    return inventory
 
 
 def bounds(name):
@@ -69,6 +73,14 @@ def tile_keys(name, radii):
         for x in range((w - radius) // size, (e + radius - 1) // size + 1):
             for z in range((n - radius) // size, (s + radius - 1) // size + 1):
                 yield level, x, z
+
+
+def landmark_extras(inventory):
+    """Planet tiles that the landmark walk-ups need beyond the county bake."""
+    planner = Path(__file__).resolve().parents[1] / "sf" / "landmark-tiles.mjs"
+    wanted = json.loads(subprocess.check_output(["node", planner, "--json"]))
+    county = {key for square in inventory["lidar"] + inventory["planet"] for key in tile_keys(square, RADIUS)}
+    return [f"{level}/{x}_{z}" for level, x, z in sorted(set(map(tuple, wanted)) - county)]
 
 
 if __name__ == "__main__":

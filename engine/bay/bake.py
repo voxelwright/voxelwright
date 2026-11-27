@@ -22,6 +22,9 @@ ROAD, PAVEMENT, GRASS, EARTH, SAND, WATER, YARD, ROCK, CANOPY = 0, 1, 2, 3, 4, 5
 PLASTER, WOOD, BRICK, CONCRETE, ROOFING = 9, 10, 8, 7, 14
 
 
+# DataSF building ID for the quartz-clad tower. Shared by the appearance and photo passes.
+PYRAMID_CITY_ID = '201006.0000687'
+
 # Buildings known by sight, by a point inside each (UTM zone 10N): walls, trim, lived in, cells a storey, cells a
 # bay, and what is special (1 a fluted round tower; 4 storeys three times as tall, for a church's windows).
 KNOWN = [
@@ -255,7 +258,8 @@ def main():
 
     # ── Each building: what its walls are, how its storeys go, and which of its sides look on open air or the street.
     out_b, out_v = [], []
-    open_air = ~grow(inside, 3)
+    # Use a 0.5 m (1-pixel) erosion instead of 1.5 m so faceted bay windows & recessed porches stay open to air (#60).
+    open_air = ~grow(inside, 1)
     for id, b in enumerate(buildings, 1):
         cx, cz = np.mean([p for p in b['rings'][0]], axis=0)
         lot = lots[min(half - 1, max(0, int(cz / 5))), min(half - 1, max(0, int(cx / 5)))]

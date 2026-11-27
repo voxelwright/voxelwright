@@ -98,6 +98,13 @@ struct Hero {
     high: [i32; 2],
 }
 
+impl Hero {
+    fn local(&self, x: i32, z: i32, half: f32) -> (f32, f32) {
+        let (dx, dz) = ((x - self.at[0]) as f32 + half, (z - self.at[2]) as f32 + half);
+        ((dx * self.along[0] + dz * self.along[1]) * 0.1, (dz * self.along[0] - dx * self.along[1]) * 0.1)
+    }
+}
+
 /// A landmark stands at (x, z) in cells, its foot at height `foot`, its `u` turned `turn` millionths of a radian from
 /// the world's x towards z. 0 where no rule has that sort.
 pub fn hero(sort: u32, x: i32, z: i32, foot: i32, turn: i32) -> i32 {
@@ -169,6 +176,10 @@ struct Building {
     seed: u32,
     /// The street's level at its lowest: where its storeys are counted from.
     base: i32,
+    /// True when the surveyed footprint already traces bay windows or faceted street projections.
+    has_surveyed_bays: bool,
+    /// Clean median eave/wall-top height (in cells) derived from valid roof samples, for uniform roof slopes.
+    eave_med: i32,
     low: [i32; 2],
     high: [i32; 2],
 }
@@ -352,6 +363,8 @@ fn read(b: &[u8]) -> Option<Pack> {
             return None;
         }
         join_cornices(own);
+        propagate_fronts(own);
+        let has_surveyed_bays = ring_has_surveyed_bays(own);
         let style = r[4] as u32;
         let evidence = Evidence::of(r[3]);
         buildings.push(Building {
@@ -373,6 +386,8 @@ fn read(b: &[u8]) -> Option<Pack> {
             ground_floor: style >> 20 & 7,
             seed: style >> 24,
             base: r[5],
+            has_surveyed_bays,
+            eave_med: r[5] + 2 * ((style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 }),
             low: [own.iter().map(|v| v[0]).min()?, own.iter().map(|v| v[1]).min()?],
             high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
         });
@@ -395,6 +410,7 @@ fn read(b: &[u8]) -> Option<Pack> {
     }
     let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     despike_roofs(&mut p.top, &p.class, tw, p.tstep);
+    repair_building_roofs(&mut p);
     // Which buildings and trunks reach into each patch.
     p.pw = (wide >> PATCH) + 1;
     p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
@@ -679,7 +695,409 @@ fn join_cornices(ring_verts: &mut [[i32; 3]]) {
     }
 }
 
+/// Propagates street-facing and open-air flags across recessed porches and faceted bay-window segments that erosion or
+/// setback distance left unmarked, and ensures no standalone building outer ring is completely windowless (#60).
+fn propagate_fronts(ring_verts: &mut [[i32; 3]]) {
+    const FACET_MAX: f32 = 22.0; // 2.2 m (bay facets & recessed porch jogs, never 3+ m side party walls)
+    let mut start = 0;
+    let mut outer = true;
+    while start < ring_verts.len() {
+        let end = (start..ring_verts.len()).find(|&i| ring_verts[i][2] & 4 != 0).unwrap_or(ring_verts.len() - 1) + 1;
+        let ring = &mut ring_verts[start..end];
+        let n = ring.len();
+        if n >= 3 {
+            let lens: Vec<f32> = (0..n).map(|i| {
+                let (a, c) = (ring[i], ring[(i + 1) % n]);
+                (((c[0] - a[0]) as f32).powi(2) + ((c[1] - a[1]) as f32).powi(2)).sqrt()
+            }).collect();
+            let orig: Vec<i32> = ring.iter().map(|v| v[2]).collect();
+            // Fill short unmarked chains (<= 6 edges, <= 12 m) bounded on both sides by street-facing edges (bit 1).
+            for i in 0..n {
+                if orig[i] & 3 == 3 || lens[i] >= FACET_MAX {
+                    continue;
+                }
+                let mut steps_b = 0usize;
+                let mut len_sum = lens[i];
+                let mut before_street = false;
+                for k in 1..=6.min(n - 1) {
+                    let j = (i + n - k) % n;
+                    if orig[j] & 2 != 0 {
+                        before_street = true;
+                        break;
+                    }
+                    if lens[j] >= FACET_MAX {
+                        break;
+                    }
+                    steps_b += 1;
+                    len_sum += lens[j];
+                }
+                if !before_street {
+                    continue;
+                }
+                let mut after_street = false;
+                for k in 1..=6.min(n - 1) {
+                    let j = (i + k) % n;
+                    if orig[j] & 2 != 0 {
+                        after_street = true;
+                        break;
+                    }
+                    if lens[j] >= FACET_MAX || steps_b + k > 6 {
+                        break;
+                    }
+                    len_sum += lens[j];
+                }
+                if after_street && len_sum <= 120.0 {
+                    ring[i][2] |= 3;
+                }
+            }
+            // Fallback: if an outer ring has zero open-air edges (erosion swallowed every face), open its longest
+            // fronts (>= 2.0 m, or at least its longest edge) so the building is never a blind blank box.
+            if outer && !ring.iter().any(|v| v[2] & 1 != 0) {
+                let longest = lens.iter().copied().fold(0.0f32, f32::max);
+                let thresh = (longest * 0.6).max(20.0).min(longest);
+                for (i, &l) in lens.iter().enumerate() {
+                    if l >= thresh - 0.1 {
+                        ring[i][2] |= 1;
+                    }
+                }
+            }
+        }
+        outer = false;
+        start = end;
+    }
+}
+
+/// True when a building's outer ring already traces bay windows or stepped/angled street projections, so `What::By`
+/// does not glue a second synthetic bay box on top of surveyed bay geometry (#60).
+fn ring_has_surveyed_bays(ring_verts: &[[i32; 3]]) -> bool {
+    let end = (0..ring_verts.len()).find(|&i| ring_verts[i][2] & 4 != 0).unwrap_or(ring_verts.len().saturating_sub(1)) + 1;
+    let ring = &ring_verts[..end.min(ring_verts.len())];
+    let n = ring.len();
+    if n < 7 {
+        return false;
+    }
+    let mut faceted_street = 0usize;
+    let mut angled_bends = 0usize;
+    for i in 0..n {
+        let (a, b, c) = (ring[i], ring[(i + 1) % n], ring[(i + 2) % n]);
+        let (dx1, dz1) = ((b[0] - a[0]) as f32, (b[1] - a[1]) as f32);
+        let len1 = (dx1 * dx1 + dz1 * dz1).sqrt();
+        if a[2] & 2 != 0 && (5.0..=45.0).contains(&len1) {
+            faceted_street += 1;
+            let (dx2, dz2) = ((c[0] - b[0]) as f32, (c[1] - b[1]) as f32);
+            let len2 = (dx2 * dx2 + dz2 * dz2).sqrt();
+            if len1 > 0.5 && len2 > 0.5 {
+                let cos_a = (dx1 * dx2 + dz1 * dz2) / (len1 * len2);
+                if cos_a.abs() < 0.92 {
+                    angled_bends += 1;
+                }
+            }
+        }
+    }
+    faceted_street >= 3 || (faceted_street >= 2 && angled_bends >= 1)
+}
+
+/// Repairs collapsed perimeter ground-level lidar dropouts (where a surveyed footprint extends 0.5–1.5 m past the
+/// lidar roof return edge), denoises single-cell rooftop spikes/potholes with a 3x3 building-interior median, and
+/// fills missing horizontal eaves on street-facing edges so houses never render as broken/demolished stubs (#60).
+fn repair_building_roofs(p: &mut Pack) {
+    if p.tstep <= 0 || p.tstep > 10 || p.buildings.is_empty() {
+        return;
+    }
+    let (tw, tstep, tx0, tz0) = (p.tw, p.tstep, p.tx0, p.tz0);
+    let nb = p.buildings.len();
+    for bi in 0..nb {
+        if p.buildings[bi].special != 0 {
+            continue;
+        }
+        let b_low = p.buildings[bi].low;
+        let b_high = p.buildings[bi].high;
+        let b_base = p.buildings[bi].base;
+        let b_first = p.buildings[bi].first;
+        let b_count = p.buildings[bi].count;
+        let i0 = ((b_low[0] - tx0).div_euclid(tstep)).clamp(0, tw - 1);
+        let i1 = ((b_high[0] - tx0).div_euclid(tstep)).clamp(0, tw - 1);
+        let j0 = ((b_low[1] - tz0).div_euclid(tstep)).clamp(0, tw - 1);
+        let j1 = ((b_high[1] - tz0).div_euclid(tstep)).clamp(0, tw - 1);
+        let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+        if w == 0 || h == 0 || w * h > 12000 {
+            continue;
+        }
+        let mut inside = vec![false; w * h];
+        let mut repaired = vec![NONE; w * h];
+        let mut valid_heights = Vec::new();
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            let cz = tz0 + j * tstep + tstep / 2;
+            for li in 0..w {
+                let i = i0 + li as i32;
+                let cx = tx0 + i * tstep + tstep / 2;
+                if p.probe(&p.buildings[bi], cx, cz).inside {
+                    let k = lj * w + li;
+                    inside[k] = true;
+                    let v = p.top[(j * tw + i) as usize];
+                    repaired[k] = v;
+                    if v != NONE && (v as i32) >= b_base + 24 {
+                        valid_heights.push(v);
+                    }
+                }
+            }
+        }
+        if valid_heights.is_empty() {
+            continue;
+        }
+        valid_heights.sort_unstable();
+        let roof_lo = valid_heights[valid_heights.len() / 4];
+        // Pass A: Fill collapsed perimeter dropouts (< base + 24, i.e. ground/car/missing lidar inside the footprint)
+        // by sampling straight inward from the outer edge into the same building's valid roof.
+        let mut filled = repaired.clone();
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            let cz = tz0 + j * tstep + tstep / 2;
+            for li in 0..w {
+                let k = lj * w + li;
+                if !inside[k] {
+                    continue;
+                }
+                let v = repaired[k];
+                if v != NONE && (v as i32) >= b_base + 24 {
+                    continue;
+                }
+                let i = i0 + li as i32;
+                let cx = tx0 + i * tstep + tstep / 2;
+                let pr = p.probe(&p.buildings[bi], cx, cz);
+                if pr.far >= 24.0 {
+                    continue;
+                }
+                let far = pr.far.max(0.01);
+                let (ix, iz) = ((cx as f32 + 0.5 - pr.on[0]) / far, (cz as f32 + 0.5 - pr.on[1]) / far);
+                let mut found = None;
+                // Prefer the nearest valid inside roof sample (radius 1..=3) so a corner dropout next to a lower
+                // front eave inherits that front roof instead of jumping up to a taller rear roof (`roof_lo`).
+                let mut near_vals = [0i16; 49];
+                for rad in 1i32..=3 {
+                    let mut m = 0usize;
+                    for dj in -rad..=rad {
+                        let nj = lj as i32 + dj;
+                        if nj < 0 || nj >= h as i32 { continue; }
+                        for di in -rad..=rad {
+                            if di.abs().max(dj.abs()) != rad { continue; }
+                            let ni = li as i32 + di;
+                            if ni < 0 || ni >= w as i32 { continue; }
+                            let nk = nj as usize * w + ni as usize;
+                            if inside[nk] && repaired[nk] != NONE && (repaired[nk] as i32) >= b_base + 26 {
+                                near_vals[m] = repaired[nk];
+                                m += 1;
+                            }
+                        }
+                    }
+                    if m > 0 {
+                        near_vals[..m].sort_unstable();
+                        found = Some(near_vals[m / 4]);
+                        break;
+                    }
+                }
+                if found.is_none() {
+                    for &d in &[8.0f32, 14.0, 20.0, 26.0] {
+                        let sx = ((cx as f32 + 0.5 + ix * d).floor() as i32 - tx0).div_euclid(tstep) - i0;
+                        let sz = ((cz as f32 + 0.5 + iz * d).floor() as i32 - tz0).div_euclid(tstep) - j0;
+                        if sx >= 0 && sz >= 0 && (sx as usize) < w && (sz as usize) < h {
+                            let sk = sz as usize * w + sx as usize;
+                            if inside[sk] && repaired[sk] != NONE && (repaired[sk] as i32) >= b_base + 26 {
+                                found = Some(repaired[sk]);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if found.is_none() && pr.looks & 128 != 0 {
+                    let eave = (pr.looks >> 8) as i16;
+                    if (eave as i32) >= b_base + 26 {
+                        found = Some(eave);
+                    }
+                }
+                if found.is_none() && (roof_lo as i32) >= b_base + 28 {
+                    found = Some(roof_lo);
+                }
+                if let Some(fv) = found {
+                    filled[k] = fv;
+                }
+            }
+        }
+        // Pass B: 3x3 edge-preserving building-interior median to strip lidar vents, poles, potholes and jagged teeth,
+        // plus a perimeter-sliver clamp on residential roofs so 0.5-1.0 m corner fins never protrude above the eave (#60).
+        let is_home = p.buildings[bi].home;
+        let mut nbrs = [0i16; 9];
+        let mut wide_nbrs = [0i16; 25];
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            for li in 0..w {
+                let k = lj * w + li;
+                if !inside[k] {
+                    continue;
+                }
+                let cur = filled[k];
+                if cur == NONE || (cur as i32) < b_base + 24 {
+                    continue;
+                }
+                let mut n = 0usize;
+                for dj in -1i32..=1 {
+                    let nj = lj as i32 + dj;
+                    if nj < 0 || nj >= h as i32 { continue; }
+                    for di in -1i32..=1 {
+                        let ni = li as i32 + di;
+                        if ni < 0 || ni >= w as i32 { continue; }
+                        let nk = nj as usize * w + ni as usize;
+                        if inside[nk] && filled[nk] != NONE && (filled[nk] as i32) >= b_base + 24 {
+                            nbrs[n] = filled[nk];
+                            n += 1;
+                        }
+                    }
+                }
+                let mut out = cur;
+                if n >= 4 {
+                    nbrs[..n].sort_unstable();
+                    let med = nbrs[n / 2];
+                    let flat = nbrs[..n].iter().filter(|&&nv| (nv - med).abs() <= 8).count();
+                    if (cur - med).abs() <= 18 || flat >= 5 {
+                        out = med;
+                    }
+                }
+                if is_home && n <= 4 {
+                    let mut wn = 0usize;
+                    for dj in -2i32..=2 {
+                        let nj = lj as i32 + dj;
+                        if nj < 0 || nj >= h as i32 { continue; }
+                        for di in -2i32..=2 {
+                            let ni = li as i32 + di;
+                            if ni < 0 || ni >= w as i32 { continue; }
+                            let nk = nj as usize * w + ni as usize;
+                            if inside[nk] && filled[nk] != NONE && (filled[nk] as i32) >= b_base + 24 {
+                                wide_nbrs[wn] = filled[nk];
+                                wn += 1;
+                            }
+                        }
+                    }
+                    if wn >= 6 {
+                        wide_nbrs[..wn].sort_unstable();
+                        let wmed = wide_nbrs[wn / 2];
+                        if out > wmed + 6 {
+                            out = wmed;
+                        }
+                    }
+                }
+                let i = i0 + li as i32;
+                p.top[(j * tw + i) as usize] = out;
+            }
+        }
+        // Pass C: Fill missing or collapsed surveyed eaves on street-facing edges using the repaired roof grid.
+        let mut best_street: Option<(f32, i32)> = None;
+        let mut ring_start = 0usize;
+        for ei in 0..b_count {
+            let a = p.verts[b_first + ei];
+            let last = a[2] & 4 != 0 || ei == b_count - 1;
+            let c = p.verts[b_first + if last { ring_start } else { ei + 1 }];
+            if last {
+                ring_start = ei + 1;
+            }
+            if a[2] & 2 == 0 {
+                continue;
+            }
+            let (dx, dz) = ((c[0] - a[0]) as f32, (c[1] - a[1]) as f32);
+            let long = (dx * dx + dz * dz).sqrt();
+            if long < 7.0 {
+                continue;
+            }
+            let has_valid = a[2] & 128 != 0 && ((a[2] >> 8) as i16 as i32) >= b_base + 28;
+            if has_valid && !is_home {
+                let ev = (a[2] >> 8) as i16 as i32;
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, ev));
+                }
+                continue;
+            }
+            let (tx, tz) = (dx / long, dz / long);
+            let (mx, mz) = ((a[0] + c[0]) as f32 * 0.5, (a[1] + c[1]) as f32 * 0.5);
+            let n1 = (-tz, tx);
+            let inward = if p.probe(&p.buildings[bi], (mx + n1.0 * 5.0) as i32, (mz + n1.1 * 5.0) as i32).inside {
+                n1
+            } else {
+                (tz, -tx)
+            };
+            let mut samples = Vec::new();
+            for &t in &[0.15f32, 0.32, 0.50, 0.68, 0.85] {
+                let sx = (a[0] as f32 + dx * t + inward.0 * 6.0) as i32;
+                let sz = (a[1] as f32 + dz * t + inward.1 * 6.0) as i32;
+                if let Some(top_v) = p.top(sx, sz) {
+                    if top_v >= b_base + 28 {
+                        samples.push(top_v);
+                    }
+                }
+            }
+            if has_valid {
+                let mut ev = (a[2] >> 8) as i16 as i32;
+                // Check both 0.6 m and 1.2 m inward before lowering a valid baked eave so a shallow front bay/porch
+                // ledge (0.6 m deep) never collapses a genuine two-storey street wall.
+                let mut deep_samples = Vec::new();
+                for &t in &[0.15f32, 0.32, 0.50, 0.68, 0.85] {
+                    let s1 = p.top((a[0] as f32 + dx * t + inward.0 * 6.0) as i32, (a[1] as f32 + dz * t + inward.1 * 6.0) as i32)
+                        .filter(|&v| v >= b_base + 28);
+                    let s2 = p.top((a[0] as f32 + dx * t + inward.0 * 12.0) as i32, (a[1] as f32 + dz * t + inward.1 * 12.0) as i32)
+                        .filter(|&v| v >= b_base + 28);
+                    if let Some(best) = s1.into_iter().chain(s2).max() {
+                        deep_samples.push(best);
+                    }
+                }
+                if deep_samples.len() >= 3 {
+                    deep_samples.sort_unstable();
+                    let med_eave = deep_samples[deep_samples.len() / 2];
+                    // Clamp stale baked eaves that sit > 0.6 m taller than the actual repaired roof behind the edge.
+                    if ev > med_eave + 6 {
+                        ev = med_eave;
+                        p.verts[b_first + ei][2] = (a[2] & !0xff_ff00) | 128 | ((ev & 0xffff) << 8);
+                    }
+                }
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, ev));
+                }
+            } else if samples.len() >= 3 {
+                samples.sort_unstable();
+                let med_eave = samples[samples.len() / 2];
+                p.verts[b_first + ei][2] = (a[2] & !0xff_ff00) | 128 | ((med_eave & 0xffff) << 8);
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, med_eave));
+                }
+            }
+        }
+        p.buildings[bi].eave_med = best_street.map_or(roof_lo as i32, |(_, ev)| ev);
+    }
+}
+
 impl Pack {
+    /// Roof height at an interior building cell, falling back to the nearest valid adjacent interior sample when a
+    /// narrow perimeter cell's `tstep` grid center sits just outside the polygon (`NONE`), before synthetic `2 * storey`.
+    #[inline]
+    fn roof_raster(&self, b: &Building, x: i32, z: i32) -> i32 {
+        if let Some(v) = self.top(x, z) {
+            return v;
+        }
+        if self.tstep > 0 {
+            let s = self.tstep;
+            let mut best = i32::MAX;
+            for (nx, nz) in [(x - s, z), (x + s, z), (x, z - s), (x, z + s)] {
+                if let Some(v) = self.top(nx, nz) {
+                    if v >= b.base + 24 && v < best && self.probe(b, nx, nz).inside {
+                        best = v;
+                    }
+                }
+            }
+            if best != i32::MAX {
+                return best;
+            }
+        }
+        b.base + 2 * b.storey
+    }
+
     /// Whether the pack knows a column: its samples reach round it.
     fn holds(&self, x: i32, z: i32) -> bool {
         let wide = (self.gw - 1) * self.gstep;
@@ -1113,7 +1531,7 @@ struct Probe {
 
 /// What a front is at one place on it: how its storeys, windows and doors go. `up` is cells above the building's
 /// base, `top` where its wall ends, `deep` how many cells in from the outline, `size` the cell's size.
-fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32, size: i32) -> Kind {
+fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32, size: i32, pitched: bool) -> Kind {
     let glass = kind(GLASS, OWN);
     let dark = kind(PLASTER, grey(13));
     let (storey, module) = (b.storey, b.module as f32);
@@ -1129,18 +1547,49 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         };
     }
     let detail = p.looks >> 24;
-    // Place the entry beside the garage, with both meeting the local street grade.
-    if detail != 0 && over_ground < 30 {
+    // Place the entry beside the garage, recessed cleanly inside trim jambs & lintels; never fall through to cut a
+    // Floor-0 window straight across the top of a garage door or front entry door (#60).
+    if detail != 0 && over_ground < storey {
         let entry = (p.long * 0.22).clamp(7.0, 18.0);
-        if detail & 8 != 0 && (p.along - entry).abs() <= 5.0 && (4..=26).contains(&over_ground) {
-            return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+        if detail & 8 != 0 && (p.along - entry).abs() <= 5.5 {
+            if (4..=27).contains(&over_ground) {
+                let jamb = (p.along - entry).abs() > 4.2;
+                if over_ground == 27 || jamb {
+                    return b.trim;
+                }
+                if deep < 1.1 && size == 1 {
+                    return 0;
+                }
+                return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+            }
+            return b.wall;
         }
-        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() < (p.long * 0.23).min(19.0) && over_ground < 23 {
-            return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+        let half_g = (p.long * 0.23).min(19.0);
+        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() <= half_g {
+            if over_ground <= 23 {
+                let jamb = (p.along - p.long * 0.66).abs() > half_g - 1.2;
+                if over_ground == 23 || jamb {
+                    return b.trim;
+                }
+                if deep < 1.0 && size == 1 {
+                    return 0;
+                }
+                return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+            }
+            return b.wall;
+        }
+        // On a residential garage+entry ground floor, never squeeze a broken narrow window sliver into the small
+        // pier between the entry door and garage door (or beside them when < 1.2 m of wall remains) (#60).
+        if detail & 12 == 12 {
+            let lo = (entry - 5.5).min(p.long * 0.66 - half_g) - 4.0;
+            let hi = (entry + 5.5).max(p.long * 0.66 + half_g) + 4.0;
+            if p.along >= lo && p.along <= hi {
+                return b.wall;
+            }
         }
     }
-    // The cornice: the wall's last cells are trim.
-    if up >= top - 3 && size <= 2 {
+    // The cornice: the wall's last cells are trim (slim 1-cell verge on pitched gables so gable slopes stay clean).
+    if size <= 2 && up >= top - if pitched { 1 } else { 3 } {
         return b.trim;
     }
     // A side that looks on nothing (a neighbour's wall, a light well) or is too short for a window is plain.
@@ -1148,17 +1597,23 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         return b.wall;
     }
     let (floor, fy) = (up.div_euclid(storey), up.rem_euclid(storey));
+    // A surveyed faceted bay edge (0.8 m to 1 module wide on a street front) centers one sash window cleanly on that
+    // facet rather than risking falling entirely inside a solid pier between continuous ring bays (#60).
+    let facet = p.looks & 2 != 0 && p.long >= 8.0 && p.long < module;
     let count = (p.long / module).floor().max(1.0);
-    // A surveyed bay or curved street wall can comprise many edges shorter
-    // than a window module. Continue its spacing around the ring.
-    let within = if p.long < module { p.round.rem_euclid(module) } else { p.along - (p.long - count * module) / 2.0 };
-    if within < 0.0 || within >= count * module {
-        return b.wall;
-    }
-    let (bay, mu) = ((within / module) as i32, within % module - module / 2.0);
+    let (bay, mu, bay_half_cap) = if facet {
+        (0, p.along - p.long * 0.5, (p.long * 0.5 - 2.0).max(2.0))
+    } else {
+        // A curved wall made of tiny < 0.8 m chords continues its spacing around the ring.
+        let within = if p.long < module { p.round.rem_euclid(module) } else { p.along - (p.long - count * module) / 2.0 };
+        if within < 0.0 || within >= count * module {
+            return b.wall;
+        }
+        ((within / module) as i32, within % module - module / 2.0, module / 2.0 - 2.0)
+    };
     let chance = hash(bay, p.side as i32, b.seed);
     // What the opening is: its half width, its foot and its head, and whether it is a door.
-    let (half, foot, head, door) = if floor == 0 && p.looks & 2 != 0 && over_ground < storey && storey <= 60 {
+    let (mut half, foot, head, door) = if floor == 0 && p.looks & 2 != 0 && over_ground < storey && storey <= 60 {
         if b.ground_floor == 2 || b.ground_floor == 3 {
             (module / 2.0 - 2.0, 0, if b.ground_floor == 3 { storey - 3 } else { 24 }, 2)
         } else if b.ground_floor == 4 {
@@ -1167,6 +1622,8 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             (module / 2.0 - 2.0, 0, storey - 3, 4)
         } else if b.ground_floor == 1 || !b.home {
             (module / 2.0 - 3.0, 5, storey - 7, 0) // a shop's window
+        } else if facet {
+            (bay_half_cap, 9, storey - 6, 0) // ground-level bay facet gets a clean window, not a cut-off garage
         } else if chance % 3 == 0 {
             (module / 2.0 - 4.0, 0, 23, 2) // a garage
         } else if chance % 3 == 1 {
@@ -1182,23 +1639,36 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
     } else {
         (measured_half(b, 8, storey - 6).unwrap_or((module / 2.0 - 5.0).min(8.0)), 8, storey - 6, 0)
     };
+    if facet {
+        half = half.min(bay_half_cap);
+    }
+    // Clamp the top floor's window head cleanly below the cornice instead of deleting the entire floor of windows
+    // whenever a 2-story house sits slightly under `2 * storey` tall (#60: fixed blank 2nd floors across Outer Sunset).
+    let max_fy = top - 4 - floor * storey;
+    let eff_head = head.min(max_fy);
+    let eff_foot = if door == 0 && floor > 0 && eff_head < foot + 10 {
+        (eff_head - 14).max(3)
+    } else {
+        foot
+    };
+    let has_opening = eff_head - eff_foot >= if door == 0 { 8 } else { 14 };
     // A belt at each floor and a sill under each window, where cells are fine enough to show them.
     if size == 1 && deep < 1.0 {
         if fy == 0 && floor > 0 && !b.home {
             return b.trim;
         }
-        if door == 0 && fy == foot - 1 && mu.abs() < half + 1.0 {
+        if has_opening && door == 0 && fy == eff_foot - 1 && mu.abs() < half + 1.0 && over_ground + (fy - eff_foot) >= 2 {
             return b.trim;
         }
     }
-    if mu.abs() >= half || fy < foot || fy >= head || up + (head - fy) > top - 4 || over_ground + (fy - foot) < 3 && door == 0 {
+    if !has_opening || mu.abs() >= half || fy < eff_foot || fy >= eff_head || (over_ground + (fy - eff_foot) < 3 && door == 0) {
         return b.wall;
     }
     match door {
         4 => if deep < 2.0 * size as f32 { 0 } else { dark },
         3 => if deep < 1.0 { 0 } else { glass },
         2 => if deep < 1.0 && size == 1 { 0 } else { kind(WOOD, grey(4 + (chance >> 4) as u8 % 6)) },
-        1 => if deep < 1.0 && size == 1 { 0 } else if fy >= head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
+        1 => if deep < 1.0 && size == 1 { 0 } else if fy >= eff_head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
         // A window sits a cell back in its wall, with the room dark behind it.
         _ if size > 1 => if deep < size as f32 { glass } else { dark },
         _ => if deep < 1.0 { 0 } else if deep < 2.0 {
@@ -1206,7 +1676,7 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             let sashes = (2.0 * half / 9.0).round().max(2.0);
             let across = (mu + half) / (2.0 * half) * sashes;
             let mullion = (across - across.round()).abs() * 2.0 * half / sashes < 0.6 && across.round() > 0.0 && across.round() < sashes;
-            if mullion || (fy - foot) == (head - foot) / 2 { b.trim } else { glass }
+            if mullion || (fy - eff_foot) == (eff_head - eff_foot) / 2 { b.trim } else { glass }
         } else { dark },
     }
 }
@@ -1267,13 +1737,14 @@ struct OwnedColumn {
     kerb: i32,
     what: OwnedWhat,
     fixtures: Vec<FixtureSpan>,
-    hero: Option<(Hero, f32, f32)>,
+    heroes: [Option<(Hero, f32, f32)>; 2],
+    hero_n: u8,
 }
 
 enum OwnedWhat {
     Open,
-    In(usize, usize, Probe, i32, u8),
-    By(usize, usize, Probe, i32),
+    In(usize, usize, Probe, i32, u8, bool, i32, i32, f32),
+    By(usize, usize, Probe, i32, bool),
     Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
     Mass(i32, u8, Kind),
 }
@@ -1283,8 +1754,9 @@ impl OwnedColumn {
     fn as_column<'a>(&'a self, packs: &'a [Pack]) -> Column<'a> {
         let what = match self.what {
             OwnedWhat::Open => What::Open,
-            OwnedWhat::In(pi, bi, probe, roof, tint) => What::In(&packs[pi].buildings[bi], probe, roof, tint),
-            OwnedWhat::By(pi, bi, probe, roof) => What::By(&packs[pi].buildings[bi], probe, roof),
+            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far) =>
+                What::In(&packs[pi].buildings[bi], probe, roof, tint, pitched, wall_top, step_below, step_far),
+            OwnedWhat::By(pi, bi, probe, roof, stepped) => What::By(&packs[pi].buildings[bi], probe, roof, stepped),
             OwnedWhat::Crown { foot, top, trunk, tint, edge } => What::Crown { foot, top, trunk, tint, edge },
             OwnedWhat::Mass(roof, tint, wall) => What::Mass(roof, tint, wall),
         };
@@ -1295,42 +1767,54 @@ impl OwnedColumn {
             kerb: self.kerb,
             what,
             fixtures: Vec::new(),
-            hero: self.hero,
+            heroes: self.heroes,
+            hero_n: self.hero_n,
         }
     }
 }
 
 #[inline]
-fn hero_from_slice(heroes: &[Hero], x: i32, z: i32, size: i32) -> Option<(Hero, f32, f32)> {
+fn heroes_from_slice(heroes: &[Hero], x: i32, z: i32, size: i32) -> ([Option<(Hero, f32, f32)>; 2], u8) {
     if heroes.is_empty() {
-        return None;
+        return ([None, None], 0);
     }
+    let mut out = [None, None];
+    let mut n = 0u8;
     let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
     for h in heroes {
         if x < h.low[0] || z < h.low[1] || x > h.high[0] || z > h.high[1] {
             continue;
         }
-        let (dx, dz) = ((x - h.at[0]) as f32 + half, (z - h.at[2]) as f32 + half);
-        let (u, w) = ((dx * h.along[0] + dz * h.along[1]) * 0.1, (dz * h.along[0] - dx * h.along[1]) * 0.1);
+        let (u, w) = h.local(x, z, half);
         let Some(r) = heroes::reach(h.sort) else { continue };
         if u >= r[0] && u < r[3] && w >= r[2] && w < r[5] {
-            return Some((*h, u, w));
+            out[n as usize] = Some((*h, u, w));
+            n += 1;
+            if n == 2 {
+                break;
+            }
         }
     }
-    None
+    (out, n)
 }
 
-fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes: &[Hero], marks: &[[i32; 4]], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
-    let hero = hero_from_slice(heroes, x, z, size);
+fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], marks: &[[i32; 4]], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
+    let (heroes, hero_n) = heroes_from_slice(heroes_slice, x, z, size);
     let picked = pack_indices.iter().copied().find(|&pi| packs[pi].gstep >= least && packs[pi].holds(x, z))
         .or_else(|| pack_indices.iter().copied().find(|&pi| packs[pi].holds(x, z)));
     let Some(pi) = picked else {
-        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: OwnedWhat::Open, hero };
+        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: OwnedWhat::Open, heroes, hero_n };
     };
     let p = &packs[pi];
-    let ground_height = p.ground_height(x, z);
+    let tread = tread_ground(&heroes[..hero_n as usize]);
+    let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
     let g = (ground_height + 0.5).floor() as i32;
     let (mut class, tint) = p.surface(x, z);
+    if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
+        h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
+    }) {
+        class = GRASS_HERE;
+    }
     let graphed = class & 7 == ROAD && marks.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]);
     if graphed { class &= !96; }
     let road_grey = |t: u8| 8 + ((t.clamp(4, 11) - 4) * 4 + 3) / 7;
@@ -1343,12 +1827,13 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes: &[Hero], marks: 
         })
     } else { None };
     let (ground, kerb) = match class & 7 {
+        _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
         PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
-        WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
+        WATER_HERE if g > 4 => (kind(WATER, colour(13, 5)), 0),
         WATER_HERE => (kind(SAND, OWN), 0),
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
@@ -1356,34 +1841,74 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes: &[Hero], marks: 
     let what = match p.building_idx(x, z) {
         Some((bi, probe)) if probe.inside => {
             let b = &p.buildings[bi];
-            let raster = p.top(x, z).unwrap_or(b.base + 2 * b.storey);
-            let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
+            let raster = p.roof_raster(b, x, z);
+            let mut pitched = false;
+            let (roof, wall_top) = if probe.looks & 128 != 0 && probe.far < 15.0 {
                 let eave = (probe.looks >> 8) as i16 as i32;
                 let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
                 let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
-                if probe.looks >> 24 & 2 != 0 { blended.min(eave + 3) } else { blended }
+                pitched = raster > eave + 6;
+                let r = if probe.looks >> 24 & 2 != 0 && !pitched { blended.min(eave + 3) } else { blended };
+                (r, eave)
             } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
                 let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
                 match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
-                    Some(eave) => raster.min(eave + 3),
-                    None => raster,
+                    Some(eave) => {
+                        pitched = raster > eave + 6;
+                        (if pitched { raster } else { raster.min(eave + 3) }, eave)
+                    }
+                    None => (raster, b.eave_med),
                 }
-            } else { raster }.max(g + 22);
-            OwnedWhat::In(pi, bi, probe, roof, tint)
+            } else {
+                let eave = if probe.looks & 128 != 0 { (probe.looks >> 8) as i16 as i32 } else { b.eave_med };
+                (raster, eave)
+            };
+            let roof = roof.max(g + 22);
+            let (mut step_below, mut step_far) = (i32::MAX, 1e9f32);
+            if probe.far >= 3.0 * size as f32 && size <= 4 && probe.looks & 2 != 0 {
+                let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+                let far = probe.far.max(0.01);
+                let (ox, oz) = ((probe.on[0] - cx) / far, (probe.on[1] - cz) / far);
+                let d1 = 1.4 * size as f32;
+                let d2 = 2.6 * size as f32;
+                let d3 = 3.8 * size as f32;
+                let f1 = p.top((cx + ox * d1).floor() as i32, (cz + oz * d1).floor() as i32);
+                let f2 = p.top((cx + ox * d2).floor() as i32, (cz + oz * d2).floor() as i32);
+                let f3 = p.top((cx + ox * d3).floor() as i32, (cz + oz * d3).floor() as i32);
+                if let Some(low) = f1.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = if size == 1 { 0.5 } else { 1.5 };
+                } else if let Some(low) = f2.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 1.6;
+                } else if let Some(low) = f3.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 2.5;
+                }
+            }
+            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far)
         }
         Some((bi, probe)) if size <= 2 && probe.looks & 2 != 0 => {
+            let b = &p.buildings[bi];
             let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
             let far = probe.far.max(0.01);
-            let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
+            let (ux, uz) = (dx / far, dz / far);
+            let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
             let eave = if probe.looks & 128 != 0 {
                 Some((probe.looks >> 8) as i16 as i32)
             } else if probe.looks >> 24 & 2 != 0 {
-                p.eave_near(probe.on, [dx / far, dz / far]).or_else(|| p.top(ix, iz))
+                p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
             } else {
                 p.top(ix, iz)
             };
             match eave {
-                Some(roof) => OwnedWhat::By(pi, bi, probe, roof),
+                Some(roof) => {
+                    let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
+                    let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
+                    let behind = b1.into_iter().chain(b2).max();
+                    let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
+                    OwnedWhat::By(pi, bi, probe, roof, stepped)
+                }
                 None => OwnedWhat::Open,
             }
         }
@@ -1397,6 +1922,11 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes: &[Hero], marks: 
                 let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
                 let on_road = class & 7 == ROAD;
                 match p.trunk(x, z) {
+                    Some((_, stem)) if tall >= 28 && heroes.iter().flatten().any(|(h, _, _)|
+                        h.sort == heroes::CONSERVATORY && {
+                            let (u, w) = h.local(stem[0], stem[1], 0.0);
+                            heroes::valley_palm_stem(u, w)
+                        }) => OwnedWhat::Open,
                     Some((far, trunk)) if tall >= 28 => {
                         let high = (trunk[2] - g).max(tall);
                         let measured = trunk[3] >> 8;
@@ -1423,7 +1953,7 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes: &[Hero], marks: 
     };
     let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(..) | OwnedWhat::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
-    OwnedColumn { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x, z, size), what, hero }
+    OwnedColumn { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x, z, size), what, heroes, hero_n }
 }
 
 /// Fast single-cell kind query for unedited Bay columns (#73). Uses a 512-entry direct-mapped cache for simple open columns.
@@ -1445,7 +1975,7 @@ pub fn kind_single(x: i32, y: i32, z: i32) -> Kind {
     }
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
-        if matches!(c.what, What::Open) && c.hero.is_none() && c.fixtures.is_empty() {
+        if matches!(c.what, What::Open) && c.hero_n == 0 && c.fixtures.is_empty() {
             SOLID_CACHE.with_borrow_mut(|cache| {
                 cache[idx] = SolidEntry { x, z, epoch, top: c.g + c.kerb, g: c.g, ground: c.ground };
             });
@@ -1488,7 +2018,7 @@ pub fn under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
     }
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
-        if matches!(c.what, What::Open) && c.hero.is_none() && c.fixtures.is_empty() {
+        if matches!(c.what, What::Open) && c.hero_n == 0 && c.fixtures.is_empty() {
             let top = c.g + c.kerb;
             SOLID_CACHE.with_borrow_mut(|cache| {
                 cache[idx] = SolidEntry { x, z, epoch, top, g: c.g, ground: c.ground };
@@ -1516,47 +2046,74 @@ struct Column<'a> {
     kerb: i32,
     what: What<'a>,
     fixtures: Vec<FixtureSpan>,
-    /// A landmark this column is in, and where in its frame the column's middle is (u, w, in metres).
-    hero: Option<(Hero, f32, f32)>,
+    /// Up to two overlapping landmarks this column is in (e.g. Fort Point under the Golden Gate arch), and each
+    /// column's middle in its frame (u, w, in metres).
+    heroes: [Option<(Hero, f32, f32)>; 2],
+    hero_n: u8,
 }
 
 enum What<'a> {
     Open,
-    /// In a building: its roof's cell and colour.
-    In(&'a Building, Probe, i32, u8),
-    /// Just outside one, where its bays and cornice stand: how high its wall is there.
-    By(&'a Building, Probe, i32),
+    /// In a building: its roof's cell, colour, whether its roof rises into a pitched gable behind the front,
+    /// its clean wall-top eave height (above which interior roof slopes are painted `ROOFING` rather than stucco),
+    /// and (for stepped-back upper walls behind a lower wing) the lower roof height and depth into the step.
+    In(&'a Building, Probe, i32, u8, bool, i32, i32, f32),
+    /// Just outside one, where its bays and cornice stand: how high its wall is there, and whether a pitched gable
+    /// or taller upper wall rises directly behind it.
+    By(&'a Building, Probe, i32, bool),
     /// Leaves from here up to there, and a trunk up to so high if one stands in this column.
     Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
     /// A building seen from far, from a pack with no outlines: its roof's cell and colour, and its wall.
     Mass(i32, u8, Kind),
 }
 
-/// The landmark a column is in, where the world's cells are fine enough to show it (heroes.rs `REALM_MOST`).
-fn hero_at(x: i32, z: i32, size: i32) -> Option<(Hero, f32, f32)> {
+/// The landmarks a column is in (up to two overlapping), where the world's cells are fine enough to show them.
+fn heroes_at(x: i32, z: i32, size: i32) -> ([Option<(Hero, f32, f32)>; 2], u8) {
     if size > heroes::REALM_MOST || !LANDMARKS.get() {
-        return None;
+        return ([None, None], 0);
     }
     HEROES.with_borrow(|all| {
-        all.iter().filter(|h| x >= h.low[0] && z >= h.low[1] && x <= h.high[0] && z <= h.high[1]).find_map(|h| {
-            // A column of the finest cells is named by its cell; a coarser one by its middle.
-            let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
-            let (dx, dz) = ((x - h.at[0]) as f32 + half, (z - h.at[2]) as f32 + half);
-            let (u, w) = ((dx * h.along[0] + dz * h.along[1]) * 0.1, (dz * h.along[0] - dx * h.along[1]) * 0.1);
-            let r = heroes::reach(h.sort)?;
-            (u >= r[0] && u < r[3] && w >= r[2] && w < r[5]).then_some((*h, u, w))
-        })
+        let mut out = [None, None];
+        let mut n = 0u8;
+        let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+        for h in all.iter().filter(|h| x >= h.low[0] && z >= h.low[1] && x <= h.high[0] && z <= h.high[1]) {
+            let (u, w) = h.local(x, z, half);
+            if let Some(r) = heroes::reach(h.sort) {
+                if u >= r[0] && u < r[3] && w >= r[2] && w < r[5] {
+                    out[n as usize] = Some((*h, u, w));
+                    n += 1;
+                    if n == 2 {
+                        break;
+                    }
+                }
+            }
+        }
+        (out, n)
+    })
+}
+
+/// The top solid cell of a measured stair tread. Its upper face is the walking height.
+fn tread_ground(places: &[Option<(Hero, f32, f32)>]) -> Option<f32> {
+    places.iter().flatten().find_map(|(h, u, w)| {
+        if h.sort != heroes::CONSERVATORY { return None; }
+        heroes::conservatory_stairs(*u, *w).map(|height| h.at[1] as f32 + height * 10.0 - 1.0)
     })
 }
 
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
-    let hero = hero_at(x, z, size);
+    let (heroes, hero_n) = heroes_at(x, z, size);
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, hero };
+        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, heroes, hero_n };
     };
-    let ground_height = p.ground_height(x, z);
+    let tread = tread_ground(&heroes[..hero_n as usize]);
+    let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
     let g = (ground_height + 0.5).floor() as i32;
     let (mut class, tint) = p.surface(x, z);
+    if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
+        h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
+    }) {
+        class = GRASS_HERE;
+    }
     // Where the graph's marks are drawn, the bake's paint and rails are not (`Marks`).
     let graphed = class & 7 == ROAD && marked_place(x, z);
     if graphed { class &= !96; }
@@ -1574,53 +2131,98 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         })
     } else { None };
     let (ground, kerb) = match class & 7 {
+        _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
         // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
         PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
-        // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
-        WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
+        // Elevated inland water (park ponds, lagoons, lakes, rivers): render as real water so it ripples and reflects (#60).
+        WATER_HERE if g > 4 => (kind(WATER, colour(13, 5)), 0),
         WATER_HERE => (kind(SAND, OWN), 0),
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
     };
     let what = match p.building(x, z) {
         Some((b, probe)) if probe.inside => {
-            let raster = p.top(x, z).unwrap_or(b.base + 2 * b.storey);
+            let raster = p.roof_raster(b, x, z);
             // Glass and the vertical wall can be the highest lidar return at its edge.
             // Give a surveyed plane one eave; blend into the roof over the next metre.
-            let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
+            // On pitched gables where lidar rises > 0.6 m above the eave, keep the gable slope intact instead of
+            // decapitating it flat at `eave + 3` (#60).
+            let mut pitched = false;
+            let (roof, wall_top) = if probe.looks & 128 != 0 && probe.far < 15.0 {
                 let eave = (probe.looks >> 8) as i16 as i32;
                 let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
                 let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
-                // Behind a cornice (kind_at `By`, to three cells over the eave) the roof's railings and the lidar's
-                // mixed returns stood up in teeth over it (#450): within 1.5 m of the front it is the wall's top.
-                if probe.looks >> 24 & 2 != 0 { blended.min(eave + 3) } else { blended }
+                pitched = raster > eave + 6;
+                let r = if probe.looks >> 24 & 2 != 0 && !pitched { blended.min(eave + 3) } else { blended };
+                (r, eave)
             } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
                 let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
                 match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
-                    Some(eave) => raster.min(eave + 3),
-                    None => raster,
+                    Some(eave) => {
+                        pitched = raster > eave + 6;
+                        (if pitched { raster } else { raster.min(eave + 3) }, eave)
+                    }
+                    None => (raster, b.eave_med),
                 }
-            } else { raster }.max(g + 22);
-            What::In(b, probe, roof, tint)
+            } else {
+                let eave = if probe.looks & 128 != 0 { (probe.looks >> 8) as i16 as i32 } else { b.eave_med };
+                (raster, eave)
+            };
+            let roof = roof.max(g + 22);
+            // Exposed stepped-back upper walls (e.g. a genuine 2nd storey rising behind a lower 1-storey wing) sit past
+            // `probe.far >= 3*size`; probe 3 depths so recessed glass gets real dark interior backing instead of stucco (#60).
+            let (mut step_below, mut step_far) = (i32::MAX, 1e9f32);
+            if probe.far >= 3.0 * size as f32 && size <= 4 && probe.looks & 2 != 0 {
+                let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+                let far = probe.far.max(0.01);
+                let (ox, oz) = ((probe.on[0] - cx) / far, (probe.on[1] - cz) / far);
+                let d1 = 1.4 * size as f32;
+                let d2 = 2.6 * size as f32;
+                let d3 = 3.8 * size as f32;
+                let f1 = p.top((cx + ox * d1).floor() as i32, (cz + oz * d1).floor() as i32);
+                let f2 = p.top((cx + ox * d2).floor() as i32, (cz + oz * d2).floor() as i32);
+                let f3 = p.top((cx + ox * d3).floor() as i32, (cz + oz * d3).floor() as i32);
+                if let Some(low) = f1.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = if size == 1 { 0.5 } else { 1.5 };
+                } else if let Some(low) = f2.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 1.6;
+                } else if let Some(low) = f3.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 2.5;
+                }
+            }
+            What::In(b, probe, roof, tint, pitched, wall_top, step_below, step_far)
         }
         Some((b, probe)) if size <= 2 && probe.looks & 2 != 0 => {
             // The wall's height where this column is nearest it: a little way in from the outline.
             let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
             let far = probe.far.max(0.01);
-            let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
+            let (ux, uz) = (dx / far, dz / far);
+            let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
             let eave = if probe.looks & 128 != 0 {
                 Some((probe.looks >> 8) as i16 as i32)
             } else if probe.looks >> 24 & 2 != 0 {
-                p.eave_near(probe.on, [dx / far, dz / far]).or_else(|| p.top(ix, iz))
+                p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
             } else {
                 p.top(ix, iz)
             };
             match eave {
-                Some(roof) => What::By(b, probe, roof),
+                Some(roof) => {
+                    // Check deeper behind the front edge (1.6 m and 3.6 m inward): if the building rises > 0.8 m
+                    // higher (a pitched gable or a taller upper storey behind a protruding front garage/porch),
+                    // suppress heavy protruding cornice slabs that would otherwise float mid-wall (#60).
+                    let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
+                    let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
+                    let behind = b1.into_iter().chain(b2).max();
+                    let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
+                    What::By(b, probe, roof, stepped)
+                }
                 None => What::Open,
             }
         }
@@ -1634,6 +2236,11 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                 let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
                 let on_road = class & 7 == ROAD;
                 match p.trunk(x, z) {
+                    Some((_, stem)) if tall >= 28 && heroes.iter().flatten().any(|(h, _, _)|
+                        h.sort == heroes::CONSERVATORY && {
+                            let (u, w) = h.local(stem[0], stem[1], 0.0);
+                            heroes::valley_palm_stem(u, w)
+                        }) => What::Open,
                     // A tree: its crown is round underneath, deepest at the trunk and rising to its rim; past the
                     // rim what the lidar saw is a spray of leaves and no more.
                     Some((far, trunk)) if tall >= 28 => {
@@ -1669,13 +2276,18 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     // The ground's top in quarter cells, for the finest cells' ramp (`grade_rows`): a road's, a pavement's (over its
     // kerb, so the kerb keeps its height up a hill) and a bank's, wherever the ground is open to the sky. Only the
     // measured asphalt had it, and every pavement and bank up Nob Hill and Telegraph Hill was a stair of 10 cm (#450).
-    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
+    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
-    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, hero }
+    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, heroes, hero_n }
 }
 
 fn measured_foliage(tint: u8) -> bool {
     tint >= 16 && (3..=10).contains(&((tint-16)/10)) && matches!((tint-16)%10, 2 | 5 | 6 | 8 | 9)
+}
+
+/// True when a building roof's aerial tint is genuine green meadow/foliage (living green roofs).
+fn living_roof_foliage(tint: u8) -> bool {
+    tint >= 16 && (5..=10).contains(&((tint - 16) / 10)) && matches!((tint - 16) % 10, 2 | 3 | 4 | 5 | 6 | 8 | 9)
 }
 
 /// A crown and the asphalt underneath share one column. Carry nearby open-road
@@ -1743,40 +2355,71 @@ fn tower_base(b: &Building, p: &Probe, rise: i32, size: i32) -> Option<Kind> {
 fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     // A coarse cell is what its middle is.
     let mid = y + size / 2;
+    let s_m = size as f32 * 0.1;
     if mid <= c.g {
-        return if mid >= c.g - 3 * size.max(2) { c.ground } else { kind(EARTH, OWN) };
+        if mid >= c.g - 3 * size.max(2) {
+            for slot in 0..c.hero_n as usize {
+                if let Some((h, u, w)) = c.heroes[slot] {
+                    if let Some(surf) = heroes::surface_at(h.sort, u, w, c.g as f32 * 0.1, s_m) {
+                        return surf;
+                    }
+                }
+            }
+            return c.ground;
+        }
+        return kind(EARTH, OWN);
     }
-    // A landmark (#423, #450): what its rule says, and where the rule owns its place, its air too.
-    if let Some((h, u, w)) = c.hero {
-        let up = (y - h.at[1]) as f32 * 0.1 + size as f32 * 0.05;
-        let made = heroes::kind_at(h.sort, u, up, w, size as f32 * 0.1);
-        if made != 0 {
-            return made;
+    // Landmarks (#423, #450, #60): check all overlapping rules; what a rule says wins, and where a rule owns its
+    // place, its air clears underlying lidar clutter.
+    let over_g = (y - c.g) as f32 * 0.1 + size as f32 * 0.05;
+    let mut owned_air = false;
+    for slot in 0..c.hero_n as usize {
+        if let Some((h, u, w)) = c.heroes[slot] {
+            let up = (y - h.at[1]) as f32 * 0.1 + size as f32 * 0.05;
+            let made = heroes::kind_at_world(h.sort, u, up, over_g, w, s_m);
+            if made != 0 {
+                return made;
+            }
+            if heroes::owns_world(h.sort, u, up, over_g, w) {
+                owned_air = true;
+            }
         }
-        if heroes::owns(h.sort, u, up, w) && up >= 0.0 {
-            return 0;
-        }
+    }
+    if owned_air {
+        return 0;
     }
     for fixture in &c.fixtures {
         if mid >= fixture.low && mid <= fixture.high { return fixture.rod[7] as Kind; }
     }
     match &c.what {
         What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
-        What::In(b, p, roof, tint) => {
+        What::In(b, p, roof, tint, pitched, wall_top, step_below, step_far) => {
+            let on_roof_slope = (p.far >= 3.0 * size as f32 || (b.home && p.looks & 2 == 0))
+                && *roof - *wall_top <= 30 && mid > *wall_top && mid <= *step_below;
             if mid > *roof {
                 0
-            } else if mid > *roof - size {
-                kind(ROOFING, *tint)
+            } else if mid > *roof - size || on_roof_slope {
+                if material(b.wall) == GLASS {
+                    kind(GLASS, colour(14, 7))
+                } else if living_roof_foliage(*tint) {
+                    kind(GRASS, *tint)
+                } else {
+                    kind(ROOFING, *tint)
+                }
             } else if let Some(form) = tower_base(b, p, mid - c.g, size) {
                 form
             } else if p.far < 3.0 * size as f32 && size <= 8 {
-                front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size)
+                front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size, *pitched)
+            } else if mid >= b.base + b.storey && mid > step_below.saturating_add(4) && *step_far < 3.0 * size as f32 && size <= 4 {
+                front(b, p, mid - b.base, *roof - b.base, (mid - c.g).max(32), *step_far, size, *pitched)
             } else {
                 b.wall
             }
         }
-        What::Mass(roof, tint, wall) => if mid > *roof { 0 } else if mid > *roof - size { kind(ROOFING, *tint) } else { *wall },
-        What::By(b, p, roof) => {
+        What::Mass(roof, tint, wall) => if mid > *roof { 0 } else if mid > *roof - size {
+            if material(*wall) == GLASS { kind(GLASS, colour(14, 7)) } else if living_roof_foliage(*tint) { kind(GRASS, *tint) } else { kind(ROOFING, *tint) }
+        } else { *wall },
+        What::By(b, p, roof, stepped) => {
             if size == 1 && mid <= c.g + c.kerb {
                 return c.ground;
             }
@@ -1811,15 +2454,24 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                     return kind(STEEL, grey(13));
                 }
             }
-            // A cornice is a painted moulding in the trim's colour: concrete's slab joints every 1.6 m cut it into
-            // merlons (#450).
-            if detail & 2 != 0 && p.far <= 4.0 && up >= top-4 && up <= top+3 { return kind(PLASTER, (b.trim >> 8) as u8); }
-            // The cornice stands a cell or two out from the wall's top.
-            if p.far < 2.0 && up >= top - 3 && up <= top {
+            // A cornice is a painted moulding in the trim's colour on flat/parapet fronts. Never protrude a thick
+            // parapet slab on a stepped lower porch/garage, a pitched gable, an unsurveyed/jagged roofline, or a short stub (#60).
+            let flat_eave = p.looks & 128 != 0;
+            if detail & 2 != 0 && flat_eave && !*stepped && p.long >= 18.0 && top >= 44 && p.far <= 3.5 && up >= top - 4 && up <= top + 1 {
+                return kind(PLASTER, (b.trim >> 8) as u8);
+            }
+            // Slim eave trim at the wall's top (never protrude on stepped mid-wall garage/porch eaves).
+            if !*stepped && p.far < 1.8 && up >= top - 2 && up <= top {
                 return b.trim;
             }
-            // Bay windows: on a home's street front, over every other bay of it, from the first floor to the cornice.
-            if (if detail != 0 { detail & 1 == 0 } else { !b.home }) || p.long < b.module as f32 || up < b.storey || up > top - 4 {
+            // Synthetic bay windows: only on plain flat-fronted homes whose surveyed outline does NOT already trace
+            // bay windows (#60), and wide enough for a real bay.
+            if b.has_surveyed_bays
+                || (if detail != 0 { detail & 1 == 0 } else { !b.home })
+                || p.long < (b.module as f32 * 1.4).max(40.0)
+                || up < b.storey
+                || up > top - 4
+            {
                 return 0;
             }
             let module = b.module as f32;
@@ -1873,7 +2525,10 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
 
 /// How high the ground is at a column: its top cell.
 pub fn ground(x: i32, z: i32) -> i32 {
-    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| p.ground(x, z)))
+    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| {
+        let (places, n) = heroes_at(x, z, 1);
+        tread_ground(&places[..n as usize]).map_or_else(|| p.ground(x, z), |height| height.round() as i32)
+    }))
 }
 
 /// Where someone on foot stands at a column, whether it is paved, and the sort of place (always 0: the town's
@@ -1882,9 +2537,9 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
         match c.what {
-            What::In(b, ref probe, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
+            What::In(b, ref probe, _, _, _, _, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
                 (c.g + 1, true, 0),
-            What::In(_, _, roof, _) => (roof + 1, false, 0),
+            What::In(_, _, roof, _, _, _, _, _) => (roof + 1, false, 0),
             _ => (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
         }
     })
@@ -1935,6 +2590,14 @@ fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
     let fill = top4.rem_euclid(4);
     if fill == 0 || y < low_y || y >= low_y + SIDE as i32 ||
         c.fixtures.iter().any(|s| s.low <= y && y <= s.high) { return; }
+    // Do not carve or pad raw terrain grade over a landscape hero's pond, plaza or floral parterre (#60).
+    for slot in 0..c.hero_n as usize {
+        if let Some((h, u, w)) = c.heroes[slot] {
+            if heroes::surface_at(h.sort, u, w, c.g as f32 * 0.1, 0.1).is_some() {
+                return;
+            }
+        }
+    }
     // Its top cell is the ground's, or a pavement's kerb over it. The grade is carved only from that ground and laid
     // only into air: not into a tree's trunk, a stoop's step or a landmark's foot, which stand in the same cells.
     let (lo, hi, kind) = if y <= c.g + c.kerb { (fill, 4, 0) } else { (0, fill, c.ground) };
@@ -2025,7 +2688,7 @@ pub fn make(s: &mut Scratch) {
                     } else {
                         has_fixtures
                     };
-                    if matches!(oc.what, OwnedWhat::Open) && oc.hero.is_none() && !has_solid_fixture {
+                    if matches!(oc.what, OwnedWhat::Open) && oc.hero_n == 0 && !has_solid_fixture {
                         let top = if size == 1 { oc.g + oc.kerb } else { oc.g };
                         let min_mid = low_y + half;
                         if min_mid > top {
@@ -2046,11 +2709,11 @@ pub fn make(s: &mut Scratch) {
                         }
                         continue;
                     }
-                    let cy_end = if oc.hero.is_none() && !has_solid_fixture {
+                    let cy_end = if oc.hero_n == 0 && !has_solid_fixture {
                         let max_mid = match oc.what {
                             OwnedWhat::Open => if size == 1 { oc.g + oc.kerb } else { oc.g },
-                            OwnedWhat::In(_, _, _, roof, _) | OwnedWhat::Mass(roof, _, _) => roof.max(oc.g),
-                            OwnedWhat::By(_, _, _, roof) => (roof + 3).max(oc.g + oc.kerb),
+                            OwnedWhat::In(_, _, _, roof, ..) | OwnedWhat::Mass(roof, _, _) => roof.max(oc.g),
+                            OwnedWhat::By(_, _, _, roof, _) => (roof + 3).max(oc.g + oc.kerb),
                             OwnedWhat::Crown { top, .. } => top.max(oc.g + oc.kerb),
                         };
                         let min_mid = low_y + half;
@@ -2185,10 +2848,49 @@ mod tests {
     }
 
     #[test]
+    fn conservatory_replaces_the_whole_surveyed_crown_of_a_matched_trunk() {
+        // Reproduce the western stem in 190_277: lidar merges the two mapped
+        // palms and gives it a 6.4 m radius. Its east rim is outside both new crowns.
+        let mut bytes = pack();
+        let tops = 64 + 65 * 65 * 2;
+        let classes = tops + 128 * 128 * 2;
+        for z in 96..104 {
+            for x in 96..114 {
+                let i = z * 128 + x;
+                bytes[tops + 2 * i..tops + 2 * i + 2].copy_from_slice(&415_i16.to_le_bytes());
+                bytes[classes + i] = CANOPY | GRASS_HERE;
+            }
+        }
+        let end = bytes.len();
+        bytes[end - 8..end - 4].copy_from_slice(&415_i32.to_le_bytes());
+        bytes[end - 4..].copy_from_slice(&((64_i32 << 8) | 4).to_le_bytes());
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()) };
+        assert_eq!(load(), 1);
+        let rim = || {
+            let mut sector = Scratch::new();
+            sector.start(8, 6, 7, 0);
+            make(&mut sector);
+            let mut leaves = 0;
+            for x in 560..565 {
+                for z in 496..506 {
+                    for y in 384..410 {
+                        if material(sector.cells[at(x - 512, y - 384, z - 448)]) == LEAVES { leaves += 1; }
+                    }
+                }
+            }
+            leaves
+        };
+        assert!(rim() > 0, "fixture must emit a raw crown at its rim");
+        hero(heroes::CONSERVATORY, 624, 153, 200, 0);
+        assert_eq!(rim(), 0, "the displaced lidar stem still has a second crown");
+        clear();
+    }
+
+    #[test]
     fn measured_crowns_have_openings_and_keep_the_trunk() {
         let tint = colour(6, 5);
         let mut c = Column { g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
-            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), hero: None };
+            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), heroes: [None, None], hero_n: 0 };
         let mut gaps = 0;
         let mut leaves = 0;
         for x in 0..90 {
@@ -2209,7 +2911,7 @@ mod tests {
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
         let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
-            what: What::Open, fixtures: Vec::new(), hero: None };
+            what: What::Open, fixtures: Vec::new(), heroes: [None, None], hero_n: 0 };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
         assert_eq!(rows.len(), 4);
@@ -2498,6 +3200,198 @@ mod tests {
         let packs = [pack];
         let c = column(&packs, 285, 285, 1);
         assert!(matches!(c.what, What::Open), "trunkless tall canopy should not float");
+    }
+
+    #[test]
+    fn faceted_bays_get_windows_without_double_bays_or_floating_cornices() {
+        // An 8-vertex house with a surveyed 3-sided bay front whose angled facets were left unmarked by erosion.
+        let mut ring = [
+            [0, 0, 3], [20, 0, 0], [32, -8, 0], [44, 0, 0], [64, 0, 3],
+            [64, 80, 1], [0, 80, 1], [0, 40, 4 | 1],
+        ];
+        propagate_fronts(&mut ring);
+        assert!(ring[1][2] & 3 == 3 && ring[2][2] & 3 == 3 && ring[3][2] & 3 == 3, "bay facets inherit street facing");
+        assert!(ring_has_surveyed_bays(&ring), "surveyed bay geometry detected to prevent double bay extrusion");
+        // An outer ring with zero open faces gets its longest edge opened so no house is a blind concrete box.
+        let mut blind = [[0, 0, 0], [50, 0, 0], [50, 30, 0], [0, 30, 4]];
+        propagate_fronts(&mut blind);
+        assert!(blind[0][2] & 1 != 0 && blind[2][2] & 1 != 0, "blind building opens longest walls");
+        // Narrow 1.4 m street-facing bay facet centers a real glass sash window (mullion at centre, glass on either pane).
+        let b = Building {
+            first: 0, count: 4, wall: kind(PLASTER, WHITE), trim: kind(PLASTER, grey(2)), glass: None,
+            storey: 32, module: 30, home: true, special: 0, ground_floor: 0, seed: 1, base: 100,
+            has_surveyed_bays: true, eave_med: 180, low: [0, 0], high: [100, 100],
+        };
+        let p_pane = Probe { inside: true, far: 1.5, along: 5.0, round: 23.0, long: 14.0, looks: 3, side: 1, on: [5.0, 0.0] };
+        assert_eq!(material(front(&b, &p_pane, 48, 96, 48, 1.5, 1, false)), GLASS);
+        let p = Probe { inside: true, far: 1.5, along: 7.0, round: 25.0, long: 14.0, looks: 3, side: 1, on: [7.0, 0.0] };
+        assert_eq!(front(&b, &p, 48, 96, 48, 1.5, 1, false), b.trim);
+        // Stepped/pitched What::By suppresses protruding 40 cm white cornice slabs that would float mid-wall.
+        let p_by = Probe { inside: false, far: 3.0, along: 10.0, round: 10.0, long: 20.0, looks: 3 | (2 << 24), side: 1, on: [10.0, 0.0] };
+        let c_stepped = Column {
+            g: 100, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
+            what: What::By(&b, p_by, 140, true), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+        };
+        assert_eq!(kind_at(&c_stepped, 10, 141, -3, 1), 0, "stepped roof must not float cornice mid-wall");
+        // Living green roofs and glass roofs render as GRASS / GLASS rather than grey ROOFING shingles.
+        let c_green = Column {
+            g: 100, road_top4: None, ground: kind(GRASS, OWN), kerb: 0,
+            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+        };
+        assert_eq!(material(kind_at(&c_green, 10, 180, 10, 1)), GRASS);
+        // 2-story Outer Sunset house (5.9 m tall, storey 34): floor 1 must get real GLASS windows below its cornice,
+        // never an orphan white sill on a blank wall (#60).
+        let sunset = Building {
+            first: 0, count: 4, wall: kind(PLASTER, colour(6, 7)), trim: kind(PLASTER, WHITE), glass: None,
+            storey: 34, module: 30, home: true, special: 0, ground_floor: 0, seed: 2, base: 585,
+            has_surveyed_bays: false, eave_med: 643, low: [0, 0], high: [100, 100],
+        };
+        let p_sun = Probe { inside: true, far: 1.5, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
+        let glass_cells = (34..58).filter(|&up| material(front(&sunset, &p_sun, up, 58, up, 1.5, 1, false)) == GLASS).count();
+        assert!(glass_cells >= 8, "2-story 5.8 m house floor 1 should have real windows, got {glass_cells}");
+        // Stepped-back 2nd-floor wall behind a lower wing (probe.far = 18.0 >= 3.0) still gets windows on floor >= 1!
+        let p_setback = Probe { inside: true, far: 18.0, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
+        let c_setback = Column {
+            g: 585, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
+            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+        };
+        let setback_glass = (619..643).filter(|&y| material(kind_at(&c_setback, 22, y, 18, 1)) == GLASS).count();
+        assert!(setback_glass >= 8, "stepped-back 2nd floor behind wing should have windows, got {setback_glass}");
+    }
+
+    #[test]
+    fn collapsed_front_lidar_and_garage_overlap_are_repaired() {
+        // Reproduces the exact Outer Sunset fault (owner feedback on IMG_6768.png, #60):
+        // (1) Front 1.0 m of building footprint has ground-level lidar dropouts (base+6) while interior is base+56..68,
+        // (2) Single-cell +3.0 m rooftop spike, (3) Sloped roof rising from eave+0 to eave+14, (4) Garage+entry front.
+        let mut bytes = Vec::new();
+        let (gw, tw, gstep, tstep) = (33i32, 64i32, 10i32, 5i32);
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 4, 0, 0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        // Building spans x=60..180, z=60..140 (base=100, storey=32); west front at x=60 faces street.
+        for j in 12..28 {
+            for i in 12..36 {
+                let k = (j * tw + i) as usize;
+                cls[k] = BUILT | PAVEMENT;
+                if i < 14 {
+                    // Front 1.0 m lidar dropout: ground-level returns (base + 6) that collapsed the front wall to 2.2 m!
+                    top[k] = 106;
+                } else {
+                    // Sloped hip roof rising cleanly from 154 at front to 168 at ridge.
+                    top[k] = (154 + ((i - 14) * 4).min(14)) as i16;
+                }
+            }
+        }
+        // Single-cell rooftop antenna/vent spike (+3.0 m above surrounding roof).
+        top[(20 * tw + 24) as usize] = 198;
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![grey(9); (tw * tw) as usize]);
+        // Building record: first=0, count=4, wall=cream plaster, trim=white, storey=32, mod=28, home=1, base=100
+        let style = 32 | (28 << 8) | (1 << 16);
+        for v in [0i32, 4, kind(PLASTER, colour(3, 1)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes.extend(v.to_le_bytes());
+        }
+        // 4 corners: west front (60,140)->(60,60) has street + garage + entry + cornice (0xf << 24), NO eave bit!
+        let front_looks: i32 = 3 | (0xf << 24);
+        for [x, z, l] in [[60i32, 140, front_looks], [60, 60, 1], [180, 60, 1], [180, 140, 4 | 1]] {
+            for v in [x, z, l] { bytes.extend(v.to_le_bytes()); }
+        }
+        let pack = read(&bytes).expect("valid pack");
+        let packs = [pack];
+        // 1. Collapsed front 1.0 m wall is restored up to the real ~5.4 m eave, never left as a 2.2 m stub!
+        let c_front = column(&packs, 62, 100, 1);
+        match c_front.what {
+            What::In(_, _, roof, _, _, _, _, _) => assert!(roof >= 150, "front wall collapsed to {roof}"),
+            _ => panic!("expected What::In at front wall"),
+        }
+        // 2. Single-cell +3.0 m rooftop spike at (122, 102) is denoised down to the roof plane (~168).
+        assert!(packs[0].top(122, 102).unwrap() <= 172, "rooftop spike survived: {:?}", packs[0].top(122, 102));
+        // 3. Interior sloped roof voxels above the eave render as ROOFING, never flashing bright stucco risers!
+        let c_slope = column(&packs, 92, 100, 1);
+        assert_eq!(material(kind_at(&c_slope, 92, 158, 100, 1)), ROOFING, "sloped roof step flashed wall stucco");
+        // 4. Garage header (over_ground = 23..30) directly above the garage door must NEVER cut a Floor-0 glass window!
+        let p_gar = Probe { inside: true, far: 1.5, along: 52.0, round: 52.0, long: 80.0, looks: front_looks, side: 0, on: [60.0, 88.0] };
+        let b0 = &packs[0].buildings[0];
+        let clipped_glass = (23..31).filter(|&y| material(front(b0, &p_gar, y, 56, y, 1.5, 1, false)) == GLASS).count();
+        assert_eq!(clipped_glass, 0, "window clipped straight into top of garage door ({clipped_glass} cells)");
+    }
+
+    #[test]
+    fn residential_roof_end_corner_fins_are_flattened() {
+        // Reproduces the 36th Ave corner fin artifact (#60): a residential front corner beside a side lightwell has a
+        // ground-level dropout next to a 5.2 m front eave while the rear roof is 6.6 m, plus a 1-sample corner spike.
+        let mut bytes = Vec::new();
+        let (gw, tw, gstep, tstep) = (33i32, 64i32, 10i32, 5i32);
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 6, 0, 0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        // L-shaped front corner: x=60..160, z=60..120 plus a narrow front corner stub x=60..70, z=120..125 (alley behind x=70..160)
+        for j in 12..25 {
+            for i in 12..32 {
+                if j == 24 && i >= 14 { continue; }
+                let k = (j * tw + i) as usize;
+                cls[k] = BUILT | PAVEMENT;
+                top[k] = if i < 16 { 152 } else { 166 };
+            }
+        }
+        // Front-right corner dropout (104) + adjacent 1-sample perimeter fin (168) sticking +1.6 m above the 152 eave.
+        top[(24 * tw + 12) as usize] = 104;
+        top[(24 * tw + 13) as usize] = 168;
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![grey(9); (tw * tw) as usize]);
+        let style = 32 | (28 << 8) | (1 << 16);
+        for v in [0i32, 6, kind(PLASTER, colour(3, 1)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes.extend(v.to_le_bytes());
+        }
+        for [x, z, l] in [
+            [60i32, 125, 3], [60, 60, 1], [160, 60, 1], [160, 120, 1], [70, 120, 1], [70, 125, 4 | 1],
+        ] {
+            for v in [x, z, l] { bytes.extend(v.to_le_bytes()); }
+        }
+        let pack = read(&bytes).expect("valid pack");
+        let corner_drop = pack.top(62, 122).expect("repaired corner");
+        let corner_fin = pack.top(67, 122).expect("flattened fin");
+        assert!(corner_drop <= 156, "corner dropout jumped to rear roof height: {corner_drop}");
+        assert!(corner_fin <= 156, "1-sample perimeter roof-end fin survived: {corner_fin}");
+
+        // A valid baked two-storey eave (160) behind a shallow 0.6 m lower bay shelf (137, rising to 160 at 1.2 m in)
+        // must keep its 160 eave and never collapse to the 137 shelf.
+        let mut bytes2 = Vec::new();
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 4, 0, 0] {
+            bytes2.extend(v.to_le_bytes());
+        }
+        bytes2.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top2 = vec![NONE; (tw * tw) as usize];
+        let mut cls2 = vec![PAVEMENT; (tw * tw) as usize];
+        for j in 12..24 {
+            for i in 12..28 {
+                let k = (j * tw + i) as usize;
+                cls2[k] = BUILT | PAVEMENT;
+                top2[k] = if i < 14 { 137 } else { 160 };
+            }
+        }
+        for t in top2 { bytes2.extend(t.to_le_bytes()); }
+        bytes2.extend(&cls2);
+        bytes2.extend(vec![grey(9); (tw * tw) as usize]);
+        for v in [0i32, 4, kind(PLASTER, colour(6, 7)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes2.extend(v.to_le_bytes());
+        }
+        let baked_160: i32 = 3 | 128 | (160 << 8) | (15 << 24);
+        for [x, z, l] in [[60i32, 120, baked_160], [60, 60, 1], [140, 60, 1], [140, 120, 4 | 1]] {
+            for v in [x, z, l] { bytes2.extend(v.to_le_bytes()); }
+        }
+        let pack2 = read(&bytes2).expect("valid pack2");
+        let kept_eave = (pack2.verts[0][2] >> 8) as i16 as i32;
+        assert_eq!(kept_eave, 160, "shallow 0.6 m bay shelf collapsed valid 2-storey eave to {kept_eave}");
     }
 
     #[test]

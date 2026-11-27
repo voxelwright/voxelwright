@@ -255,7 +255,7 @@ async function main() {
   })
   // Build independent GPU pipelines concurrently in two batches (#83) so shader compilation never serializes startup.
   const [march, blit, debris, smoke, water, planet, shade, roadTracks, carWheels, released] = await Promise.all([
-    marcher(device, gpu.format, world),
+    marcher(device, gpu.format, world, false, !!LOCAL?.release),
     glow(gpu),
     crumbs(device, gpu.format),
     puffs(device, gpu.format),
@@ -288,12 +288,13 @@ async function main() {
     people(device, gpu.format, march),
     wand(device, gpu.format, march, core, controls, over),
   ])
-  // Boxes covering the cells up to the far model's handover: on a full city with a far model, coarser boxes beyond
-  // reach stream after the place is shown so cold load never waits on citywide coarse tiles hidden behind far faces.
+  // Show the place once its near boxes and skyline are ready. Coarser fallback cells have lower fetch priority.
   const nearLevels = farModel.listing && farModel.reach > 0
     ? world.levels.filter((l) => l.index === 0 || ((l.grid[0] * SIDE) << (l.index - 1)) / 2 < farModel.reach * M)
     : world.levels
   world.farFrom = nearLevels.length
+  world.farCovered = (x0, z0, x1, z1) => farModel.covers(x0, z0, x1, z1)
+  farModel.onFallback = (x0, z0, x1, z1) => world.refreshFar(x0, z0, x1, z1)
   loading.step('skyline')
   const colours = palette(), stuff = materials()
   // What is heard (#247): `?sound=0` leaves it out. Deferred until after the first picture is drawn (#83) so
@@ -337,11 +338,11 @@ async function main() {
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
   const roll = (Number(query.get('roll') ?? (directLL ? 0 : LOCAL?.roll) ?? 0) * Math.PI) / 180
   /** Dynamic driving camera offsets set each frame by living.ts (0 whenever not driving). */
-  let driveFov = 0, driveRoll = 0, driveEnergy = 0
+  let driveFov = 0, driveRoll = 0, driveEnergy = 0, driveDrift = 0
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
-  const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
+  const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (Math.max(-90, Math.min(90, look[1])) * Math.PI) / 180 }
   // Feed sector workers immediately (#83) so they begin making near tiles while the rest of page init completes.
   world.update([pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE])
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
@@ -417,7 +418,10 @@ async function main() {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
     const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
-    const curRoll = roll + driveRoll, curFov = Math.min(115, Math.max(40, fov + driveFov))
+    const curRoll = roll + driveRoll
+    // A photographic lens can be narrower than the driving camera's range.
+    const curFov = driveFov === 0 && fov > 0 && fov < 180 ? fov
+      : Math.min(115, Math.max(40, (Number.isFinite(fov) ? fov : 70) + driveFov))
     const cr = Math.cos(curRoll), sr = Math.sin(curRoll)
     const right = curRoll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
     const up = curRoll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
@@ -440,7 +444,8 @@ async function main() {
     if (!controls.live('moving')) return
     const [right, up] = controls.turn(), held = controls.held, stick = controls.stick
     pose.yaw += right
-    pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
+    // Keep a registered overhead view vertical until the player tilts it.
+    if (up) pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
     const v = view(), fast = held('ShiftLeft') || held('ShiftRight') ? 5 : 1
     const ahead = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0) - stick[1] * 2, side = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0) + stick[0] * 2
     const rise = (held('Space') ? 1 : 0) - (held('KeyC') || held('ControlLeft') ? 1 : 0)
@@ -904,7 +909,7 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
     device.queue.submit([encoder.finish()])
     telemetry?.onPresented(canvas)
@@ -1221,14 +1226,14 @@ async function main() {
     world: far, made: () => made,
     ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } },
     dropped: (id) => moving.delete(id),
-    lens: (fovAdd, rollAdd, energy) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy },
+    lens: (fovAdd, rollAdd, energy, driftBlur = 0) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy; driveDrift = driftBlur },
     fx: {
       smoke: (at, vel, intensity, colour) => smoke.tireSmoke(at, vel, intensity, colour),
       exhaust: (at, dir, pop, boost) => smoke.exhaust(at, dir, pop, boost),
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
-      sparks: (at, strength) => { debris.burst(at, 1.5, Math.round(3 + strength * 6), [1.0, 0.57, 0.12], 0.13, 0.34, 0.5 + strength * 0.4, true); smoke.glint(at, 4 + strength * 5) },
+      sparks: (at, strength) => { debris.burst(at, 1.6, Math.round(5 + strength * 9), [1.0, 0.68, 0.16], 0.12, 0.42, 0.6 + strength * 0.45, true); smoke.glint(at, 4.5 + strength * 5.5) },
       // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)

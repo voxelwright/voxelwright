@@ -18,6 +18,53 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 export const DEFAULT_RAW = join(HERE, 'places-raw.json.br')
 export const DEFAULT_BRANDS = join(HERE, 'brands.json')
 export const DEFAULT_PLAZAS = join(HERE, 'plazas.json')
+export const DEFAULT_HEROES = join(HERE, 'heroes.json')
+
+/** Horizontal footprints [u0, w0, u1, w1] in metres matching non-bridge landmarks in `engine/core/src/heroes.rs`.
+ * Elevated bridge spans (2 Golden Gate, 4 Bay Bridge) are omitted so real waterfront shops below them stay intact. */
+const HERO_FOOTPRINTS = {
+  1: [-34, -34, 34, 34],       // Salesforce Tower
+  3: [-29, -29, 29, 29],       // Transamerica Pyramid
+  5: [-104, -29, 103, 33],     // Ferry Building
+  7: [-40, -40, 40, 40],       // Sutro Tower
+  8: [-66, -57.3, 66, 57.3],   // City Hall
+  9: [-38, -114, 54, 109],     // Palace of Fine Arts
+  10: [-54, -34, 54, 34],      // Fort Point
+  11: [-81, -66.5, 81, 36.5],  // California Academy of Sciences
+  12: [-66, -66, 66, 66],      // Japanese Tea Garden
+  13: [-80, -60, 80, 60],      // San Francisco Botanical Garden
+  14: [-50, -22, 61, 96],      // Conservatory of Flowers
+  15: [-28.5, -11.5, 27, 13],  // Painted Ladies
+  16: [-80, -40, 78, 44],      // de Young Museum
+}
+
+/** Loads oriented horizontal exclusion boxes for authored ground-level landmarks from `heroes.json` (#60 x #93). */
+export function loadHeroExclusions(heroesPath = DEFAULT_HEROES) {
+  if (!heroesPath || !existsSync(heroesPath)) return []
+  const list = JSON.parse(readFileSync(heroesPath, 'utf8'))
+  const boxes = []
+  for (const h of list) {
+    const r = HERO_FOOTPRINTS[h.sort]
+    if (!r || !Array.isArray(h.at) || !Array.isArray(h.toward)) continue
+    const [hx, hz] = latLonToWorldM(h.at[0], h.at[1])
+    const [tx, tz] = latLonToWorldM(h.toward[0], h.toward[1])
+    const len = Math.hypot(tx - hx, tz - hz) || 1
+    boxes.push({ name: h.name, sort: h.sort, hx, hz, ax: (tx - hx) / len, az: (tz - hz) / len, r })
+  }
+  return boxes
+}
+
+/** True when world-metre point `(x, z)` lies inside any authored ground-level landmark footprint (padded by `pad` m). */
+export function insideHero(boxes, x, z, pad = 0) {
+  for (const h of boxes) {
+    const dx = x - h.hx, dz = z - h.hz
+    const u = dx * h.ax + dz * h.az
+    const w = dz * h.ax - dx * h.az
+    const [u0, w0, u1, w1] = h.r
+    if (u >= u0 - pad && u <= u1 + pad && w >= w0 - pad && w <= w1 + pad) return h
+  }
+  return null
+}
 
 /** Lat/lon -> UTM 10N frame 10n4250 in world metres (matches page/bay.ts `place` / 10). */
 export function latLonToWorldM(lat, lon) {
@@ -202,10 +249,11 @@ export function loadRawPlaces(rawPath = DEFAULT_RAW) {
  * Compiles raw open-data POIs + plazas with `brands.json` and `plazas.json`.
  * Returns `{ data, bytes, mapPlaces, stats, summary }`.
  */
-export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS, plazasPath = DEFAULT_PLAZAS } = {}) {
+export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS, plazasPath = DEFAULT_PLAZAS, heroesPath = DEFAULT_HEROES } = {}) {
   const raw = loadRawPlaces(rawPath)
   const brandsCfg = existsSync(brandsPath) ? JSON.parse(readFileSync(brandsPath, 'utf8')) : { brands: [], overrides: [], categories: {} }
   const plazasCfg = existsSync(plazasPath) ? JSON.parse(readFileSync(plazasPath, 'utf8')) : { archetypes: {}, heroes: [] }
+  const heroBoxes = loadHeroExclusions(heroesPath)
   const rules = compileBrandRules(brandsCfg)
 
   // Deduplicated style palette table so bay/places.json stays super compact.
@@ -222,10 +270,14 @@ export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS
     return i
   }
 
-  let parodyCount = 0
+  let parodyCount = 0, skippedHeroShops = 0
   const brandHits = new Map()
   const shops = []
   for (const r of raw.shops ?? []) {
+    if (insideHero(heroBoxes, r.x, r.z, 2)) {
+      skippedHeroShops++
+      continue
+    }
     const res = rules.resolve(r)
     if (res.parodyOf) {
       parodyCount++
@@ -312,6 +364,21 @@ export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS
     }
   }
 
+  let skippedHeroPlazas = 0
+  const overlapsLandmarkPlaza = (rp) => {
+    if (insideHero(heroBoxes, rp.x, rp.z, 4)) return true
+    if (rp.ex != null && rp.ez != null && insideHero(heroBoxes, rp.ex, rp.ez, 4)) return true
+    // Skip raw plazas whose OSM polygon or benches fall inside an authored landscape/building landmark
+    // (keep neighboring parks like Transamerica Redwood Park whose center/entrance/benches sit cleanly outside).
+    const hitBench = (rp.bn ?? []).some(([bx, bz]) => insideHero(heroBoxes, bx, bz, 0))
+    if (hitBench) return true
+    const hitPoly = (rp.p ?? []).find(([px, pz]) => {
+      const h = insideHero(heroBoxes, px, pz, 0)
+      return h && h.sort !== 3
+    })
+    return Boolean(hitPoly)
+  }
+
   for (const rp of raw.plazas ?? []) {
     const rn = normalizeName(rp.n)
     let hit = null
@@ -327,8 +394,19 @@ export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS
         break
       }
     }
+    if (!hit && overlapsLandmarkPlaza(rp)) {
+      skippedHeroPlazas++
+      continue
+    }
     if (hit) hit.matched = true
-    plazas.push(makePlazaRecord(rp, hit))
+    const cleanRaw = heroBoxes.length && (rp.bn?.length || rp.k?.length)
+      ? {
+          ...rp,
+          ...(rp.bn?.length ? { bn: rp.bn.filter(([bx, bz]) => !insideHero(heroBoxes, bx, bz, 1)) } : {}),
+          ...(rp.k?.length ? { k: rp.k.filter(([kx, kz]) => !insideHero(heroBoxes, kx, kz, 1)) } : {}),
+        }
+      : rp
+    plazas.push(makePlazaRecord(cleanRaw, hit))
   }
 
   // Synthesize compact square polygon for any configured hero plaza missing from raw open-data extracts
@@ -397,6 +475,8 @@ export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS
     plazas: plazas.length,
     benches: benchCount,
     mapPlaces: mapPlaces.length,
+    skippedHeroShops,
+    skippedHeroPlazas,
     bytes: bytes.length,
   }
   const summary = `${stats.shops} storefronts (${stats.parodyShops} parody across ${stats.parodyBrandsMatched} chains), ${stats.plazas} plazas (${stats.benches} OSM benches), ${stats.mapPlaces} map POIs, ${(bytes.length / 1024).toFixed(0)} KB`

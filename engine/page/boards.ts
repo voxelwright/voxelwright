@@ -336,6 +336,8 @@ export interface Boards {
     at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean
     /** It has something to say: it comes in to its near round over some seconds, and goes back out when this is false again. */
     loud: boolean
+    /** Hidden while the sky-gap drone swarm is up (eggs.ts / eggs-sky.ts): the plane, tow line and banner cloth stay out of the sky so they never fly in front of the drones. */
+    hidden: boolean
     /** How far it has come in: 0 on its own round, 1 on the near one. */
     readonly come: number
     /** The cloth's box on the page now (client px), or null where any of it is behind the eye. */
@@ -738,7 +740,7 @@ export async function boards(o: Needs): Promise<Boards> {
   // ── The plane and its banner ──
   const whole_ = o.file.banner ?? null, shape0 = o.canvas.getBoundingClientRect()
   const towed: Banner | null = whole_ ? (whole_.upright && shape0.height > shape0.width ? { ...whole_, ...whole_.upright } : whole_) : null
-  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
+  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; hidden: boolean; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
   /** Keeps a called plane in the picture (below, where the picture's projection is): every frame of its flight. */
   let summon: (() => void) | null = null
   let boxAt: (phase: number) => { x0: number; y0: number; x1: number; y1: number } | null = () => null, read: (phase: number) => boolean = () => false
@@ -788,8 +790,8 @@ export async function boards(o: Needs): Promise<Boards> {
       return [p[0] + (q[0] - p[0]) * e, p[1] + (q[1] - p[1]) * e, p[2] + (q[2] - p[2]) * e]
     }
     /** Where on its round it is as it flies on, 0 to 1 (held, `flown.phase` is where it is held). */
-    let running = towed.start ?? 0, last = performance.now()
-    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, get come() { return come }, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
+    let running = towed.start ?? 0, last = performance.now(), hidden = false
+    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, get hidden() { return hidden }, set hidden(on: boolean) { hidden = on; cloth.hidden = on; line.hidden = on; if (on) piece.cell = 0 }, get come() { return come }, call(on) { this.called = on }, get box() { return hidden ? null : boxAt(this.phase) }, get readable() { return !hidden && read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
     /** Where the plane is and where its cloth's two ends are, at a place on its round (0 to 1). */
     const parts = (phase: number) => [point(phase, () => 0), point(phase, (r) => r.body + r.gap), point(phase, (r) => r.body + r.gap + 2 * r.half)]
     let looked = 0
@@ -824,7 +826,7 @@ export async function boards(o: Needs): Promise<Boards> {
     // (Run from its flight, which first runs before `onPicture` below is made: it is not called before an egg calls it.)
     summon = () => {
       const f = flown!
-      if (!f.called || f.hold !== null) { f.inView = false; return }
+      if (f.hidden || !f.called || f.hold !== null) { f.inView = false; return }
       const rect = o.canvas.getBoundingClientRect(), v = o.view(), aspect = rect.width / Math.max(1, rect.height)
       /** How much of it is on the picture at a place on its round: the plane, the cloth's ends, its middle. */
       const seen = (phase: number, edge: number) => { const [p, a, b] = parts(phase); return [p, a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] as [number, number, number]].filter((q) => { const at = onPicture([q[0], q[1] - now((r) => r.drop), q[2]], v, aspect); return at && Math.abs(at.x) < edge && Math.abs(at.y) < edge }).length }
@@ -862,7 +864,9 @@ export async function boards(o: Needs): Promise<Boards> {
       const at = point(f.phase, () => 0), ahead = point(f.phase, (r) => -10 * r.cell), heading = [ahead[0] - at[0], ahead[2] - at[2]], turn = Math.atan2(-heading[1], heading[0])
       f.at = at
       piece.pos = f.at
-      piece.cell = now((r) => r.cell)
+      cloth.hidden = f.hidden
+      line.hidden = f.hidden
+      piece.cell = f.hidden ? 0 : now((r) => r.cell)
       // Its nose along its way, banked into the round by how hard it is turning there.
       const next = point(f.phase, (r) => -100 * r.cell), bend = Math.atan2(next[2] - ahead[2], next[0] - ahead[0]) - Math.atan2(heading[1], heading[0])
       const bank = Math.max(-0.5, Math.min(0.5, Math.atan2(Math.sin(bend), Math.cos(bend)) * 1.6)), sn = Math.sin(turn / 2), c = Math.cos(turn / 2), sb = Math.sin(bank / 2), cb = Math.cos(bank / 2)

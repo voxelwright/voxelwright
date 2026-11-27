@@ -69,7 +69,7 @@ export function striker(release) {
           if (py < y0 || py > y1 || px < x || px > x + lu) continue
           n = c2.map((c) => c * out)
         }
-        if (t > 1 && t <= most && (!best || t < best.t)) best = { t, at: [from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t], normal: n, id: w[i * 5 + 4], top: pos[1] + y1, foot: pos[1] + y0, layer: s.layer }
+        if (t > 1 && t <= most && (!best || t < best.t)) best = { t, at: [from[0] + dir[0] * t, from[1] + dir[1] * t, from[2] + dir[2] * t], normal: n, id: w[i * 5 + 4], pyramid: (w2 & (1 << 29)) !== 0, top: pos[1] + y1, foot: pos[1] + y0, layer: s.layer }
       }
     }
     return best

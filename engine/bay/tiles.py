@@ -15,9 +15,10 @@ coarse the sector it is making is (bay.rs `least_step`), and bay.ts asks for til
     ~/.village/engine/bay/venv/bin/python engine/bay/tiles.py
 """
 import glob, json, os, struct
+from pathlib import Path
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw
-from shapely import make_valid, union_all
+from shapely import contains_xy, make_valid, union_all
 from shapely.geometry import LineString, Point, Polygon, box as survey_box
 import earth
 import compact_store
@@ -73,6 +74,39 @@ def outline(verts):
         return Polygon()
     polygon = Polygon(rings[0], rings[1:])
     return polygon if polygon.is_valid else make_valid(polygon)
+
+
+def measured_fronts(top, x0, z0, buildings, roofs):
+    """Write the surveyed half-metre sections only inside the matching near-tile outline."""
+    for roof in roofs:
+        sections = roof['sections']
+        first = roof['firstX']
+        last = first + 5 * (len(sections[0][1]) - 1)
+        if (last < x0 or first >= x0 + 5 * top.shape[1] or sections[-1][0] < z0
+                or sections[0][0] >= z0 + 5 * top.shape[0]):
+            continue
+        # Packs retain the surveyed corners, but discard the DataSF id. Match its directed front edge.
+        a, b = map(tuple, roof['edge'])
+        for verts, _ in buildings:
+            if not any(v[:2] == a and verts[(i + 1) % len(verts)][:2] == b for i, v in enumerate(verts)):
+                continue
+            footprint = outline(verts)
+            levels, profiles = zip(*sections)
+            zs = np.arange(levels[0], levels[-1] + 1, 5)
+            for column, heights in enumerate(zip(*profiles)):
+                x = first + 5 * column
+                i = (x - x0) // 5
+                if not 0 <= i < top.shape[1]:
+                    continue
+                rows = (zs - z0) // 5
+                inside = (rows >= 0) & (rows < top.shape[0]) & contains_xy(footprint, x + 0.5, zs + 0.5)
+                rows = rows[inside]
+                fit = np.rint(np.interp(zs[inside], levels, heights))
+                old = top[rows, i]
+                # Skip missing or low court returns and tall projections. The measured front can lower
+                # a smeared edge by up to 1.6 m, but can raise a sample by at most 0.3 m.
+                top[rows, i] = np.where((old >= fit - 3) & (old <= fit + 16), fit, old)
+            break
 
 
 def polygons(geometry):
@@ -175,6 +209,7 @@ def cut(paths, wanted=None):
     mass = np.asarray(mass)
 
     index = {'levels': [{'size': l[0], 'gstep': l[1]} for l in earth.LEVELS], 'tiles': [[], [], []], 'squares': [os.path.basename(p)[:-4] for p in sorted(glob.glob(f'{PACKS}/*.bay'))]}
+    roofs = json.loads(Path(__file__).with_name('sf-roof-fronts.json').read_text())['roofs']
     frame = earth.Frame(FRAME)
     for level, (size, gstep, tstep, margin, _) in enumerate(earth.LEVELS):
         os.makedirs(f'{PACKS}/tiles/{level}', exist_ok=True)
@@ -199,6 +234,7 @@ def cut(paths, wanted=None):
                     seen = seen[..., 0]
                     t, c, n = np.where(seen, t[..., 0], et), np.where(seen, c[..., 0], ec), np.where(seen, n[..., 0], en)
                     own = [(v, r) for v, r in buildings if max(q[0] for q in v) >= x0 - margin and min(q[0] for q in v) < x0 + size + margin and max(q[1] for q in v) >= z0 - margin and min(q[1] for q in v) < z0 + size + margin]
+                    measured_fronts(t, x0 - margin, z0 - margin, own, roofs)
                     stems = [s for s in trunks if x0 - margin <= s[0] < x0 + size + margin and z0 - margin <= s[1] < z0 + size + margin]
                     if not seen.all():
                         tile = survey_box(x0-margin, z0-margin, x0+size+margin, z0+size+margin)

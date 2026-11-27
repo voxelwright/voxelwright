@@ -100,7 +100,8 @@ The release, the street graphs and the kept car live in `~/.village`, not in git
 | --- | --- | --- |
 | `node deploy/data.mjs pack` | The machine with `~/.village`, after the pin moves | Bundles the pinned release (its quality-11 copies from the realm build's cache), the street graphs and the kept car as Brotli in one `data.tar`. Uploads it as release `sf-data-<first 16 hex of the index digest>` unless that release exists, and writes `deploy/data.json` (`pin`, `digest`, `tag`). |
 | `node deploy/data.mjs pack-local PIN DIRECTORY` | Anywhere with the staged release | Writes the archive and `data.json` into `DIRECTORY` instead of uploading. |
-| `node deploy/data.mjs fetch` | CI | Checks that `data.json` is for the pin in `engine/sf/pilot/current.json`, downloads the bundle, checks the index digest and every file's size and SHA-256, and writes them under `~/.village/engine`. |
+| `node deploy/data.mjs fetch` | CI and local builds | Restores the pinned bundle to `~/.village/engine`, checking the index digest and each file’s length and SHA-256. A matching stamp, manifest digest and file sizes let later builds reuse the restore. Pass `--force` to download and verify again. |
+| `node deploy/data.mjs fetch /path/to/data.tar` | Bake machine | Restores a local copy of the bundle with the same pin, index and file checks. |
 
 `fetch` downloads from GitHub, or from `VOXELWRIGHT_DATA_URL` when it is set (HTTPS, or HTTP on a loopback address: `127.0.0.1`, `localhost` or `[::1]`). A mirror serves `<tag>/data.tar` under that address, the layout `pack-local` writes. If the pin and `data.json` disagree, CI fails before it builds the realm, so nothing deploys. Commit `data.json` with the pin.
 
@@ -159,7 +160,7 @@ Changing the workflow, the environment or the redirects changes what the public 
 [publish.sh](https://github.com/voxelwright/voxelwright/blob/main/deploy/publish.sh) then deploys `voxelwright`, then `zahynailo`, and checks each one:
 
 1. `wrangler deployments status` shows the new commit on 100% of traffic.
-2. Pages answer `200`: `/`, `/current.json` and the pinned manifest for voxelwright.world, and `/`, `/blog/` and `/blog/feed.xml` for zahynailo.dev.
+2. Pages answer `200`, retrying briefly while Cloudflare propagates the new Worker version: `/`, `/current.json` (matching the pinned release) and the pinned manifest for voxelwright.world, and `/`, `/blog/` and `/blog/feed.xml` for zahynailo.dev.
 3. For voxelwright.world, the manifest arrives with `Content-Encoding: br` and the same length as its `.br` file in `dist-world`.
 
 If a check fails after the upload, the script runs `wrangler rollback` for that Worker and stops. Each outcome, and the traffic status after an error, goes to the Actions summary. A failure on `zahynailo` leaves `voxelwright` on its new version. `publish.sh` reads `GITHUB_SHA` and `GITHUB_STEP_SUMMARY` and uses GNU `stat`, so it runs only in Actions.

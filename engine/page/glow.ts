@@ -52,22 +52,53 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 @fragment fn last(in: Out) -> @location(0) vec4f {
   let d = in.uv - 0.5;
   var c = textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb;
-  // High-speed driving lens energy (u.pad = 0..1): subtle peripheral radial streak + edge chroma while keeping center crisp.
-  if (u.pad > 0.001) {
-    let r2 = dot(d, d);
-    let edge = smoothstep(0.05, 0.42, r2) * u.pad;
-    let streak = d * edge * 0.036;
-    let s1 = textureSampleLevel(picture, smooth_, clamp(in.uv - streak * 0.5, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
-    let s2 = textureSampleLevel(picture, smooth_, clamp(in.uv - streak, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
-    let s3 = textureSampleLevel(picture, smooth_, clamp(in.uv - streak * 1.5, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
-    c = c * 0.46 + s1 * 0.27 + s2 * 0.17 + s3 * 0.10;
-    let ca = d * edge * 0.008;
-    c.r = mix(c.r, textureSampleLevel(picture, smooth_, clamp(in.uv + ca, vec2f(0.001), vec2f(0.999)), 0.0).r, 0.55);
-    c.b = mix(c.b, textureSampleLevel(picture, smooth_, clamp(in.uv - ca, vec2f(0.001), vec2f(0.999)), 0.0).b, 0.55);
+  // High-speed driving lens energy (u.pad = 0..1) and rotational/lateral drift blur (u.tint.a = -1..1).
+  // Radial speed streaks intensify along rushing roadside asphalt & side buildings while keeping the
+  // lower-center car silhouette and road vanishing point razor sharp; drift blur streaks background
+  // city buildings & streetlights tangentially across the frame.
+  let energy = u.pad;
+  let drift = u.tint.a;
+  let driftMag = abs(drift);
+  var blurVec = vec2f(0.0);
+  if (energy > 0.001 || driftMag > 0.001) {
+    let vp = vec2f(0.5, 0.44);
+    let rd = in.uv - vp;
+    let carD = (in.uv - vec2f(0.5, 0.72)) / vec2f(0.18, 0.20);
+    let carMask = smoothstep(0.52, 1.38, dot(carD, carD));
+    let sideRoad = smoothstep(0.45, 0.96, in.uv.y) * smoothstep(0.09, 0.28, abs(in.uv.x - 0.5));
+    let radAmt = clamp((smoothstep(0.022, 0.34, dot(rd, rd)) + sideRoad * 0.72) * carMask * energy, 0.0, 1.35);
+    let radVec = rd * radAmt * 0.052;
+    let driftSign = select(-1.0, 1.0, drift >= 0.0);
+    let driftBg = mix(0.65, 1.22, smoothstep(0.84, 0.18, in.uv.y)) * carMask * driftMag;
+    let driftDir = vec2f(driftSign, rd.x * 0.14 * driftSign);
+    let driftVec = driftDir * driftBg * 0.030;
+    blurVec = radVec + driftVec;
+    if (dot(blurVec, blurVec) > 1e-7) {
+      var acc = c * 0.22;
+      var wSum = 0.22;
+      for (var k = 1; k <= 8; k++) {
+        let t = f32(k) / 8.0;
+        let w = (1.0 - t * 0.65) * 0.20;
+        let off = blurVec * (t * 1.25 - 0.14);
+        let suv = clamp(in.uv - off, vec2f(0.001), vec2f(0.999));
+        acc += textureSampleLevel(picture, smooth_, suv, 0.0).rgb * w;
+        wSum += w;
+      }
+      c = acc / wSum;
+      let ca = rd * radAmt * (1.0 - driftMag * 0.85) * 0.0022;
+      c.r = mix(c.r, textureSampleLevel(picture, smooth_, clamp(in.uv + ca, vec2f(0.001), vec2f(0.999)), 0.0).r, 0.35);
+      c.b = mix(c.b, textureSampleLevel(picture, smooth_, clamp(in.uv - ca, vec2f(0.001), vec2f(0.999)), 0.0).b, 0.35);
+    }
   }
-  c += textureSampleLevel(spread, smooth_, in.uv, 0.0).rgb * u.strength;
-  // The corners of the picture a little darker, as a lens leaves them (tightening subtly at high speed).
-  c *= 1.0 - dot(d, d) * (0.42 + u.pad * 0.16);
+  var bloom = textureSampleLevel(spread, smooth_, in.uv, 0.0).rgb;
+  if (driftMag > 0.04 || energy > 0.15) {
+    let b1 = textureSampleLevel(spread, smooth_, clamp(in.uv - blurVec * 0.55, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+    let b2 = textureSampleLevel(spread, smooth_, clamp(in.uv - blurVec * 1.10, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+    bloom = bloom * 0.50 + b1 * 0.32 + b2 * 0.18;
+  }
+  c += bloom * u.strength;
+  // The corners of the picture a little darker, as a lens leaves them (tightening subtly at high speed/drift).
+  c *= 1.0 - dot(d, d) * (0.42 + max(energy, driftMag * 0.85) * 0.18);
   // The grade, which follows the hour (u.step here is how much colour, how much contrast). With the sun low and at
   // night, more of both than the tone curve leaves: that is what made the sunset. By day, a little less colour and
   // nearly no more contrast: with the evening's grade a street by day was called bright and toy-coloured by every
@@ -112,8 +143,8 @@ fn chance(c: vec2i) -> f32 {
 }
 `
 
-/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for; `tint` is what the finished picture is multiplied by; `drive` (0 to 1) adds high-speed radial lens energy while driving. Returns the pass to call each frame. */
-export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number], drive?: number) => void> {
+/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for; `tint` is what the finished picture is multiplied by; `drive` (0 to 1) adds high-speed radial lens streaks while `drift` (-1 to 1) adds tangential drift motion blur. Returns the pass to call each frame. */
+export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number], drive?: number, drift?: number) => void> {
   const { device } = gpu
   const module = await shader(device, 'glow', CODE), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
@@ -168,10 +199,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     p.draw(3)
     p.end()
   }
-  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1], drive = 0) => {
+  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1], drive = 0, drift = 0) => {
     const k = keep(from)
     device.queue.writeBuffer(k.blocks[0], 0, new Float32Array([1 / from.size[0], 1 / from.size[1], night, 0]))
-    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, Math.max(0, Math.min(1, drive)), tint[0], tint[1], tint[2], 1]))
+    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, Math.max(0, Math.min(1, drive)), tint[0], tint[1], tint[2], Math.max(-1, Math.min(1, drift))]))
     pass(encoder, bright, k.binds[0], k.views[0])
     // Twice over: the looks are close together, and once is too narrow a glow.
     for (let twice = 0; twice < 2; twice++) {

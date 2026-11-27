@@ -11,9 +11,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
 from compact_store import TileStore, link_libraries, read as read_base
+import evidence_tile
 
 CREDITS = [
     "U.S. Geological Survey 3DEP",
@@ -80,10 +82,18 @@ def cut(source, far, record):
     return listing
 
 
+def listed_tiles(listing, field):
+    keys = listing.get(field, [])
+    if not isinstance(keys, list) or any(not isinstance(k, str) or k not in listing["tiles"] for k in keys):
+        raise ValueError(f"{field} must name tiles in this far listing")
+    return set(keys)
+
+
 def restock(out, life=None, cars=None, landing=None, base=None, far=None):
     """Stage a pinned release again with new street life, vehicles, far tiles or landing cut; every other object stays
     as it is. `far` is a far.json whose tiles replace the base's tiles of the same keys (each checked as `generate`
-    checks them), and whose `wedge` and `light`, where it has them, replace the base's.
+    checks them), along with the ground ownership of those keys. Its `wedge` and `light`, where supplied,
+    replace the base's.
 
     The candidate's tiles, names, graphs and far bands are the base release's own (OUT's pin unless --base names
     another), so its panel scores carry over unchanged; it is staged beside it (APFS clones, the old release untouched)
@@ -97,9 +107,9 @@ def restock(out, life=None, cars=None, landing=None, base=None, far=None):
     files = {}
 
     def record(path, name):
-        files[name] = path
         with path.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        files[name] = path, digest
         return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
 
     replaced = [kind for kind, source in (("life", life), ("cars", cars)) if source]
@@ -111,6 +121,21 @@ def restock(out, life=None, cars=None, landing=None, base=None, far=None):
         mine = inventory.get("far")
         if not mine or any(listing.get(k) != mine[k] for k in ("version", "size", "bands", "lods")):
             raise ValueError("far tiles need a release with the same far model")
+        incoming = {field: listed_tiles(listing, field) for field in ("ground", "landmarks")}
+        if incoming["ground"] & incoming["landmarks"]:
+            raise ValueError("a landmark-only tile cannot certify ground coverage")
+        changed = {key for key, bands in listing["tiles"].items() if bands != mine["tiles"].get(key)}
+        for field, opposite in (("ground", "landmarks"), ("landmarks", "ground")):
+            known = listed_tiles(mine, field)
+            # An older producer cannot attest to coverage. Identical band bytes preserve
+            # existing knowledge unless the incoming producer explicitly says otherwise.
+            known.difference_update(listing["tiles"] if field in listing else changed)
+            known.difference_update(incoming[opposite])
+            known.update(incoming[field])
+            if known or field in listing:
+                mine[field] = sorted(known)
+            else:
+                mine.pop(field, None)
         for key, bands in listing["tiles"].items():
             if key not in mine["tiles"] or len(bands) != 3:
                 raise ValueError(f"far tile {key} is not the base's")
@@ -124,6 +149,13 @@ def restock(out, life=None, cars=None, landing=None, base=None, far=None):
         for key in ("wedge", "light"):
             if key in listing:
                 mine[key] = listing[key]
+        if listing.get("credit"):
+            # A partial restock can leave both generations of survey data in use.
+            previous = mine.get("credit", "")
+            sources = [source for line in (previous, listing["credit"]) for source in line.split("; ") if source]
+            mine["credit"] = "; ".join(dict.fromkeys(sources))
+            inventory["credits"] = [c for c in inventory.get("credits", []) if c != previous and c != mine["credit"]]
+            inventory["credits"].append(mine["credit"])
     if landing:
         if "far" not in inventory:
             raise ValueError("a landing cut needs a release with a far model")
@@ -135,25 +167,37 @@ def restock(out, life=None, cars=None, landing=None, base=None, far=None):
     dest = out / "releases" / digest
     if dest.exists():
         raise ValueError(f"{dest} already exists")
-    tmp = out / "releases" / f".restock-{digest}"
-    shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir()
-    for entry in old.iterdir():
-        if entry.name in (*replaced, "manifest.json") or entry.name.startswith(("panel-", ".")):
-            continue
-        subprocess.run(["/bin/cp", "-cR", entry, tmp / entry.name], check=True)
-    if landing:
-        shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
-    for path in gone:
-        (tmp / path).unlink(missing_ok=True)
-    if (old / ".bay-store").is_symlink():
-        (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
-    for name, source in files.items():
-        (tmp / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp / name).unlink(missing_ok=True)
-        shutil.copyfile(source, tmp / name)
-    (tmp / "manifest.json").write_bytes(manifest)
-    tmp.rename(dest)
+    with TemporaryDirectory(prefix=".restock-", dir=dest.parent) as work:
+        tmp = Path(work) / "release"
+        tmp.mkdir()
+        for entry in old.iterdir():
+            if entry.name in (*replaced, "manifest.json") or entry.name.startswith(("panel-", ".")):
+                continue
+            target = tmp / entry.name
+            if entry.is_symlink() and not (entry.name == "far" and (far or landing)):
+                target.symlink_to(os.readlink(entry))
+            elif sys.platform == "darwin":
+                subprocess.run(["/bin/cp", "-cRL", entry, target], check=True)
+            elif entry.is_dir():
+                shutil.copytree(entry, target)
+            else:
+                shutil.copy2(entry, target)
+        if landing:
+            shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
+        for path in gone:
+            (tmp / path).unlink(missing_ok=True)
+        if (old / ".bay-store").is_symlink():
+            (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
+        for name, (source, expected) in files.items():
+            target = tmp / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.unlink(missing_ok=True)
+            shutil.copyfile(source, target)
+            with target.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                    raise ValueError(f"{name} changed while restocking")
+        (tmp / "manifest.json").write_bytes(manifest)
+        tmp.rename(dest)
     print(digest, "staged with", len(files), "new objects; everything else as", release)
     return digest
 
@@ -170,12 +214,17 @@ def generate(
     cars=None,
     paint=None,
     compact_store=None,
+    facades=None,
 ):
     packs = root / "packs"
     index = json.loads((packs / "tiles/index.json").read_text())
     state = json.loads((root / "state.json").read_text())
     verified = {k: v for task in state["done"].values() for k, v in task.items()}
-    credits = list(CREDITS)
+    frame = "10n4250"
+    reviews, credit = evidence_tile.load_reviewed(
+        facades or Path(evidence_tile.__file__).with_name("evidence-reviewed-sf.json"), frame
+    )
+    credits = list(dict.fromkeys([*CREDITS, credit]))
     if any(path.endswith(".fixtures.json.gz") for path in verified):
         credits.append("Street lamps and trolley wires: San Francisco Public Works")
     files = {}
@@ -204,6 +253,14 @@ def generate(
 
         wall_faces = accepted_faces(paint)
         structures = prototype(root)
+
+    def finish_tile(data, reviewed):
+        if wall_faces is not None:
+            data = apply(data, wall_faces, structures)
+        if reviewed:
+            data = evidence_tile.apply(data, reviewed, reviewed=True)
+        return data
+
     levels = []
     with (
         closing(TileStore(compact_store)) if compact_store else nullcontext(None)
@@ -216,14 +273,14 @@ def generate(
                 if key in tiles:
                     raise ValueError("duplicate tile")
                 source = packs / path
+                reviewed = reviews.get((x, z)) if level == 0 else None
                 if store is not None:
                     data = read_base(source)
                     if hashlib.sha256(data).hexdigest() != verified.get(
                         str(source.relative_to(root))
                     ):
                         raise ValueError(f"tile changed since checkpoint: {source}")
-                    if wall_faces is not None:
-                        data = apply(data, wall_faces, structures)
+                    data = finish_tile(data, reviewed)
                     if shutil.disk_usage(out).free < 17 * 2**30:
                         raise ValueError(
                             "disk reserve reached before compact release tile"
@@ -233,10 +290,13 @@ def generate(
                     )
                 else:
                     tiles[key] = record(source, path)
-                    if wall_faces is not None:
-                        if shutil.disk_usage(out.parent).free < 17 * 2**30:
+                    if wall_faces is not None or reviewed:
+                        if wall_faces is not None and shutil.disk_usage(out.parent).free < 17 * 2**30:
                             raise ValueError("disk reserve reached; staging can resume")
-                        blob = apply(read_base(source), wall_faces, structures)
+                        data = read_base(source)
+                        if hashlib.sha256(data).hexdigest() != tiles[key]["sha256"]:
+                            raise ValueError(f"tile changed since checkpoint: {source}")
+                        blob = finish_tile(data, reviewed)
                         sha = hashlib.sha256(blob).hexdigest()
                         if sha != tiles[key]["sha256"]:
                             cache = out / ".paint-objects" / sha
@@ -263,7 +323,7 @@ def generate(
     }
     inventory = {
         "version": 1,
-        "frame": "10n4250",
+        "frame": frame,
         "levels": levels,
         "names": names,
         "credits": credits,
@@ -292,6 +352,8 @@ def generate(
         far = json.loads(far_index.read_text())
         if far.get("version") != 1 or far["size"] != 5000 or far["bands"] != [4, 1, 0]:
             raise ValueError("unsupported far inventory")
+        if listed_tiles(far, "ground") & listed_tiles(far, "landmarks"):
+            raise ValueError("a landmark-only tile cannot certify ground coverage")
         for key, bands in far["tiles"].items():
             if (
                 not re.fullmatch(r"-?(?:0|[1-9][0-9]*)_-?(?:0|[1-9][0-9]*)", key)
@@ -454,6 +516,7 @@ if __name__ == "__main__":
     cli.add_argument("--life", type=Path, help="life.py directory with its index")
     cli.add_argument("--cars", type=Path, help="cars.mjs directory with its index")
     cli.add_argument("--paint", type=Path, help="accepted city-paint batch receipt")
+    cli.add_argument("--facades", type=Path, help="reviewed residential wall records (default: the SF set)")
     cli.add_argument(
         "--restock",
         action="store_true",
@@ -463,6 +526,8 @@ if __name__ == "__main__":
     cli.add_argument("--base", help="with --restock, the staged release to start from instead of OUT's pin")
     args = cli.parse_args()
     if args.restock:
+        if args.facades:
+            cli.error("--facades needs a fresh tile stage")
         restock(args.out, args.life, args.cars, args.landing, args.base, args.far)
         sys.exit()
     generate(
@@ -477,4 +542,5 @@ if __name__ == "__main__":
         args.cars,
         args.paint,
         args.compact_store,
+        args.facades,
     )

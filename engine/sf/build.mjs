@@ -15,7 +15,7 @@
 // Modules are written as player/build.mjs writes them: Node's own stripper over each module the page reaches, with
 // `.ts` addresses written `.js`, nothing bundled. The tiles, the car and this folder never go in git.
 import { stripTypeScriptTypes } from 'node:module'
-import { constants as fsConstants, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { constants as fsConstants, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { availableParallelism, homedir } from 'node:os'
 import { Worker } from 'node:worker_threads'
@@ -128,9 +128,6 @@ if (!page.includes('src="/page/main.ts"')) fail('page/index.html no longer loads
 if (realm.release !== 'current.json') fail('sf/realm.json must name its release pointer: "release": "current.json"')
 const cloneFile = (from, to) => {
   mkdirSync(dirname(to), { recursive: true })
-  if (process.platform === 'linux') {
-    try { linkSync(from, to); return } catch { /* cross-device or existing */ }
-  }
   try { copyFileSync(from, to, fsConstants.COPYFILE_FICLONE) } catch { copyFileSync(from, to) }
 }
 const cloneTree = (from, to) => {

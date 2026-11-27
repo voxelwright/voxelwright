@@ -30,7 +30,131 @@ TERRAIN = 'https://tiles.mapterhorn.com'
 SEA = 1.0
 NONE, BED = -32768, -30
 ROAD, PAVEMENT, GRASS, EARTH, SAND, WATER, YARD, ROCK, CANOPY, BUILT = 0, 1, 2, 3, 4, 5, 6, 7, 8, 16
-PLASTER, BRICK, CONCRETE = 9, 8, 7
+PLASTER, WOOD, BRICK, CONCRETE, GLASS, STEEL = 9, 10, 8, 7, 11, 12
+
+# Common CSS/OSM colour names -> sRGB 0..255 for semantic building/roof tagging (#60).
+NAMED_RGB = {
+    'white': (236, 234, 228), 'ivory': (240, 235, 220), 'cream': (236, 226, 200), 'beige': (218, 204, 176),
+    'tan': (204, 178, 142), 'sand': (216, 198, 160), 'sandstone': (206, 184, 152), 'limestone': (214, 206, 190),
+    'yellow': (224, 198, 112), 'ochre': (198, 156, 88), 'gold': (212, 176, 84), 'orange': (208, 132, 78),
+    'terracotta': (184, 102, 74), 'red': (168, 72, 62), 'maroon': (122, 54, 54), 'brown': (138, 102, 76),
+    'pink': (222, 178, 176), 'salmon': (216, 148, 128), 'green': (112, 148, 106), 'olive': (132, 142, 96),
+    'sage': (156, 174, 152), 'blue': (118, 150, 182), 'navy': (54, 72, 102), 'teal': (94, 144, 148),
+    'purple': (136, 114, 148), 'lavender': (176, 162, 192), 'grey': (158, 158, 156), 'gray': (158, 158, 156),
+    'lightgrey': (198, 198, 194), 'lightgray': (198, 198, 194), 'silver': (192, 196, 200),
+    'darkgrey': (104, 104, 106), 'darkgray': (104, 104, 106), 'charcoal': (74, 76, 82), 'black': (44, 46, 50),
+    'copper': (164, 112, 82), 'bronze': (146, 108, 76),
+}
+
+_EARTH_PALETTE = None
+
+
+def _palette_rgb():
+    """Engine 256-colour palette in sRGB 0..1 (matches page/march.ts & bake.py)."""
+    global _EARTH_PALETTE
+    if _EARTH_PALETTE is not None:
+        return _EARTH_PALETTE
+    out = np.zeros((256, 3), np.float32)
+    for i in range(1, 16):
+        v = 0.86 - (i - 1) / 14 * 0.8
+        out[i] = (v, v, v * 0.99)
+    tones = [(0.14, 0.97), (0.26, 0.94), (0.4, 0.88), (0.55, 0.8), (0.78, 0.86), (0.7, 0.55), (0.6, 0.32), (0.16, 0.8), (0.26, 0.62), (0.3, 0.42)]
+    holds = [0.95, 0.95, 0.55, 0.55, 0.7, 0.5]
+    painted = {0: (0.14, 0.93), 1: (0.26, 0.88), 2: (0.4, 0.8), 7: (0.16, 0.76)}
+    for hue in range(24):
+        for tone in range(10):
+            h = hue / 4
+            at = int(h)
+            hold = holds[at] + (holds[(at + 1) % 6] - holds[at]) * (h - at)
+            s, bright = (painted[tone][0] * hold, painted[tone][1]) if tone in painted else tones[tone]
+            v = bright * 0.84
+            f = lambda n: v - v * s * max(0, min((n + h) % 6, 4 - (n + h) % 6, 1))
+            out[16 + hue * 10 + tone] = (f(5), f(3), f(1))
+    _EARTH_PALETTE = out
+    return out
+
+
+def parse_color_index(raw):
+    """Map an Overture/OSM hex or named colour string to the nearest engine palette index (1..255), or None."""
+    if not raw or not isinstance(raw, str):
+        return None
+    s = raw.strip().lower().replace('_', '').replace('-', '').replace(' ', '')
+    rgb = NAMED_RGB.get(s)
+    if rgb is None and s.startswith('#'):
+        hx = s[1:]
+        if len(hx) == 3 and all(c in '0123456789abcdef' for c in hx):
+            rgb = tuple(int(c * 2, 16) for c in hx)
+        elif len(hx) == 6 and all(c in '0123456789abcdef' for c in hx):
+            rgb = (int(hx[0:2], 16), int(hx[2:4], 16), int(hx[4:6], 16))
+    if rgb is None:
+        return None
+    target = np.array(rgb, np.float32) / 255.0
+    table = _palette_rgb()[1:]
+    # Slight chroma weight so warm creams/brick reds do not snap prematurely to pure neutral grey.
+    d = ((table - target) ** 2).sum(1)
+    return int(np.argmin(d)) + 1
+
+
+def parse_material(raw, props=None, home=False, tall=8.0):
+    """Map an Overture/OSM facade_material string (or building typology) to an engine material constant."""
+    m = (raw or '').strip().lower()
+    if any(k in m for k in ('glass', 'mirror', 'curtain')):
+        return GLASS
+    if any(k in m for k in ('brick', 'clinker', 'terracotta', 'adobe')):
+        return BRICK
+    if any(k in m for k in ('concrete', 'cement', 'stone', 'limestone', 'granite', 'marble', 'sandstone', 'block')):
+        return CONCRETE
+    if any(k in m for k in ('wood', 'timber', 'log', 'shingle')):
+        return WOOD
+    if any(k in m for k in ('metal', 'steel', 'copper', 'bronze', 'zinc', 'alum', 'tin')):
+        return STEEL
+    if any(k in m for k in ('plaster', 'stucco', 'render', 'vinyl')):
+        return PLASTER
+    if props:
+        cls = (props.get('class') or '').lower()
+        sub = (props.get('subtype') or '').lower()
+        if cls in ('greenhouse', 'conservatory'):
+            return GLASS
+        if cls in ('church', 'cathedral', 'chapel', 'civic', 'public', 'museum', 'monument', 'castle', 'fort'):
+            return CONCRETE
+        if cls in ('industrial', 'warehouse', 'factory', 'fire_station'):
+            return BRICK
+        if sub == 'commercial' and tall >= 36:
+            return GLASS
+    return None
+
+
+def sculpt_roof(shape_name, where, base, tall, roof_h=None):
+    """Sculpt a 2D height grid (cells) for gabled, hipped, pyramidal, domed or skillion roofs instead of flat boxes."""
+    h, w = where.shape
+    ys, xs = np.nonzero(where)
+    if ys.size < 4:
+        return np.full(where.shape, base + round(tall * 10), np.int32)
+    shape = (shape_name or '').strip().lower()
+    rh = float(roof_h) if roof_h and roof_h > 0.5 else min(max(2.2, tall * 0.28), 7.5)
+    eave_m = max(2.5, tall - rh)
+    y0, y1 = float(ys.min()), float(ys.max())
+    x0, x1 = float(xs.min()), float(xs.max())
+    cy, cx = (y0 + y1) * 0.5, (x0 + x1) * 0.5
+    ry, rx = max(0.5, (y1 - y0) * 0.5), max(0.5, (x1 - x0) * 0.5)
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    ny = np.abs(yy - cy) / ry
+    nx = np.abs(xx - cx) / rx
+    if shape in ('dome', 'onion', 'round'):
+        r2 = np.clip(nx * nx + ny * ny, 0.0, 1.0)
+        elev = eave_m + rh * np.sqrt(1.0 - r2)
+    elif shape in ('pyramidal', 'hipped'):
+        elev = eave_m + rh * np.clip(1.0 - np.maximum(nx, ny), 0.0, 1.0)
+    elif shape == 'gabled':
+        # Ridge runs along the longer horizontal axis.
+        across = ny if rx >= ry else nx
+        elev = eave_m + rh * np.clip(1.0 - across, 0.0, 1.0)
+    elif shape == 'skillion':
+        across = ((yy - y0) / max(1.0, y1 - y0)) if rx >= ry else ((xx - x0) / max(1.0, x1 - x0))
+        elev = eave_m + rh * np.clip(across, 0.0, 1.0)
+    else:
+        elev = np.full((h, w), tall, np.float32)
+    return np.rint(base + elev * 10.0).astype(np.int32)
 # As tiles.py: a tile's width, the ground's and the top's sampling, the top's margin, all in cells; then the step
 # a coarse level is drawn at before it is brought down (a building smaller than a sample must still count).
 LEVELS = [(2500, 10, 5, 80, 5), (10000, 20, 20, 80, 10), (40000, 160, 160, 320, 40)]
@@ -85,6 +209,11 @@ def kept(name, make, remember=True):
 readers = {}
 
 
+def feature_cache(theme):
+    # Building records decoded before version 3 discarded roof and facade tags.
+    return f'{RELEASE}/{3 if theme == "buildings" else 2}'
+
+
 def features(theme, z, x, y):
     """One map tile of Overture: {layer: [(type, rings in longitude and latitude, properties)]}."""
     def make():
@@ -107,12 +236,21 @@ def features(theme, z, x, y):
                 g, kind, c = f['geometry'], f['geometry']['type'], f['geometry']['coordinates']
                 parts = [[c]] if kind == 'Point' else [c] if kind in ('LineString', 'Polygon') and kind == 'Polygon' else [[c]] if kind == 'LineString' else [[p] for p in c] if kind in ('MultiPoint', 'MultiLineString') else c
                 p = f['properties']
-                keep = {k: p[k] for k in ('id', 'height', 'num_floors', 'class', 'subtype', 'is_underground', 'is_salt', '@name', 'level', 'road_surface', 'roof_shape', 'has_parts', 'building_id', 'min_height') if k in p}
+                keep = {
+                    k: p[k]
+                    for k in (
+                        'id', 'height', 'num_floors', 'class', 'subtype', 'is_underground', 'is_salt',
+                        '@name', 'level', 'road_surface', 'roof_shape', 'roof_color', 'roof_material',
+                        'roof_height', 'roof_direction', 'facade_color', 'facade_material',
+                        'has_parts', 'building_id', 'min_height',
+                    )
+                    if k in p
+                }
                 for part in parts:
                     rows.append((kind.replace('Multi', ''), [ll(r) for r in part], keep))
             out[name] = rows
         return out
-    return kept(f'{RELEASE}/2/{theme}/{z}/{x}_{y}', make)
+    return kept(f'{feature_cache(theme)}/{theme}/{z}/{x}_{y}', make)
 
 
 decoded = {}
@@ -198,9 +336,36 @@ def grow(mask, times=1):
     return mask
 
 
-def style(seed, home, tall):
-    """A building's wall, trim and the word its front is made by (as bake.py: nothing in the data says a wall's colour)."""
-    if home or tall < 24:
+def style(seed, home, tall, props=None):
+    """A building's wall, trim and style word: honours Overture/OSM facade_material & facade_color first, then
+    building typology, falling back to a muted regional palette when source attributes are absent (#60)."""
+    props = props or {}
+    mat = parse_material(props.get('facade_material'), props, home, tall)
+    col = parse_color_index(props.get('facade_color'))
+    if mat is not None:
+        if mat == GLASS:
+            wall = GLASS | ((col or (16 + 14 * 10 + 7)) << 8)
+            trim = STEEL | (2 << 8)
+        elif mat == BRICK:
+            wall = BRICK | ((col or 0) << 8)
+            trim = CONCRETE | (2 << 8)
+        elif mat == STEEL:
+            wall = STEEL | ((col or (2 + (seed >> 12) % 6)) << 8)
+            trim = STEEL | (1 << 8)
+        elif mat == WOOD:
+            wall = WOOD | ((col or (16 + 2 * 10 + 8)) << 8)
+            trim = PLASTER | (1 << 8)
+        elif mat == CONCRETE:
+            wall = CONCRETE | ((col or (2 + (seed >> 12) % 4)) << 8)
+            trim = CONCRETE | (1 << 8)
+        else:
+            wall = PLASTER | ((col or (1 + (seed >> 12) % 3)) << 8)
+            trim = PLASTER | (1 << 8)
+    elif col is not None:
+        base_mat = PLASTER if (home or tall < 24) else CONCRETE
+        wall = base_mat | (col << 8)
+        trim = PLASTER | (1 << 8)
+    elif home or tall < 24:
         hue = [3, 3, 4, 2, 4, 3, 16, 14, 9, 22, 1, 5][seed % 12]
         tone = [0, 0, 7, 0, 1, 7, 0, 7, 1][(seed >> 8) % 9]
         wall = PLASTER | (16 + hue * 10 + tone) << 8 if (seed >> 4) % 5 else PLASTER | (1 + (seed >> 12) % 3) << 8
@@ -235,7 +400,7 @@ def draw(frame, x0, z0, n, step, zoom, fine):
         ys = range(int((1 - math.asinh(math.tan(math.radians(north))) / math.pi) / 2 * m), int((1 - math.asinh(math.tan(math.radians(south))) / math.pi) / 2 * m) + 1)
         for ty in ys:
             for tx in xs:
-                rows = kept(f'{RELEASE}/2/{frame.name}/{theme}-{layer}/{z}/{tx}_{ty}', lambda: [(k, [frame.cells(r) for r in rings], p) for k, rings, p in features(theme, z, tx, ty).get(layer, [])])
+                rows = kept(f'{feature_cache(theme)}/{frame.name}/{theme}-{layer}/{z}/{tx}_{ty}', lambda: [(k, [frame.cells(r) for r in rings], p) for k, rings, p in features(theme, z, tx, ty).get(layer, [])])
                 for kind, rings, p in rows:
                     lo, hi = np.min([r.min(0) for r in rings], 0), np.max([r.max(0) for r in rings], 0)
                     if hi[0] >= x0 - 200 and hi[1] >= z0 - 200 and lo[0] < x0 + wide + 200 and lo[1] < z0 + wide + 200:
@@ -321,7 +486,7 @@ def draw(frame, x0, z0, n, step, zoom, fine):
     tint = np.full((n, n), 6, 'u1')
     mass = np.zeros((n, n), np.int32)
     rows, verts = [], []
-    open_air = ~grow(built > 0, 3) if fine else None
+    open_air = ~grow(built > 0, 1) if fine else None
     street = roads > 0
     for i, (rings, p, seed) in enumerate(buildings, 1):
         lo, hi = rings[0].min(0), rings[0].max(0)
@@ -338,9 +503,22 @@ def draw(frame, x0, z0, n, step, zoom, fine):
         if not where.any():
             continue
         base = int(under[a[1]:a[3], a[0]:a[2]][where].min())
-        top[a[1]:a[3], a[0]:a[2]][where] = base + round(tall * 10)
-        tint[a[1]:a[3], a[0]:a[2]][where] = 4 + (seed >> 9) % 6
-        wall, trim, word = style(seed, home, tall)
+        roof_shape = p.get('roof_shape')
+        if roof_shape and roof_shape.lower() in ('gabled', 'hipped', 'pyramidal', 'dome', 'onion', 'round', 'skillion'):
+            sculpted = sculpt_roof(roof_shape, where, base, tall, p.get('roof_height'))
+            top[a[1]:a[3], a[0]:a[2]][where] = sculpted[where]
+        else:
+            top[a[1]:a[3], a[0]:a[2]][where] = base + round(tall * 10)
+        roof_mat = (p.get('roof_material') or '').lower()
+        roof_col = parse_color_index(p.get('roof_color'))
+        if any(k in roof_mat for k in ('grass', 'green', 'plant', 'living')):
+            roof_tint = 16 + 8 * 10 + 5  # living green roof -> GRASS in bay.rs
+        elif roof_col is not None:
+            roof_tint = roof_col
+        else:
+            roof_tint = 4 + (seed >> 9) % 6
+        tint[a[1]:a[3], a[0]:a[2]][where] = roof_tint
+        wall, trim, word = style(seed, home, tall, p)
         mass[a[1]:a[3], a[0]:a[2]][where] = wall | 0x10000
         if fine:
             first = len(verts)

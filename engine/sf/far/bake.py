@@ -13,13 +13,14 @@ grid the square touches (sf/far/pack.mjs packs them into the release's far tiles
            far layer, for a 25 degree lens over 1 to 3 km; at the 70 degrees a visitor roams with a pixel is a metre and
            more past 600 m, and downtown 1 m is 3.8 MiB a square kilometre at Brotli 5 against 9.6
   ground   the bare ground, cells of 2 m, heights in steps of 1 m
+  ground-inland   mapped pond surfaces and their islands that would otherwise be culled as open sea
 
 Incremental: a square whose archive has not changed since it was baked (its size and time, and this bake's VERSION)
 is left alone, so the far model grows as the run finishes squares.
 
     ~/.village/engine/landing/ina/venv/bin/python engine/sf/far/bake.py [square ...] [--force] [--cell 1] [--out dir]
 """
-import io, json, math, os, sys, time, zipfile, zlib
+import gzip, hashlib, io, json, math, os, sys, time, zipfile, zlib
 import numpy as np
 from scipy import ndimage
 
@@ -27,6 +28,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'landing', 'ina'))
 import looks  # noqa: E402  wall colours and windows by rule (#423)
 from matte import LEAF_SIDE, LEAF_TOP, crown_rule, faces, filled, rgb24  # noqa: E402  columns to faces, and trees as crowns (#423)
+
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'bay'))
+from mapped_water import WATER_RGB, for_square as square_water, level_of, levelled, mask as water_mask  # noqa: E402
 
 # Where the archives are: the city's run (bay/full_run.py) writes them square by square; the pilot's are kept apart.
 # A square in both is the run's.
@@ -38,7 +42,7 @@ def archive(square):
 OUT = os.path.expanduser('~/.village/engine/sf/far/squares')
 E0, N0, SEA = 500_000.0, 4_250_000.0, 1.0
 TILE = 500.0  # metres: the far model's tiles (pack.mjs SIZE)
-VERSION = 3  # 3: trees are crowns on trunks (matte.py `crown_rule`)
+VERSION = 4  # Merge rectangles within each block and survey square, keeping neighbour heights at the seam.
 NAMES = os.path.join(HERE, '..', '..', 'landing', 'ina', 'names.json')
 
 
@@ -74,6 +78,22 @@ def bake(square, force=False, cell=0.5, out=OUT):
     src = archive(square)
     st = os.stat(src)
     sig = f'{VERSION}:{cell}:{st.st_size}:{int(st.st_mtime)}'
+    sidecar = os.path.splitext(src)[0] + '.detail.json.gz'
+    observed = {}
+    if os.path.exists(sidecar):
+        with gzip.open(sidecar, 'rt') as stream:
+            observed = json.load(stream)
+        if observed.get('square') != square:
+            raise ValueError(f'incorrect water observations for {square}')
+    ponds = square_water(square, observed)
+    if ponds:
+        sig += ':water2:' + hashlib.sha256(json.dumps(ponds, separators=(',', ':')).encode()).hexdigest()
+        levels = [level_of(r) for r in ponds]
+        if any(level is not None for level in levels):
+            sig += ':levels:' + hashlib.sha256(json.dumps(levels).encode()).hexdigest()
+    # Only this square contains the Pyramid's surveyed footprint.
+    if square == '551.7_4182.5':
+        sig += ':pyramid-finish1'
     dest = f'{out}/{square}'
     if not force and os.path.exists(f'{dest}/index.json') and json.load(open(f'{dest}/index.json')).get('inputs') == sig:
         return None
@@ -154,6 +174,7 @@ def bake(square, force=False, cell=0.5, out=OUT):
     for b in table:
         city[b['id']] = zlib.crc32(b['city'].encode()) & 0xffffff or 1
     bid = city[ids]
+    pyramid = next((i for i, name in names.items() if name == 'Transamerica Pyramid'), None)
     # ── Which cells are this square's: its own kilometre, not the margin.
     ee = west + (np.arange(cols) + 0.5) * cell
     nn = north - (np.arange(rows) + 0.5) * cell
@@ -185,10 +206,11 @@ def bake(square, force=False, cell=0.5, out=OUT):
                 mine = np.zeros((rb - ra, cb - ca), bool)
                 mine[r0 - ra:r1 - ra, c0 - ca:c1 - ca] = True
                 mine &= ours[sl]
-                f = faces(h[sl], inside[sl], roof[sl], walls[sl], style[sl], bid[sl], zeros[sl] if step == 1 else np.zeros(h[sl].shape, np.int64), floor[sl], hq)
-                # Faces that begin in the margin are the neighbouring block's (matte.py `write`).
-                fx, fz = (f[:, 0] & 0x7ff).astype(np.int64), ((f[:, 0] >> 11) & 0x7ff).astype(np.int64)
-                f = f[mine[np.clip(fz, 0, rb - ra - 1), np.clip(fx, 0, cb - ca - 1)]]
+                f = faces(h[sl], inside[sl], roof[sl], walls[sl], style[sl], bid[sl], zeros[sl] if step == 1 else np.zeros(h[sl].shape, np.int64), floor[sl], hq, owned=mine)
+                if pyramid is not None and layer == 'far':
+                    fx = (f[:, 0] & 0x7ff).astype(np.int64)
+                    fz = ((f[:, 0] >> 11) & 0x7ff).astype(np.int64)
+                    looks.mark_pyramid(f, ids[sl][fz, fx] == pyramid)
                 if not len(f):
                     continue
                 name = f'{layer}-{x}_{z}.bin'
@@ -212,9 +234,26 @@ def bake(square, force=False, cell=0.5, out=OUT):
     sub = (slice(step // 2, None, step), slice(step // 2, None, step))
     gh = np.maximum(np.round((ground[sub] - SEA) * 10 / hq).astype(np.int64), 0)
     gc = np.where(leafy[sub] | crown[sub] | ((over[sub] > 0.5) & (ids[sub] == 0)), rgb24(np.full(gh.shape, 92), np.full(gh.shape, 104), np.full(gh.shape, 80)), rgb24(np.full(gh.shape, 104), np.full(gh.shape, 104), np.full(gh.shape, 106)))
-    write('ground', gh, ~water[sub], own[sub], gc, gc, np.zeros(gh.shape, np.int64), np.zeros(gh.shape, np.int64), gh, hq, step)
+    bare = ~water[sub]
+    ground_ids = np.zeros(gh.shape, np.int64)
+    if ponds:
+        xs, zs = (ee[sub[1]] - E0) * 10, (N0 - nn[sub[0]]) * 10
+        wet = water_mask(ponds, xs, zs)
+        gc[wet] = WATER_RGB
+        levelled(ponds, xs, zs, gh, lambda m: max(round((m - SEA) * 10 / hq), 0))
+        # The Palace lagoon lies near sea level. Its mapped islands keep their land colour even
+        # when their quantized height is the same as the lake and open Bay.
+        low = (gh * hq <= 10) | ~bare
+        if low.any():
+            mapped = low & water_mask(ponds, xs, zs, include_islands=True)
+            if mapped.any():
+                write('ground-inland', gh, mapped, own[sub], gc, gc, ground_ids, ground_ids, gh, hq, step)
+                bare = bare & ~mapped
+    write('ground', gh, bare, own[sub], gc, gc, ground_ids, ground_ids, gh, hq, step)
     index = {'village': 'far', 'version': VERSION, 'square': square, 'inputs': sig, 'turn': 0, 'faces': sum(b['faces'] for b in blocks), 'blocks': blocks,
              'sun': None, 'styles': looks.STYLES, 'credit': 'U.S. Geological Survey 3DEP; City and County of San Francisco (DataSF)'}
+    if ponds:
+        index['credit'] += '; © OpenStreetMap contributors (ODbL, inland water)'
     json.dump(index, open(f'{dest}/index.json.part', 'w'))
     os.replace(f'{dest}/index.json.part', f'{dest}/index.json')
     return {'square': square, 'faces': index['faces'], 'blocks': len(blocks), 'seconds': round(time.time() - began, 1)}

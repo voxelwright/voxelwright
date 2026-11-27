@@ -1,8 +1,9 @@
 """Prove the building records on the 16-place panel (#450): stage the round-2 panel tiles with the records written
 in, render them once, and say per changed building whether its wall moved towards the photograph.
 
-The photograph is each place's reserved panel reference: a Mapillary panorama that no record used (facade_evidence
-`cameras` leaves it and every camera within 5 m of it out). Its wall colour for a building is read the way a view is
+The photograph is each place's reserved panel reference, a Mapillary image ID excluded from the fit. A later pose
+solution can put a fitted camera closer than the original 5 m exclusion; verify the solved positions for any release
+decision (evidence_tile.load_reviewed). Its wall colour for a building is read the way a view is
 (the same projection, segmentation and clipping rules), and compared with the colour the renderer gave the wall
 before (the bake's row, or PR 474's paint majority) and after. Chroma (CIELAB a*, b*) decides; lightness is reported
 apart, because a bias shared by every photograph (an exposure that reads walls dark) would favour the records.

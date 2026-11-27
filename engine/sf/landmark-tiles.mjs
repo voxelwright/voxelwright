@@ -1,8 +1,8 @@
 // The cell tiles round the realm's landmarks (#450, sf/heroes.json), so that a visitor who walks to one stands on
 // ground and not in the sea: the planet's tiles (bay/earth.py) within `REACH` tiles of each landmark at each level.
-// sf/build.mjs copies them; this makes those not made yet, with the planet's own maker.
+// coverage.py uses --json to include outlying tiles in the city bake. --make warms the local planet cache.
 //
-//   node sf/landmark-tiles.mjs [--make]
+//   node sf/landmark-tiles.mjs [--json | --make]
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -16,10 +16,16 @@ const SIZES = [2500, 10000, 40000]
 export const FRAME = '10n4250'
 export const EARTH = join(homedir(), '.village', 'engine', 'bay', 'earth', 'tiles', FRAME)
 
-/** Every tile round the landmarks: [level, x, z]. The Golden Gate's south end too, where one walks onto it. */
+/** Every tile round the landmarks: [level, x, z]. Include BOTH ends of bridges so no bridge ever ends in open water (#60). */
 export function landmarkTiles() {
   const listed = JSON.parse(readFileSync(join(root, 'sf', 'heroes.json'), 'utf8'))
-  const at = [...listed.filter((h) => h.only !== 'night').map((h) => h.at), [37.8107, -122.4776]]
+  const bridgeEnds = [
+    [37.8107, -122.4776], // Golden Gate Bridge south end (Fort Point / Presidio)
+    [37.8325, -122.4798], // Golden Gate Bridge north end (Marin Headlands)
+    [37.7897, -122.3882], // Bay Bridge west anchorage (Rincon Hill)
+    [37.8105, -122.3655], // Bay Bridge east end (Yerba Buena Island)
+  ]
+  const at = [...listed.filter((h) => h.only !== 'night').map((h) => h.at), ...bridgeEnds]
   const out = new Map()
   for (const [lat, lon] of at) {
     const p = place(lat, lon)
@@ -32,7 +38,12 @@ export function landmarkTiles() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const all = landmarkTiles(), missing = all.filter(([l, x, z]) => !existsSync(join(EARTH, String(l), `${x}_${z}.bay`)))
+  const all = landmarkTiles()
+  if (process.argv.includes('--json')) {
+    console.log(JSON.stringify(all))
+    process.exit(0)
+  }
+  const missing = all.filter(([l, x, z]) => !existsSync(join(EARTH, String(l), `${x}_${z}.bay`)))
   console.log(`${all.length} tiles round the landmarks, ${missing.length} not made yet`)
   if (process.argv.includes('--make') && missing.length) {
     // The planet's maker, asked a tile a line (bay/earth.py `serve`), six at once.
