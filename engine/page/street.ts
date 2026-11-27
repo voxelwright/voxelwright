@@ -271,6 +271,10 @@ export interface Street {
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
   enabled: boolean
+  /** Pre-warms location-independent vehicle models, smooth faces and robotaxi domes off-thread before landing. */
+  prewarm(): void
+  /** Pre-fetches the street-life graph squares around `(x, z)` cells ahead of arrival. */
+  warmAt(x: number, z: number): void
   /** One of every kept vehicle side by side, `gap` cells apart (22), standing still, all facing a heading (radians) with their fronts on a line through a place (cells) and the row going off to their left: for looking at them (the checks' line-up). Null clears it. */
   lineup(at: readonly [number, number] | null, heading?: number, gap?: number): string[]
   /**
@@ -420,8 +424,10 @@ export function street(o: {
       void fetch(new URL(index.life[name].path, o.life)).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) { take(s); squares.set(name, 'held') } }, () => squares.delete(name))
     }
   }
+  let pendingWarm: readonly [number, number, number] | null = null
   void fetch(new URL('index.json', o.life)).then((r) => r.json()).then((i) => {
     index = i
+    if (pendingWarm) wanted(pendingWarm)
     if (!i.transit) return
     void fetch(new URL(i.transit.path, o.life)).then((r) => r.json()).then((t: { routes: { ref: string; kind: string; lines: number[][] }[]; buses?: { ref: string; kind: string; operator: string; hours: [number, number]; pieces: { roads: string[]; stops: [number, number][] }[] }[] }) => {
       // The cable cars run their routes as OSM orders them, one way each; the streetcars are driven.
@@ -999,6 +1005,7 @@ export function street(o: {
       if (!m) return null
       const front = m.motor?.front ?? 0, done = { ...m, id, front, long: (front < 2 ? m.size[0] : m.size[2]), wide: (front < 2 ? m.size[2] : m.size[0]) }
       ready.set(id, done)
+      if (prewarmOn) enqueueModelWarm(done)
       return done
     }, () => null))
     return m
@@ -1011,9 +1018,42 @@ export function street(o: {
   const faces = new Map<string, Born | 'asked'>()
   const maker = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
   let asking = 0
+  let prewarmOn = false
+  const warmQueue: { m: Model; paint: number; i: number }[] = []
+  const warmQueued = new Set<string>()
+  const drainWarm = () => {
+    if (!prewarmOn || asking >= 1) return
+    while (warmQueue.length && asking < 1) {
+      const next = warmQueue.shift()!
+      const key = `${next.m.id}/${next.paint}/${next.i}`
+      if (faces.has(key)) continue
+      bornOf(next.m, next.paint, next.i)
+    }
+  }
+  const enqueueModelWarm = (m: Model) => {
+    const ext = lods(m)
+    if (!ext.length) return
+    // Warm the sharpest exterior LOD (used close up on landing) and coarsest LOD (for mid-range traffic).
+    const indices = ext.length > 1 ? [ext[ext.length - 1].i, ext[0].i] : [ext[0].i]
+    const paints = m.variants.length > 0 ? [0, ...(m.variants.length > 1 ? [1] : [])] : [-1]
+    for (const i of indices) for (const paint of paints) {
+      const key = `${m.id}/${paint}/${i}`
+      if (faces.has(key) || warmQueued.has(key)) continue
+      warmQueued.add(key)
+      warmQueue.push({ m, paint, i })
+    }
+    drainWarm()
+  }
+  const prewarm = () => {
+    if (prewarmOn) return
+    prewarmOn = true
+    for (const svc of ROBOTAXI_SERVICES) buildLidarDomeBorns(svc)
+    for (const m of ready.values()) enqueueModelWarm(m)
+  }
   maker.onmessage = (e: MessageEvent<{ key: string; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; filled?: number; cells?: Uint16Array }>) => {
     if (e.data.cells) { const k = e.data.key; if (fineKept.size >= 8) fineKept.delete(fineKept.keys().next().value!); fineKept.set(k, Promise.resolve(e.data.cells)); cellsAsked.get(k)?.(e.data.cells); cellsAsked.delete(k); return }
     asking--; const look = lookOf(e.data.key); if (look) faces.set(e.data.key, { id: 0, cells: e.data.filled!, size: look.size, com: [0, 0, 0], low: [0, 0, 0], faces: e.data.faces!, smooth: e.data.smooth })
+    if (warmQueue.length) drainWarm()
   }
   /**
    * A look's palette in a colour, with what the library says is the vehicle's paint (sf/cars.mjs `rolesOf`) marked
@@ -3206,6 +3246,11 @@ export function street(o: {
     set onNearMiss(fn: ((info: NearMiss) => void) | undefined) { nearMissCb = fn },
     get enabled() { return on },
     set enabled(v: boolean) { on = v },
+    prewarm,
+    warmAt(x: number, z: number) {
+      pendingWarm = [x, 0, z]
+      wanted(pendingWarm)
+    },
     get ms() { return ms + peopleMs },
     get ready() { return roads.size > 0 && ready.size > 0 },
   }
