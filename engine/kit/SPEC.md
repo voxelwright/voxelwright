@@ -58,6 +58,8 @@ low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
 - A floating touch thumbstick recess (`.vx-recess.float`) builds a hollow stepped octagonal gimbal
   ring with backlit cardinal ticks so the world shows through its interior, paired with a sculpted
   concave voxel thumbstick cap (`[data-vx-stick-cap]`).
+- Its icon set (`SLIM_ICONS`, for `data-vx-icon`) adds a media player's: `play`, `pause`, `stop`, `next`, `sound`,
+  `muted`, `minimize` and `playing` (level bars), drawn 7 to 9 cells tall to sit crisp at 2 px a cell.
 
 ## 1. Principles
 
