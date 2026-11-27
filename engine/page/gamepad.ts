@@ -387,6 +387,8 @@ export function gamepad(options: GamepadOptions = {}): GamepadController {
       const eR3 = edge(11)
       const eUp = edge(12)
       const eDown = edge(13)
+      edge(14)
+      const eRight = edge(15)
 
       // Enter/exit vehicle (Y/Triangle -> KeyE)
       if (eY) fireKey('KeyE')
@@ -398,6 +400,8 @@ export function gamepad(options: GamepadOptions = {}): GamepadController {
       if (mounted) {
         // Cycle chase camera (RB/R1 or D-pad Down -> KeyC)
         if (eRB || eDown) fireKey('KeyC')
+        // Repair vehicle (D-pad Right -> KeyF)
+        if (eRight) fireKey('KeyF')
         // Hover/special roll (X/Square -> KeyQ)
         if (eX) fireKey('KeyQ')
       } else {

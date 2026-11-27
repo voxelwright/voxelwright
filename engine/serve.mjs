@@ -622,7 +622,7 @@ function open(of) {
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
   let questions = 0
-  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, fineDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
   // that were in the air when the world last stopped are lost; where they came from is as they left it).
   const log = []

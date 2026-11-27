@@ -16,8 +16,10 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { coarser, GT_COUPE, leaksOf, outsideAir, sculptCoupe } from '../page/car-sculpt.ts'
-import { FINE_FILLED, fineCar } from '../page/living.ts'
+import { coarser, COUPE_KINDS, GT_COUPE, leaksOf, outsideAir, sculptCoupe } from '../page/car-sculpt.ts'
+import { car as makeCar, FINE_FILLED, fineCar } from '../page/living.ts'
+import { carveWheelWells } from '../page/wheels.ts'
+import { KEPT } from '../rules/kept.mjs'
 import { cleanShell } from '../sf/sculpt-cars.mjs'
 import { here } from './kit.mjs'
 
@@ -115,6 +117,37 @@ console.log('fineCar: its look')
   check(!blocked.length, `from the driver's seat ahead, nothing but glass before the road (${blocked.length ? `blocked at ${blocked.join(' ')}` : '88 rays'})`)
   const summonLike = sculptCoupe({ ...GT_COUPE, paint: PAINT })
   check(summonLike.size.join() === '180,52,77', `the GT coupe (the library's and G's) is ${summonLike.size.join(' x ')} cells at 2.5 cm`)
+
+  // #61: every car wears a fine look (car(), KEPT.car, KEPT.kart), carving wheel wells bites zero painted fender
+  // voxels, and the wheel-well backing wall is dark matte liner rather than body paint.
+  const plainCar = makeCar([0, 0, 0])
+  check(plainCar.fine?.length === 1 && plainCar.fine[0].per === 4, 'car() wears a 2.5 cm fine look (no plain coarse cars)')
+  const carved = carveWheelWells(kinds, look.size, per, look.low, car.motor, car.size)
+  let paintToAir = 0, outerLiner = 0, wallLiner = 0, wallPaint = 0
+  const isRed = (k) => (k & 15) === STEEL && ((k >> 8) & 255) === 20
+  for (let i = 0; i < kinds.length; i++) {
+    if (isRed(kinds[i]) && carved && carved.kinds[i] === 0) paintToAir++
+  }
+  const S = per * 10, archR = 0.3 + 0.045
+  for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) for (let x = 0; x < w; x++) {
+    const k = carved ? carved.kinds[x + w * (z + d * y)] : kinds[x + w * (z + d * y)]
+    if (!k) continue
+    const X = (x + 0.5) / S, Y = (y + 0.5) / S
+    const rArch = Math.min(Math.hypot(X - 0.7, Y - 0.3), Math.hypot(X - 3.5, Y - 0.3))
+    if ((z <= 1 || z >= d - 2) && y >= 8 && y <= 28 && rArch < archR + 0.08 && k === COUPE_KINDS.liner) outerLiner++
+    if ((z === 12 || z === d - 13) && rArch < archR - 0.04 && Y > 0.22) {
+      if (k === COUPE_KINDS.liner) wallLiner++
+      else if (isRed(k)) wallPaint++
+    }
+  }
+  check(!!carved && paintToAir === 0, `carveWheelWells bites zero painted fender voxels to air (${paintToAir} removed)`)
+  check(outerLiner === 0 && wallLiner > 100 && wallPaint === 0, `wheel-well backing wall is dark matte liner with no liner bleeding onto outer fender skin (outerLiner=${outerLiner}, wallLiner=${wallLiner}, wallPaint=${wallPaint})`)
+
+  const keptCar = KEPT.car(0), keptKart = KEPT.kart(2)
+  let kartFilled = 0, kartPolished = 0
+  for (const k of keptKart.fine?.[0]?.cells ?? []) if (k) { kartFilled++; if (k & 128) kartPolished++ }
+  check(keptCar.fine?.length === 1 && keptCar.fine[0].per === 4 && Array.isArray(keptCar.eye), 'KEPT.car wears a 2.5 cm fine look with driver eye')
+  check(keptKart.fine?.length === 1 && keptKart.fine[0].per === 4 && kartFilled > 5000 && kartFilled <= FINE_FILLED && kartPolished > 1000 && Array.isArray(keptKart.eye), `KEPT.kart wears a 2.5 cm sculpted fine look (${kartFilled} cells, ${kartPolished} polished paint)`)
 }
 
 // ── The library ──

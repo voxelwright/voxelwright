@@ -36,10 +36,11 @@ struct U {
   c1: vec3f, lampHead: f32,
   c2: vec3f, lampAxis: f32,
   // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them.
-  // crack: where its glass was struck (#37), in its own cells; far below it (-1e5) where it was not.
-  smoothOn: f32, crackX: f32, crackY: f32, crackZ: f32,
+  smoothOn: f32, pad0: f32, pad1: f32, pad2: f32,
   // Its dents (#37): none for a piece that was never struck, and then nothing of them is worked out.
   deform: Deform,
+  // Per-window crack origins (#61): front, rear, left, right; each (originX, originY, originZ, strength).
+  cracks: array<vec4f, 4>,
 }
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
 struct Looks { palette: array<vec4f, 256>, material: array<Material, 16> }
@@ -317,33 +318,39 @@ fn crackNet(p: vec2f) -> f32 {
   }
   return 1.0 - smoothstep(0.03, 0.09, d2 - d1);
 }
-// How cracked a pane is here (#37): broken round where its glass was struck, for as much as its worst-hit window is
-// cracked (deform.ts keeps no more than that for the GPU), out to 30 cm for a knock and over a metre for a hard blow,
-// with a web of cracks out from that point. Both lie across the way it was struck, so they run on unbroken over a
-// pane's stair of faces. 0 on a piece whose glass was never struck.
+// How cracked a pane is here (#37, #61): broken round where each struck window was hit (front, rear, left, right),
+// out to 30 cm for a knock and over a metre for a hard blow, with a web of cracks out from that window's own origin.
+// Both lie across the way it was struck, so they run on unbroken over a pane's stair of faces. 0 on a piece whose
+// glass was never struck.
 fn paneCrack(in: Out) -> f32 {
-  let crack = u.deform.status.w;
-  if (crack <= 0.01 || u.crackX < -1000.0) { return 0.0; }
-  let origin = vec3f(u.crackX, u.crackY, u.crackZ);
-  var best = 1e9;
-  var closest = 0u;
-  for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
-    let gap = distance(origin, u.deform.posR[i].xyz);
-    if (gap < best) { best = gap; closest = i; }
-  }
-  // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
-  let p = (in.at - origin) * u.cell * 4.0;
-  let a = abs(u.deform.dirD[closest].xyz);
-  var across = vec3f(p.x, p.y, 0.0);
-  if (a.x >= a.y && a.x >= a.z) { across = vec3f(p.z, p.y, 0.0); }
-  else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
-  let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
-  if (amount <= 0.0) { return 0.0; }
-  // Its lines are finer than a pixel from the street: there they glittered, so further than 3 m they give way to an
-  // even whitening of the broken glass.
+  if (u.deform.status.w <= 0.01) { return 0.0; }
   let seenNear = 1.0 - smoothstep(30.0, 90.0, length(in.seen));
-  let lines = max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
-  return mix(amount * 0.3, lines, seenNear);
+  var total = 0.0;
+  for (var w = 0u; w < 4u; w++) {
+    let cr = u.cracks[w];
+    let crack = cr.w;
+    if (crack <= 0.01) { continue; }
+    let origin = cr.xyz;
+    // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
+    let p = (in.at - origin) * u.cell * 4.0;
+    let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
+    if (amount <= 0.0) { continue; }
+    var best = 1e9;
+    var closest = 0u;
+    for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
+      let gap = distance(origin, u.deform.posR[i].xyz);
+      if (gap < best) { best = gap; closest = i; }
+    }
+    let a = abs(u.deform.dirD[closest].xyz);
+    var across = vec3f(p.x, p.y, 0.0);
+    if (a.x >= a.y && a.x >= a.z) { across = vec3f(p.z, p.y, 0.0); }
+    else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
+    // Its lines are finer than a pixel from the street: there they glittered, so further than 3 m they give way to an
+    // even whitening of the broken glass.
+    let lines = max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
+    total = max(total, mix(amount * 0.3, lines, seenNear));
+  }
+  return total;
 }
 @fragment fn fs_tint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -394,8 +401,8 @@ export interface Piece {
   lamps?: [number, number, number, number]
   /** Its dents, scuffs and cracks (#37, deform.ts), kept by whoever records what struck it; none or no dents draws it as made. */
   deform?: DeformState
-  /** Where its glass was struck, in its own cells (#37): where its cracks spread from. None: its glass is whole. */
-  crackAt?: [number, number, number]
+  /** Per-window crack origins `[front, rear, left, right]` in this piece's own cells (#61). None: glass is whole. */
+  cracks?: (readonly [number, number, number] | null)[]
   destroy(): void
 }
 
@@ -413,8 +420,8 @@ export interface Pieces {
   smooth: boolean
 }
 
-/** A piece's own numbers (struct U): twelve rows of four, then its dents. */
-const OWN = 192, DEFORM_AT = OWN / 4, UNIFORMS = OWN + DEFORM_BYTES
+/** A piece's own numbers (struct U): twelve rows of four, its dents, then four per-window crack origins. */
+const OWN = 192, DEFORM_AT = OWN / 4, CRACKS_BYTES = 16 * 4, CRACKS_AT = (OWN + DEFORM_BYTES) / 4, UNIFORMS = OWN + DEFORM_BYTES + CRACKS_BYTES
 
 /**
  * A look's faces as the GPU takes them, six words a face: the solid ones first, then the glass, each with its corners'
@@ -552,9 +559,14 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
         f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
-        const crack = piece.crackAt
-        f[45] = crack ? crack[0] : -1e5; f[46] = crack ? crack[1] : -1e5; f[47] = crack ? crack[2] : -1e5
+        f[45] = 0; f[46] = 0; f[47] = 0
         packDeformUniforms(piece.deform, f, DEFORM_AT)
+        const cracks = piece.cracks, gc = piece.deform?.glassCrack
+        for (let k = 0; k < 4; k++) {
+          const c = cracks?.[k], strength = gc ? gc[k] : 0, o = CRACKS_AT + k * 4
+          if (c && strength > 0) { f[o] = c[0]; f[o + 1] = c[1]; f[o + 2] = c[2]; f[o + 3] = strength }
+          else { f[o] = 0; f[o + 1] = 0; f[o + 2] = 0; f[o + 3] = 0 }
+        }
         // (Copied when called: one block serves every piece.)
         device.queue.writeBuffer(piece.uniforms, 0, block)
         const faces = facesOf(piece)

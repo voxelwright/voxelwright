@@ -53,6 +53,7 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Headlights | L | - | - |
 | Horn | Hold H | Hold Horn | L3 |
 | Next radio station | N | Radio, or tap the station's name while it shows | - |
+| Repair car | F | Repair | D-pad right |
 | View from the seat | V | Seat | R3 or D-pad up |
 | Get out | E | Get off | Y / Triangle |
 | **Map** | | | |
@@ -75,7 +76,7 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Mirrors, shadows, traced shadows, heat view | Shift+M, L, K, H (on foot) | - | - |
 | In a [shared world](/multiplayer): pick up, throw, portal, realm wheel | G, T, P, Tab | - | - |
 
-While you drive, the car's mode is solid. Keys the page hears before any mode still work (Enter, `/`, O, M and Shift+M among them), but the hour, rain, reset, F, K, G and Backquote wait until you are out.
+While you drive, the car's mode is solid. Keys the page hears before any mode still work (Enter, `/`, O, M and Shift+M among them), but the hour, rain, reset, K, G and Backquote wait until you are out; F repairs the car you are driving instead of lighting a fire.
 
 Riding something other than a car (a flying or hovering thing, or one that jumps) uses the schemes in `SCHEMES` in `engine/page/living.ts`: W and S, A and D, then Space and C to rise and sink, Q to roll over (hover) or Space to jump (ride). The wand registers Q as a key heard before any mode (`always` in `engine/page/wand.ts`), so on a hover vehicle Q takes up the wand and the roll never arrives; the touch key **Roll over** works. The ray marcher draws mirrors, shadows and glass; [the engine](/engine#glass) explains how.
 
@@ -109,7 +110,7 @@ Stand within 4.5 m of a car and the cue says `E  drive the` and its name. Press 
 
 The physics runs in the core (`engine/core/src/bodies/living.rs`), as it does for every [living thing](/living). The page sends three numbers: go (throttle or brake), turn, and rise (the handbrake). For a car it also sends whether boost is held and how hard it rains (`living_drive_aux` in the [core](/engine-core)). It resends them when they change and every 0.25 s while held. A car told nothing for 1 s (`QUIET`) goes to sleep.
 
-Each car has a **motor**: `grip`, `power`, `top` speed, `steer` angle and `tough`ness, with its wheels as feet that steer or drive (`Motor` in `engine/page/living.ts`). The street cars carry their motors in the kept car library. `?living=car` puts the hand-written test car in front of you (4.2 m long, top speed 20 m/s), and `?living=finecar` the same car with a cabin in 2.5 cm cells.
+Each car has a **motor**: `grip`, `power`, `top` speed, `steer` angle and `tough`ness, with its wheels as feet that steer or drive (`Motor` in `engine/page/living.ts`). The street cars carry their motors in the kept car library. `?living=car` (and `?living=finecar`) puts the hand-written sculpted test car in front of you (4.2 m long, top speed 20 m/s, with a cabin in 2.5 cm cells).
 
 - **Throttle** is strongest from a standstill and fades toward `top`. Reverse tops out at about a third of it.
 - **Brake**: pressing against the direction of travel brakes every wheel. Off the throttle the car coasts, and stops dead below 0.6 m/s.
@@ -171,7 +172,7 @@ N cycles the car radio through Radio Off, Bay Drive FM, Twin Peaks Chill and Fil
 
 ### Wheels
 
-Every living car with two or more wheels gets drawn wheels (`engine/page/wheels.ts`, the `wheels` pass of the [frame](/engine#how-a-frame-is-made), at most 64 wheels). The wheels baked into a car's fine look are carved out (`carveWheelWells`) so the drawn ones can move. Front wheels steer with your input and counter-steer into a slide. Each wheel rides its own suspension over kerbs. Driven wheels spin in a burnout, rear wheels lock under the handbrake, and brake discs glow orange-red after hard braking and cool as you drive on. Reduced motion softens the steering and the spin.
+Every living car with two or more wheels gets drawn wheels (`engine/page/wheels.ts`, the `wheels` pass of the [frame](/engine#how-a-frame-is-made), at most 64 wheels). The wheels baked into a car's fine look are carved out (`carveWheelWells`, preserving painted fenders and lining recessed wheel wells dark) so the drawn ones can move. Front wheels steer with your input and counter-steer into a slide. Each wheel rides its own suspension over kerbs and shifts and tilts inward with a crushed corner (`deformPointCpu` in `engine/page/deform.ts`). Driven wheels spin in a burnout, rear wheels lock under the handbrake, and brake discs glow orange-red after hard braking and cool as you drive on. Reduced motion softens the steering and the spin.
 
 ### Lamps, skidmarks and light on the road
 
@@ -191,7 +192,7 @@ Traffic cars are drawn and steered by the page, not simulated as bodies (`engine
 
 They react to you:
 
-- **Crashes.** Hit a car and it wakes as a real body and is knocked by the impact, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams only bounce you off. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
+- **Crashes.** Hit a car and it wakes as a real drivable body with its interior, is knocked by the impact, and both vehicles dent immediately, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams bounce you off and dent your car. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
 

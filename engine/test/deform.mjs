@@ -6,7 +6,7 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
-import { VehicleDeformation, MAX_DENTS, DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, recordImpact, repairVehicle, clearVehicle, getVehicleDamage } from '../page/deform.ts'
+import { VehicleDeformation, MAX_DENTS, DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, deformPointCpu, recordImpact, repairVehicle, clearVehicle, getVehicleDamage } from '../page/deform.ts'
 
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b} (+/- ${tolerance})`)
 const vector = (a, b, tolerance) => a.forEach((v, i) => near(v, b[i], tolerance))
@@ -216,7 +216,15 @@ for (let batch = 0; batch < 25; batch++) {
 }
 samples.sort((a,b) => a-b)
 const cpuPackMs = samples[Math.floor(samples.length / 2)]
-console.log('CPU: transforms, merging/replacement, survival box, damage curves, repair, malformed input, 208-byte layout PASS')
+// CPU deformPointCpu matches the position oracle & finite-difference normal for all six overlapping dents (#61).
+for (const p of [[57, 15, 14], [65, 15, 22], [72, 15, 28], [20, 18, 20]]) {
+  const got = deformPointCpu(p, [0, 1, 0], multi)
+  vector(got.pos, position(p, multi), 1e-6)
+  vector(got.norm, numericalNormal(p, multi), 1e-3)
+}
+const healthyCpu = deformPointCpu([60, 15, 20], [0, 1, 0], undefined)
+vector(healthyCpu.pos, [60, 15, 20], 0); vector(healthyCpu.norm, [0, 1, 0], 0)
+console.log('CPU: transforms, merging/replacement, survival box, damage curves, repair, malformed input, 208-byte layout, deformPointCpu PASS')
 
 const linux = process.platform === 'linux'
 const browser = await chromium.launch({ headless: true, ...(process.platform === 'darwin' ? { channel: 'chrome' } : {}), args: linux ? ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--ignore-gpu-blocklist'] : ['--enable-unsafe-webgpu', '--use-angle=metal'] })
