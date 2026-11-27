@@ -20,7 +20,7 @@ export default ({ hear }) => {
     const count = sent.get(rule.id)
     if (!count || now - count.since > 1000) sent.set(rule.id, { since: now, n: 1 })
     else if (++count.n > A_SECOND) return wrong(`a rule asks and answers other rules at most ${A_SECOND} times a second`)
-    hear(other, event, { ask: id, by: rule.id, ...JSON.parse(json) })
+    hear(other, event, { ...JSON.parse(json), ask: id, by: rule.id })
   }
   return { does: { ask: pass('asked', 'of'), answer: pass('answered', 'to') }, dropped: (ruleId) => { sent.delete(ruleId) } }
 }

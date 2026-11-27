@@ -1126,3 +1126,122 @@ async fn stun_cannot_fill_the_table_http_needs() {
         .is_ok()
     );
 }
+
+#[tokio::test]
+async fn public_status_shares_lookup_budget_and_closes_http_connection() {
+    let m = start(Config {
+        lookups_per_minute: 1,
+        ..cfg()
+    })
+    .await;
+    let res = m.http.get(&m.base).send().await.unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.headers()["connection"], "close");
+    assert_eq!(m.get("/ice").await.0, 429);
+    assert!(Config::default().max_lobbies <= Config::default().max_connections / 2);
+}
+
+#[tokio::test]
+async fn wrong_operator_tokens_temporarily_ban_public_reads() {
+    let m = start_with(cfg(), Some(TOKEN)).await;
+    for _ in 0..5 {
+        assert_eq!(
+            m.http
+                .post(format!("{}/bans", m.base))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            401
+        );
+    }
+    assert_eq!(m.get("/").await.0, 403);
+    assert_eq!(m.get("/ice").await.0, 403);
+    assert_eq!(
+        m.http
+            .post(format!("{}/bans", m.base))
+            .bearer_auth(TOKEN)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        403
+    );
+    let ip = "127.0.0.1".parse().unwrap();
+    assert!(
+        !m.st
+            .lock()
+            .banned(ip, std::time::Instant::now() + Duration::from_secs(61))
+    );
+}
+
+#[tokio::test]
+async fn hello_has_a_control_message_budget() {
+    let m = start(Config {
+        hello_wait: 60.0,
+        ..cfg()
+    })
+    .await;
+    let mut socket = m.open().await;
+    for _ in 0..16 {
+        socket
+            .send(Message::Pong(Default::default()))
+            .await
+            .unwrap();
+    }
+    assert_eq!(closed(&mut socket).await.0, 4408);
+}
+
+#[test]
+fn proxy_configuration_trusts_only_matching_peers() {
+    use clap::Parser;
+    let cfg = Config::parse_from([
+        "master",
+        "--behind-proxy",
+        "x-forwarded-for",
+        "--trusted-proxy",
+        "192.0.2.7",
+        "--trusted-proxy",
+        "2001:db8::/64",
+    ]);
+    assert!(cfg.trusts_proxy("192.0.2.7".parse().unwrap()));
+    assert!(cfg.trusts_proxy("2001:db8::3".parse().unwrap()));
+    let st = State::new(cfg, None);
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("x-forwarded-for", "192.0.2.42".parse().unwrap());
+    for (peer, want) in [
+        ("127.0.0.1:42", "127.0.0.1"),
+        ("192.0.2.7:42", "192.0.2.42"),
+    ] {
+        assert_eq!(
+            village_master::api::caller(&st, &headers, peer.parse().unwrap()).ok(),
+            Some(want.parse().unwrap())
+        );
+    }
+}
+
+#[test]
+fn full_tables_preserve_open_connections_and_throttle_sweeps() {
+    use village_master::state::Kind;
+    let st = State::new(
+        Config {
+            max_tracked_addrs: 2,
+            ..cfg()
+        },
+        None,
+    );
+    let [a, b, c, d] = [1, 2, 3, 4].map(|last| std::net::IpAddr::from([192, 0, 2, last]));
+    let _held = st.connection(a).unwrap();
+    assert!(st.charge(b, Kind::Lookup).is_ok());
+    assert!(st.charge(c, Kind::Lookup).is_ok());
+    assert!(st.charge(d, Kind::Lookup).is_err());
+    assert!(st.lock().addrs.contains_key(&a));
+    assert!(!st.lock().addrs.contains_key(&b));
+    assert!(st.stun(a) && st.stun(b));
+    assert!(!st.stun(c));
+    st.lock().stun.get_mut(&b).unwrap().0 -= Duration::from_secs(61);
+    assert!(
+        !st.stun(d),
+        "a new source must not repeat the sweep inside the cooldown"
+    );
+}

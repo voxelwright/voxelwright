@@ -149,9 +149,22 @@ async function literal(servers) {
 }
 /** The addresses an SDP's candidates name (to refuse a banned one before any channel opens). */
 const addressesIn = (sdp) => [...String(sdp).matchAll(/a=candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ/g)].map((m) => m[1]).filter((a) => !a.endsWith('.local'))
+export function seatConflict(c, { id, on }, peers) {
+  if (c.boarding || peers.some(w => w !== c && [w.riding, w.boarding, w.seat].includes(id))) return 'that seat is claimed'
+  if (on === true) return [c.riding, c.seat].some(current => current && current !== id) ? 'leave your seat first' : null
+  return c.riding === id || c.seat === id ? null : 'you are not on that'
+}
+
+export function selectedAddress(pc) {
+  try {
+    const address = pc.sctp?.transport?.iceTransport?.getSelectedCandidatePair()?.remote?.address ?? pc.selectedCandidatePair()?.remote?.address
+    return isIP(address) ? address : null
+  } catch { return null }
+}
+
 /**
  * Who an address is for per-address limits, eviction rank and bans: an IPv4 address unchanged, an IPv4-mapped IPv6
- * address as its IPv4, and any other IPv6 address as its /56 (the same rule the master uses in `master/src/text.rs`).
+ * address as its IPv4, and any other IPv6 address as its /56 (preserving the scope of saved door bans).
  */
 export function addressKey(address) {
   if (typeof address !== 'string') return null
@@ -224,14 +237,14 @@ export function door(o) {
   if (o.most) kept.most = Math.max(1, Math.min(64, Math.floor(o.most)))
   const ready = (async () => { if (o.password) kept.password = await seal(o.password); save() })()
   const adminSealed = o.admin ? seal(o.admin) : null
-  const failing = tries()
+  const failing = tries(), passwordBudget = pool(24, 60_000)
   setInterval(() => failing.sweep(), 60_000).unref()
 
   /** What each person has made lately, by who they are: a page that joins again is the same person, with the same pools. */
   const makers = new Map()
   // Forgotten once their pools are full again: nothing is lost by that, and a stream of new keys leaves nothing behind.
-  setInterval(() => { for (const [you, m] of makers) if (m.made.left() >= limits.thingsMinute && m.changed.left() >= limits.changesMinute) makers.delete(you) }, 60_000).unref()
-  const makerOf = (c) => { if (!makers.has(c.you)) makers.set(c.you, { made: pool(limits.thingsMinute, 60_000), changed: pool(limits.changesMinute, 60_000) }); return makers.get(c.you) }
+  setInterval(() => { for (const [you, m] of makers) if (m.made.left() >= limits.thingsMinute && m.changed.left() >= limits.changesMinute && m.fine.left() >= limits.upMinute) makers.delete(you) }, 60_000).unref()
+  const makerOf = (c) => { if (!makers.has(c.you)) makers.set(c.you, { fine: pool(limits.upMinute, 60_000), made: pool(limits.thingsMinute, 60_000), changed: pool(limits.changesMinute, 60_000) }); return makers.get(c.you) }
   /** Whether someone may make a thing now, and why not: asked by their page before any model is (page/door.ts `may`), and again by the ask itself. */
   const mayMake = (c) => (c.admin ? null : kept.build === 'admins' ? 'on this server only admins build' : makerOf(c).made.left() < 1 ? `you have made ${limits.thingsMinute} things this minute: wait a little` : null)
   /** Every connection, welcomed or not; a welcomed one has `you`. */
@@ -270,7 +283,7 @@ export function door(o) {
   function counted(c) {
     if (c.closed) return
     c.connected ??= Date.now()
-    if (!c.address) try { c.address = c.pc.selectedCandidatePair()?.remote?.address ?? null } catch { /* not known */ }
+    c.address = selectedAddress(c.pc)
     const key = addressKey(c.address)
     if (!key) return
     c.addressKey = key
@@ -423,7 +436,7 @@ export function door(o) {
         }
       }
       if (stopped) { try { pc.close() } catch { /* already */ } pc = null; unplace(); held--; serve(); return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }] }
-      c = { pc, ch: {}, n, chunk: CHUNK_LEAST, you: null, name: '', admin: false, address: null, addressKey: null, since: Date.now(), last: Date.now(), streams: new Map(), parts: null, inflight: 0, riding: new Set(), seat: null, closed: false, aborts: new Set(), queued: 0, queue: [], drained: null,
+      c = { pc, ch: {}, n, chunk: CHUNK_LEAST, you: null, name: '', admin: false, address: null, addressKey: null, since: Date.now(), last: Date.now(), streams: new Map(), parts: null, inflight: 0, riding: null, boarding: null, seat: null, closed: false, aborts: new Set(), queued: 0, queue: [], drained: null,
         pools: { ctl: pool(20), fine: pool(4, 60_000), stream: pool(2, 10_000), asks: pool(limits.asks), up: pool(limits.upMinute, 60_000), columns: pool(limits.columns), ask: pool(limits.ask), say: pool(limits.say), here: pool(limits.here), act: pool(limits.act), drive: pool(limits.drive), look: pool(limits.look) } }
       // The place is the join's now: its port is given back when it closes. A peer connection closed while it is being
       // answered never settles what it was doing (libdatachannel), so each step is raced against its closing.
@@ -476,6 +489,9 @@ export function door(o) {
     c.closed = true
     c.gone?.resolve()
     conns.delete(c)
+    const seat = c.riding ?? c.boarding ?? c.seat
+    if (seat && c.you) void fetch(`${o.world}/world/drive`, { method: 'POST', body: JSON.stringify({ by: c.you, id: seat, on: false }), signal: AbortSignal.timeout(3000) }).catch(() => {})
+    c.riding = c.boarding = c.seat = null
     clearTimeout(c.joinBy)
     for (const a of c.aborts) a.abort()
     c.queue = []; c.queued = 0
@@ -517,6 +533,8 @@ export function door(o) {
     if (h.proto !== PROTO) return refuse(c, `this server speaks protocol ${PROTO}`)
     if (h.pin !== o.pin) return refuse(c, o.pin === 'town' ? 'this server is the generated town, and your page was made for another world' : `this server holds San Francisco release ${String(o.pin).slice(0, 12)}, and your page was made for another`)
     if (!proves(h, c.fingerprint)) return refuse(c, 'a hello is signed by the page\'s own key')
+    counted(c)
+    if (!c.address) return refuse(c, 'the peer address is not ready: join again')
     const you = youOf(h.key), place = placeOf(c.address)
     const banned = () => kept.bans.some((b) => b.you === you || (b.place && b.place === place))
     if (banned()) return refuse(c, 'you are banned from this server')
@@ -525,8 +543,10 @@ export function door(o) {
       if (typeof h.password !== 'string') return refuse(c, 'this server asks for a password')
       const keys = [`c:${c.n}`, ...(place ? [`a:${place}`] : [])], wait = failing.wait(keys)
       if (wait) return refuse(c, `too many wrong passwords: wait ${Math.ceil(wait / 1000)} s`)
+      if (!passwordBudget.take()) return refuse(c, 'too many password attempts: wait a minute')
       failing.tried(keys)
       if (!(await same(h.password, kept.password))) return refuse(c, 'wrong password')
+      passwordBudget.give()
       failing.passed(keys)
     }
     if (c.closed || c.refused) return
@@ -553,14 +573,20 @@ export function door(o) {
   }
   async function becomeAdmin(c, password) {
     if (!adminSealed) return { why: 'this server has no admins' }
-    const place = placeOf(c.address), keys = [`admin:${c.n}`, ...(place ? [`admin:${place}`] : [])], wait = failing.wait(keys)
+    counted(c)
+    if (!c.address) return { why: 'the peer address is not ready' }
+    const place = placeOf(c.address)
+    if (kept.bans.some((b) => b.you === c.you || b.place === place)) return { why: 'you are banned from this server' }
+    const keys = [`admin:${c.n}`, ...(place ? [`admin:${place}`] : [])], wait = failing.wait(keys)
     if (wait) return { why: `too many wrong passwords: wait ${Math.ceil(wait / 1000)} s` }
+    if (!passwordBudget.take()) return { why: 'too many password attempts: wait a minute' }
     failing.tried(keys)
     if (!(await same(password, await adminSealed))) {
       // Said a second later, whatever the wait: a guess costs time.
       await new Promise((r) => setTimeout(r, 1000))
       return { why: 'wrong password' }
     }
+    passwordBudget.give()
     failing.passed(keys)
     c.admin = true
     log(`${c.name} (${c.you}) is an admin`)
@@ -666,13 +692,16 @@ export function door(o) {
     if (route.columns) { const n = Math.max(0, (Number(q.get('x1')) - Number(q.get('x0'))) * (Number(q.get('z1')) - Number(q.get('z0')))) || 0; if (n > limits.columns || !c.pools.columns.take(n)) return reply(c, h.n, 429, 'too many columns asked after: wait a second') }
     // Who asked is this connection, whatever the page wrote.
     let untaken = null
+    if (route.rate === 'fine' && !c.admin && !makerOf(c).fine.take(raw.length)) return reply(c, h.n, 429, 'too many bytes of fine cells this minute')
+    if (c.inflight >= INFLIGHT_MOST) return reply(c, h.n, 429, 'too many requests under way')
     if (json) {
       if (route.by) json.by = c.you
       if (route.by === 'here') json.name = c.name
       if (route.by === 'drive') {
         if (typeof json.id !== 'string' || !ID.test(json.id)) return reply(c, h.n, 400, 'what a thing is told is {id, go, turn, rise}')
-        if (typeof json.on === 'boolean') { if (json.on) c.riding.add(json.id); else c.riding.delete(json.id) }
-        else if (!c.riding.has(json.id) && c.seat !== json.id) return reply(c, h.n, 409, 'you are not on that')
+        const why = seatConflict(c, json, welcomed())
+        if (why) return reply(c, h.n, 409, why)
+        if (typeof json.on === 'boolean') c.boarding = json.id
       }
       // Where this page's person is, as it last said: a thing it makes is made near there (serve.mjs `stranger`).
       if (route.by === 'here' && Array.isArray(json.at) && json.at.length === 3 && json.at.every(Number.isFinite)) c.at = json.at.slice()
@@ -683,7 +712,7 @@ export function door(o) {
         if (!c.admin) {
           // (Given back if the world does not take it: only what was made or changed counts.)
           if (json.edit !== undefined && json.thing !== undefined) { const why = mayMake(c); if (why || !makerOf(c).made.take()) return reply(c, h.n, 429, why ?? `you have made ${limits.thingsMinute} things this minute: wait a little`); untaken = () => makerOf(c).made.give() }
-          else if (json.thing !== undefined) { if (!makerOf(c).changed.take()) return reply(c, h.n, 429, `you have changed things ${limits.changesMinute} times this minute: wait a little`); untaken = () => makerOf(c).changed.give() }
+          else if (json.thing !== undefined || json.blast || json.ignite || json.ball) { if (!makerOf(c).changed.take()) return reply(c, h.n, 429, `you have changed things ${limits.changesMinute} times this minute: wait a little`); untaken = () => makerOf(c).changed.give() }
           json.as = { things: limits.things, cells: limits.cells, at: c.at ?? null, reach: limits.reach }
         }
       }
@@ -691,17 +720,17 @@ export function door(o) {
     }
     const path = url.pathname + (q.size ? `?${q}` : '')
     if (route.stream) return stream(c, h.n, path)
-    if (c.inflight >= INFLIGHT_MOST) return reply(c, h.n, 429, 'too many requests under way')
     c.inflight++
     const abort = new AbortController()
     c.aborts.add(abort)
     try {
-      const r = await fetch(`${o.world}${path}`, { method: h.m, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]), ...(h.m === 'POST' ? { body: json ? JSON.stringify(json) : raw } : {}) })
+      const r = await fetch(`${o.world}${path}`, { method: h.m, headers: route.rate === 'fine' && !c.admin ? { 'x-world-stranger': c.you } : {}, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]), ...(h.m === 'POST' ? { body: json ? JSON.stringify(json) : raw } : {}) })
+      if (route.by === 'drive' && r.ok && typeof json.on === 'boolean') c.riding = json.on ? json.id : null
       const bytes = Buffer.from(await r.arrayBuffer())
       if (r.status !== 202) untaken?.()
       reply(c, h.n, r.status, bytes, r.headers.get('content-type') ?? 'application/octet-stream')
     } catch { reply(c, h.n, 502, 'the world did not answer') }
-    finally { c.aborts.delete(abort); c.inflight-- }
+    finally { if (route.by === 'drive' && typeof json.on === 'boolean') c.boarding = null; c.aborts.delete(abort); c.inflight-- }
   }
 
   // ── down: the stream ──

@@ -105,7 +105,7 @@ The door decides everything a stranger's page can do. It is [engine/door.mjs](ht
 
 A waiting join is let go in this order: one already refused, then one not connected 3 s after its answer left, then one from the address with the most joins waiting, then the one silent the longest. A join is never let go before it could have said hello (its channels open for 500 ms, or 2 s after its answer left). Joins that say nothing can't keep a door shut.
 
-An address is keyed as the master keys it: IPv4 as it is, IPv4-mapped IPv6 as its IPv4, and any other IPv6 address by its /56 (`addressKey`). For the per-address limits and the hello's ban check, the address comes from the connection's selected candidate pair, never from what the offer says. Only the early ban refusal above reads the offer's candidates, because nothing else is known yet.
+The door groups addresses for saved bans and limits: IPv4 as it is, IPv4-mapped IPv6 as its IPv4, and any other IPv6 address by its /56 (`addressKey`). For the per-address limits and the hello's ban check, the address comes from the connection's selected candidate pair, never from what the offer says. A hello or admin login waits for a fresh join attempt if the selected address is unavailable. The lobby shares a budget of 24 password checks per minute across addresses, with successful checks refunded. Only the early ban refusal above reads the offer's candidates, because nothing else is known yet.
 
 ### The hello
 
@@ -156,7 +156,9 @@ For anyone who is not an admin, the door puts `as` on each ask, and the world se
 | One thing's side | 256 cells, 96 for a living thing |
 | One thing's record | 24 KB of JSON |
 
-Before a page asks its model for anything, it asks the door whether it may make (`{n, may: 'make'}`). Any builder may still break things with a blast or a hammer. The world's file stops at 256 MB: past that, the world takes no more asks.
+Before a page asks its model for anything, it asks the door whether it may make (`{n, may: 'make'}`). Strangers place cells as recorded things. Blasts, fire and balls share the maker's change quota and must originate within reach. A blast must clear other makers' recorded cells. Fire, sparks and projectiles can travel, so these asks are refused while another maker has a thing standing. A driver can claim one live vehicle at a time.
+
+Fine uploads share the identity's byte allowance across reconnects. Unplaced parts occupy up to 64 MiB or 256 parts across the server. Once a world records controls referencing a part it is kept with the world. Other staged parts expire after ten minutes and are cleared on restart. The world's file stops at 256 MB: past that, the world takes no more asks.
 
 ## The wire
 
