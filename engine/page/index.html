@@ -7,7 +7,8 @@
 <title>Village engine</title>
 <style>
   html, body { margin: 0; height: 100%; background: #10141a; color: #e8ecf1; font: 13px/1.4 -apple-system, system-ui, sans-serif; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
-  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; touch-action: none; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; height: var(--app-h, 100dvh); display: block; touch-action: none; }
+  /* --app-h: an installed iOS app is laid out a status bar short of the screen; pwa.ts measures the screen (fitStandaloneHeight). */
   /* The line that says how the page is doing is the workshop's, not a phone's: on a small screen held in the hand it took the top of the picture (#367). `?status=1` shows it there. */
   @media (pointer: coarse) and (max-height: 520px), (pointer: coarse) and (max-width: 520px) { body:not(.status) #hud { display: none; } }
   #hud { position: fixed; left: max(10px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); padding: 5px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); font-variant-numeric: tabular-nums; max-width: calc(100vw - 20px); pointer-events: none; }
@@ -20,7 +21,7 @@
   @media (hover: hover) and (pointer: fine) { #boom { display: none; } }
   #boom { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); width: 76px; height: 76px; border-radius: 50%; border: 0; background: rgba(210, 70, 40, 0.85); color: #fff; font: 600 15px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   /* The layer over the picture (hud.ts). It takes no touch or click itself: only what is in it that is for pressing. */
-  #over { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
+  #over { position: fixed; inset: 0; bottom: auto; height: var(--app-h, 100%); pointer-events: none; z-index: 6; }
   #over [hidden] { display: none; }
   #said { position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: 184px; max-width: min(400px, 70vw); padding: 7px 11px; border-radius: 3px; background: rgba(18, 24, 34, 0.72); border: 1.5px solid rgba(94, 114, 146, 0.36); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); white-space: pre-wrap; overflow-wrap: anywhere; }
   /* The ask bar: collapsed into a slim low-profile voxel key at rest (play-hud.ts), expanding into a machined composer when opened. */

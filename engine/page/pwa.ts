@@ -151,6 +151,31 @@ export function isStandaloneDisplay(
   }
 }
 
+/**
+ * The height an installed iOS web app should fill. With the black-translucent status bar, iOS lays the page out a
+ * status bar short of the screen (100vh, 100dvh and `inset: 0` all stop there), leaving a bare band at the bottom.
+ * `screen` on iOS keeps its portrait numbers whatever the turn, so the long side is the height when upright and the
+ * short side when turned. Null when the layout already fills the screen (Android, desktop, a fixed iOS).
+ */
+export function fullScreenHeight(inner: { w: number; h: number }, screen: { w: number; h: number }): number | null {
+  const long = Math.max(screen.w, screen.h), short = Math.min(screen.w, screen.h)
+  const full = inner.h >= inner.w ? long : short
+  return full - inner.h > 1 && full - inner.h < 120 ? full : null
+}
+
+/** Keeps `--app-h` on <html> at the full screen height in an installed iOS web app; the page's CSS falls back to 100dvh. */
+export function fitStandaloneHeight(win: Window & { navigator: Navigator & { standalone?: boolean } } = window): void {
+  if (win.navigator.standalone !== true) return
+  const root = win.document.documentElement
+  const fit = () => {
+    const h = fullScreenHeight({ w: win.innerWidth, h: win.innerHeight }, { w: win.screen.width, h: win.screen.height })
+    if (h) root.style.setProperty('--app-h', `${h}px`)
+    else root.style.removeProperty('--app-h')
+  }
+  win.addEventListener('resize', fit)
+  fit()
+}
+
 /** True on iOS/iPadOS Safari where installation uses Share -> Add to Home Screen rather than `beforeinstallprompt`. */
 export function isIosSafari(
   ua = typeof navigator !== 'undefined' ? navigator.userAgent : '',
@@ -466,6 +491,7 @@ export function initPwa(opts: {
 } = {}) {
   const standalone = isStandaloneDisplay()
   if (typeof document !== 'undefined') document.documentElement.classList.toggle('pwa', standalone)
+  if (typeof window !== 'undefined') fitStandaloneHeight()
 
   // Register SW (only on pages with <link rel="manifest">) and request durable storage when installed.
   void registerServiceWorker()

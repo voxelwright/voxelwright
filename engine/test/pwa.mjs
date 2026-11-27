@@ -9,6 +9,7 @@ import {
   createWakeLock,
   isIosSafari,
   isStandaloneDisplay,
+  fullScreenHeight,
   registerServiceWorker,
   skyThemeColor,
 } from '../page/pwa.ts'
@@ -188,6 +189,14 @@ import {
 
   unbind()
   assert.equal(handlers.get('play'), null)
+}
+
+// 3b. An installed iOS app laid out a status bar short (owner's iPhone, Nov 27) fills the screen; a full layout is left alone.
+{
+  assert.equal(fullScreenHeight({ w: 393, h: 793 }, { w: 393, h: 852 }), 852)
+  assert.equal(fullScreenHeight({ w: 852, h: 393 }, { w: 393, h: 852 }), null)
+  assert.equal(fullScreenHeight({ w: 393, h: 852 }, { w: 393, h: 852 }), null)
+  assert.equal(fullScreenHeight({ w: 393, h: 500 }, { w: 393, h: 852 }), null)
 }
 
 // 4. Install prompt handles beforeinstallprompt, iOS Safari fallback, and hides in standalone or webdriver.
