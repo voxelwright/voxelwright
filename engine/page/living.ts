@@ -6,7 +6,7 @@
 import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import { cockpit, type CockpitState } from './cockpit.ts'
 import { VehicleDeformation, type DeformState } from './deform.ts'
-import { createDriveCam, type DriveCamMode } from './drive-cam.ts'
+import { createDriveCam, DRIVE_CAM_LABELS, nextDriveCam, type DriveCamMode } from './drive-cam.ts'
 import { touchSteerCurve } from './gamepad.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
@@ -214,6 +214,51 @@ const turned = (q: readonly number[], v: readonly number[]): [number, number, nu
   return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
 }
 
+/** How far ahead of the driver's eye nothing of its own but glass may be (cells): a head's room before the windscreen, the dash or a wheel. */
+const EYE_CLEAR = 3.5
+/**
+ * Where a driver's eye sees out from (#74): `eye` itself where, through its windscreen (20 degrees to either side,
+ * from 12 degrees down to 8 up), nothing of its own but glass is within `EYE_CLEAR` and no cell is within a head's
+ * width of it; else the nearest place that is so, forward first along its front, then back and up and down. A
+ * kept car's eye may be over its own seat's back (the street's blue saloon: its seat filled the lower half of the
+ * picture, 3 cm under the eye). Null where the eye is clear already, or no place near is.
+ */
+export function clearEye(eye: readonly number[], front: number, parts: readonly { kinds: ArrayLike<number>; size: readonly number[]; per: number; low: readonly number[] }[]): [number, number, number] | null {
+  const f = FRONTS[front] ?? FRONTS[0], r = [-f[2], 0, f[0]]
+  /** The kind of its look at a place in its own cells: the first part with a cell there (0 for none). */
+  const kindAt = (p: readonly number[]) => {
+    for (const part of parts) {
+      const x = Math.floor((p[0] - part.low[0]) * part.per), y = Math.floor((p[1] - part.low[1]) * part.per), z = Math.floor((p[2] - part.low[2]) * part.per)
+      if (x < 0 || y < 0 || z < 0 || x >= part.size[0] || y >= part.size[1] || z >= part.size[2]) continue
+      const k = part.kinds[x + part.size[0] * (z + part.size[2] * y)]
+      if (k) return k
+    }
+    return 0
+  }
+  const solid = (p: readonly number[]) => { const k = kindAt(p); return k !== 0 && (k & 15) !== 11 }
+  const rays: number[][] = []
+  for (const side of [-20, -10, 0, 10, 20]) for (const up of [-12, -6, 0, 8]) {
+    const a = (side * Math.PI) / 180, d = [f[0] * Math.cos(a) + r[0] * Math.sin(a), Math.tan((up * Math.PI) / 180), f[2] * Math.cos(a) + r[2] * Math.sin(a)], n = Math.hypot(d[0], d[1], d[2])
+    rays.push(d.map((v) => v / n))
+  }
+  const clear = (p: readonly number[]) => {
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if (solid([p[0] + dx * 0.8, p[1] + dy * 0.8, p[2] + dz * 0.8])) return false
+    for (const d of rays) for (let t = 0.25; t <= EYE_CLEAR; t += 1 / 8) {
+      const k = kindAt([p[0] + d[0] * t, p[1] + d[1] * t, p[2] + d[2] * t])
+      // (Glass met: what is past it is the street's, or the bonnet's seen through it.)
+      if ((k & 15) === 11) break
+      if (k) return false
+    }
+    return true
+  }
+  if (clear(eye)) return null
+  for (const step of [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 5, 6]) for (const [along, up] of [[step, 0], [step, 0.5], [step, -0.5], [-step, 0], [0, step / 2], [0, -step / 2]]) {
+    const p: [number, number, number] = [eye[0] + f[0] * along, eye[1] + up, eye[2] + f[2] * along]
+    if (clear(p)) return p.map((v) => +v.toFixed(2)) as [number, number, number]
+  }
+  return null
+}
+
 export function living(o: {
   send(ask: Ask): void
   /** Says that something is to move, so that the solver is asked for steps again. */
@@ -385,8 +430,8 @@ export function living(o: {
     seat.setAttribute('aria-pressed', String(inside))
     const driveExtras: HTMLButtonElement[] = []
     if (scheme.name === 'drive') {
-      const camBtn = button('cam', 'Cam', () => { if (inside) view(false); cam.cycle(); showCamToast() })
-      camBtn.setAttribute('aria-label', 'Cycle camera view')
+      const camBtn = button('cam', 'Cam', nextView)
+      camBtn.setAttribute('aria-label', 'Next camera view, the seat among them')
       driveExtras.push(camBtn)
       if (o.audio?.radio) {
         const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('next') })
@@ -456,6 +501,9 @@ export function living(o: {
       piece.cell = 0
       return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: glassOf(kinds, f.size) }
     }))
+    // The eye where it sees out (#74): once, as its look is worn, and kept on it for the seat, its dents and its card.
+    const eye = clearEye(eyeOf(thing), thing.motor.front, parts)
+    if (eye) thing.eye = eye
     const queued = pendingDents.get(thing)
     if (queued) {
       pendingDents.delete(thing)
@@ -581,21 +629,39 @@ export function living(o: {
     const held = (v: number, most: number) => Math.max(-EYE_OUT, Math.min(most + EYE_OUT, v))
     return [held(e[0], thing.size[0]), held(e[1], thing.size[1] + SITTING_EYE), held(e[2], thing.size[2])]
   }
-  const view = (on: boolean) => {
+  // A car's seat is one of the driving camera's views (#74): in it the camera says 'seat', and out of it the view
+  // it was in before (`outside`), unless C says which view comes next.
+  let outside: DriveCamMode = 'close'
+  /** Says the ridden thing's keys on its card again (set as it is mounted). */
+  let refreshCard: (() => void) | null = null
+  const view = (on: boolean, next?: DriveCamMode) => {
     if (on === inside) return
     inside = on && !!riding
     seat?.setAttribute('aria-pressed', String(inside))
-    if (inside && riding) { cabin.reset(); head[0] = 0; head[1] = -0.08; o.lens?.(0, 0, 0) }
-    else {
+    const isDrive = !!riding && (riding.controls ?? 'drive') === 'drive'
+    if (inside && riding) {
+      if (isDrive && cam.mode !== 'seat') { outside = cam.mode; cam.setMode('seat') }
+      cabin.reset(); head[0] = 0; head[1] = -0.08; o.lens?.(0, 0, 0)
+    } else {
       // Behind again: looking the way the head was turned.
       cabin.reset()
       o.pose.tilt = undefined
-      const isDrive = riding && (riding.controls ?? 'drive') === 'drive'
       if (isDrive) cam.sync(facing, head[0], true)
       o.pose.yaw = facing + head[0]
       o.pose.pitch = isDrive ? -0.135 : -0.22
       room = 0
+      // (After the pose is set: cinema blends in from where the eye was, the seat.)
+      if (cam.mode === 'seat') cam.setMode(next ?? outside)
     }
+  }
+  /** C, the touch kit's Cam and a pad's next camera while driving: the next view of the driving camera, in or out of the seat. */
+  const nextView = () => {
+    const next = nextDriveCam(cam.mode)
+    if (next === 'seat') view(true)
+    else if (inside) view(false, next)
+    else cam.setMode(next)
+    showCamToast()
+    refreshCard?.()
   }
   const tell = (thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump', boost?: boolean, wetness?: number) => {
     if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once, boost, wetness); return }
@@ -668,15 +734,15 @@ export function living(o: {
       }
     }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
-    const refreshCard = () => {
-      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio'], ['F', 'repair']] : []
-      o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
+    refreshCard = () => {
+      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['V', inside ? `back to ${DRIVE_CAM_LABELS[outside]}` : 'seat'], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio'], ['F', 'repair']] : [['V', 'look from the seat']]
+      o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     }
     refreshCard()
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && code === 'KeyN') { if (!e?.repeat) o.audio?.radio?.('next'); return true } if (isDrive && code === 'KeyF') { if (!e?.repeat && riding) repairCar(riding); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); if (isDrive) { showCamToast(); refreshCard?.() } return true } if (isDrive && code === 'KeyC') { nextView(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && code === 'KeyN') { if (!e?.repeat) o.audio?.radio?.('next'); return true } if (isDrive && code === 'KeyF') { if (!e?.repeat && riding) repairCar(riding); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }

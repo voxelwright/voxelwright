@@ -1,9 +1,11 @@
 // Cinematic driving camera suite (#32): encapsulates all external vehicle cameras (close chase,
 // far chase, hood, bumper, and dynamic GTA-style cinema mode), instant 180-degree look-back (X),
 // smooth exponential mode-switch interpolation, SF hill stunt air-cam, and multi-ray anti-clipping.
+// The driver's seat is one of its views too (#74): C goes round them all, the seat among them. In the seat the
+// eye is living.ts's own (cockpit.ts heaves it) and only `frameSeat` is asked of the camera.
 import { AHEAD, clearWay, roomAfter } from './eye.ts'
 
-export const DRIVE_CAM_MODES = ['close', 'far', 'hood', 'bumper', 'cinema'] as const
+export const DRIVE_CAM_MODES = ['close', 'far', 'hood', 'bumper', 'seat', 'cinema'] as const
 export type DriveCamMode = (typeof DRIVE_CAM_MODES)[number]
 
 export const DRIVE_CAM_LABELS: Record<DriveCamMode, string> = {
@@ -11,8 +13,12 @@ export const DRIVE_CAM_LABELS: Record<DriveCamMode, string> = {
   far: 'Far',
   hood: 'Hood',
   bumper: 'Bumper',
+  seat: 'Seat',
   cinema: 'Cinema',
 }
+
+/** The view C goes to after `mode`. */
+export const nextDriveCam = (mode: DriveCamMode): DriveCamMode => DRIVE_CAM_MODES[(DRIVE_CAM_MODES.indexOf(mode) + 1) % DRIVE_CAM_MODES.length]
 
 export interface DriveCamDeps {
   pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] }
@@ -67,13 +73,13 @@ export interface DriveCam {
   setMode(mode: DriveCamMode): void
   /** Resets transient camera dynamics when mounting/unmounting. */
   reset(): void
-  /** Synchronizes yaw/blend to a vehicle heading (on mount or exiting Driver Seat). */
+  /** Synchronizes yaw/blend to a vehicle heading (on mount or leaving the seat). */
   sync(facing: number, orbitOffset?: number, snapBlend?: boolean): void
   /** Injects an impact/landing camera shake impulse. */
   shake(amp: number): void
-  /** Updates `pose` and `lens` for one external driving frame. */
+  /** Updates `pose` and `lens` for one external driving frame (in 'seat', when the seat cannot be placed, it frames as 'close'). */
   frame(ctx: DriveCamInput): void
-  /** Updates dynamic FOV and speed-energy while in Driver Seat (V). */
+  /** Updates dynamic FOV and speed-energy while in the seat ('seat': C round to it, or V). */
   frameSeat(dt: number, fwdSpeed: number, topSpeed: number, reducedMotion: boolean): void
 }
 
@@ -307,7 +313,7 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
     get fovAdd() { return camFov },
     cycle() {
       const prev = mode
-      const next = DRIVE_CAM_MODES[(DRIVE_CAM_MODES.indexOf(mode) + 1) % DRIVE_CAM_MODES.length]
+      const next = nextDriveCam(mode)
       mode = next
       if (next === 'cinema') { exitTransition = 0; startCinema(true) }
       else if (prev === 'cinema') leaveCinema()
@@ -541,7 +547,7 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
         targetFovBias = 9.0
         targetMountMix = 1
       } else {
-        // 'close' (and cinema look-back fallback)
+        // 'close' (and cinema look-back fallback, and a seat that cannot be placed)
         targetFwdOff = -(closeBack + camPull + airBack)
         targetUpOff = closeHigh - airDrop
         targetBasePitch = -0.135 + camHill + airPitch

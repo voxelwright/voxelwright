@@ -62,6 +62,7 @@ let checks = [
   ['living', 'node', ['test/living.mjs'], true],
   ['driven', 'node', ['test/driven.mjs'], true],
   ['fine-living', 'node', ['test/fine-living.mjs'], true],
+  ['seat-view', 'node', ['test/seat-view.mjs'], true],
   ['deform', 'node', ['test/deform.mjs'], true],
   ['dents', 'node', ['test/dents.mjs'], true],
   ['sculpt-cars', 'node', ['test/sculpt-cars.mjs'], false],
