@@ -37,10 +37,10 @@ These hold everywhere in the sound code:
 
 `sound()` in [sound.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/sound.ts) makes one `AudioContext` with `latencyHint: 'interactive'`, loads `dsp.ts` as the worklet module and connects one `AudioWorkletNode` named `village-voice` straight to the output.
 
-- Browsers only allow sound after a gesture. The context is resumed by the first `pointerup`, `touchend`, `click` or `keydown` anywhere, and again after a call, a lock or an app switch has stopped it. A touch going down is not enough; its coming up is.
+- Browsers only allow sound after a gesture. The context is resumed by the first `pointerup`, `touchend`, `click` or `keydown` anywhere (or immediately if `navigator.userActivation.hasBeenActive` is already true when deferred audio finishes starting), and again after a call, a lock or an app switch has stopped it. A touch going down is not enough; its coming up is.
 - On an iPhone the ringer switch silences page audio unless the page says it is playing media, so `sound()` sets `navigator.audioSession.type = 'playback'` where it exists.
 - The page suspends the context while it is hidden.
-- The picture never waits for sound. [main.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/main.ts) starts it and carries on; a worklet that fails to load leaves a silent page, not a broken one.
+- The picture never waits for sound. [main.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/main.ts) defers starting `sound()` until right after the first picture is drawn so `AudioContext` creation never blocks cold launch; a worklet that fails to load leaves a silent page, not a broken one.
 
 `dsp.ts` has no runtime imports, so the same file runs in Node as `new Synth(rate).render(left, right)`. The checks and the benchmark render the exact code the page plays.
 

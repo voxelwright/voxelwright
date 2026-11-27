@@ -31,7 +31,7 @@ const SENT_BY_WORKER = (path) => path.startsWith('releases/') || path.startsWith
 // Binary city tiles, far faces and road/map tables are only read by WebGPU browsers (all of which send
 // Accept-Encoding: br): drop their uncompressed copies when a quality-11 .br sibling exists so dist-world stays
 // compact (~800 MB / ~6,800 files instead of ~6.7 GB / ~12,400 files). Text and JSON keep both plain and .br.
-const BROTLI_ONLY_BINARY = (path) => SENT_BY_WORKER(path) && /\.(bay|far|bin)$/.test(path)
+const BROTLI_ONLY_BINARY = (path) => SENT_BY_WORKER(path) && /\.(bay|far|bin|pack)$/.test(path)
 // releases/<pin>/graph/: the street graphs, plain and .br. No page code reads them (engine/page has no reference).
 const UNUSED = (path) => /^releases\/[^/]+\/graph\//.test(path)
 const worldFiles = new Map()
@@ -162,7 +162,8 @@ function assemble(folder, entries, headers, world) {
       p === 'alpha.js' ||
       p === 'page/main.js' ||
       p === 'page/core.wasm' ||
-      p === 'kit/voxelmorphism.css' ||
+      /^assets\/(?:main|core)-[^/]+\.(?:js|wasm)$/.test(p) ||
+      /^kit\/voxelmorphism(?:-[0-9a-f]+)?\.css$/.test(p) ||
       /^loading-[^/]+\.webp$/.test(p) ||
       /^kit\/fonts\/.*\.woff2$/.test(p) ||
       /^icons\/icon-(?:192|512)\.png$/.test(p)
@@ -201,6 +202,11 @@ function assemble(folder, entries, headers, world) {
       '  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000',
       '# The loader\'s pictures are named by their content.',
       '/loading-*.webp',
+      '  Cache-Control: public, max-age=31536000, immutable',
+      '# Content-hashed engine bundles, chunks, WebAssembly core and stylesheet.',
+      '/assets/*',
+      '  Cache-Control: public, max-age=31536000, immutable',
+      '/kit/voxelmorphism-*.css',
       '  Cache-Control: public, max-age=31536000, immutable',
       '# Fonts keep their names but almost never change: a week, then checked in the background for a month.',
       '/kit/fonts/*',

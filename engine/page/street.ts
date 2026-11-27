@@ -26,7 +26,9 @@ import { NAMED as NAMED_MOVES } from './moves.ts'
 import { unrun } from './runs.ts'
 import { POLISHED } from './spells.ts'
 import { faces as facesOf } from './fine.ts'
-import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiService, type StationBorns } from './robotaxi.ts'
+import { LOCAL } from './local.ts'
+import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
+import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiModel, type RobotaxiService, type StationBorns } from './robotaxi.ts'
 
 /** What street life asks of the land (the core's exports). */
 export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; top_at?(x: number, z: number): number }
@@ -382,6 +384,8 @@ export function street(o: {
   input: Input
   /** Faces made for a look's cells, for the page to keep beside the ones it makes itself (main.ts): a car brought to life finds its look's faces made. */
   faces?: (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => void
+  /** Pre-sculpted robotaxi models built off the page thread (robotaxi-maker.ts); built synchronously here when omitted. */
+  robotaxis?: Promise<readonly RobotaxiModel[]>
   /** Called on a high-speed clean close pass past a parked or traffic car. */
   onNearMiss?: (info: NearMiss) => void
   /** Called when the driven vehicle collides with a street vehicle (for sparks, audio, and events). */
@@ -486,6 +490,15 @@ export function street(o: {
   /** Life files on their way: at most `LIFE_AT_ONCE` (#81), the nearest the eye first, so a jump across the city does not ask for a dozen at once. */
   let lifeComing = 0
   const LIFE_AT_ONCE = 3
+  const lifePacks = PACKS_ENABLED ? LOCAL?.packs ?? null : null
+  const lifeReleaseRoot = new URL('../', o.life)
+  const lifeJson = async <T>(relPath: string, packUrl: string | null): Promise<T | null> => {
+    if (packUrl) {
+      const packed = await readPackedJson<T>(packUrl, `life/${relPath}`)
+      if (packed) return packed
+    }
+    return fetch(new URL(relPath, o.life)).then((r) => (r.ok ? (r.json() as Promise<T>) : null), () => null)
+  }
   const wanted = (eye: readonly number[]) => {
     if (!index || lifeComing >= LIFE_AT_ONCE) return
     const near: { name: string; d: number }[] = []
@@ -498,7 +511,9 @@ export function street(o: {
     for (const { name } of near.slice(0, LIFE_AT_ONCE - lifeComing)) {
       squares.set(name, 'asked')
       lifeComing++
-      void fetch(new URL(index.life[name].path, o.life)).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) { take(s); squares.set(name, 'held') } }, () => squares.delete(name)).finally(() => { lifeComing-- })
+      const packName = lifePacks?.life ? squarePackName('life', name, lifePacks.life) : null
+      const packUrl = packName ? new URL(`${lifePacks!.dir ?? 'packs/'}${packName}`, lifeReleaseRoot).href : null
+      void lifeJson<Parameters<typeof take>[0]>(index.life[name].path, packUrl).then((s) => { if (s) { take(s); squares.set(name, 'held') } else squares.delete(name) }, () => squares.delete(name)).finally(() => { lifeComing-- })
     }
   }
   /**
@@ -507,30 +522,37 @@ export function street(o: {
    */
   let pendingWarm: readonly [number, number, number] | null = null
   let lifeAsked = false
-  const askLife = () => { if (lifeAsked) return; lifeAsked = true; void fetch(new URL('index.json', o.life)).then((r) => r.json()).then((i) => {
-    index = i
-    if (pendingWarm) wanted(pendingWarm)
-    if (!i.transit) return
-    void fetch(new URL(i.transit.path, o.life)).then((r) => r.json()).then((t: { routes: { ref: string; kind: string; lines: number[][] }[]; buses?: { ref: string; kind: string; operator: string; hours: [number, number]; pieces: { roads: string[]; stops: [number, number][] }[] }[] }) => {
-      // The cable cars run their routes as OSM orders them, one way each; the streetcars are driven.
-      lines.length = 0; cableBases.clear()
-      for (const route of t.routes) for (const flat of route.lines) {
-        const l = line(flat, 0)
-        if (l.len < 3000) continue
-        const seed = mix(Math.round(flat[0]), Math.round(flat[1]))
-        if (route.kind === 'cable') lines.push({ ...l, seed, lights: [] })
-        else tramLines.push({ ...l, seed, lights: [] })
-      }
-      // The buses' and trolleybuses' routes, a piece at a time: a Muni line every 8 minutes or so at its usual 7 m/s
-      // between stops, another operator's every 20.
-      for (const b of t.buses ?? []) for (const p of b.pieces) {
-        const seed = mix(idSeed(Number(p.roads[0].split('/')[0])), b.ref.split('').reduce((h, ch) => mix(h, ch.charCodeAt(0)), 7))
-        busPieces.push({ keys: p.roads, stops: p.stops, seed, apart: (/muni/i.test(b.operator) ? 8 : 20) * 60 * 70, kind: b.kind === 'trolleybus' ? 'trolley' : 'bus', hours: b.hours, ref: b.ref })
-      }
-      for (const r of roads.values()) r.railShift = undefined
-      routed = true
+  const askLife = () => {
+    if (lifeAsked) return
+    lifeAsked = true
+    const metaPack = lifePacks?.lifeMeta ? new URL(lifePacks.lifeMeta, lifeReleaseRoot).href : null
+    void lifeJson<typeof index>('index.json', metaPack).then((i) => {
+      if (!i) return
+      index = i
+      if (pendingWarm) wanted(pendingWarm)
+      if (!i.transit) return
+      void lifeJson<{ routes: { ref: string; kind: string; lines: number[][] }[]; buses?: { ref: string; kind: string; operator: string; hours: [number, number]; pieces: { roads: string[]; stops: [number, number][] }[] }[] }>(i.transit.path, metaPack).then((t) => {
+        if (!t) return
+        // The cable cars run their routes as OSM orders them, one way each; the streetcars are driven.
+        lines.length = 0; cableBases.clear()
+        for (const route of t.routes) for (const flat of route.lines) {
+          const l = line(flat, 0)
+          if (l.len < 3000) continue
+          const seed = mix(Math.round(flat[0]), Math.round(flat[1]))
+          if (route.kind === 'cable') lines.push({ ...l, seed, lights: [] })
+          else tramLines.push({ ...l, seed, lights: [] })
+        }
+        // The buses' and trolleybuses' routes, a piece at a time: a Muni line every 8 minutes or so at its usual 7 m/s
+        // between stops, another operator's every 20.
+        for (const b of t.buses ?? []) for (const p of b.pieces) {
+          const seed = mix(idSeed(Number(p.roads[0].split('/')[0])), b.ref.split('').reduce((h, ch) => mix(h, ch.charCodeAt(0)), 7))
+          busPieces.push({ keys: p.roads, stops: p.stops, seed, apart: (/muni/i.test(b.operator) ? 8 : 20) * 60 * 70, kind: b.kind === 'trolleybus' ? 'trolley' : 'bus', hours: b.hours, ref: b.ref })
+        }
+        for (const r of roads.values()) r.railShift = undefined
+        routed = true
+      }, () => {})
     }, () => {})
-  }, () => {}) }
+  }
 
   // ── People ──
   const routes = new Map<string, Route>()
@@ -1065,29 +1087,49 @@ export function street(o: {
   const models = new Map<string, Promise<Model | null>>(), ready = new Map<string, Model>()
   let library: { id: string; kind: string }[] = []
   // Register every active robotaxi service from `ROBOTAXI_SERVICES` procedurally (zero extra fetches, works on every SF release).
+  // When `o.robotaxis` is provided (built off the main thread in robotaxi-maker.ts), models arrive asynchronously without stalling boot.
   const serviceById = new Map<string, RobotaxiService>()
   const robotaxiModels = new Map<string, Model>()
-  for (const svc of ROBOTAXI_SERVICES) {
-    serviceById.set(svc.id, svc)
-    const built: Model = buildRobotaxiModel(svc)
-    robotaxiModels.set(svc.id, built)
-    ready.set(svc.id, built)
-    models.set(svc.id, Promise.resolve(built))
+  for (const svc of ROBOTAXI_SERVICES) serviceById.set(svc.id, svc)
+  if (o.robotaxis) {
+    for (const svc of ROBOTAXI_SERVICES) {
+      models.set(svc.id, o.robotaxis.then((made) => made.find((m) => m.id === svc.id) ?? null))
+    }
+  } else {
+    for (const svc of ROBOTAXI_SERVICES) {
+      const built: Model = buildRobotaxiModel(svc)
+      robotaxiModels.set(svc.id, built)
+      ready.set(svc.id, built)
+      models.set(svc.id, Promise.resolve(built))
+    }
   }
   const serviceOf = (c: Car): RobotaxiService => serviceById.get(c.model.serviceId ?? '') ?? ROBOTAXI_SERVICES[0]
   const lidarBorn = (svc: RobotaxiService, stuck: boolean) => buildLidarDomeBorns(svc)[stuck ? 'stuck' : 'normal']
+  const carsPackUrl = lifePacks?.cars ? new URL(lifePacks.cars, new URL('../', o.cars)).href : null
+  const carsJson = async <T>(relPath: string): Promise<T | null> => {
+    if (carsPackUrl) {
+      const packed = await readPackedJson<T>(carsPackUrl, `cars/${relPath}`)
+      if (packed) return packed
+    }
+    return fetch(new URL(relPath, o.cars)).then((r) => (r.ok ? (r.json() as Promise<T>) : null), () => null)
+  }
   /** The kept vehicles' listing, and each of them: as the life files are, the first time street life is on (#81). */
   let carsAsked = false
-  const askCars = () => { if (carsAsked) return; carsAsked = true; void fetch(new URL('index.json', o.cars)).then((r) => r.json()).then((l) => {
-    library = l.cars
-    for (const c of library) if (!serviceById.has(c.id)) model(c.id)
-    for (const svc of ROBOTAXI_SERVICES) {
-      if (!library.some((c) => c.id === svc.id)) library = [...library, { id: svc.id, kind: 'robotaxi' }]
-    }
-  }, () => {}) }
+  const askCars = () => {
+    if (carsAsked) return
+    carsAsked = true
+    void carsJson<{ cars: { id: string; kind: string }[] }>('index.json').then((l) => {
+      if (!l) return
+      library = l.cars
+      for (const c of library) if (!serviceById.has(c.id)) model(c.id)
+      for (const svc of ROBOTAXI_SERVICES) {
+        if (!library.some((c) => c.id === svc.id)) library = [...library, { id: svc.id, kind: 'robotaxi' }]
+      }
+    }, () => {})
+  }
   const model = (id: string) => {
     let m = models.get(id)
-    if (!m) models.set(id, m = fetch(new URL(`${id}.json`, o.cars)).then((r) => (r.ok ? r.json() : null)).then((m: Omit<Model, 'id' | 'front' | 'long' | 'wide'> | null) => {
+    if (!m) models.set(id, m = carsJson<Omit<Model, 'id' | 'front' | 'long' | 'wide'>>(`${id}.json`).then((m) => {
       if (!m) return null
       const front = m.motor?.front ?? 0, done = { ...m, id, front, long: (front < 2 ? m.size[0] : m.size[2]), wide: (front < 2 ? m.size[2] : m.size[0]) }
       ready.set(id, done)
@@ -1851,7 +1893,7 @@ export function street(o: {
   const depotCars: Car[] = []
   interface DepotState {
     service: RobotaxiService
-    model: Model
+    model: Model | null
     borns: StationBorns | null
     shown: boolean
     mascotAngle: number
@@ -1868,7 +1910,7 @@ export function street(o: {
   }
   const depots: DepotState[] = ROBOTAXI_SERVICES.map((service) => ({
     service,
-    model: robotaxiModels.get(service.id)!,
+    model: robotaxiModels.get(service.id) ?? null,
     borns: null,
     shown: false,
     mascotAngle: 0,
@@ -1886,6 +1928,17 @@ export function street(o: {
     },
   }))
   const depotByService = new Map<string, DepotState>(depots.map((d) => [d.service.id, d]))
+  if (o.robotaxis) {
+    void o.robotaxis.then((made) => {
+      for (const built of made) {
+        robotaxiModels.set(built.id, built)
+        ready.set(built.id, built)
+        const depot = depotByService.get(built.id)
+        if (depot) depot.model = built
+        if (prewarmOn) enqueueModelWarm(built)
+      }
+    })
+  }
 
   const smoothWaypoints = (ctrl: [number, number][]): { pts: [number, number][]; cum: number[] } => {
     const pts: [number, number][] = []
@@ -1984,7 +2037,7 @@ export function street(o: {
     const total = path.cum[path.cum.length - 1] || 0
     const s = total * progress
     const c: Car = {
-      id: ids++, model: depot.model, paint: -1, kind: phase === 'charging' ? 'parked' : 'traffic', seed: ids,
+      id: ids++, model: depot.model!, paint: -1, kind: phase === 'charging' ? 'parked' : 'traffic', seed: ids,
       x: bx, y: 0, z: bz, heading: b.heading, pitch: 0, v: phase === 'charging' ? 0 : 28, piece: null, shown: '',
       lidarAngle: random() * Math.PI * 2,
       depot: { serviceId: depot.service.id, phase, bay: bayIdx, until: now + 9 + random() * 18, pts: path.pts, cum: path.cum, s },
@@ -2018,6 +2071,7 @@ export function street(o: {
   const depotStep = (dt: number, view: View) => {
     const now = performance.now() / 1000
     for (const depot of depots) {
+      if (!depot.model) continue
       const st = depot.service.station, sid = depot.service.id
       const dist = Math.hypot(view.eye[0] - st.cx, view.eye[2] - st.cz)
       if (dist > st.drawReach) {
@@ -2109,6 +2163,7 @@ export function street(o: {
   }
   const showStations = (view: View, dt: number) => {
     for (const depot of depots) {
+      if (!depot.model) continue
       const st = depot.service.station, sid = depot.service.id, sp = depot.pieces
       const dist = Math.hypot(view.eye[0] - st.cx, view.eye[2] - st.cz)
       if (dist > st.drawReach) { hideDepot(depot); continue }
@@ -3226,7 +3281,8 @@ export function street(o: {
         triggerStuck(kind: 'intersection' | 'narrow' = 'intersection', serviceId?: string) {
           const svc = serviceId === undefined ? ROBOTAXI_SERVICES[0] : serviceById.get(serviceId)
           if (!svc) return null
-          const svcModel = robotaxiModels.get(svc.id)!
+          const svcModel = robotaxiModels.get(svc.id)
+          if (!svcModel) return null
           const eye = lastEye ?? [svc.station.cx, 50, svc.station.cz]
           const nowT = performance.now() / 1000
           // Prefer a visible incident beside actual sidewalk traffic, keeping existing taxis when equally suitable.
@@ -3415,7 +3471,7 @@ export function street(o: {
       wanted(pendingWarm)
     },
     get ms() { return ms + peopleMs },
-    get ready() { return roads.size > 0 && ready.size > 0 },
+    get ready() { return roads.size > 0 && ready.size > 0 && robotaxiModels.size === ROBOTAXI_SERVICES.length },
   }
   return self
 }

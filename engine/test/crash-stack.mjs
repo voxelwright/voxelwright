@@ -190,7 +190,14 @@ if (!parts.includes('sf')) {
   // Another checkout's page and core over the built folder's, each module stripped as sf/build.mjs strips it.
   const from = resolve(arg('page', here)), NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1,2}\/[^'"`?$]+?)\.(ts|mjs)\b/g
   const extra = (req, res) => {
-    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname), m = /^\/(page|make|blocks)\/([\w./-]+)\.(js|wasm)$/.exec(path)
+    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname)
+    if (path === '/sf/index.html') {
+      const html = readFileSync(join(dist, 'sf/index.html'), 'utf8').replace(/\.\.\/assets\/main-[^"]+\.js/g, '../page/main.js')
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end(html)
+      return true
+    }
+    const m = /^\/(page|make|blocks)\/([\w./-]+)\.(js|wasm)$/.exec(path)
     if (!m || m[2].includes('..')) return false
     const source = m[3] === 'wasm' ? join(from, m[1], `${m[2]}.wasm`) : [join(from, m[1], `${m[2]}.ts`), join(from, m[1], `${m[2]}.mjs`)].find((f) => existsSync(f) && statSync(f).isFile())
     if (!source || !existsSync(source)) return false

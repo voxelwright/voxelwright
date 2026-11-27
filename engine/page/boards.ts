@@ -445,7 +445,7 @@ export async function boards(o: Needs): Promise<Boards> {
       // (Each frame, as a far face is made again when its size changes and a reset lays the boards again.)
       if (s.screen) s.screen.unlit = dark
       if (s.far) s.far.unlit = dark
-      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
+      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s, true); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
       if (!s.screen) continue
       if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
       else if (s.b.type === 'logo') { seat(s, view.eye); sharpen(s, view, to.size) }
@@ -500,8 +500,10 @@ export async function boards(o: Needs): Promise<Boards> {
   /**
    * A lettering board's face: a picture of the front of its cells as the world has them now (a letter that fell is
    * not on it), from its posts' feet to its panels' top, a cell proud of them.
+   * When `fromWorld` is false (freshly laid), samples directly from `s.shape.runs` so boot never forces the page's
+   * WASM core to generate distant 64³ sectors synchronously on the main thread.
    */
-  const paintFar = (s: Stood) => {
+  const paintFar = (s: Stood, fromWorld = false) => {
     // A pixel of it a quarter of a letter's stroke, and what it is the mean of the cells under it: from where a face
     // is shown a stroke is a pixel or two of the picture, and one cell picked out of nine lost a letter's diagonals.
     const sh = s.shape!, low = sh.box[1], tall = sh.box[4] - low, step = Math.max(1, Math.round((sh.px ?? 4) / 4)), w = Math.ceil(sh.wide / step), h = Math.ceil(tall / step)
@@ -509,14 +511,35 @@ export async function boards(o: Needs): Promise<Boards> {
     const kinds = (s.farKinds = new Uint8Array(w * h * 3)), each = 255 / (step * step)
     const letters = (sh.letters ?? []).filter((l): l is Laid => !!l)
     s.farLetter = Int16Array.from({ length: w }, (_, i) => letters.findIndex((l) => i * step + step / 2 >= l.k0 && i * step + step / 2 < l.k0 + l.pitch))
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-      const share = [0, 0, 0]
-      for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) {
-        const along = i * step + u + 0.5 - sh.wide / 2
-        const kind = o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(low + tall - j * step - v - 0.5), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15
-        if (kind) share[kind === LAMP ? 2 : kind === STEEL ? 1 : 0] += each
+    let front: Uint8Array | null = null
+    if (!fromWorld && sh.runs.length && sh.wide > 0 && tall > 0) {
+      front = new Uint8Array(sh.wide * tall)
+      const runs = sh.runs, ax = sh.right[0] !== 0, dir = ax ? sh.right[0] : sh.right[2]
+      const plane = Math.floor((ax ? sh.middle[2] - sh.normal[2] * 0.5 : sh.middle[0] - sh.normal[0] * 0.5))
+      const org = Math.round((ax ? sh.middle[0] : sh.middle[2]) - (dir > 0 ? sh.wide / 2 : -sh.wide / 2 + 1))
+      for (let r = 0; r < runs.length; r += 5) {
+        const x0 = runs[r], x1 = runs[r + 1], y = runs[r + 2], z = runs[r + 3], k = runs[r + 4] & 15
+        if (!k || y < low || y >= low + tall) continue
+        const row = (y - low) * sh.wide
+        if (ax) { if (z === plane) for (let x = x0; x < x1; x++) { const c = dir > 0 ? x - org : org - x; if (c >= 0 && c < sh.wide) front[row + c] = k } }
+        else if (plane >= x0 && plane < x1) { const c = dir > 0 ? z - org : org - z; if (c >= 0 && c < sh.wide) front[row + c] = k }
       }
-      kinds.set(share, (j * w + i) * 3)
+    }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      let s0 = 0, s1 = 0, s2 = 0
+      for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) {
+        let kind: number
+        if (front) {
+          const col = i * step + u, ky = low + tall - 1 - (j * step + v)
+          kind = col < sh.wide && ky >= low && ky < low + tall ? front[(ky - low) * sh.wide + col] : 0
+        } else {
+          const along = i * step + u + 0.5 - sh.wide / 2
+          kind = o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(low + tall - j * step - v - 0.5), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15
+        }
+        if (kind) { if (kind === LAMP) s2 += each; else if (kind === STEEL) s1 += each; else s0 += each }
+      }
+      const off = (j * w + i) * 3
+      kinds[off] = s0; kinds[off + 1] = s1; kinds[off + 2] = s2
     }
     s.stale = false
     s.far!.at = [sh.middle[0] + sh.normal[0], low + tall / 2, sh.middle[2] + sh.normal[2]]; s.far!.hu = [(sh.right[0] * sh.wide) / 2, 0, (sh.right[2] * sh.wide) / 2]; s.far!.hv = [0, tall / 2, 0]
@@ -601,6 +624,8 @@ export async function boards(o: Needs): Promise<Boards> {
     s.seen = key
     s.sharp(key === 'whole' ? undefined : seen)
   }
+  let seenEdits = -1
+  let standingEdits = -1
   const stand = (s: Stood, again = false) => {
     const b = s.b, face = faceOf(b), text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '', face!) : ''
     if (!again && s.shape && s.text === text) return
@@ -608,7 +633,15 @@ export async function boards(o: Needs): Promise<Boards> {
     s.shape = shape(b, text, face ?? undefined); s.text = text
     if (s.shape.runs.length) lay(rows(s.shape.runs, s.shape.box))
     place(s)
-    if (b.type === 'lettering') { s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M]); paintFar(s); keep(); glow.board(b.id, litOf(b, s.shape)) }
+    if (b.type === 'lettering') {
+      s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M])
+      paintFar(s, false)
+      keep()
+      glow.board(b.id, litOf(b, s.shape))
+      glow.standing(b.id, (s.shape.letters ?? []).filter((l): l is Laid => !!l).map((l) => l.squares.filter((q) => q.lit).map(() => true)))
+    }
+    seenEdits = o.done()
+    standingEdits = seenEdits
   }
   /** A lettering board's letters as their light knows them (letterlight.ts): each one's box, which way it faces, the middle of each cell of its lamp. */
   const litOf = (b: Board, sh: Shape): LitLetter[] => (sh.letters ?? []).filter((l): l is Laid => !!l).map((l) => {
@@ -620,8 +653,11 @@ export async function boards(o: Needs): Promise<Boards> {
       cells: l.squares.filter((q) => q.lit).map((q) => [sh.middle[0] + sh.right[0] * (q.along - 0.5), q.y + 0.5, sh.middle[2] + sh.right[2] * (q.along - 0.5)] as [number, number, number]),
     }
   })
-  // What stands of each lettering board's lamp, twice a second: a halo only over the cells of it that are there.
+  // What stands of each lettering board's lamp, twice a second when edits have occurred: a halo only over the cells of it that are there.
   setInterval(() => {
+    const n = o.done()
+    if (n === standingEdits) return
+    standingEdits = n
     for (const s of stood.values()) {
       const sh = s.shape
       if (s.b.type !== 'lettering' || !sh?.letters) continue
@@ -697,7 +733,8 @@ export async function boards(o: Needs): Promise<Boards> {
     }
   }
   // Asked only when the world has changed since: nothing a frame.
-  let seenEdits = -1
+  seenEdits = o.done()
+  standingEdits = seenEdits
   setInterval(() => { const n = o.done(); if (n !== seenEdits) { seenEdits = n; masks(); for (const s of stood.values()) if (s.far) s.stale = true } }, 400)
 
   // ── The plane and its banner ──

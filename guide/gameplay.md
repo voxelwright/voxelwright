@@ -84,7 +84,7 @@ Riding something other than a car (a flying or hovering thing, or one that jumps
 
 ## The first view and EXPLORE
 
-The realm opens on a still picture from Ina Coolbrith Park (`engine/page/first.ts`). No key moves the eye and no click takes the pointer. Only the settings gear (time, weather, graphics), a Credits key and the signs answer. Enter, NumpadEnter and `/` open the eggs' line. `?first=0` skips the first view. The realm hides the line of numbers (frame time, memory, position) unless the address has `?debug=1`.
+The realm opens on a still picture from Ina Coolbrith Park (`engine/page/first.ts`). No key moves the eye and no click takes the pointer. Only the settings gear (time, weather, graphics and Credits), the lockers count and the signs answer. Enter, NumpadEnter and `/` open the eggs' line. `?first=0` skips the first view. The realm hides the line of numbers (frame time, memory, position) unless the address has `?debug=1`.
 
 The EXPLORE board on the roof of 555 California St is the way in (`engine/page/entry.ts`). `engine.explore.state` moves through `idle`, `picking`, `going`, `in` and `leaving`:
 
@@ -235,7 +235,7 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 
-The **settings panel** is in sections: Time & weather (Light, Dark, SF now, the hour fader, the weather), Graphics (Low, Medium, High, Dynamic resolution and Target FPS or the resolution fader), and, in play, the keys that act: Back to the view, Say…, Your AI…, Credits and Reset world. On a desk in play the two sections stand side by side with the keys along the foot; on an upright phone they are one column. The first view's gear, its panel and its Credits and lockers keys use the same slim look as the HUD in play.
+The **settings panel** is in sections: Time & weather (Light, Dark, SF now, the hour fader, the weather), Graphics (Low, Medium, High, Dynamic resolution and Target FPS or the resolution fader), and the keys that act: Credits (shown in both the first view and play, with Mapillary attribution inside the Credits card) plus, in play, Back to the view, Say…, Your AI… and Reset world. On a desk in play the two sections stand side by side with the keys along the foot; on an upright phone they are one column. The first view's gear, its panel and its lockers key use the same slim look as the HUD in play.
 
 ## The minimap, the map and GPS
 
@@ -360,7 +360,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale (0.25 to 1.5), march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
 | `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring (`fine` 0 to 2, `workers` 1 to 8, `pool` 16 to 2048 MiB) |
 | `panes`, `through`, `tries`, `fog`, `walk=loop` | Both | Glass, finer-cell and sea-fog settings, and a march variant, for measuring |
-| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring. `far` and `farlanding` must be paths on this site; `farfaces` is 100,000 to 20,000,000 |
+| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding`, `farpacks`, `packs=0` | Both | The far model's source, packs and limits, for measuring. `far`, `farlanding` and `farpacks` must be paths on this site; `farfaces` is 100,000 to 20,000,000; `farthest` defaults to 16,000 m (6,000 m on `saveData` / `2g` / `3g`); `packs=0` disables reading `VXPK` release packs |
 | `portalworkers`, `portalkeeps` | Server | Workers and keep time for a portal's world |
 
 ## Where it lives and how it is checked

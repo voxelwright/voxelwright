@@ -61,13 +61,16 @@ try {
   await page.screenshot({ path: join(shots, 'park.png') })
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
 
-  // The credits, as the page shows them.
-  await page.click('#first .credits')
+  // The credits, opened from Settings.
+  await page.click('#realm .fold')
+  await page.waitForTimeout(300)
+  await page.click('#realm .sky .sky-credits-link')
   await page.waitForTimeout(300)
   const text = await page.evaluate(() => document.querySelector('#first-credits').innerText)
   for (const name of ['OpenStreetMap', 'Mapillary', 'DataSF']) check(text.includes(name), `the Credits key opens a list naming ${name}`)
   await page.screenshot({ path: join(shots, 'credits.png') })
   await page.keyboard.press('Escape')
+  await page.click('#realm .fold')
 
   // Every board's link, and the blog's own pages.
   const boards = await page.evaluate(() => globalThis.engine.boards.records.filter((r) => r.to).map((r) => ({ id: r.id, to: new URL(r.to, location.href).href })))

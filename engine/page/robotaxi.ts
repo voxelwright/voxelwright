@@ -175,6 +175,11 @@ function rolesOf(palette: number[], paintKinds: Set<number>): string[] {
 // ── 1. Sculpted Waymo Ojai Robotaxi Builder (cached per service) ──
 const modelCache = new Map<string, RobotaxiModel>()
 
+/** (#83) Adopts models sculpted in a worker (`robotaxi-maker.ts`) so `buildRobotaxiModel` answers immediately. */
+export function adoptRobotaxiModels(made: readonly RobotaxiModel[]): void {
+  for (const m of made) if (!modelCache.has(m.id)) modelCache.set(m.id, m)
+}
+
 export function buildRobotaxiModel(service: RobotaxiService): RobotaxiModel {
   const existing = modelCache.get(service.id)
   if (existing) return existing

@@ -200,7 +200,7 @@ A face is five `u32` words, as the vertex shader in `far.ts` reads them:
 
 ## Beside the release
 
-`engine/sf/build.mjs` writes these into its output folder (`<out>`, `engine/dist-sf` by default) next to the page, outside the release and its hash. The marks come from the city run's street graphs, the map from the release's tiles and the graphs, and the landmarks are a copy of `engine/sf/heroes.json`.
+`engine/sf/build.mjs` writes these into its output folder (`<out>`, `engine/dist-sf` by default) next to the page, outside the release and its hash. The marks come from the city run's street graphs, the map from the release's tiles and the graphs, and the landmarks are a copy of `engine/sf/heroes.json`. `build.mjs` also embeds `heroes.json` and `marks-squares.bin` inside `<script id="realm">` (`LOCAL.bay`) so cold and warm visits spend zero extra Worker requests on them, bundles the page, workers, AudioWorklet, Voxelmorphism kit and the compiled WebAssembly core into content-hashed immutable files under `<out>/assets/` (with `--no-bundle` to emit unbundled stripped modules), and writes `VXPK` packs under `<out>/sf/releases/<pin>/packs/` (`landing.pack`, 2 km `far0-<gx>_<gz>.pack`, `cars.pack`, `life-meta.pack`, 4 km `life-<gx>_<gz>.pack` and `names-<gx>_<gz>.pack`; `--no-packs` disables, and `manifest.json` stays untouched so the release pin never changes).
 
 | File | Format | Read by |
 | --- | --- | --- |

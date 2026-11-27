@@ -92,6 +92,8 @@ export async function sound(): Promise<Sound> {
   let hidden = false
   const wake = () => { if (context.state !== 'running' && !hidden) void context.resume().catch(() => {}) }
   for (const type of ['pointerup', 'touchend', 'click', 'keydown']) addEventListener(type, wake, { capture: true, passive: true })
+  // If audio init was deferred past first picture and the visitor already interacted meanwhile, resume right away.
+  if (navigator.userActivation?.hasBeenActive) wake()
   document.addEventListener('visibilitychange', () => { hidden = document.hidden; if (hidden) void context.suspend().catch(() => {}); else if (navigator.userActivation?.hasBeenActive ?? true) wake() })
 
   const ids = new Map<Patch, number>(), spare: number[] = []
