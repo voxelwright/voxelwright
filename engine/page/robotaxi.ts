@@ -11,10 +11,7 @@ import { POLISHED } from './spells.ts'
 import type { Born } from './told.ts'
 
 export {
-  PAYMO_SERVICE,
-  ROBOTAXI_HANDLING,
   ROBOTAXI_SERVICES,
-  robotaxiServiceById,
   type RobotaxiService,
   type RobotaxiStation,
   type StationBay,

@@ -64,6 +64,7 @@ let checks = [
   ['fine-living', 'node', ['test/fine-living.mjs'], true],
   ['deform', 'node', ['test/deform.mjs'], true],
   ['dents', 'node', ['test/dents.mjs'], true],
+  ['robotaxi-shape', 'node', ['test/robotaxi-shape.mjs'], false],
   ['sculpt-cars', 'node', ['test/sculpt-cars.mjs'], false],
   ['drives', 'node', ['test/drives.mjs'], true],
   ['person', 'node', ['test/person.mjs'], true],

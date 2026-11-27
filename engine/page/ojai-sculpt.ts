@@ -448,22 +448,22 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
       const f = facing(x, y, z)
       const yTop = topAt(X, u)
       const sU = side(X, Y)
-      // Upper black floating roof cap & spoiler band.
-      if (Y > yTop - 0.085 || (f.up > 0.72 && s > 0.14 && s < 0.65)) {
-        // Panoramic tinted glass moonroof panel framed by the gloss-black floating roof rails!
-        if (s > 0.22 && s < 0.58 && u < sU - 0.14 && Y > 1.62) return K.glass
-        return liv.roof
-      }
       // Huge swept monovolume panoramic windshield (s = 0.64..0.85).
-      if (s > 0.64 && f.ahead > 0.30) {
+      if (s > 0.64 && f.ahead > 0.12 && u < sU - 0.04) {
         // Sleek gloss-black A-pillar frame edges & lower cowl blackout band.
         if (Y < yBelt + 0.045 || u > sU - 0.065) return liv.roof
         return K.screen
       }
       // Clean raked rear liftgate window (s < 0.14).
-      if (s < 0.14 && f.ahead < -0.22) {
+      if (s < 0.14 && f.ahead < -0.12 && u < sU - 0.04) {
         if (Y < yBelt + 0.06 || Y > 1.56 || u > sU - 0.10) return liv.roof
         return K.glass
+      }
+      // Upper black floating roof cap & spoiler band.
+      if (Y > yTop - 0.085 || (f.up > 0.72 && s > 0.14 && s < 0.65)) {
+        // Panoramic tinted glass moonroof panel framed by the gloss-black floating roof rails!
+        if (s > 0.22 && s < 0.58 && u < sU - 0.14 && Y > 1.62) return K.glass
+        return liv.roof
       }
       // B-pillarless panoramic sliding-door side windows (uninterrupted sleek dark glass from A-pillar to D-pillar!).
       if (s > 0.12 && s < 0.78 && Y > yBelt + 0.025 && Y < yTop - 0.095) {

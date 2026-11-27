@@ -134,7 +134,7 @@ export function buildStationGeometry(spec: RobotaxiStationSpec): RobotaxiStation
 }
 
 /** Default San Francisco bystander yells & filming lines parameterized by any robotaxi brand name. */
-export function defaultYellLines(brand: string): readonly string[] {
+function defaultYellLines(brand: string): readonly string[] {
   const upper = brand.toUpperCase()
   return [
     `${upper}?! MOVE IT!`,
@@ -150,7 +150,7 @@ export function defaultYellLines(brand: string): readonly string[] {
   ]
 }
 
-export function defaultFilmLines(brand: string): readonly string[] {
+function defaultFilmLines(brand: string): readonly string[] {
   return [
     'Caught in 4K!',
     `Classic ${brand}`,
@@ -161,11 +161,25 @@ export function defaultFilmLines(brand: string): readonly string[] {
   ]
 }
 
-/** Primary San Francisco robotaxi service: PayMo (pearl-white Ojai, floating gloss-black roof, emerald-mint & cyan livery). */
-export const PAYMO_SERVICE: RobotaxiService = {
+type ServiceSpec = Pick<RobotaxiService, 'id' | 'name' | 'livery' | 'share' | 'stationBoost' | 'stationGlow'> & {
+  badge?: string
+  station: Omit<RobotaxiStationSpec, 'name' | 'gantryTitle' | 'depotTitle'>
+}
+
+export function robotaxiService(spec: ServiceSpec): RobotaxiService {
+  const badge = spec.badge ?? spec.name.toUpperCase()
+  return {
+    ...spec,
+    badge,
+    station: buildStationGeometry({ ...spec.station, name: `${spec.name} Station`, gantryTitle: badge, depotTitle: 'DEPOT' }),
+    yellLines: defaultYellLines(spec.name),
+    filmLines: defaultFilmLines(spec.name),
+  }
+}
+
+export const ROBOTAXI_SERVICES: readonly RobotaxiService[] = [robotaxiService({
   id: 'paymo',
   name: 'PayMo',
-  badge: 'PAYMO',
   share: 0.18,
   stationBoost: 0.54,
   livery: {
@@ -178,10 +192,7 @@ export const PAYMO_SERVICE: RobotaxiService = {
   },
   stationGlow: k(LAMP, hue(10, 4)),
   // Flat open commercial lot on west side of Stockton St between Beach St & North Point St (inside 6-square pilot & 155-square full SF).
-  station: buildStationGeometry({
-    name: 'PayMo Station',
-    gantryTitle: 'PAYMO',
-    depotTitle: 'DEPOT',
+  station: {
     lat: 37.80745,
     lon: -122.41062,
     cx: 518520,
@@ -190,18 +201,5 @@ export const PAYMO_SERVICE: RobotaxiService = {
     uz: 0.98652,
     wx: -0.98652,
     wz: 0.16364,
-  }),
-  yellLines: defaultYellLines('PayMo'),
-  filmLines: defaultFilmLines('PayMo'),
-}
-
-/**
- * Active San Francisco robotaxi fleet registry.
- * Add competing services here (each with its own `id`, `name`, `badge`, `livery`, and `station`)
- * and traffic spawning, station depots, map pins, mutual standoffs, and crowd reactions pick them up automatically.
- */
-export const ROBOTAXI_SERVICES: readonly RobotaxiService[] = [PAYMO_SERVICE]
-
-export function robotaxiServiceById(id: string): RobotaxiService | undefined {
-  return ROBOTAXI_SERVICES.find((s) => s.id === id)
-}
+  },
+})]

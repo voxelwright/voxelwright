@@ -11,7 +11,7 @@
 //   7. Captures full-size screenshots (including both front 3/4 and rear-side 3/4 close-ups of the sculpted Ojai!) for visual inspection.
 //
 //   node test/sf-robotaxi.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/robotaxi-check] [--headed]
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -29,7 +29,6 @@ if (!has('no-build')) {
   if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
 }
 mkdirSync(shots, { recursive: true })
-for (const f of readdirSync(shots)) if (f.endsWith('.png')) rmSync(join(shots, f))
 
 const site = await plain(dist, '127.0.0.1', 0)
 const back = await turn()
@@ -70,6 +69,15 @@ try {
     return places.find((p) => p.name === stationName) ?? null
   }, primary.station)
   check(!!hasStationPlace && hasStationPlace.kind === 'landmark', `${primary.station} registered in map places (${JSON.stringify(hasStationPlace)})`)
+
+  await page.keyboard.press('KeyM')
+  await page.getByRole('button', { name: primary.station, exact: true }).click()
+  await page.locator('#world-map .wm-visit').click()
+  await page.waitForFunction(({ x, z }) => {
+    const e = globalThis.engine
+    return e.explore.state === 'in' && !e.map.open && e.me.on && Math.hypot(e.pose.x - x, e.pose.z - z) < 50
+  }, hasStationPlace, { timeout: 30_000 })
+  check(true, `Map Visit arrived on foot at ${primary.station}`)
 
   // Fly to primary station overview looking West-Northwest across the depot!
   await page.evaluate((serviceId) => {
@@ -163,6 +171,7 @@ try {
     e.fov = 48
     return { x: parkedRT.x, z: parkedRT.z, heading: parkedRT.heading, side }
   }, primary.id)
+  if (!heroCar) throw new Error('No parked robotaxi available for the Ojai silhouette check')
   await page.waitForTimeout(900)
   await page.screenshot({ path: join(shots, '04-ojai-front-closeup.png') })
 
@@ -255,14 +264,14 @@ try {
   console.log(`    crowd & traffic reactions: ${JSON.stringify(react)}`)
   check(react.stuckCount >= 1, `stuck robotaxi remains frozen with hazards (${react.stuckCount} stuck)`)
   check(react.reactions.honks >= 1, `blocked cars honked & flashed high beams (${react.reactions.honks} honks)`)
-  check(react.reactions.filmers + react.reactions.yellers >= 2 && react.reactions.shouts >= 1 && react.shoutEvents >= 1,
+  check(react.reactions.filmers >= 1 && react.reactions.yellers >= 1 && react.reactions.shouts >= 1 && react.shoutEvents >= 1,
     `nearby pedestrians stopped to film/yell & shouted (${react.reactions.filmers} filmers, ${react.reactions.yellers} yellers, ${react.reactions.shouts} shouts, ${react.shoutEvents} events)`)
 
   const waitHazardOn = () =>
     page.waitForFunction((id) => {
       const s = globalThis.engine.street.robotaxis.stuck.find((x) => x.id === id)
-      return !s || (s.hazardOn && s.hazardPhase >= 0.04 && s.hazardPhase < 0.34)
-    }, stuckInfo.id, { timeout: 3000, polling: 20 }).catch(() => null)
+      return s?.hazardOn && s.hazardPhase >= 0.04 && s.hazardPhase < 0.34
+    }, stuckInfo.id, { timeout: 3000, polling: 20 })
 
   const pickCleanView = async (st, mode) =>
     page.evaluate(({ st, mode }) => {
@@ -329,28 +338,30 @@ try {
             if ((dax * dsx + daz * dsz) / (dal * dsl) < 0.35) continue
             const bx = (dax / dal) * 0.56 + (dsx / dsl) * 0.44
             const bz = (daz / dal) * 0.56 + (dsz / dsl) * 0.44
-            const gx = camX / 10, gz = camZ / 10, gy = e.ground(gx, gz)
-            Object.assign(e.pose, { x: gx, y: gy + 1.65, z: gz, yaw: Math.atan2(bx, -bz), pitch: -0.04 })
+            Object.assign(e.pose, { x: camX / 10, y: camY / 10, z: camZ / 10, yaw: Math.atan2(bx, -bz), pitch: -0.04 })
             e.fov = 74
             return 'closeup'
           }
         }
       }
-      const hM = mode === 'night' ? 2.5 : 3.0
-      const opts = [
-        [st.x + fx * 84 + rx * 62, st.z + fz * 84 + rz * 62],
-        [st.x + fx * 84 - rx * 62, st.z + fz * 84 - rz * 62],
-        [st.x + fx * 72 + rx * 58, st.z + fz * 72 + rz * 58],
-        [st.x + fx * 72 - rx * 58, st.z + fz * 72 - rz * 58],
-        [st.x + fx * 66 + rx * 42, st.z + fz * 66 + rz * 42],
-        [st.x + fx * 66 - rx * 42, st.z + fz * 66 - rz * 42],
-        [st.x + fx * 96 + rx * 44, st.z + fz * 96 + rz * 44],
-        [st.x + fx * 96 - rx * 44, st.z + fz * 96 - rz * 44],
-      ]
+      // Try front three-quarter views first, then the rest of the street if traffic fills the foreground.
+      const opts = []
+      for (const distance of [94, 78, 115]) {
+        for (const angle of [0.65, -0.65, 0.35, -0.35, 1.0, -1.0, 1.45, -1.45, 0, 2.2, -2.2, Math.PI]) {
+          const dx = Math.cos(angle + st.heading) * distance, dz = Math.sin(angle + st.heading) * distance
+          opts.push([st.x + dx, st.z + dz])
+        }
+      }
       // Score clear street viewpoints by how many curb-side filming/yelling spectators sit visibly in frame!
       const crowd = e.street.folk(e.view(), performance.now() / 1000).filter((p) => (p.filming > 0.2 || !!p.move || !!p.says) && Math.hypot(p.at[0] - st.x, p.at[2] - st.z) < 250)
-      const valid = opts.filter(([x, z]) => clearPoint(x, z, hM))
-      let chosen = valid[0] ?? [st.x + fx * 76, st.z + fz * 76], bestScore = -1
+      let hM = mode === 'night' ? 2.5 : 3
+      let valid = opts.filter(([x, z]) => clearPoint(x, z, hM))
+      if (!valid.length) {
+        hM = 4.5
+        valid = opts.filter(([x, z]) => clearPoint(x, z, hM))
+      }
+      if (!valid.length) throw new Error('No clear camera position around the stopped robotaxi')
+      let chosen = valid[0], bestScore = -1
       for (const [cx, cz] of valid) {
         const tx = st.x - fx * 24, tz = st.z - fz * 24
         const dirX = tx - cx, dirZ = tz - cz, dl = Math.hypot(dirX, dirZ) || 1
@@ -364,9 +375,9 @@ try {
         }
         if (score > bestScore) { bestScore = score; chosen = [cx, cz] }
       }
-      const gx = chosen[0] / 10, gz = chosen[1] / 10, gy = e.ground(gx, gz)
+      const gx = chosen[0] / 10, gz = chosen[1] / 10, gy = e.feet(Math.round(chosen[0]), Math.round(chosen[1])) / 10
       const tx = (st.x - fx * 24) / 10, tz = (st.z - fz * 24) / 10
-      Object.assign(e.pose, { x: gx, y: gy + hM, z: gz, yaw: Math.atan2(tx - gx, -(tz - gz)), pitch: mode === 'night' ? -0.07 : -0.10 })
+      Object.assign(e.pose, { x: gx, y: gy + hM, z: gz, yaw: Math.atan2(tx - gx, -(tz - gz)), pitch: Math.atan2(st.y / 10 + 1 - (gy + hM), Math.hypot(tx - gx, tz - gz)) })
       e.fov = 72
       return 'street'
     }, { st, mode })
@@ -410,7 +421,23 @@ try {
   if (!(await waitLensClear(stuckInfo))) { await pickCleanView(stuckInfo, 'night'); await page.waitForTimeout(300); await waitLensClear(stuckInfo) }
   await waitHazardOn()
   await page.waitForTimeout(40)
-  await page.screenshot({ path: join(shots, '07-stuck-night-hazards.png') })
+  const nightFrame = await page.screenshot({ path: join(shots, '07-stuck-night-hazards.png') })
+  // An eye inside a wall left the entire street blank while the HUD rendered normally.
+  // Read the central scene, excluding all HUD corners, from the frame we actually captured.
+  const edges = await page.evaluate(async (png) => {
+    const img = new Image()
+    img.src = 'data:image/png;base64,' + png
+    await img.decode()
+    const ctx = new OffscreenCanvas(64, 40).getContext('2d')
+    ctx.drawImage(img, img.width * 0.15, img.height * 0.2, img.width * 0.7, img.height * 0.6, 0, 0, 64, 40)
+    const { data } = ctx.getImageData(0, 0, 64, 40)
+    let count = 0
+    for (let i = 4; i < data.length; i += 4) {
+      if (i % 256 && Math.max(...[0, 1, 2].map((c) => Math.abs(data[i + c] - data[i + c - 4]))) > 16) count++
+    }
+    return count
+  }, nightFrame.toString('base64'))
+  check(edges > 75, `night frame shows the street around the robotaxi (${edges} contrasting samples)`)
 
   // Verify narrow-street freeze trigger too!
   const narrowInfo = await page.evaluate((serviceId) => {

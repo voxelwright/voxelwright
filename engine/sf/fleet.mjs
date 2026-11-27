@@ -11,7 +11,7 @@
 
 import { COUPE_KINDS, GT_COUPE, sculptCoupe } from '../page/car-sculpt.ts'
 import { OJAI_KINDS, OJAI_SPEC, sculptOjai } from '../page/ojai-sculpt.ts'
-import { PAYMO_SERVICE, ROBOTAXI_HANDLING } from '../page/robotaxi-services.ts'
+import { ROBOTAXI_HANDLING } from '../page/robotaxi-services.ts'
 
 const STEEL = 12, GLASS = 11, PLASTER = 9, WOOD = 10, ROOFING = 14, LAMP = 15
 const k = (material, colour = 0) => material | (colour << 8)
@@ -378,7 +378,7 @@ export function cableCar() {
  * Sculpted Waymo Ojai (Zeekr RT) autonomous electric robotaxi (#57), parameterized by any `RobotaxiService`
  * from `page/robotaxi-services.ts` so every service shares the exact continuous analytical geometry in `page/ojai-sculpt.ts`.
  */
-export function robotaxi(service = PAYMO_SERVICE) {
+export function robotaxi(service) {
   const { cells, size } = sculptOjai({ livery: service.livery, badge: service.badge, spec: OJAI_SPEC })
   const [x0, x1] = OJAI_SPEC.wheels
   const body = [Math.ceil(size[0] / OJAI_SPEC.per), Math.ceil(size[1] / OJAI_SPEC.per), Math.ceil(size[2] / OJAI_SPEC.per)]

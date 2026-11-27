@@ -2645,7 +2645,7 @@ export function street(o: {
         }),
         reactions: { honks: stuckHonksStat, shouts: crowdShoutsStat, filmers: rtFilmersStat, yellers: rtYellersStat },
         triggerStuck(kind: 'intersection' | 'narrow' = 'intersection', serviceId?: string) {
-          const svc = (serviceId ? serviceById.get(serviceId) : undefined) ?? ROBOTAXI_SERVICES[0]
+          const svc = serviceId === undefined ? ROBOTAXI_SERVICES[0] : serviceById.get(serviceId)
           if (!svc) return null
           const svcModel = robotaxiModels.get(svc.id)!
           const eye = lastEye ?? [svc.station.cx, 50, svc.station.cz]
