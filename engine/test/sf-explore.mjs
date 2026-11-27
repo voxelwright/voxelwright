@@ -742,6 +742,16 @@ try {
     // the face 40 px by 13 (Nov 22); that it reads is the picture's to say, just below.)
     check(v.inside && v.clear && v.tall >= 12 && v.wide >= 36 && hitP.wide >= 44 && hitP.high >= 44, `the board is in the phone's picture, ${round(v.wide)} px wide and ${round(v.tall)} tall, clear of BLOG; a tap is on it ${hitP.wide} x ${hitP.high} px round its middle (44 each way or more)`)
     check(v.faced && !v.blogFaced && idleP.lamp - idleP.panel > 60, `shown as its face there (BLOG as its cells, as it always was), and read from the picture: lamp ${idleP.lamp}, panel ${idleP.panel}`)
+    // Without the far model covering 555 California (still loading, failed, or ?farreach=0), the coarse marched voxels
+    // of EXPLORE itself (64 cells on a phone) must not occlude its far face (screens.ts `push`).
+    {
+      const nf = await open(PHONE, { query: '&farreach=0' })
+      await nf.page.waitForTimeout(1500)
+      const nfFaced = await nf.realm.evaluate(() => globalThis.engine.boards.faced('explore'))
+      const nfRead = await read(nf.page, nf.realm)
+      check(nfFaced && nfRead.lamp - nfRead.panel > 60, `with coarse voxels (?farreach=0) on a phone, EXPLORE's far face still clears its own voxels and reads: lamp ${nfRead.lamp}, panel ${nfRead.panel}`)
+      await nf.context.close()
+    }
     // The whole first view on the phone, as it was asked for (#450: aa429ad8's cut BLOG at the left, and Twitch and the
     // Pyramid were out of it): BLOG, the three logos, EXPLORE, the banner and the Pyramid in the picture, and still when a tap leans
     // the eye to the board. (The banner's plane is kept in the picture on its round: waited for, a few seconds at most.)

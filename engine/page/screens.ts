@@ -43,11 +43,12 @@ const FAR = 100000.0;
   let n = normalize(cross(u.hu, u.hv));
   // Cloth: held at its leading edge, it waves more the further along.
   var p = u.at + u.hu * (2.0 * s - 1.0) + u.hv * (2.0 * t - 1.0) + n * u.wave * s * sin(s * 9.0 - u.time * 3.0);
-  // A little towards the eye, more from far off: its housing's cells are coarser there than the gap in front of them.
-  p -= normalize(p) * u.push;
+  // A little towards the eye in depth, more from far off: its housing's cells are coarser there than the gap in front of them.
+  // Keep x, y and w at the true point so screen alignment and far-model depth occlusion stay exact.
   let d = dot(p, u.forward);
+  let dz = max(NEAR + 0.01, d - u.push);
   var out: Out;
-  out.pos = vec4f(dot(p, u.right) / (u.tanHalf * u.aspect), dot(p, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
+  out.pos = vec4f(dot(p, u.right) / (u.tanHalf * u.aspect), dot(p, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (1.0 - NEAR / dz) * d, d);
   out.uv = vec2f(s, t);
   out.front = select(0.0, 1.0, dot(n, u.at) < 0.0);
   return out;
@@ -96,6 +97,8 @@ export interface Screen {
   unlit: boolean
   /** How far it waves, cells (a banner). */
   wave: number
+  /** Extra depth bias towards the eye, cells: clears coarse marched voxels of the board itself when shown from far. */
+  push: number
   show(content: Content | null): void
   /** Shows what `draw` draws on its picture (clear where nothing is: the face is cut to it). */
   paint(draw: (pen: OffscreenCanvasRenderingContext2D, wide: number, high: number) => void): void
@@ -174,7 +177,7 @@ export async function screens(device: GPUDevice, format: GPUTextureFormat): Prom
       }
       let video: HTMLVideoElement | null = null, frame = -1, asked = 0, showing = { kind: 'nothing', ready: false }
       const held: Held = {
-        at: [0, 0, 0], hu: [1, 0, 0], hv: [0, 1, 0], mask: 0xffffffff, hidden: false, unlit: false, wave: 0, uniforms, bind, tiles, both, leds: leds ? pixels : [0, 0], style,
+        at: [0, 0, 0], hu: [1, 0, 0], hv: [0, 1, 0], mask: 0xffffffff, hidden: false, unlit: false, wave: 0, push: 0, uniforms, bind, tiles, both, leds: leds ? pixels : [0, 0], style,
         get showing() { return showing },
         show(content) {
           const mine = ++asked
@@ -215,7 +218,7 @@ export async function screens(device: GPUDevice, format: GPUTextureFormat): Prom
         if (s.hidden || !s.mask) continue
         const from = [s.at[0] - view.eye[0], s.at[1] - view.eye[1], s.at[2] - view.eye[2]], far = Math.hypot(from[0], from[1], from[2])
         const glows = s.style.glows && !s.unlit
-        f.set([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, time, ...from, glows ? 0.94 * (1 - (1 - (s.style.dim ?? 1)) * (1 - day)) : Math.max(s.unlit ? 0 : s.style.least ?? 0, (0.2 + 0.58 * day) * (1 - 0.3 * dull)), ...s.hu, s.wave, ...s.hv, s.style.glows ? Math.max(0.6, far * 0.0015) : 0])
+        f.set([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, time, ...from, glows ? 0.94 * (1 - (1 - (s.style.dim ?? 1)) * (1 - day)) : Math.max(s.unlit ? 0 : s.style.least ?? 0, (0.2 + 0.58 * day) * (1 - 0.3 * dull)), ...s.hu, s.wave, ...s.hv, s.style.glows ? Math.max(0.6, far * 0.0015, s.push) : 0])
         u.set([s.mask >>> 0, s.tiles[0], s.tiles[1], s.both ? 1 : 0], 24)
         // (By night a tenth of its light is over what a lit wall gives back: the last pass spreads that.)
         f.set([s.leds[0], s.leds[1], glows ? 0.1 * (s.style.glow ?? 1) * (1 - day) : 0, 0], 28)
