@@ -49,7 +49,7 @@ import { SIDE, World } from './world.ts'
 import { far as farOf, samePath } from './far.ts'
 import { fog } from './fog.ts'
 import { eggSky } from './eggs-sky.ts'
-import { BAY, BUDGET, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, BUDGET, DEVICE, HOLD, holds, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -2150,7 +2150,7 @@ async function main() {
       w.onerror = () => { w.terminate(); resolve(ROBOTAXI_SERVICES.map(buildRobotaxiModel)) }
     }))
     const life = streetOf({
-      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
+      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, fine: (x, z) => !STREAM || holds(inner, x - 40, z - 40, x + 40, z + 40, 1), hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
       faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) },
       robotaxis,
       onNearMiss: (info) => {

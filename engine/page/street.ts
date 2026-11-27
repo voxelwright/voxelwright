@@ -31,7 +31,7 @@ import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
 import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiModel, type RobotaxiService, type StationBorns } from './robotaxi.ts'
 
 /** What street life asks of the land (the core's exports). */
-export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; top_at?(x: number, z: number): number }
+export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; top_at?(x: number, z: number): number }
 
 type Ring = Float64Array
 interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
@@ -46,7 +46,9 @@ interface Car {
   id: number; model: Model; paint: number; kind: 'parked' | 'traffic' | 'cable' | 'tram'; seed: number
   /** A streetcar's line. */
   track?: Line & { lights: { s: number; node: number; dx: number; dz: number }[] }
-  x: number; y: number; z: number; heading: number; pitch: number; v: number
+  x: number; y: number; z: number; heading: number; pitch: number; roll?: number; v: number
+  /** Whether this parked car was settled after the finest terrain tiles covering its wheels had arrived. */
+  fineGround?: boolean
   piece: Piece | null; shown: string
   // Driving: the road, its lane, how far along, the road before (for the corner) and the one after.
   road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number; queued?: boolean
@@ -368,6 +370,8 @@ export function street(o: {
   /** Where the life files (`life/index.json`) and the kept vehicles (`cars/index.json`) are. */
   life: URL; cars: URL
   land: Ground
+  /** Whether the finest terrain tiles covering `(x, z)` are loaded, so parked cars re-settle once fine ground arrives. */
+  fine?: (x: number, z: number) => boolean
   hour: () => number; rain: () => number
   /** Seconds on the clock people walk by. */
   clock: () => number
@@ -1201,11 +1205,12 @@ export function street(o: {
   }
 
   // ── Placing a vehicle ──
-  /** The turn of a vehicle heading a way (radians: its front at cos, 0, sin) with its nose up by `pitch`. */
-  const turnOf = (m: Model, heading: number, pitch: number): [number, number, number, number] => {
-    // Its own front: +x (0), -x (1), +z (2), -z (3); turned about y so that front is the heading, then pitched about its own side.
+  /** The turn of a vehicle heading a way (radians: its front at cos, 0, sin) with its nose up by `pitch` and right side up by `roll`. */
+  const turnOf = (m: Model, heading: number, pitch: number, roll = 0): [number, number, number, number] => {
+    // Its own front: +x (0), -x (1), +z (2), -z (3); turned about y so that front is the heading, then pitched and rolled about its own axes.
     const own = [0, Math.PI, -Math.PI / 2, Math.PI / 2][m.front], yaw = own - heading
-    const p = m.front === 1 ? -pitch : m.front === 0 ? pitch : 0, r = m.front === 2 ? pitch : m.front === 3 ? -pitch : 0
+    const p = m.front === 1 ? -pitch : m.front === 0 ? pitch : m.front === 2 ? -roll : roll
+    const r = m.front === 2 ? -pitch : m.front === 3 ? pitch : m.front === 0 ? -roll : roll
     const qy = [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)], qz = [0, 0, Math.sin(p / 2), Math.cos(p / 2)], qx = [Math.sin(r / 2), 0, 0, Math.cos(r / 2)]
     const mul = (a: number[], b: number[]) => [a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0], a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]]
     const q = mul(mul(qy, qz), qx)
@@ -1214,6 +1219,107 @@ export function street(o: {
   const rotate = (q: readonly number[], v: readonly number[]) => {
     const [x, y, z, w] = q, ix = w * v[0] + y * v[2] - z * v[1], iy = w * v[1] + z * v[0] - x * v[2], iz = w * v[2] + x * v[1] - y * v[0], iw = -x * v[0] - y * v[1] - z * v[2]
     return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x]
+  }
+  /** Spring equilibrium constants matching `engine/core/src/bodies/living.rs` (`SAG`, `STOP`) and `kinds.rs` (`weighs_own`). */
+  const SAG = 0.4, STOP = 0.05
+  const WEIGHS = [0, 1.6, 2.6, 1.0, 1.6, 1.0, 2.2, 2.4, 1.9, 1.6, 0.6, 2.4, 7.8, 0.15, 1.6, 1.9]
+  interface StanceFoot { lx: number; ly: number; lz: number; along: number; right: number; comAlong: number; comRight: number; reach: number; ride: number }
+  interface Stance { feet: StanceFoot[]; fit: [number, number, number][] }
+  /** Solves a 3x3 linear system `A x = b` with partial pivoting; returns null if singular. */
+  const solve3 = (a: number[][], b: readonly number[]): [number, number, number] | null => {
+    const m = [[a[0][0], a[0][1], a[0][2], b[0]], [a[1][0], a[1][1], a[1][2], b[1]], [a[2][0], a[2][1], a[2][2], b[2]]]
+    for (let c = 0; c < 3; c++) {
+      let piv = c
+      for (let r = c + 1; r < 3; r++) if (Math.abs(m[r][c]) > Math.abs(m[piv][c])) piv = r
+      if (Math.abs(m[piv][c]) < 1e-12) return null
+      if (piv !== c) { const t = m[c]; m[c] = m[piv]; m[piv] = t }
+      for (let r = c + 1; r < 3; r++) {
+        const f = m[r][c] / m[c][c]
+        for (let k = c + 1; k < 4; k++) m[r][k] -= f * m[c][k]
+      }
+    }
+    const x2 = m[2][3] / m[2][2], x1 = (m[1][3] - m[1][2] * x2) / m[1][1], x0 = (m[0][3] - m[0][1] * x1 - m[0][2] * x2) / m[0][0]
+    return Number.isFinite(x0) && Number.isFinite(x1) && Number.isFinite(x2) ? [x0, x1, x2] : null
+  }
+  const stances = new WeakMap<Model, Stance | null>()
+  /** Precomputes a motorized model's center of mass, wheel geometry and linear plane-fit weights for zero-jump settling. */
+  const stanceOf = (m: Model): Stance | null => {
+    const cached = stances.get(m)
+    if (cached !== undefined) return cached
+    const feetIn = m.motor?.feet
+    if (!feetIn || feetIn.length < 3) { stances.set(m, null); return null }
+    const [sx, sy, sz] = m.size
+    const body = unrun(m.body.runs, sx * sy * sz, m.body.palette)
+    let mass = 0, cx = 0, cy = 0, cz = 0
+    for (let y = 0; y < sy; y++) for (let z = 0; z < sz; z++) for (let x = 0; x < sx; x++) {
+      const k = body[x + sx * (z + sz * y)]
+      if (!k) continue
+      const w = WEIGHS[k & 15] || 1
+      mass += w; cx += (x + 0.5) * w; cy += (y + 0.5) * w; cz += (z + 0.5) * w
+    }
+    const com: [number, number, number] = mass > 0 ? [cx / mass, cy / mass, cz / mass] : [sx / 2, sy / 3, sz / 2]
+    const toLocal = (dx: number, dz: number): [number, number] => (
+      m.front === 0 ? [dx, dz] : m.front === 1 ? [-dx, -dz] : m.front === 2 ? [dz, -dx] : [-dz, dx]
+    )
+    const feet: StanceFoot[] = feetIn.map((f) => {
+      const lx = f.at[0] - sx / 2, ly = f.at[1], lz = f.at[2] - sz / 2
+      const [along, right] = toLocal(lx, lz)
+      const [comAlong, comRight] = toLocal(f.at[0] - com[0], f.at[2] - com[2])
+      return { lx, ly, lz, along, right, comAlong, comRight, reach: f.reach, ride: (1 - SAG) * f.reach - ly }
+    })
+    // Least-squares plane-fit weights: given target heights `h[i]`, `[y0, sp, sr] = sum_i fit[i] * h[i]`.
+    let s00 = 0, s01 = 0, s02 = 0, s11 = 0, s12 = 0, s22 = 0
+    for (const f of feet) { s00++; s01 += f.along; s02 += f.right; s11 += f.along * f.along; s12 += f.along * f.right; s22 += f.right * f.right }
+    const normal = [[s00, s01, s02], [s01, s11, s12], [s02, s12, s22]]
+    const fit: [number, number, number][] = []
+    for (const f of feet) {
+      const w = solve3(normal, [1, f.along, f.right])
+      if (!w) { stances.set(m, null); return null }
+      fit.push(w)
+    }
+    const st: Stance = { feet, fit }
+    stances.set(m, st)
+    return st
+  }
+  /**
+   * Solves the exact static 4-wheel spring+bump-stop equilibrium (`living.rs`: `SAG = 0.4`, `STOP = 0.05`) using
+   * damped Newton with backtracking line search so a parked car stands where the solver will hold it with zero jump.
+   */
+  const solveStance = (st: Stance, g: readonly number[], yInit: number, pInit: number, rInit: number, cosTilt = 1): [number, number, number] => {
+    const n = st.feet.length, invC = 1 / Math.max(0.2, cosTilt), target = invC
+    let y = yInit, sp = pInit, sr = rInit
+    const evalRes = (yy: number, pp: number, rr: number) => {
+      let r0 = -target, r1 = 0, r2 = 0
+      const a0 = [0, 0, 0], a1 = [0, 0, 0], a2 = [0, 0, 0]
+      for (let i = 0; i < n; i++) {
+        const f = st.feet[i]
+        const p = f.reach - f.ly - (yy + f.along * pp + f.right * rr - g[i]) * invC
+        if (p <= 0) continue
+        const k = 1 / (n * SAG * f.reach), more = Math.max(0, p - SAG * f.reach)
+        const force = k * (p + (more * more) / (STOP * f.reach))
+        const dfdp = k * (1 + (2 * more) / (STOP * f.reach)) * invC
+        r0 += force; r1 += force * f.comAlong; r2 += force * f.comRight
+        a0[0] += dfdp; a0[1] += dfdp * f.along; a0[2] += dfdp * f.right
+        a1[0] += dfdp * f.comAlong; a1[1] += dfdp * f.comAlong * f.along; a1[2] += dfdp * f.comAlong * f.right
+        a2[0] += dfdp * f.comRight; a2[1] += dfdp * f.comRight * f.along; a2[2] += dfdp * f.comRight * f.right
+      }
+      return { r0, r1, r2, merit: r0 * r0 + r1 * r1 + r2 * r2, A: [a0, a1, a2] }
+    }
+    for (let iter = 0; iter < 12; iter++) {
+      const cur = evalRes(y, sp, sr)
+      if (cur.merit < 1e-10) break
+      cur.A[0][0] += 1e-6; cur.A[1][1] += 1e-6; cur.A[2][2] += 1e-6
+      const step = solve3(cur.A, [cur.r0, cur.r1, cur.r2])
+      if (!step) break
+      let alpha = 1, accepted = false
+      for (let ls = 0; ls < 8; ls++) {
+        const ny = y + alpha * step[0], np = sp + alpha * step[1], nr = sr + alpha * step[2]
+        if (evalRes(ny, np, nr).merit < cur.merit) { y = ny; sp = np; sr = nr; accepted = true; break }
+        alpha *= 0.5
+      }
+      if (!accepted || (Math.abs(alpha * step[0]) < 1e-5 && Math.abs(alpha * step[1]) < 1e-6 && Math.abs(alpha * step[2]) < 1e-6)) break
+    }
+    return [y, sp, sr]
   }
   /**
    * The road's top under a wheel: the town's footing (feetAt), lowered to what the world has there now if something
@@ -1234,12 +1340,68 @@ export function street(o: {
     for (let y = f - 2; y >= f - 30; y--) if (o.land.world_kind(ix, y, iz)) return y + 1
     return f
   }
-  /** Sets a car on the road under a point: its height from the ground under its front and back wheels, its nose up the hill. */
-  const settle = (c: Car) => {
-    const hl = c.model.long * 0.32, fx = Math.cos(c.heading), fz = Math.sin(c.heading)
-    const front = wheelAt(c.x + fx * hl, c.z + fz * hl), back = wheelAt(c.x - fx * hl, c.z - fz * hl)
-    c.y = (front + back) / 2 - 0.5
-    c.pitch = Math.atan2(front - back, 2 * hl)
+  /** Exact surface height under a wheel ray using `floor` cell coordinates and `world_under`, matching `living.rs::ray`. */
+  const roadAt = (x: number, z: number, fromY?: number) => {
+    const ix = Math.floor(x), iz = Math.floor(z)
+    if (o.land.world_under) {
+      const f = o.land.feet_at(ix, iz), g = o.land.ground_at(ix, iz)
+      const base = f - g > 25 ? g + 1 : f
+      const top = fromY !== undefined ? Math.floor(fromY) : base + 12
+      const hit = o.land.world_under(ix, top, iz, 36)
+      if (hit > -1_000_000) return hit
+      return base
+    }
+    const f = o.land.feet_at(ix, iz), g = o.land.ground_at(ix, iz)
+    const base = f - g > 25 ? g + 1 : f
+    if (!changedNear(x, z)) return base
+    if (o.land.world_kind(ix, base - 1, iz)) return base
+    for (let y = base - 2; y >= base - 30; y--) if (o.land.world_kind(ix, y, iz)) return y + 1
+    return base
+  }
+  /** Sets a car on the road under it: motorized vehicles match their 4-wheel spring equilibrium (pitch and roll); others use 2-point centerline footing. */
+  const settle = (c: Car, exact = false) => {
+    const st = stanceOf(c.model)
+    const fx = Math.cos(c.heading), fz = Math.sin(c.heading)
+    if (!st) {
+      const hl = c.model.long * 0.32
+      const front = wheelAt(c.x + fx * hl, c.z + fz * hl), back = wheelAt(c.x - fx * hl, c.z - fz * hl)
+      c.y = (front + back) / 2 - 0.5
+      c.pitch = Math.atan2(front - back, 2 * hl)
+      c.roll = 0
+      return
+    }
+    const rx = -fz, rz = fx
+    const g: number[] = new Array(st.feet.length)
+    let y0 = 0, sp = 0, sr = 0
+    for (let i = 0; i < st.feet.length; i++) {
+      const f = st.feet[i]
+      const gi = exact ? roadAt(c.x + fx * f.along + rx * f.right, c.z + fz * f.along + rz * f.right) : wheelAt(c.x + fx * f.along + rx * f.right, c.z + fz * f.along + rz * f.right)
+      g[i] = gi
+      const h = gi + f.ride
+      y0 += st.fit[i][0] * h; sp += st.fit[i][1] * h; sr += st.fit[i][2] * h
+    }
+    if (exact) {
+      ;[y0, sp, sr] = solveStance(st, g, y0, sp, sr, 1)
+      // Re-sample wheel rays along the tilted body's `down` vector to match `living.rs::ray` on hills and cross-slopes.
+      const q = turnOf(c.model, c.heading, Math.atan(sp), Math.atan(sr))
+      const down = rotate(q, [0, -1, 0])
+      const cosTilt = Math.max(0.2, -down[1])
+      let changed = cosTilt < 0.999
+      for (let i = 0; i < st.feet.length; i++) {
+        const f = st.feet[i]
+        const start = rotate(q, [f.lx, f.ly, f.lz])
+        const sx = c.x + start[0], sy = y0 + start[1], sz = c.z + start[2]
+        const estDist = Math.max(0, (sy - g[i]) / cosTilt)
+        const gi = roadAt(sx + down[0] * estDist, sz + down[2] * estDist, sy)
+        if (gi !== g[i]) { g[i] = gi; changed = true }
+      }
+      if (changed) {
+        ;[y0, sp, sr] = solveStance(st, g, y0, sp, sr, cosTilt)
+      }
+    }
+    c.y = y0
+    c.pitch = Math.atan(sp)
+    c.roll = Math.atan(sr)
   }
   const mulQ = (a: readonly number[], b: readonly number[]): [number, number, number, number] => [
     a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
@@ -1266,7 +1428,7 @@ export function street(o: {
     }
     if (!born) { hide(c); return }
     if (c.shown !== key || !c.piece) { c.piece?.destroy(); c.piece = o.pieces.add(born, true); c.shown = key; drawn.add(c) }
-    const look = c.model.looks[Number(key)], q = turnOf(c.model, c.heading, c.pitch)
+    const look = c.model.looks[Number(key)], q = turnOf(c.model, c.heading, c.pitch, c.roll ?? 0)
     // Its look's low corner, from the middle of its foot.
     const off = rotate(q, [look.low[0] - c.model.size[0] / 2, look.low[1], look.low[2] - c.model.size[2] / 2])
     c.piece.born.com = [0, 0, 0]
@@ -1452,13 +1614,22 @@ export function street(o: {
         const s = slots[i]
         if (Math.hypot(s.x - eye[0], s.z - eye[2]) > PARKED || gone.has(i)) continue
         seen.add(i)
-        if (parked.has(i) || chance(s.seed, 3) >= parkedFill(s, hour)) continue
+        const isFine = o.fine ? o.fine(s.x, s.z) : true
+        const existing = parked.get(i)
+        if (existing) {
+          if (!existing.fineGround && !existing.thing && !existing.waking && isFine) {
+            settle(existing, true)
+            existing.fineGround = true
+          }
+          continue
+        }
+        if (chance(s.seed, 3) >= parkedFill(s, hour)) continue
         const van = ready.get('van'), m = van && chance(s.seed, 8) < 0.08 ? van : cars[Math.floor(chance(s.seed, 4) * cars.length)], paint = chance(s.seed, 5) < 0.3 ? -1 : Math.floor(chance(s.seed, 6) * m.variants.length)
-        const c: Car = { id: ids++, model: m, paint, kind: 'parked', seed: s.seed, x: s.x, y: 0, z: s.z, heading: s.yaw, pitch: 0, v: 0, piece: null, shown: '', slot: i }
-        settle(c)
+        const c: Car = { id: ids++, model: m, paint, kind: 'parked', seed: s.seed, x: s.x, y: 0, z: s.z, heading: s.yaw, pitch: 0, roll: 0, fineGround: isFine, v: 0, piece: null, shown: '', slot: i }
+        settle(c, true)
         // Not on a roof or a stair (the footing there is not the street's), and not in what the survey left standing at the kerb.
         const g = o.land.ground_at(Math.round(s.x), Math.round(s.z))
-        if (c.y - g > 8 || Math.abs(c.pitch) > 0.3) { gone.add(i); continue }
+        if (c.y + (m.looks[0]?.low[1] ?? 0) - g > 8 || Math.abs(c.pitch) > 0.3) { if (isFine) gone.add(i); continue }
         // Never in a lane: no part of it where a lane's cars go (by the lanes as traffic keeps them, laneOff).
         if (inLane(s.x, s.z, m.wide / 2)) { gone.add(i); inLanes++; continue }
         parked.set(i, c)
@@ -1500,10 +1671,10 @@ export function street(o: {
     const thing = await o.alive.spawn({ name: carName(m, c.paint), cells: Int32Array.from(body), size: m.size, low, motor, controls: m.controls ?? 'drive', seats: m.seats, eye: m.eye, fine })
     c.waking = false
     if (!thing.alive) { pending.delete(c); return false }
-    // Turned as it stood: its middle where it was, a little over the road, still.
+    // Turned as it stood: placed directly at its solved 4-wheel spring equilibrium with no upward hop.
     const at = o.alive.where(thing), com = at ? [at.at[0] - low[0], at.at[1] - low[1], at.at[2] - low[2]] : [m.size[0] / 2, m.size[1] / 3, m.size[2] / 2]
-    const q = turnOf(m, c.heading, c.pitch), off = rotate(q, [com[0] - m.size[0] / 2, com[1], com[2] - m.size[2] / 2])
-    o.alive.place(thing, [c.x + off[0], c.y + off[1] + 1, c.z + off[2]], q)
+    const q = turnOf(m, c.heading, c.pitch, c.roll ?? 0), off = rotate(q, [com[0] - m.size[0] / 2, com[1], com[2] - m.size[2] / 2])
+    o.alive.place(thing, [c.x + off[0], c.y + off[1], c.z + off[2]], q)
     // (Where the solver put it is not known yet, `followed`: it goes as it was pushed.)
     if (o2.push) { o.alive.kick(thing, o2.push); c.thrown = true; c.going = { x: NaN, z: NaN, vx: o2.push[0], vz: o2.push[2], dt: 0 } }
     if (o2.asked !== undefined) { wakeLags.push(Math.min(0.15, Math.max(0.02, performance.now() / 1000 - o2.asked))); if (wakeLags.length > 4) wakeLags.shift(); wakeLag = Math.min(...wakeLags) }
@@ -2712,7 +2883,7 @@ export function street(o: {
       }
       if (bad) craters.push({ x: sx / bad, z: sz / bad, r: s.radius + 10 })
       // Parked cars there settle on what is left under them.
-      for (const c of parked.values()) if (!c.thing && Math.hypot(c.x - s.at[0], c.z - s.at[2]) < reach + c.model.long) settle(c)
+      for (const c of parked.values()) if (!c.thing && Math.hypot(c.x - s.at[0], c.z - s.at[2]) < reach + c.model.long) settle(c, true)
     }
   }
 

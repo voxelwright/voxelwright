@@ -728,9 +728,11 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
         const bodyUp = turned(v.rot, [0, 1, 0])
 
         // Estimate forward speed from live telemetry when driven, or from frame-to-frame motion when coasting/parked.
+        const movedDist = st.prevPos ? Math.hypot(v.pos[0] - st.prevPos[0], v.pos[1] - st.prevPos[1], v.pos[2] - st.prevPos[2]) : 0
+        if (movedDist > 50) for (const ws of st.wheels) ws.init = false
         let fwdSpeed = v.fwdSpeed
         if (fwdSpeed === undefined) {
-          if (st.prevPos && clampedDt > 0.001) {
+          if (st.prevPos && movedDist <= 50 && clampedDt > 0.001) {
             const dx = v.pos[0] - st.prevPos[0], dy = v.pos[1] - st.prevPos[1], dz = v.pos[2] - st.prevPos[2]
             const raw = (dx * bodyFwd[0] + dy * bodyFwd[1] + dz * bodyFwd[2]) / clampedDt
             fwdSpeed = Math.abs(raw) < 1500 ? raw : 0
