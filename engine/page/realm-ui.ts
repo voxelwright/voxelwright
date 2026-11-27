@@ -37,6 +37,8 @@ export interface RealmPage {
   say?(): void
   /** Opens the panel where a visitor connects their own AI (connect.ts), where the page makes things itself (#526). */
   ai?(): void
+  /** Opens the in-car radio & connected music picker (Spotify, Apple Music, FM stations). */
+  radio?(): void
   /** Opens the servers (lobbies.ts, #526): other players' servers to join, or how to host one. Where lobbies may be joined and this page is in none (in one, its tag stands where this key does). */
   servers?(): void
   /** Light, Dark or San Francisco now (#524, modes.ts), where the realm has a real sky to follow. Without it the panel has no such row. */
@@ -75,10 +77,11 @@ const STYLE = /* css */ `
    act (Back to the view, Say, Your AI, Credits, Reset world). One column, a groove between sections; on a desk in play the
    time and the weather on the left and the graphics on the right, the keys along the foot; on a phone on its side, columns. */
 #realm .sky .part { display: contents; }
-/* The keys that act: two to a row, the way back the whole row wide (explore.ts puts it first). */
-#realm .sky .part.acts .foot { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--vx) * 3); }
-#realm .sky .part.acts .foot > .vx-button { justify-content: center; min-inline-size: 0; white-space: nowrap; }
-#realm .sky .part.acts .foot > .home { grid-column: 1 / -1; }
+/* The keys that act: two to a row, the way back the whole row wide (explore.ts puts it first), one left over the whole row
+   too (which keys there are depends on the page: Say, Radio and Your AI are each where it has them). */
+#realm .sky .part.acts .foot { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 3); }
+#realm .sky .part.acts .foot > .vx-button { flex: 1 1 40%; justify-content: center; min-inline-size: 0; white-space: nowrap; }
+#realm .sky .part.acts .foot > .home { flex-basis: 100%; }
 @media (pointer: fine) {
   html:not(.first) #realm .sky { inline-size: calc(var(--vx) * 172); grid-template-columns: 1fr 1fr; column-gap: calc(var(--vx) * 7); align-items: start; }
   html:not(.first) #realm .sky .part { display: grid; gap: calc(var(--vx) * 3); align-content: start; }
@@ -87,8 +90,11 @@ const STYLE = /* css */ `
   html:not(.first) #realm .sky .part.res { grid-column: 2; grid-row: 2; }
   html:not(.first) #realm .sky .part.acts { grid-column: 1 / -1; grid-row: 3; }
   html:not(.first) #realm .sky .sep { display: none; }
-  html:not(.first) #realm .sky .part.acts .foot { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2); }
-  html:not(.first) #realm .sky .part.acts .foot > .reset { margin-inline-start: auto; }
+  /* (At a desk the keys in one row as far as they go, Reset world last and at the right.) */
+  html:not(.first) #realm .sky .part.acts .foot { gap: calc(var(--vx) * 2); }
+  html:not(.first) #realm .sky .part.acts .foot > .vx-button { flex: 1 1 auto; }
+  html:not(.first) #realm .sky .part.acts .foot > .home { flex-basis: auto; }
+  html:not(.first) #realm .sky .part.acts .foot > .reset { flex: 0 0 auto; margin-inline-start: auto; }
 }
 /* The graphics: three quality tiers across one row, with Medium given extra room so its words stay clear of its walls. */
 #realm .sky .graphics { grid-auto-flow: column; grid-template-columns: 1fr 1.4fr 1fr; }
@@ -169,8 +175,8 @@ html.riding #realm :is(.act, .held, .tools, .cues), html.riding #realm :is(.act,
   #realm .tools { left: auto; right: max(12px, env(safe-area-inset-right)); bottom: auto; top: 50%; transform: translateY(-62%); }
   @media (orientation: portrait) { #realm .tools { top: auto; bottom: calc(max(84px, env(safe-area-inset-bottom) + 84px) + 112px); transform: none; } }
   #realm .tools > label { min-inline-size: calc(var(--vx) * 20); }
-  /* Open, the sky's panel is over where the tools stand: they step aside until it is folded. */
-  #realm.open .tools { display: none; }
+  /* Open, the sky's panel is over where the tools and thumb keys stand: they step aside until it is folded. */
+  #realm.open :is(.tools, .thumbs) { display: none; }
   #realm .thumbs { display: block; pointer-events: none; }
   #realm .thumbs > * { pointer-events: auto; }
   #realm .stick { position: absolute; left: 0; top: 0; inline-size: 132px; block-size: 132px; margin: -66px 0 0 -66px; pointer-events: none !important; transition: opacity 0.2s; opacity: 0.55; }
@@ -247,7 +253,7 @@ export function realmControls(page: RealmPage) {
       </div>` : ''}
       <div class="part acts" role="group" aria-label="Actions">
       <div class="vx-groove" role="separator"></div>
-      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
     </section>
     <div class="vx-toggle-group tools" role="radiogroup" aria-label="Tool">
@@ -297,6 +303,7 @@ export function realmControls(page: RealmPage) {
   // (Folded first where the panel is a drawer, as Say… does: the dialog is to be read.)
   root.querySelector('button.lobbies')?.addEventListener('click', () => { if (coarse.matches) folded(true); page.servers?.() })
   root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
+  root.querySelector('button.radio')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.radio?.() })
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
   // Dynamic resolution On/Off: On steers resolution to hold Target FPS; Off pins it where the slider stands.
   let sizing = false

@@ -238,6 +238,7 @@ Two ways, side by side, behind `?voices=babble` or `?voices=speech`; off by defa
 
 - **The cabin.** In the driver's seat the muffle low-pass is 3,400 Hz (20,000 outside, 650 under the sea) and the
   cover 0.45, so rain, wind and surf play at 55%; wind is cut a further 40%. The muffle is on the whole mix.
+- For the connected radio picker, SDK lifecycle and provider checks, see the streaming-music skill.
 - **The radio** (`STATIONS`): Radio Off, Bay Drive FM (116 BPM, Dorian), Twin Peaks Chill (86, Lydian) and Fillmore
   Funk (108, Mixolydian), cycled by N. Each is a mood in `RADIO_MOODS` in `compose.ts`, outside `MOODS` so the
   realm rules and the 54-clip benchmark are unchanged; `resolve()` finds both. A conductor of its own plays with

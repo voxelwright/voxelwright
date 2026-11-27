@@ -172,7 +172,7 @@ html:not(.first)[data-hud]:has(#realm .lobbies, #lobby-tag) #card { top: calc(ma
 
 /* ── Contextual cues: slim 2-course smoked voxel card with miniature voxel keycap ── */
 #realm .cues { position: absolute; left: 0; top: 0; display: grid; gap: 6px; pointer-events: none !important; }
-html:has(#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])) #realm .cues { visibility: hidden; }
+html:has(#choice:not([hidden]), #ask.open, #connect[open], #radio-picker[open], #ai-line:not([hidden])) #realm .cues { visibility: hidden; }
 #realm .cue {
   display: inline-flex;
   align-items: center;
@@ -508,7 +508,9 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 124px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
   html:not(.first)[data-hud] [data-panel="wand-take"] button.vx-button { block-size: 44px; min-block-size: 44px; }
   html[data-hud] [data-panel="wand-take"] .vx-kbd { display: none; }
-  html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 180px); }
+  /* (Upright, under the wand's key; on its side where it was, above the body.) */
+  html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 100px); }
+  @media (orientation: portrait) { html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 180px); } }
 
   /* Sky drawer open: gameplay chrome steps aside cleanly. */
   html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .lobbies, #lobby-tag, #ask:not(.open), #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
@@ -1033,7 +1035,7 @@ export function playHud(o: {
     if (cueChute) say(chute, touch ? 'Chute' : 'Space', 'Parachute')
     if (cueFly) say(fly, 'B', 'Fly')
     if (cueLand) say(land, 'B', 'Walk')
-    const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])')
+    const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open], #radio-picker[open], #ai-line:not([hidden])')
     html.classList.toggle('drawer', drawer)
     for (const [el, want] of [[chute, cueChute && free], [fly, cueFly && free], [land, cueLand && free]] as const) {
       const was = el.classList.contains('on')

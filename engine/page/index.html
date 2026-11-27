@@ -157,16 +157,40 @@
   @media (prefers-reduced-motion: reduce) {
     [data-panel="stunts"], [data-panel="stunts"].pop { animation: none !important; transition: opacity 0.12s linear !important; }
   }
-  /* Procedural car radio station toast (sound/radio.ts): auto-fading pill shown briefly on tune, hidden when idle. */
-  [data-panel="radio-toast"] { --radio-accent: #ff4fa0; position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 96px); display: none; align-items: center; gap: 7px; padding: 6px 12px 6px 10px; border-radius: 999px; background: rgba(12, 16, 22, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.12); color: #f2f5f9; pointer-events: auto; cursor: pointer; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); opacity: 0; transform: translateY(6px); transition: opacity 0.22s ease, transform 0.22s ease; white-space: nowrap; }
+  /* Procedural & connected car radio station toast (sound/radio.ts): auto-fading pill shown briefly on tune or track change, hidden when idle. */
+  [data-panel="radio-toast"] { --radio-accent: #ff4fa0; position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 96px); display: none; align-items: center; gap: 8px; max-width: min(320px, calc(100vw - 36px)); padding: 6px 12px 6px 10px; border-radius: 999px; background: rgba(12, 16, 22, 0.82); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.14); color: #f2f5f9; pointer-events: auto; cursor: pointer; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32); opacity: 0; transform: translateY(6px); transition: opacity 0.22s ease, transform 0.22s ease; white-space: nowrap; }
+  html.yt-mini [data-panel="radio-toast"] { bottom: calc(max(18px, env(safe-area-inset-bottom)) + 344px); }
+  /* Visible YouTube Music mini-player (>=200x200 px viewport per YouTube ToS); hidden completely when idle or on FM. */
+  [data-panel="radio-yt"] { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 98px); width: 216px; border-radius: 14px; overflow: hidden; background: rgba(12, 16, 22, 0.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.44); pointer-events: auto; display: none; flex-direction: column; }
+  html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="radio-yt"]:not([hidden]) { display: flex; }
+  html:has(#ask.open) [data-panel="radio-yt"] { display: none !important; }
+  [data-panel="radio-yt"] .ryt-bar { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 5px 8px; background: rgba(255, 0, 51, 0.14); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  [data-panel="radio-yt"] .ryt-lbl { font: 700 10px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #ff6b81; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  [data-panel="radio-yt"] .ryt-stop { border: 0; border-radius: 6px; width: 22px; height: 22px; background: rgba(255, 255, 255, 0.1); color: #f2f5f9; font: 600 14px/1 -apple-system, system-ui, sans-serif; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+  [data-panel="radio-yt"] .ryt-stop:hover { background: rgba(255, 255, 255, 0.2); }
+  [data-panel="radio-yt"] .ryt-frame { width: 216px; height: 200px; background: #090c11; }
+  [data-panel="radio-yt"] .ryt-frame iframe { display: block; width: 216px; height: 200px; border: 0; }
+  @media (pointer: coarse) {
+    [data-panel="radio-yt"] { right: auto; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); }
+    html.yt-mini [data-panel="radio-toast"] { bottom: auto; }
+  }
+  [data-panel="radio-toast"].has-track { border-radius: 14px; padding: 7px 12px 7px 9px; }
   html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="radio-toast"]:not([hidden]) { display: inline-flex; }
-  html:has(#ask.open) [data-panel="radio-toast"] { display: none !important; }
+  html:has(#ask.open, #radio-picker[open]) [data-panel="radio-toast"] { display: none !important; }
+  html:has(#radio-picker[open]) :is([data-panel="drive-hud"], [data-panel="stunts"]) { display: none !important; }
+  html:has(#realm.open, #radio-picker[open]) [data-panel="living"] { display: none !important; }
   [data-panel="radio-toast"].show { opacity: 1; transform: translateY(0); }
-  [data-panel="radio-toast"] .rt-note { color: var(--radio-accent); font: 700 13px/1 -apple-system, system-ui, sans-serif; }
-  [data-panel="radio-toast"] .rt-name { font: 700 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; color: #f2f5f9; }
+  [data-panel="radio-toast"] .rt-art { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; flex: none; }
+  [data-panel="radio-toast"] .rt-note { color: var(--radio-accent); font: 700 13px/1 -apple-system, system-ui, sans-serif; flex: none; }
+  [data-panel="radio-toast"]:has(.rt-art:not([hidden])) .rt-note { display: none; }
+  [data-panel="radio-toast"] .rt-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  [data-panel="radio-toast"] .rt-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  [data-panel="radio-toast"] .rt-badge { flex: none; padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--radio-accent) 26%, rgba(255, 255, 255, 0.1)); color: #fff; font: 800 9px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em; }
+  [data-panel="radio-toast"] .rt-name { font: 700 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; color: #f2f5f9; overflow: hidden; text-overflow: ellipsis; }
   [data-panel="radio-toast"].is-off .rt-name { color: #b5bec9; }
-  [data-panel="radio-toast"] .rt-freq { font: 600 10px/1 ui-monospace, monospace; color: rgba(232, 236, 241, 0.6); padding-left: 4px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
-  [data-panel="radio-toast"] .rt-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; margin-left: 2px; }
+  [data-panel="radio-toast"] .rt-freq { flex: none; font: 600 10px/1 ui-monospace, monospace; color: rgba(232, 236, 241, 0.6); padding-left: 4px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
+  [data-panel="radio-toast"] .rt-track { font: 500 11px/1.15 -apple-system, system-ui, sans-serif; color: rgba(232, 236, 241, 0.78); overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  [data-panel="radio-toast"] .rt-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; margin-left: 2px; flex: none; }
   [data-panel="radio-toast"] .rt-bars i { display: block; width: 2px; height: 4px; border-radius: 1px; background: var(--radio-accent); animation: rt-eq 0.75s ease-in-out infinite alternate; }
   [data-panel="radio-toast"] .rt-bars i:nth-child(2) { height: 9px; animation-delay: 0.18s; }
   [data-panel="radio-toast"] .rt-bars i:nth-child(3) { height: 6px; animation-delay: 0.34s; }

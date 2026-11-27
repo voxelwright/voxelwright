@@ -263,7 +263,7 @@ export function living(o: {
     drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null): void
     event(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force?: number): void
     horn(on: boolean): void
-    radio?(action: 'next' | 'enter' | 'exit'): void
+    radio?(action: 'cycle' | 'next' | 'prev' | 'open' | 'enter' | 'exit'): void
   }
 }): Living {
   const M = 10
@@ -389,8 +389,9 @@ export function living(o: {
       camBtn.setAttribute('aria-label', 'Cycle camera view')
       driveExtras.push(camBtn)
       if (o.audio?.radio) {
-        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('next') })
-        radioBtn.setAttribute('aria-label', 'Next car radio station')
+        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('open') })
+        radioBtn.setAttribute('aria-haspopup', 'dialog')
+        radioBtn.setAttribute('aria-label', 'Open car radio and playlists')
         driveExtras.push(radioBtn)
       }
       const repairBtn = button('repair', 'Repair', () => { if (riding) repairCar(riding) })
@@ -669,14 +670,14 @@ export function living(o: {
     }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
     const refreshCard = () => {
-      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio'], ['F', 'repair']] : []
+      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio station'], ['R', 'playlists'], ['F', 'repair']] : []
       o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     }
     refreshCard()
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && code === 'KeyN') { if (!e?.repeat) o.audio?.radio?.('next'); return true } if (isDrive && code === 'KeyF') { if (!e?.repeat && riding) repairCar(riding); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && code === 'KeyN') { if (!e?.repeat) o.audio?.radio?.(e?.shiftKey ? 'open' : 'cycle'); return true } if (isDrive && code === 'KeyR') { if (!e?.repeat) o.audio?.radio?.('open'); return true } if (isDrive && code === 'Period') { if (!e?.repeat) o.audio?.radio?.('next'); return true } if (isDrive && code === 'Comma') { if (!e?.repeat) o.audio?.radio?.('prev'); return true } if (isDrive && code === 'KeyF') { if (!e?.repeat && riding) repairCar(riding); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }
