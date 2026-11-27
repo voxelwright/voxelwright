@@ -2,8 +2,9 @@
 // and warm, is put behind glass and looked at through it, from outside in and from inside out: in the world's own
 // cells (the works yard's office of glass) and through a piece's glass (a living thing, a box with walls of glass). Where glass stopped
 // the eye, the middle of the picture was the pale blue of the glass or what it mirrored, never the lamp. With mirrors
-// off (Shift+M) glass is a pale face again, the world's and a body's: there the lamp is not seen, which is told by
-// the middle being no brighter than the same pane beside it. (Putting the lamp out to compare was an edit, and it
+// off (Shift+M) the world's glass is a pale face again: there the lamp is not seen, which is told by the middle being
+// no brighter than the same pane beside it. A body's glass is still seen through with mirrors off (#74): a pale face
+// there made every window of a car opaque from its own seat on the Low and Medium presets. (Putting the lamp out to compare was an edit, and it
 // set off what stood round it: the office's wall came down, and the lamp's cells fell on each other.) And the wand stops at a pane, as a pick does: its
 // ring is drawn on a window, not lost behind it.
 //
@@ -154,8 +155,8 @@ try {
   const inPiece = await middle('piece-outside-in')
   check(lamp(inPiece), `from outside a box of glass, through both its sides, the lamp beyond it is seen (${say(inPiece)})`)
   await mirrors(false)
-  const hidPiece = await shows('piece-mirrors-off')
-  check(hidPiece < 0.05, `with mirrors off the box's glass is a face: the lamp beyond it is not seen (the middle ${hidPiece.toFixed(2)} brighter than the pane beside it)`)
+  const offPiece = await middle('piece-mirrors-off')
+  check(lamp(offPiece), `with mirrors off the box's glass is still seen through: the lamp beyond it is seen (${say(offPiece)})`)
   await mirrors(true)
   await eye(mid, light)
   const outPiece = await middle('piece-inside-out')

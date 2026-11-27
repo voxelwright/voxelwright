@@ -74,12 +74,13 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `world.ts` | Boxes, slots, the pool, asks to workers. |
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
-| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
+| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. `pieces.ts` draws a body's glass after its solid faces, tinting what is behind it; with mirrors off it still tints but mirrors nothing, so a car is seen out of from its seat on every preset (#74). |
 | `deform.ts` | Vehicle damage: dents, scuffs, cracked glass and engine damage recorded from crashes, packed for `pieces.ts` (see [vehicle damage](#vehicle-damage)). |
 | `fine.ts`, `streetfaces.ts` | Faces of things in cells finer than the world's (vehicles' looks). `facesWithSmooth` also gives each outside face smooth words at its four corners: a normal fitted to the shape round the corner and how open it is (#38). The street's cars get theirs in the `streetfaces.ts` worker. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
 | `living.ts`, `person.ts`, `people.ts`, `residents.ts` | Living things, a person's own body, figures and the town's residents ([living things and people](/living)). |
+| `street.ts`, `robotaxi-services.ts`, `ojai-sculpt.ts`, `robotaxi.ts` | San Francisco pedestrians, traffic and charging depots. Each robotaxi operator supplies a name, a livery, traffic shares and a station location. Operators share the Ojai model and the driving and crowd behavior. |
 | `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
 | `radio-ui.ts`, `sound/radio.ts`, `sound/radio-providers.ts` | Procedural offline FM car radio (`N` cycles), zero-login YouTube / YouTube Music streaming (official IFrame Player API with `>=200×200` visible mini-player and saved playlists; Spotify PKCE and Apple MusicKit JS v3 kept behind `ENABLED_STREAMING_PROVIDERS`), curated SF driving playlists, Waymo-style media picker (`R` while driving or Settings `Radio…`), horn/collision ducking, and Doppler pass-by whooshes. |

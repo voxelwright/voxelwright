@@ -1986,6 +1986,10 @@ async function main() {
         ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch, dur: info.annoyed ? 0.15 : 0.22, force: 0.65, reach: 18, travels: false })
         if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
       },
+      onShout: (info) => {
+        ears?.spoke({ name: info.name, text: info.text, at: info.at }, 'babble')
+        window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
+      },
     })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
@@ -2113,8 +2117,7 @@ async function main() {
     if (joined || directLL) realmUi.fold(true)
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
-    const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
-    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, back: { go: () => void explored()?.back(), can: () => explored()?.state === 'in' }, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
+    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.

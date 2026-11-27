@@ -5,7 +5,8 @@
 // world's shadows (the sun's maps); it casts none of its own. Its glass is seen through (#163): drawn after what is
 // solid, it lets what is behind it show, tinted, with what it mirrors on it. Its glass faces are kept apart from the
 // solid ones when it is made, so the solid faces are drawn as they were and the glass passes draw only glass. With
-// mirrors off its glass is a pale face as the world's is. A thing of finer cells may carry a smooth word a face (#38,
+// mirrors off it is still seen through, tinted, and mirrors nothing (#74: a pale face there, as the world's glass
+// is, made every window of a car opaque from its own seat on the Low and Medium presets). A thing of finer cells may carry a smooth word a face (#38,
 // fine.ts `facesWithSmooth`): its outside is then lit by a normal from the shape round it, darkened in its hollows,
 // and its paint and glass mirror as a car's do, where a face lit by its square normal showed each step of a curve.
 // A vehicle that has been struck (#37, deform.ts) is drawn bent: up to six dents move its corners and turn its normals,
@@ -35,8 +36,9 @@ struct U {
   c0: vec3f, lampRev: f32,
   c1: vec3f, lampHead: f32,
   c2: vec3f, lampAxis: f32,
-  // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them.
-  smoothOn: f32, pad0: f32, pad1: f32, pad2: f32,
+  // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them. mirrors: 0 is
+  // the M key's mirrors off, under which glass is seen through, tinted, and mirrors nothing (#74).
+  smoothOn: f32, mirrors: f32, pad1: f32, pad2: f32,
   // Its dents (#37): none for a piece that was never struck, and then nothing of them is worked out.
   deform: Deform,
   // Per-window crack origins (#61): front, rear, left, right; each (originX, originY, originZ, strength).
@@ -206,21 +208,34 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   let head = max(u.lampHead, 0.0);
   let brake = max(u.lampBrake, 0.0);
   let rev = max(u.lampRev, 0.0);
-  // Front lamps: warm intense white headlights (crisper & hotter on high beam > 1.0), amber markers kept amber.
+  // Negative u.lampRev drives 4-way amber hazard blinkers (works in broad daylight even when headlights are off).
+  let hazard = max(-u.lampRev, 0.0);
+  // Autonomous sensor status cyan/mint LEDs stay crisply lit regardless of headlight mode.
+  let cyan = albedo.b > albedo.r * 1.4 && albedo.g > albedo.r * 1.3;
+  if (cyan) { return albedo * (1.45 + min(head, 1.0) * 0.6); }
+  // Front lamps: rich signal-orange amber hazard blinkers + warm intense white headlights (crisper & hotter on high beam > 1.0).
   if (along > 0.35 && faceFwd > -0.5) {
-    if (head <= 0.01) { return vec3f(0.0); }
     let amber = albedo.r > albedo.g * 1.4 && albedo.g > albedo.b * 2.2;
-    if (amber) { return vec3f(1.8, 0.78, 0.08) * min(head, 1.2); }
+    if (amber) {
+      let amp = max(min(head, 0.7), hazard * 4.5);
+      if (amp <= 0.01) { return vec3f(0.0); }
+      return vec3f(1.3, 0.10, 0.002) * amp;
+    }
+    if (head <= 0.01) { return vec3f(0.0); }
     let hi = clamp(head - 1.0, 0.0, 1.0);
     let tint = mix(vec3f(1.0, 0.88, 0.66), vec3f(1.0, 0.97, 0.90), hi);
     return tint * (min(head, 1.0) * 2.8 + hi * 6.5);
   }
-  // Rear lamps: dedicated white reverse lenses, inner reverse zone on red clusters when reversing, steady crimson tails, blazing crimson brakes.
+  // Rear lamps: dedicated white reverse lenses, deep orange-amber hazard blinkers, inner reverse zone on red clusters when reversing, steady crimson tails, blazing crimson brakes.
   if (along < -0.35 && faceFwd < 0.5) {
     let whiteLens = albedo.g > albedo.r * 0.65 && albedo.b > albedo.r * 0.55;
     if (whiteLens) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
     let amber = albedo.g > albedo.r * 0.25 && albedo.b < albedo.r * 0.25;
-    if (amber) { return vec3f(1.5, 0.64, 0.06) * min(head, 1.0); }
+    if (amber) {
+      let amp = max(min(head, 0.65), hazard * 4.8);
+      if (amp <= 0.01) { return vec3f(0.0); }
+      return vec3f(1.3, 0.10, 0.002) * amp;
+    }
     if (rev > 0.05 && across < 0.62) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
     let tail = min(head, 1.0) * 1.9;
     let stop = brake * 9.5;
@@ -229,12 +244,14 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     let hot = clamp(brake, 0.0, 1.0);
     return vec3f(1.0, 0.004 + hot * 0.003, 0.001 + hot * 0.001) * redPower;
   }
-  // Side/roof marker lamps: gentle warm marker glow when headlights are on.
+  // Side-mirror amber hazard repeaters & side/roof marker lamps.
+  if (hazard > 0.05 && albedo.r > albedo.g * 1.4 && albedo.g > albedo.b * 2.2) {
+    return vec3f(1.3, 0.10, 0.002) * (hazard * 4.5);
+  }
   if (head > 0.05) { return albedo * (1.8 * min(head, 1.0)); }
   return vec3f(0.0);
 }
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  // (Glass faces come here only with mirrors off: a pale face.)
   let stuff = in.kind & 15u;
   let m = looks.material[stuff];
   // The cell as it was in the world when the body came loose, and the face as it then looked.
@@ -358,9 +375,11 @@ fn paneCrack(in: Out) -> f32 {
   // (A picture already toned: what lets a share through of the light lets about that share's root through of the picture.)
   let soft = smoothSeen(in, rd);
   let n = select(in.facing, litBy(in, rd), soft);
-  // A crack lets less through: it is white, and lit (fs_glint).
+  // A crack lets less through: it is white, and lit (fs_glint). With mirrors off there is no glint to give back
+  // what it mirrors, so it lets all of its share through.
   let through = 1.0 - 0.6 * paneCrack(in);
-  return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - paneMirror(rd, n, soft)) * through, vec3f(0.4545)), 1.0);
+  let mirrored = select(0.0, paneMirror(rd, n, soft), u.mirrors > 0.5);
+  return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - mirrored) * through, vec3f(0.4545)), 1.0);
 }
 @fragment fn fs_glint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -411,7 +430,7 @@ export interface Pieces {
   add(born: Born, share?: boolean): Piece
   /** Gives a piece made unshared new faces (and smooth words) for the same look: its square faces once its smooth ones are made (#38). Nothing for one destroyed. */
   refit(piece: Piece, faces: Uint32Array<ArrayBuffer>, smooth?: Uint32Array<ArrayBuffer>): void
-  /** mirrors: false is the M key's mirrors off, under which glass is a pale face. */
+  /** mirrors: false is the M key's mirrors off, under which glass is seen through, tinted, mirroring nothing. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites, mirrors?: boolean): void
   readonly count: number
   /** How many faces are drawn a frame. */
@@ -559,7 +578,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
         f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
-        f[45] = 0; f[46] = 0; f[47] = 0
+        f[45] = mirrors ? 1 : 0; f[46] = 0; f[47] = 0
         packDeformUniforms(piece.deform, f, DEFORM_AT)
         const cracks = piece.cracks, gc = piece.deform?.glassCrack
         for (let k = 0; k < 4; k++) {
@@ -572,11 +591,12 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         const faces = facesOf(piece)
         pass.setBindGroup(0, piece.bind)
         pass.setVertexBuffer(0, faces.faces)
-        // The solid faces; with mirrors off the glass too, as pale faces.
-        pass.draw(4, mirrors ? faces.count - faces.glass : faces.count)
+        // The solid faces.
+        pass.draw(4, faces.count - faces.glass)
       }
-      // The glass of those that have any: what is behind it tinted, then what it adds of itself.
-      if (mirrors) for (const panes of [tint, glint]) {
+      // The glass of those that have any: what is behind it tinted, then what it adds of itself. With mirrors off
+      // it is still seen through (#74): a pale face there was a car's every window opaque from its own seat.
+      for (const panes of mirrors ? [tint, glint] : [tint]) {
         pass.setPipeline(panes)
         for (const piece of live) {
           if (!piece.glass || !piece.cell) continue

@@ -51,8 +51,10 @@ low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
   breathe through with physical Fresnel edge gleam while holding contrast over both bright sky and
   dark streets; primary/active keys use deep cobalt enamel (`transmission: 0.06`) with an optional
   top status LED bar.
-- Small cue cards use 2 courses with a 1-voxel left accent edge; larger panels (such as the in-play
-  Settings drawer at `--vx: 3px`) use 4 courses with no top bolt shoulder.
+- Small cue cards use 2 courses with a 1-voxel left accent edge; larger panels (such as the
+  Settings drawer at `--vx: 3px`, in the first view and in play) use 4 courses with no top bolt shoulder.
+- The realm's first view uses this look too (`#first`, the settings key and panel), so that the
+  landing and play read as one device (#75).
 - A floating touch thumbstick recess (`.vx-recess.float`) builds a hollow stepped octagonal gimbal
   ring with backlit cardinal ticks so the world shows through its interior, paired with a sculpted
   concave voxel thumbstick cap (`[data-vx-stick-cap]`).
