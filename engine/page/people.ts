@@ -49,6 +49,8 @@ export interface Person {
   reading?: number
   /** Holding up a phone forward at eye/chest level to film something ahead, 0 to 1. */
   filming?: number
+  /** The stopped taxi this pedestrian is watching or addressing. */
+  robotaxiId?: number
   /** Seconds, for what a body does while it stands: it shifts and breathes. */
   time?: number
   /** Their name, shown over their head, and what they are saying now, under it. Both are text someone typed: drawn as letters, nothing more. */

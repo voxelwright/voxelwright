@@ -44,6 +44,12 @@ for (let y = row(1.04); y <= row(1.54); y++) {
 }
 check(cm(longestGlass) >= 40, `windshield has a continuous exterior glass span (${cm(longestGlass)} cm)`)
 
+let paintedBrow = 0
+for (let y = row(0.84); y <= row(1.03); y++) {
+  if (at(front[y], y) === ROBOTAXI_SERVICES[0].livery.body) paintedBrow++
+}
+check(cm(paintedBrow) >= 15, `pearl paint between the headlamps spans ${cm(paintedBrow)} cm vertically`)
+
 // In the side photo the fender sensor is a dark housing roughly half a metre
 // long, directly above the front tyre. It stands proud of the door skin on both sides.
 const radius = (x, y, dir) => {
@@ -62,6 +68,21 @@ for (const dir of [-1, 1]) {
     longest = Math.max(longest, run)
   }
   check(cm(longest) >= 45, `fender sensor above wheel projects at least 7 cm for ${cm(longest)} cm (side ${dir})`)
+
+  const post = radius(row(0.53), row(1.37), dir)
+  const corner = radius(row(0.29), row(1.37), dir)
+  check(corner.kind !== ROBOTAXI_SERVICES[0].livery.body && cm(corner.distance - post.distance) >= 10,
+    `rear sensor projects ${cm(corner.distance - post.distance)} cm from the corner post (side ${dir})`)
+
+  const x = row(1.75), y = row(1.28)
+  const pane = radius(x, y, dir)
+  let hasPrivacyLining = false
+  for (let offset = 1; offset <= row(0.075); offset++) {
+    const z = centre + dir * (pane.distance - offset)
+    const kind = cells[x + width * (z + depth * y)]
+    if (kind && (kind & 15) !== GLASS) hasPrivacyLining = true
+  }
+  check((pane.kind & 15) === GLASS && hasPrivacyLining, `rear passenger pane has glass over a privacy lining (side ${dir})`)
 }
 
 // Viewed head-on, the front roof array occupies most of the windshield width.

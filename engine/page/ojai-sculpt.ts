@@ -310,6 +310,15 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
   }
   add(cheekX - 0.30, cheekX + 0.30, cheekY - 0.12, cheekY + 0.12, cheekPod)
 
+  // Tall side-facing camera housings wrap the painted D-pillars near the hatch.
+  const cornerX = 0.30, cornerY = 1.38
+  const cornerPod = (X: number, Y: number, u: number) => {
+    const dx = (X - cornerX) / 0.18, dy = (Y - cornerY) / 0.145
+    const outline = dx ** 4 + dy ** 4
+    return outline < 1 && u > 0.69 && u < 1.025 - 0.066 * outline
+  }
+  add(cornerX - 0.18, cornerX + 0.18, cornerY - 0.145, cornerY + 0.145, cornerPod)
+
   // Sleek aerodynamic stalked wing mirrors with integrated amber side hazard repeaters (x = 3.06..3.24 m, y = 0.99..1.11 m).
   const mx = 3.15, my = 1.16
   const mu = side(mx, my) + 0.072
@@ -356,6 +365,10 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
   const kindAt = (x: number, y: number, z: number, added: boolean): number => {
     const X = (x + 0.5) / S, Y = (y + 0.5) / S, u = Math.abs((z + 0.5) / S - zc), s = X / L
     if (added) {
+      if (X < cornerX + 0.18 && Y < 1.53) {
+        if (u > 0.98 && Math.hypot(X - cornerX + 0.06, Y - cornerY) < 0.042) return K.barrel
+        return K.gloss
+      }
       if (X > podCx - 0.31 && X < podCx + 0.31 && Y > 1.48) {
         if (X > podCx + 0.16 && Math.abs(u - 0.51) < 0.08 && Math.abs(Y - 1.70) < 0.035) return K.alloy
         return K.gloss
@@ -382,17 +395,18 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     }
     if (nearArch(X, Y, 0.052) && Y < 0.88 && u > side(X, Y) - 0.045) return liv.trim
 
-    // The black brow slopes across the upper nose. Two lamp pockets sit in its shoulders.
+    // The pearl bumper rises between two smoked lamp pockets, up to the narrow windshield cowl.
     const fX = frontX(Y, u), bf = B(L - 0.22), sFront = Math.max(0.25, side(X, Y))
     const hoodY = topAt(X, u)
     if (s > 0.865 && Y > 0.805 && Y > hoodY - 0.075 && u < sFront - 0.025) {
-      const dx = (X - (4.42 - 0.13 * u)) / 0.145, dz = (u - 0.48) / 0.21
+      const dx = (X - (4.40 - 0.13 * u)) / 0.16, dz = (u - 0.53) / 0.23
       if (dx ** 4 + dz ** 4 <= 1) {
-        if (dz > 0.72 && Math.abs(dx) < 0.66) return K.amber
-        if (dx > 0.32 && dx < 0.75 && Math.abs(dz) < 0.77) return K.head
-        return K.alloy
+        if (dz > 0.63 && dz < 0.85 && Math.abs(dx) < 0.53) return K.amber
+        if (dx > 0.10 && dx < 0.56 && Math.abs(dz) < 0.72) return K.head
+        if (dx > -0.48 && dx <= 0.10 && Math.abs(dz) < 0.65) return K.alloy
+        return K.gloss
       }
-      return K.gloss
+      return Y > belt(X) - 0.035 ? K.gloss : liv.body
     }
     if (X > fX - 0.105) {
       if (frontIntakeZone(Y, u, bf)) {
@@ -470,7 +484,9 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
       if ((kinds[j] & 15) === GLASS) glass = kinds[j]
       else if (!first || Math.abs(a) + Math.abs(b) + Math.abs(c) === 1) first = kinds[j]
     }
-    kinds[i] = glass || first || kindAt(x, y, z, solid[i] === 2)
+    // The rear windows use a charcoal privacy lining under their glass surface.
+    // Leave the driver and windshield panes clear for the first-person view.
+    kinds[i] = glass === K.glass && (x + 0.5) / S < 2.99 ? K.dash : glass || first || kindAt(x, y, z, solid[i] === 2)
   }
 
   // Seal tiny corner notches between body & added hardware.

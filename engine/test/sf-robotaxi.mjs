@@ -263,181 +263,139 @@ try {
   check(react.reactions.filmers >= 1 && react.reactions.yellers >= 1 && react.reactions.shouts >= 1 && react.shoutEvents >= 1,
     `nearby pedestrians stopped to film/yell & shouted (${react.reactions.filmers} filmers, ${react.reactions.yellers} yellers, ${react.reactions.shouts} shouts, ${react.shoutEvents} events)`)
 
-  const waitHazardOn = () =>
-    page.waitForFunction((id) => {
-      const s = globalThis.engine.street.robotaxis.stuck.find((x) => x.id === id)
-      return s?.hazardOn && s.hazardPhase >= 0.04 && s.hazardPhase < 0.34
-    }, stuckInfo.id, { timeout: 3000, polling: 20 })
-
-  const pickCleanView = async (st, mode) =>
-    page.evaluate(({ st, mode }) => {
-      const e = globalThis.engine
-      const fx = Math.cos(st.heading), fz = Math.sin(st.heading)
-      const rx = -fz, rz = fx
-      const cars = e.street.cars(st.x, st.z, 260)
-      const rayClear = (ax, ay, az, bx, by, bz) => {
-        const steps = Math.max(14, Math.ceil(Math.hypot(bx - ax, by - ay, bz - az) / 4))
-        for (let k = 1; k < steps; k++) {
-          const u = k / steps
-          if (e.kind(Math.round(ax + (bx - ax) * u), Math.round(ay + (by - ay) * u), Math.round(az + (bz - az) * u)) !== 0) return false
-        }
-        return true
+  // Frame the stopped car and its own responding pedestrians at street level. Measure the
+  // projected silhouette and distinct people, so a foreground back cannot stand in for a crowd.
+  const pickView = (mode) => page.evaluate(({ st, mode }) => {
+    const e = globalThis.engine, fx = Math.cos(st.heading), fz = Math.sin(st.heading)
+    const people = e.street.folk(e.view(), performance.now() / 1000)
+    const actors = people.filter((p) => p.robotaxiId === st.id && (p.filming > 0.3 || p.move))
+    const cars = e.street.cars(st.x, st.z, 320)
+    const otherCars = cars.filter((c) => Math.hypot(c.x - st.x, c.z - st.z) > 2)
+    const sceneClear = (a, b, obstacles) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2]
+      const steps = Math.ceil(Math.hypot(dx, dy, dz) / 3)
+      for (let i = 1; i < steps; i++) {
+        const t = i / steps
+        if (e.kind(a[0] + t * dx, a[1] + t * dy, a[2] + t * dz)) return false
       }
-      const clearPoint = (px, pz, hM) => {
-        const f = e.feet(Math.round(px), Math.round(pz)), camY = f + Math.round(hM * 10)
-        // Reject hollow building interiors & under-awning points: require open air around lens AND open sky overhead!
-        for (const [ox, oz] of [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]]) if (e.kind(Math.round(px + ox), camY, Math.round(pz + oz)) !== 0) return false
-        for (let dy = 8; dy <= 72; dy += 6) if (e.kind(Math.round(px), camY + dy, Math.round(pz)) !== 0) return false
-        if (!rayClear(px, camY, pz, st.x, st.y + 10, st.z)) return false
-        for (const c of cars) {
-          if (Math.hypot(c.x - st.x, c.z - st.z) < 8) continue
-          if (Math.hypot(c.x - px, c.z - pz) < 58) return false
-          const vx = st.x - px, vz = st.z - pz, l2 = vx * vx + vz * vz || 1
-          const t = ((c.x - px) * vx + (c.z - pz) * vz) / l2
-          if (t > 0.05 && t < 0.85 && Math.hypot(c.x - (px + vx * t), c.z - (pz + vz * t)) < 34) return false
+      return obstacles.every((c) => {
+        const hx = Math.cos(c.heading), hz = Math.sin(c.heading)
+        const long = ['tram', 'bus', 'trolley', 'cable'].includes(c.model) ? 63 : c.model === 'truck' ? 43 : 24
+        // Clip the sightline against the oriented footprint, including the point at the lens.
+        let enter = 0, leave = 1
+        for (const [ox, oz, extent] of [[hx, hz, long], [-hz, hx, 10]]) {
+          const pos = (a[0] - c.x) * ox + (a[2] - c.z) * oz, vel = dx * ox + dz * oz
+          if (Math.abs(vel) < 0.001) { if (Math.abs(pos) > extent) return true; continue }
+          const u = (-extent - pos) / vel, v = (extent - pos) / vel
+          enter = Math.max(enter, Math.min(u, v))
+          leave = Math.min(leave, Math.max(u, v))
         }
-        return true
-      }
-      if (mode === 'crowd-closeup') {
-        const list = e.street.folk(e.view(), performance.now() / 1000)
-        // Prefer actively filming bystanders (phone outstretched), then gesturing yellers/speakers, sorted nearest first!
-        const actors = list.filter((p) => (p.filming > 0.3 || p.move) && Math.hypot(p.at[0] - st.x, p.at[2] - st.z) < 240)
-        const clearOfTraffic = (x, z, tx, tz) => {
-          const dx = tx - x, dz = tz - z, length2 = dx * dx + dz * dz || 1
-          return cars.every((c) => {
-            if (Math.hypot(c.x - st.x, c.z - st.z) < 8) return true
-            const t = Math.max(0, Math.min(1, ((c.x - x) * dx + (c.z - z) * dz) / length2))
-            const clearance = ['bus', 'tram', 'trolley', 'cable'].includes(c.model) ? 64 : ['truck', 'van'].includes(c.model) ? 38 : 24
-            return Math.hypot(c.x - x - t * dx, c.z - z - t * dz) > clearance
-          })
-        }
-        let best = null
-        for (const actor of actors) {
-          const vx = st.x - actor.at[0], vz = st.z - actor.at[2], dist = Math.hypot(vx, vz)
-          if (dist < 40) continue
-          const ux = vx / dist, uz = vz / dist
-          for (const along of [-18, -5, 8]) for (const lateral of [35, -35, 49, -49]) {
-            const cx = actor.at[0] + ux * along - uz * lateral, cz = actor.at[2] + uz * along + ux * lateral
-            const cy = e.feet(Math.round(cx), Math.round(cz)) + 18
-            if (e.kind(cx, cy, cz) || e.kind(cx, cy + 10, cz) || e.kind(cx, cy + 25, cz)) continue
-            if (!clearOfTraffic(cx, cz, st.x - fx * 12, st.z - fz * 12) || !clearOfTraffic(cx, cz, actor.at[0], actor.at[2])) continue
-            if (!rayClear(cx, cy, cz, st.x, st.y + 10, st.z)) continue
-            if (![-6, 0, 6].every((off) => rayClear(cx, cy, cz, actor.at[0] + uz * off, actor.at[1] + 13, actor.at[2] - ux * off))) continue
-            const ax = actor.at[0] - cx, az = actor.at[2] - cz, ad = Math.hypot(ax, az)
-            const bx = st.x - cx, bz = st.z - cz, bd = Math.hypot(bx, bz)
-            const dot = (ax * bx + az * bz) / (ad * bd)
-            if (dot < 0.47 || dot > 0.96) continue
-            const dx = ax / ad + bx / bd, dz = az / ad + bz / bd
-            const dl = Math.hypot(dx, dz)
-            const companions = actors.filter((p) => {
-              if (p === actor) return false
-              const px = p.at[0] - cx, pz = p.at[2] - cz, d = Math.hypot(px, pz)
-              return d > 25 && d < 155 && (px * dx + pz * dz) / (d * dl) > 0.76 &&
-                clearOfTraffic(cx, cz, p.at[0], p.at[2]) && rayClear(cx, cy, cz, p.at[0], p.at[1] + 14, p.at[2])
-            }).length
-            const score = Math.min(3, companions) * 3 + (actor.filming > 0.3 ? 5 : 0) - bd / 150
-            if (!best || score > best.score) best = { cx, cy, cz, dx, dz, score }
-          }
-        }
-        if (best) {
-          Object.assign(e.pose, { x: best.cx / 10, y: best.cy / 10, z: best.cz / 10, yaw: Math.atan2(best.dx, -best.dz), pitch: -0.05 })
-          e.fov = 74
-          return 'closeup'
-        }
-      }
-      // Try front three-quarter views first, then the rest of the street if traffic fills the foreground.
-      const opts = []
-      for (const distance of [94, 78, 115]) {
-        for (const angle of [0.65, -0.65, 0.35, -0.35, 1.0, -1.0, 1.45, -1.45, 0, 2.2, -2.2, Math.PI]) {
-          const dx = Math.cos(angle + st.heading) * distance, dz = Math.sin(angle + st.heading) * distance
-          opts.push([st.x + dx, st.z + dz])
-        }
-      }
-      // Score clear street viewpoints by how many curb-side filming/yelling spectators sit visibly in frame!
-      const crowd = e.street.folk(e.view(), performance.now() / 1000).filter((p) => (p.filming > 0.2 || !!p.move || !!p.says) && Math.hypot(p.at[0] - st.x, p.at[2] - st.z) < 250)
-      let hM = mode === 'night' ? 2.5 : 3
-      let valid = opts.filter(([x, z]) => clearPoint(x, z, hM))
-      if (!valid.length) {
-        hM = 4.5
-        valid = opts.filter(([x, z]) => clearPoint(x, z, hM))
-      }
-      if (!valid.length) throw new Error('No clear camera position around the stopped robotaxi')
-      let chosen = valid[0], bestScore = -1
-      for (const [cx, cz] of valid) {
-        const tx = st.x - fx * 24, tz = st.z - fz * 24
-        const dirX = tx - cx, dirZ = tz - cz, dl = Math.hypot(dirX, dirZ) || 1
-        const ux = dirX / dl, uz = dirZ / dl
-        let score = 0
-        for (const p of crowd) {
-          const px = p.at[0] - cx, pz = p.at[2] - cz, d = Math.hypot(px, pz)
-          if (d < 35 || d > 280) continue
-          const dot = (px * ux + pz * uz) / d
-          if (dot > 0.72) score += (p.filming > 0.2 ? 3 : 2) + (p.says ? 3 : 0) + (d < 150 ? 2 : 0)
-        }
-        if (score > bestScore) { bestScore = score; chosen = [cx, cz] }
-      }
-      const gx = chosen[0] / 10, gz = chosen[1] / 10, gy = e.feet(Math.round(chosen[0]), Math.round(chosen[1])) / 10
-      const tx = (st.x - fx * 24) / 10, tz = (st.z - fz * 24) / 10
-      Object.assign(e.pose, { x: gx, y: gy + hM, z: gz, yaw: Math.atan2(tx - gx, -(tz - gz)), pitch: Math.atan2(st.y / 10 + 1 - (gy + hM), Math.hypot(tx - gx, tz - gz)) })
-      e.fov = 72
-      return 'street'
-    }, { st, mode })
-
-  const waitLensClear = (st) =>
-    page.evaluate(async (st) => {
-      const e = globalThis.engine
-      // Wait (up to ~5 s) until no moving car sits near the lens OR anywhere along the sightline to the stuck robotaxi.
-      for (let k = 0; k < 36; k++) {
-        const cx = e.pose.x * 10, cz = e.pose.z * 10
-        const vx = st.x - cx, vz = st.z - cz, l2 = vx * vx + vz * vz || 1
-        const blocker = e.street.cars(cx, cz, Math.sqrt(l2) + 60).some((c) => {
-          if (Math.hypot(c.x - st.x, c.z - st.z) < 12) return false
-          if (Math.hypot(c.x - cx, c.z - cz) < 75) return true
-          const t = ((c.x - cx) * vx + (c.z - cz) * vz) / l2
-          return t > 0.03 && t < 0.9 && Math.hypot(c.x - (cx + vx * t), c.z - (cz + vz * t)) < 30
-        })
-        if (!blocker) return true
-        await new Promise((r) => setTimeout(r, 140))
-      }
-      return false
-    }, st)
-
-  await pickCleanView(stuckInfo, 'day')
-  await page.waitForTimeout(180)
-  await waitLensClear(stuckInfo)
-  await waitHazardOn()
-  await page.waitForTimeout(40)
-  await page.screenshot({ path: join(shots, '05-stuck-intersection-crowd.png') })
-
-  await waitHazardOn()
-  await pickCleanView(stuckInfo, 'crowd-closeup')
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
-  await page.screenshot({ path: join(shots, '06-stuck-crowd-closeup.png') })
-
-  await page.evaluate(() => { globalThis.engine.hour = 20.6 })
-  await pickCleanView(stuckInfo, 'night')
-  await page.waitForTimeout(550)
-  // A car may pull into the sightline after the view is picked: re-pick once if it never clears.
-  if (!(await waitLensClear(stuckInfo))) { await pickCleanView(stuckInfo, 'night'); await page.waitForTimeout(300); await waitLensClear(stuckInfo) }
-  await waitHazardOn()
-  await page.waitForTimeout(40)
-  const nightFrame = await page.screenshot({ path: join(shots, '07-stuck-night-hazards.png') })
-  // An eye inside a wall left the entire street blank while the HUD rendered normally.
-  // Read the central scene, excluding all HUD corners, from the frame we actually captured.
-  const edges = await page.evaluate(async (png) => {
-    const img = new Image()
-    img.src = 'data:image/png;base64,' + png
-    await img.decode()
-    const ctx = new OffscreenCanvas(64, 40).getContext('2d')
-    ctx.drawImage(img, img.width * 0.15, img.height * 0.2, img.width * 0.7, img.height * 0.6, 0, 0, 64, 40)
-    const { data } = ctx.getImageData(0, 0, 64, 40)
-    let count = 0
-    for (let i = 4; i < data.length; i += 4) {
-      if (i % 256 && Math.max(...[0, 1, 2].map((c) => Math.abs(data[i + c] - data[i + c - 4]))) > 16) count++
+        return enter > leave
+      })
     }
-    return count
-  }, nightFrame.toString('base64'))
-  check(edges > 75, `night frame shows the street around the robotaxi (${edges} contrasting samples)`)
+    const atCar = (along, across, high) => [st.x + along * fx - across * fz, st.y + high, st.z + along * fz + across * fx]
+    const corners = [-22, 22].flatMap((i) => [-9, 9].map((j) => atCar(i, j, 9)))
+    const lamps = [-22, 20].flatMap((i) => [-7, 7].map((j) => atCar(i, j, 9)))
+    const fov = mode === 'day' ? 57 : 51, tan = Math.tan(fov * Math.PI / 360)
+    let best = null
+    for (const radius of (mode === 'day' ? [82, 100, 115] : [65, 80, 96])) {
+      for (const angle of [0.7, -0.7, 1.05, -1.05, 1.35, -1.35, 1.75, -1.75, 2.1, -2.1, 2.4, -2.4]) {
+        const x = st.x + Math.cos(st.heading + angle) * radius, z = st.z + Math.sin(st.heading + angle) * radius
+        const y = e.feet(Math.round(x), Math.round(z)) + 18, eye = [x, y, z]
+        if (Math.abs(y - st.y - 18) > 10 || e.kind(x, y, z) || e.kind(x, y + 18, z)) continue
+        if (people.some((p) => Math.hypot(p.at[0] - x, p.at[2] - z) < 24)) continue
+        if (!corners.every((v) => sceneClear(eye, v, otherCars))) continue
+        const visible = actors.filter((p) => {
+          const [px, py, pz] = p.at
+          const dist = Math.hypot(x - px, z - pz)
+          const facing = (Math.sin(p.yaw) * (x - px) - Math.cos(p.yaw) * (z - pz)) / dist
+          return dist > 29 && dist < 175 && facing > -0.48 && sceneClear(eye, [px, py + 12, pz], cars)
+        })
+        for (const shift of [-0.29, -0.14, 0, 0.14, 0.29]) {
+          const yaw = Math.atan2(st.x - x, z - st.z) + shift, pitch = Math.atan2(st.y + 11 - y, radius)
+          const sy = Math.sin(yaw), cy = Math.cos(yaw), sp = Math.sin(pitch), cp = Math.cos(pitch)
+          const project = ([px, py, pz]) => {
+            const dx = px - x, dy = py - y, dz = pz - z, ahead = dx * sy - dz * cy
+            const depth = ahead * cp + dy * sp
+            return { x: innerWidth / 2 + innerHeight / 2 * (dx * cy + dz * sy) / (depth * tan),
+              y: innerHeight / 2 - innerHeight / 2 * (dy * cp - ahead * sp) / (depth * tan), depth }
+          }
+          const carX = corners.map((corner) => project(corner).x)
+          const left = Math.min(...carX), right = Math.max(...carX), width = right - left
+          if (left < 40 || right > innerWidth - 40 || width < 245) continue
+          const cast = []
+          for (const p of [...visible].sort((a, b) => (b.filming || 0) - (a.filming || 0))) {
+            const [px, py, pz] = p.at, head = project([px, py + 17, pz]), foot = project(p.at)
+            const height = foot.y - head.y, half = height * 0.17
+            if (head.depth < 10 || height < 72 || head.y < 62 || foot.y > innerHeight - 60 ||
+                head.x - half < 35 || head.x + half > innerWidth - 35) continue
+            if (head.x + half > left && head.x - half < right) continue
+            if (cast.some((c) => Math.abs(c.x - head.x) < half + c.half)) continue
+            cast.push({ x: head.x, half, height, filming: p.filming > 0.3, id: p.seed })
+          }
+          const phone = cast.some((c) => c.filming)
+          const filmerHeight = Math.max(0, ...cast.filter((c) => c.filming).map((c) => c.height))
+          const score = Math.min(3, cast.length) * 5 + (phone ? 8 : 0) + Math.min(1.5, width / 340) +
+            Math.min(2, filmerHeight / (mode === 'close' ? 85 : 140)) +
+            (mode === 'night' && Math.cos(angle) < -0.3 ? 1.4 : 0)
+          if (!best || score > best.score) best = { score, x, y, z, yaw, pitch, width, cast, phone, lamps: lamps.map(project) }
+        }
+      }
+    }
+    if (!best) throw new Error('No unobstructed street-level view of the stopped taxi')
+    Object.assign(e.pose, { x: best.x / 10, y: best.y / 10, z: best.z / 10, yaw: best.yaw, pitch: best.pitch })
+    e.fov = fov
+    return { width: Math.round(best.width), actors: best.cast.map((p) => p.id), phone: best.phone, lamps: best.lamps }
+  }, { st: stuckInfo, mode })
+
+  // Let the renderer submit the chosen blink phase, then hold that presented frame while
+  // Chromium takes the screenshot. The screenshot itself can take longer than a blink.
+  const capturePhase = async (on, path) => {
+    await page.evaluate(({ id, on }) => new Promise((resolve, reject) => {
+      const e = globalThis.engine
+      let rendered = false
+      const stop = e.watch(() => {
+        if (rendered) { e.resting = true; stop(); clearTimeout(timeout); resolve(); return }
+        const st = e.street.robotaxis.stuck.find((c) => c.id === id)
+        rendered = !!st && (on ? st.hazardPhase < 0.28 : st.hazardPhase >= 0.65 && st.hazardPhase < 0.84)
+      })
+      const timeout = setTimeout(() => { stop(); reject(new Error('Incident expired before the requested blink phase')) }, 5000)
+    }), { id: stuckInfo.id, on })
+    try { return await page.screenshot({ path }) }
+    finally { await page.evaluate(() => { globalThis.engine.resting = false }) }
+  }
+  const framing = {}
+  for (const [mode, filename] of [['day', '05-stuck-intersection-crowd.png'], ['close', '06-stuck-crowd-closeup.png']]) {
+    const view = framing[mode] = await pickView(mode)
+    check(view.actors.length >= 2 && view.phone, `${mode} frame fits a ${view.width}px taxi beside ${view.actors.length} distinct responders, including a filming pose: ${view.phone}`)
+    await capturePhase(true, join(shots, filename))
+  }
+  await page.evaluate(() => { globalThis.engine.hour = 20.6 })
+  await page.waitForTimeout(350)
+  const night = framing.night = await pickView('night')
+  check(night.actors.length >= 2, `night frame fits a ${night.width}px taxi beside ${night.actors.length} distinct responders`)
+  const dark = await capturePhase(false)
+  const lit = await capturePhase(true, join(shots, '07-stuck-night-hazards.png'))
+  const amber = await page.evaluate(async ({ dark, lit, lamps }) => {
+    const read = async (png) => {
+      const img = new Image()
+      img.src = 'data:image/png;base64,' + png
+      await img.decode()
+      const ctx = new OffscreenCanvas(img.width, img.height).getContext('2d')
+      ctx.drawImage(img, 0, 0)
+      return ctx.getImageData(0, 0, img.width, img.height)
+    }
+    const [off, on] = await Promise.all([read(dark), read(lit)])
+    return lamps.map((p) => {
+      let count = 0
+      for (let y = Math.round(p.y) - 20; y <= p.y + 20; y++) for (let x = Math.round(p.x) - 20; x <= p.x + 20; x++) {
+        const i = 4 * (y * on.width + x), [r, g, b] = on.data.subarray(i, i + 3)
+        if (r > 150 && g > 55 && r > g * 1.15 && g > b * 1.35 && g > off.data[i + 1] + 12) count++
+      }
+      return count
+    })
+  }, { dark: dark.toString('base64'), lit: lit.toString('base64'), lamps: night.lamps })
+  check(Math.max(...amber) >= 5, `amber pixels brighten at projected taxi lamps between off and on frames (${amber.join(', ')})`)
 
   // Verify narrow-street freeze trigger too!
   const narrowInfo = await page.evaluate((serviceId) => {
@@ -479,7 +437,7 @@ try {
   check(driveResult.ok, `player took and drove ${primary.name} with E (${JSON.stringify(driveResult)})`)
 
   check(errors.length === 0, `zero runtime page/console errors (${errors.length}${errors.length ? ': ' + errors[0] : ''})`)
-  writeFileSync(join(shots, 'report.json'), JSON.stringify({ registry, hasStationPlace, st1, trips, nearRate, farRate, react, driveResult, errors, failures }, null, 2))
+  writeFileSync(join(shots, 'report.json'), JSON.stringify({ registry, hasStationPlace, st1, trips, nearRate, farRate, react, framing, amber, driveResult, errors, failures }, null, 2))
 } finally {
   await browser.close()
   site.stop()

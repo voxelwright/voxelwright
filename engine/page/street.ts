@@ -569,6 +569,7 @@ export function street(o: {
     return Math.max(-12, Math.min(12, step))
   }
   const shown: Person[] = [], held = new Map<number, { x: number; z: number; at: number }>()
+  const watching = new Map<number, { car: number; when: number; seen: number; left?: number }>()
   const seenWalks: number[] = []
   let stamp = 1, lastSeconds = 0
   const walkStamp = new Map<number, number>()
@@ -594,6 +595,7 @@ export function street(o: {
     if (hornPulse && !activeHorn) hornPulse = null
     // Stuck robotaxis that nearby sidewalk pedestrians react to (turning, yelling, and filming with phones).
     const stuckRT = traffic.filter((c) => c.rtStuck && nowPerf - c.rtStuck.at > 0.6 && Math.hypot(c.x - eye[0], c.z - eye[2]) < REACH + 250)
+    const stuckIds = new Set(stuckRT.map((c) => c.id))
     const nearCars = stuckRT.length
       ? [...traffic, ...depotCars, ...parked.values()].filter((c) => Math.hypot(c.x - eye[0], c.z - eye[2]) < 380)
       : []
@@ -686,7 +688,19 @@ export function street(o: {
         if (o.shocks.length || crashShocks.length) startle(i, seed, t)
         else { S.when = t; S.down = 0; S.flinch = 0; S.turned = 0; S.frozen = false }
         const { when, down, flinch, towards, turned, frozen } = S
-        placeOf(i, seed, when)
+        let routeTime = when
+        const watch = watching.get(seed)
+        if (watch) {
+          if (down || flinch || turned || frozen || t < watch.when) watching.delete(seed)
+          else {
+            if (!stuckIds.has(watch.car)) watch.left ??= t
+            // Hold the walk itself while watching. Resume along it and catch up as after a startle.
+            routeTime = watch.left === undefined ? watch.when : Math.min(t, watch.when + (t - watch.left) * 1.7)
+            if (watch.left !== undefined && routeTime >= t) watching.delete(seed)
+            watch.seen = seconds
+          }
+        }
+        placeOf(i, seed, routeTime)
         if (Math.abs(W.x - eye[0]) > REACH || Math.abs(W.z - eye[2]) > REACH) continue
         let x = W.x, z = W.z, hx = W.hx, hz = W.hz
         const high = feetAt(x, z)
@@ -728,6 +742,9 @@ export function street(o: {
             const env = ease((age - 0.5) / 0.7) * (1 - ease((bestD - 200) / 80))
             if (env > 0.05) {
               rtReact = { car: bestC, env, toward: Math.atan2(bestC.x - x, -(bestC.z - z)), dist: bestD }
+              if (!watch || watch.car !== bestC.id || watch.left !== undefined) {
+                watching.set(seed, { car: bestC.id, when: routeTime, seen: seconds })
+              }
               const vx = bestC.x - x, vz = bestC.z - z, vl = Math.hypot(vx, vz) || 1
               const ux = vx / vl, uz = vz / vl
               const curbSafe = (tx: number, tz: number) => {
@@ -780,6 +797,7 @@ export function street(o: {
         p.stride = W.s / STRIDE; p.walking = frozen || rtReact ? 0 : W.walking; p.pace = 11 + 4 * chance(seed, 2)
         p.reading = !rtReact && W.still && W.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((W.stood - 2.5) / 1.2) : 0
         p.filming = 0
+        p.robotaxiId = rtReact?.car.id
         p.move = undefined
         p.name = undefined
         p.says = undefined
@@ -845,6 +863,7 @@ export function street(o: {
     rtFilmersStat = filmersNow
     rtYellersStat = yellersNow
     if (held.size > 600) for (const [seed, a] of held) if (seconds - a.at > 5) held.delete(seed)
+    for (const [seed, watch] of watching) if (seconds - watch.seen > 5) watching.delete(seed)
     peopleMs += (performance.now() - t0 - peopleMs) * 0.1
     return shown
   }
@@ -2594,7 +2613,8 @@ export function street(o: {
       prevRideId = 0; prevRideAt = null; rideDt = 0; rideVel[0] = 0; rideVel[1] = 0; rideVel[2] = 0
       hornWas = false; lastHornPulse = -99; lastTrafficHorn = -99
       lastCrowdShout = -99; crowdShoutsStat = 0; rtFilmersStat = 0; rtYellersStat = 0; stuckHonksStat = 0; lastStuckHorn = -99
-      for (const depot of depots) { depot.inGateLift = 0; depot.outGateLift = 0; depot.lastSpawn = -99 }
+      watching.clear()
+      for (const depot of depots) { depot.inGateLift = 0; depot.outGateLift = 0; depot.lastSpawn = -99; depot.arrivals = 0; depot.departures = 0 }
       crashCountStat = 0; nearMissCountStat = 0; hornResponsesStat = 0
       traffic.length = 0; depotCars.length = 0; trams.length = 0; parked.clear(); gone.clear(); holds.clear(); living.clear(); cables.length = 0; pending.clear(); heard = o.shocks.length
       cue?.remove(); cue = null; beside?.(); beside = null
@@ -2658,16 +2678,29 @@ export function street(o: {
           const svcModel = robotaxiModels.get(svc.id)!
           const eye = lastEye ?? [svc.station.cx, 50, svc.station.cz]
           const nowT = performance.now() / 1000
-          let target: Car | null = null, bestD = 900
+          // Prefer a visible incident beside actual sidewalk traffic, keeping existing taxis when equally suitable.
+          const crowdNear = (x: number, z: number) => {
+            let film = 0, yell = 0
+            for (const p of shown) {
+              if (p.down || p.flinch || p.robotaxiId !== undefined) continue
+              const w = Math.max(0, 1 - Math.hypot(p.at[0] - x, p.at[2] - z) / 150)
+              if (chance(p.seed, 71) < 0.46) film += w
+              else yell += w
+            }
+            return Math.min(2, film) + Math.min(2, yell) + Math.min(1, film, yell)
+          }
+          let target: Car | null = null, bestD = Infinity, bestCrowd = 0
           for (const c of traffic) {
             if (c.model.kind !== 'robotaxi' || !c.road || (c.s ?? 0) < 75) continue
             if (serviceId && c.model.serviceId !== serviceId) continue
             const ok = kind === 'intersection' ? busyJunction(c.road.b) && c.road.len - c.s! < 120 : (c.road.lanes === 1 || (c.road.flags & 4) !== 0)
             const d = Math.hypot(c.x - eye[0], c.z - eye[2])
-            if (ok && d < bestD) { bestD = d; target = c }
+            if (!ok || c.rtStuck || d >= 900) continue
+            const crowd = crowdNear(c.x, c.z), rank = d + 1600 / (1 + crowd)
+            if (rank < bestD) { bestD = rank; bestCrowd = crowd; target = c }
           }
-          if (!target) {
-            let bestR: Road | null = null, bestRd = 1400
+          if (!target || bestCrowd < 1.5) {
+            let bestR: Road | null = null, bestRd = bestD
             for (let gx = Math.floor((eye[0] - 1400) / GRID); gx <= Math.floor((eye[0] + 1400) / GRID); gx++) {
               for (let gz = Math.floor((eye[2] - 1400) / GRID); gz <= Math.floor((eye[2] + 1400) / GRID); gz++) {
                 for (const r of roadGrid.get(cell(gx, gz)) ?? []) {
@@ -2678,16 +2711,20 @@ export function street(o: {
                   const sTest = kind === 'intersection' ? Math.max(85, r.len - 45) : r.len * 0.5
                   lanePoint(r, 0, sTest, P)
                   const d = Math.hypot(P.x - eye[0], P.z - eye[2])
-                  if (d < bestRd) { bestRd = d; bestR = r }
+                  if (d >= 1400 || traffic.some((c) => Math.hypot(P.x - c.x, P.z - c.z) < (svcModel.long + c.model.long) / 2 + 4)) continue
+                  const rank = d + 1600 / (1 + crowdNear(P.x, P.z)) + 80
+                  if (rank < bestRd) { bestRd = rank; bestR = r }
                 }
               }
             }
-            if (!bestR) return null
-            const sAt = kind === 'intersection' ? Math.max(85, bestR.len - 45) : bestR.len * 0.5
-            target = { id: ids++, model: svcModel, paint: -1, kind: 'traffic', seed: ids, x: 0, y: 0, z: 0, heading: 0, pitch: 0, v: 0, piece: null, shown: '', road: bestR, prev: null, next: choose(bestR, 'robotaxi'), lane: 0, s: sAt, hold: null, stuck: 0, lidarAngle: 0 }
-            pose(target)
-            traffic.push(target)
+            if (bestR) {
+              const sAt = kind === 'intersection' ? Math.max(85, bestR.len - 45) : bestR.len * 0.5
+              target = { id: ids++, model: svcModel, paint: -1, kind: 'traffic', seed: ids, x: 0, y: 0, z: 0, heading: 0, pitch: 0, v: 0, piece: null, shown: '', road: bestR, prev: null, next: choose(bestR, 'robotaxi'), lane: 0, s: sAt, hold: null, stuck: 0, lidarAngle: 0 }
+              pose(target)
+              traffic.push(target)
+            }
           }
+          if (!target) return null
           const tr = target.road!, ts = target.s!, tl = target.lane ?? 0
           const cars = carModels()
           const sleekCars = cars.filter((m) => m.id !== 'suv')
