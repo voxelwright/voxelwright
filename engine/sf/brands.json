@@ -1,0 +1,611 @@
+{
+  "version": 1,
+  "about": "Configurable GTA-style parody names, sign palettes, category themes and per-place overrides for San Francisco storefronts. Edit any entry and run `node engine/sf/build.mjs` (or deploy) to regenerate bay/places.json and bay/map.bin automatically.",
+  "policy": {
+    "parodyBigChains": true,
+    "keepIndependentNames": true,
+    "minConfidence": 0.45
+  },
+  "brands": [
+    {
+      "id": "whole-foods",
+      "match": ["whole foods", "whole foods market", "wholefoods"],
+      "parody": "Whole Moods Market",
+      "short": "WHOLE MOODS",
+      "tagline": "ORGANIC MARKET",
+      "category": "supermarket",
+      "style": { "bg": "#154734", "ink": "#f5f7ef", "accent": "#7bc143", "trim": "#0c2b1f", "font": "serif", "glow": true }
+    },
+    {
+      "id": "target",
+      "match": ["target", "target grocery", "target optical", "target express"],
+      "parody": "Bullseye Mart",
+      "short": "BULLSEYE",
+      "tagline": "DAILY GOODS",
+      "category": "supermarket",
+      "style": { "bg": "#c8102e", "ink": "#ffffff", "accent": "#ffd9df", "trim": "#8a0b1f", "font": "bold", "glow": true }
+    },
+    {
+      "id": "trader-joes",
+      "match": ["trader joe's", "trader joes"],
+      "parody": "Traitor Joe's",
+      "short": "TRAITOR JOE'S",
+      "tagline": "NEIGHBORHOOD GROCER",
+      "category": "supermarket",
+      "style": { "bg": "#b22234", "ink": "#fff8e8", "accent": "#f4c76b", "trim": "#6e1520", "font": "retro", "glow": true }
+    },
+    {
+      "id": "safeway",
+      "match": ["safeway", "safeway pharmacy", "safeway fuel"],
+      "parody": "Safe-ish Way",
+      "short": "SAFE-ISH WAY",
+      "tagline": "FOOD & DRUG",
+      "category": "supermarket",
+      "style": { "bg": "#bf1e2e", "ink": "#ffffff", "accent": "#ffe4e6", "trim": "#7c121d", "font": "bold", "glow": true }
+    },
+    {
+      "id": "starbucks",
+      "match": ["starbucks", "starbucks coffee", "starbucks reserve"],
+      "parody": "Starbuxx Coffee",
+      "short": "STARBUXX",
+      "tagline": "ESPRESSO & ROAST",
+      "category": "coffee",
+      "style": { "bg": "#0b5d3b", "ink": "#f7f7f2", "accent": "#cbe8d6", "trim": "#073c26", "font": "bold", "glow": true }
+    },
+    {
+      "id": "peets",
+      "match": ["peet's coffee", "peets coffee", "peet's"],
+      "parody": "Pete's Roast",
+      "short": "PETE'S ROAST",
+      "tagline": "DARK ROAST COFFEE",
+      "category": "coffee",
+      "style": { "bg": "#3b2314", "ink": "#f8ecd9", "accent": "#d99b43", "trim": "#24140a", "font": "serif", "glow": true }
+    },
+    {
+      "id": "blue-bottle",
+      "match": ["blue bottle", "blue bottle coffee"],
+      "parody": "Blue Flask Coffee",
+      "short": "BLUE FLASK",
+      "tagline": "POUR OVER BAR",
+      "category": "coffee",
+      "style": { "bg": "#f5f4ef", "ink": "#1f6fa8", "accent": "#57a7dc", "trim": "#d6d3c8", "font": "clean", "glow": false }
+    },
+    {
+      "id": "philz",
+      "match": ["philz", "philz coffee"],
+      "parody": "Phillz Brew",
+      "short": "PHILLZ BREW",
+      "tagline": "MINT MOJITO COFFEE",
+      "category": "coffee",
+      "style": { "bg": "#2b1c12", "ink": "#f6ead6", "accent": "#d98c3f", "trim": "#1a110b", "font": "retro", "glow": true }
+    },
+    {
+      "id": "walgreens",
+      "match": ["walgreens", "walgreens pharmacy"],
+      "parody": "Wallgreens",
+      "short": "WALLGREENS",
+      "tagline": "PHARMACY & SUNDRIES",
+      "category": "pharmacy",
+      "style": { "bg": "#b81d24", "ink": "#ffffff", "accent": "#f6d7d9", "trim": "#7c1116", "font": "serif", "glow": true }
+    },
+    {
+      "id": "cvs",
+      "match": ["cvs", "cvs pharmacy", "cvs health"],
+      "parody": "C-V-Yes Pharmacy",
+      "short": "C-V-YES",
+      "tagline": "PHARMACY 24HR",
+      "category": "pharmacy",
+      "style": { "bg": "#cc0000", "ink": "#ffffff", "accent": "#ffd4d4", "trim": "#850000", "font": "bold", "glow": true }
+    },
+    {
+      "id": "rite-aid",
+      "match": ["rite aid"],
+      "parody": "Right Aid",
+      "short": "RIGHT AID",
+      "tagline": "PHARMACY",
+      "category": "pharmacy",
+      "style": { "bg": "#153d7a", "ink": "#ffffff", "accent": "#59b368", "trim": "#0c254d", "font": "bold", "glow": true }
+    },
+    {
+      "id": "chase",
+      "match": ["chase", "chase bank", "jpmorgan chase"],
+      "parody": "Chaze Bank",
+      "short": "CHAZE",
+      "tagline": "PRIVATE VAULT",
+      "category": "bank",
+      "style": { "bg": "#0b4b8a", "ink": "#ffffff", "accent": "#7ab8f5", "trim": "#072f59", "font": "clean", "glow": true }
+    },
+    {
+      "id": "wells-fargo",
+      "match": ["wells fargo", "wells fargo bank"],
+      "parody": "Swells Fargo",
+      "short": "SWELLS FARGO",
+      "tagline": "STAGECOACH BANK",
+      "category": "bank",
+      "style": { "bg": "#b81d24", "ink": "#fff9eb", "accent": "#f5c431", "trim": "#7a1116", "font": "serif", "glow": true }
+    },
+    {
+      "id": "bank-of-america",
+      "match": ["bank of america"],
+      "parody": "Bank of Amurica",
+      "short": "BANK OF AMURICA",
+      "tagline": "NATIONAL TRUST",
+      "category": "bank",
+      "style": { "bg": "#0d2b57", "ink": "#ffffff", "accent": "#e03038", "trim": "#071a38", "font": "clean", "glow": true }
+    },
+    {
+      "id": "citibank",
+      "match": ["citibank", "citi bank", "citi"],
+      "parody": "CitiVault",
+      "short": "CITIVAULT",
+      "tagline": "CITY BANKING",
+      "category": "bank",
+      "style": { "bg": "#004b93", "ink": "#ffffff", "accent": "#e8342e", "trim": "#002f5e", "font": "clean", "glow": true }
+    },
+    {
+      "id": "us-bank",
+      "match": ["u.s. bank", "us bank"],
+      "parody": "U.S. Vault",
+      "short": "U.S. VAULT",
+      "tagline": "TRUST & SAVINGS",
+      "category": "bank",
+      "style": { "bg": "#0c2074", "ink": "#ffffff", "accent": "#e0243c", "trim": "#071347", "font": "clean", "glow": true }
+    },
+    {
+      "id": "charles-schwab",
+      "match": ["charles schwab", "schwab"],
+      "parody": "Chaz Schwab",
+      "short": "CHAZ SCHWAB",
+      "tagline": "WEALTH & BROKERAGE",
+      "category": "bank",
+      "style": { "bg": "#0082c8", "ink": "#ffffff", "accent": "#b7e2f8", "trim": "#005585", "font": "clean", "glow": true }
+    },
+    {
+      "id": "ups-store",
+      "match": ["the ups store", "ups store", "ups access point", "ups"],
+      "parody": "The OOPS Store",
+      "short": "OOPS STORE",
+      "tagline": "PACK & SHIP",
+      "category": "service",
+      "style": { "bg": "#3c2112", "ink": "#f7c225", "accent": "#ffe07d", "trim": "#24130a", "font": "bold", "glow": true }
+    },
+    {
+      "id": "fedex",
+      "match": ["fedex", "fedex office", "fedex ship center"],
+      "parody": "FedUp Express",
+      "short": "FEDUP",
+      "tagline": "PRINT & SHIP",
+      "category": "service",
+      "style": { "bg": "#4d148c", "ink": "#ffffff", "accent": "#ff6600", "trim": "#300c59", "font": "bold", "glow": true }
+    },
+    {
+      "id": "mcdonalds",
+      "match": ["mcdonald's", "mcdonalds"],
+      "parody": "McDingle's",
+      "short": "MCDINGLE'S",
+      "tagline": "BURGERS & FRIES",
+      "category": "burger",
+      "style": { "bg": "#c81912", "ink": "#ffc72c", "accent": "#ffe27d", "trim": "#850e09", "font": "bold", "glow": true }
+    },
+    {
+      "id": "burger-king",
+      "match": ["burger king"],
+      "parody": "Burger Monarch",
+      "short": "BURGER MONARCH",
+      "tagline": "FLAME GRILLED",
+      "category": "burger",
+      "style": { "bg": "#d62300", "ink": "#ffefcf", "accent": "#f5a623", "trim": "#8f1700", "font": "retro", "glow": true }
+    },
+    {
+      "id": "in-n-out",
+      "match": ["in-n-out", "in-n-out burger"],
+      "parody": "In-N-About Burger",
+      "short": "IN-N-ABOUT",
+      "tagline": "DOUBLE BURGERS",
+      "category": "burger",
+      "style": { "bg": "#f7f5ee", "ink": "#c81d25", "accent": "#f5c22c", "trim": "#c81d25", "font": "retro", "glow": true }
+    },
+    {
+      "id": "shake-shack",
+      "match": ["shake shack"],
+      "parody": "Quake Shack",
+      "short": "QUAKE SHACK",
+      "tagline": "SHAKES & BURGERS",
+      "category": "burger",
+      "style": { "bg": "#1a1e22", "ink": "#f5f7f8", "accent": "#62c43a", "trim": "#0e1013", "font": "clean", "glow": true }
+    },
+    {
+      "id": "wendys",
+      "match": ["wendy's", "wendys"],
+      "parody": "Windy's Burgers",
+      "short": "WINDY'S",
+      "tagline": "SQUARE BURGERS",
+      "category": "burger",
+      "style": { "bg": "#c91e2e", "ink": "#ffffff", "accent": "#ffe066", "trim": "#82111c", "font": "retro", "glow": true }
+    },
+    {
+      "id": "jack-in-the-box",
+      "match": ["jack in the box"],
+      "parody": "Jack Out The Box",
+      "short": "JACK OUT BOX",
+      "tagline": "LATE NIGHT BITES",
+      "category": "burger",
+      "style": { "bg": "#c41230", "ink": "#ffffff", "accent": "#ffd147", "trim": "#7c0a1d", "font": "bold", "glow": true }
+    },
+    {
+      "id": "subway",
+      "match": ["subway", "subway restaurants"],
+      "parody": "Sub-Wayward",
+      "short": "SUB-WAYWARD",
+      "tagline": "FOOTLONG SANDWICHES",
+      "category": "restaurant",
+      "style": { "bg": "#006937", "ink": "#ffd200", "accent": "#ffffff", "trim": "#004222", "font": "bold", "glow": true }
+    },
+    {
+      "id": "chipotle",
+      "match": ["chipotle", "chipotle mexican grill"],
+      "parody": "Chipot-Yay",
+      "short": "CHIPOT-YAY",
+      "tagline": "BURRITOS & BOWLS",
+      "category": "restaurant",
+      "style": { "bg": "#4c1412", "ink": "#f8f0e4", "accent": "#d95b2b", "trim": "#2e0b0a", "font": "bold", "glow": true }
+    },
+    {
+      "id": "taco-bell",
+      "match": ["taco bell"],
+      "parody": "Taco Gong",
+      "short": "TACO GONG",
+      "tagline": "LATE NIGHT TACOS",
+      "category": "restaurant",
+      "style": { "bg": "#5b2182", "ink": "#ffffff", "accent": "#ff4fa3", "trim": "#381252", "font": "bold", "glow": true }
+    },
+    {
+      "id": "panda-express",
+      "match": ["panda express"],
+      "parody": "Bear Express",
+      "short": "BEAR EXPRESS",
+      "tagline": "WOK KITCHEN",
+      "category": "restaurant",
+      "style": { "bg": "#c8102e", "ink": "#ffffff", "accent": "#f6c945", "trim": "#82091d", "font": "bold", "glow": true }
+    },
+    {
+      "id": "dominos",
+      "match": ["domino's", "domino's pizza", "dominos"],
+      "parody": "Dominoes Pizza",
+      "short": "DOMINOES",
+      "tagline": "HOT DELIVERY PIZZA",
+      "category": "pizza",
+      "style": { "bg": "#006491", "ink": "#ffffff", "accent": "#e31837", "trim": "#003f5c", "font": "bold", "glow": true }
+    },
+    {
+      "id": "papa-johns",
+      "match": ["papa john's", "papa johns"],
+      "parody": "Poppa Johnny's",
+      "short": "POPPA JOHNNY'S",
+      "tagline": "PIZZA",
+      "category": "pizza",
+      "style": { "bg": "#006838", "ink": "#ffffff", "accent": "#d6232a", "trim": "#004223", "font": "bold", "glow": true }
+    },
+    {
+      "id": "pizza-hut",
+      "match": ["pizza hut"],
+      "parody": "Pizza Shack",
+      "short": "PIZZA SHACK",
+      "tagline": "PAN PIZZA",
+      "category": "pizza",
+      "style": { "bg": "#b81d24", "ink": "#fff7e6", "accent": "#f5c23b", "trim": "#741115", "font": "retro", "glow": true }
+    },
+    {
+      "id": "sweetgreen",
+      "match": ["sweetgreen"],
+      "parody": "Sweetleaf",
+      "short": "SWEETLEAF",
+      "tagline": "SALADS & BOWLS",
+      "category": "restaurant",
+      "style": { "bg": "#1f4a33", "ink": "#f5f4ec", "accent": "#9ed670", "trim": "#122e1f", "font": "clean", "glow": false }
+    },
+    {
+      "id": "popeyes",
+      "match": ["popeyes", "popeyes louisiana kitchen"],
+      "parody": "Pop-Aye's Chicken",
+      "short": "POP-AYE'S",
+      "tagline": "SPICY CHICKEN",
+      "category": "restaurant",
+      "style": { "bg": "#e8651a", "ink": "#ffffff", "accent": "#ffe074", "trim": "#9e410d", "font": "retro", "glow": true }
+    },
+    {
+      "id": "kfc",
+      "match": ["kfc", "kentucky fried chicken"],
+      "parody": "Bay Fried Cluck",
+      "short": "BAY CLUCK",
+      "tagline": "CRISPY CHICKEN",
+      "category": "restaurant",
+      "style": { "bg": "#c8102e", "ink": "#ffffff", "accent": "#1a1a1a", "trim": "#850a1e", "font": "bold", "glow": true }
+    },
+    {
+      "id": "jamba",
+      "match": ["jamba", "jamba juice"],
+      "parody": "Jumble Juice",
+      "short": "JUMBLE JUICE",
+      "tagline": "SMOOTHIES",
+      "category": "ice_cream",
+      "style": { "bg": "#f36f21", "ink": "#ffffff", "accent": "#a4d233", "trim": "#b54b0e", "font": "retro", "glow": true }
+    },
+    {
+      "id": "baskin-robbins",
+      "match": ["baskin-robbins", "baskin robbins"],
+      "parody": "32 Flavors",
+      "short": "32 FLAVORS",
+      "tagline": "ICE CREAM",
+      "category": "ice_cream",
+      "style": { "bg": "#e44b8d", "ink": "#ffffff", "accent": "#2b6cb0", "trim": "#9e295d", "font": "retro", "glow": true }
+    },
+    {
+      "id": "dunkin",
+      "match": ["dunkin'", "dunkin", "dunkin' donuts"],
+      "parody": "Dunk'd Donuts",
+      "short": "DUNK'D",
+      "tagline": "COFFEE & DONUTS",
+      "category": "bakery",
+      "style": { "bg": "#f57e20", "ink": "#ffffff", "accent": "#da1884", "trim": "#ab520e", "font": "bold", "glow": true }
+    },
+    {
+      "id": "panera",
+      "match": ["panera", "panera bread"],
+      "parody": "Pan-Era Bakery",
+      "short": "PAN-ERA",
+      "tagline": "BAKERY CAFE",
+      "category": "bakery",
+      "style": { "bg": "#4d6127", "ink": "#fbf6e8", "accent": "#d9a94e", "trim": "#2f3d17", "font": "serif", "glow": true }
+    },
+    {
+      "id": "7-eleven",
+      "match": ["7-eleven", "7 eleven", "7eleven"],
+      "parody": "7-Twelve Market",
+      "short": "7-TWELVE",
+      "tagline": "OPEN 24 HOURS",
+      "category": "corner_store",
+      "style": { "bg": "#00663b", "ink": "#ffffff", "accent": "#f57c20", "trim": "#d92128", "font": "bold", "glow": true }
+    },
+    {
+      "id": "apple-store",
+      "match": ["apple", "apple store", "apple union square", "apple chestnut street"],
+      "parody": "iFruit Store",
+      "short": "IFRUIT",
+      "tagline": "COMPUTERS & PHONES",
+      "category": "boutique",
+      "style": { "bg": "#eef1f4", "ink": "#1a1e24", "accent": "#6b7684", "trim": "#c6ccd4", "font": "clean", "glow": true }
+    },
+    {
+      "id": "best-buy",
+      "match": ["best buy"],
+      "parody": "Best Pry",
+      "short": "BEST PRY",
+      "tagline": "ELECTRONICS",
+      "category": "boutique",
+      "style": { "bg": "#0046be", "ink": "#ffe000", "accent": "#ffffff", "trim": "#002c7a", "font": "bold", "glow": true }
+    },
+    {
+      "id": "ace-hardware",
+      "match": ["ace hardware"],
+      "parody": "Spade Hardware",
+      "short": "SPADE HARDWARE",
+      "tagline": "TOOLS & PAINT",
+      "category": "hardware",
+      "style": { "bg": "#cc1c24", "ink": "#ffffff", "accent": "#f2d6d8", "trim": "#850f14", "font": "bold", "glow": true }
+    },
+    {
+      "id": "sephora",
+      "match": ["sephora"],
+      "parody": "Saphira Beauty",
+      "short": "SAPHIRA",
+      "tagline": "COSMETICS",
+      "category": "boutique",
+      "style": { "bg": "#121316", "ink": "#ffffff", "accent": "#f4cad8", "trim": "#363840", "font": "clean", "glow": true }
+    },
+    {
+      "id": "nike",
+      "match": ["nike", "nike san francisco"],
+      "parody": "Nyke Athletics",
+      "short": "NYKE",
+      "tagline": "FOOTWEAR",
+      "category": "boutique",
+      "style": { "bg": "#141619", "ink": "#ffffff", "accent": "#f26419", "trim": "#2f333a", "font": "bold", "glow": true }
+    },
+    {
+      "id": "gap",
+      "match": ["gap", "gap factory", "the gap"],
+      "parody": "The Chasm",
+      "short": "THE CHASM",
+      "tagline": "APPAREL",
+      "category": "boutique",
+      "style": { "bg": "#152b4f", "ink": "#ffffff", "accent": "#c7d4e8", "trim": "#0c1a33", "font": "serif", "glow": true }
+    },
+    {
+      "id": "old-navy",
+      "match": ["old navy"],
+      "parody": "Old Armada",
+      "short": "OLD ARMADA",
+      "tagline": "CASUAL WEAR",
+      "category": "boutique",
+      "style": { "bg": "#0b3a70", "ink": "#ffffff", "accent": "#76b4f0", "trim": "#072447", "font": "bold", "glow": true }
+    },
+    {
+      "id": "uniqlo",
+      "match": ["uniqlo"],
+      "parody": "UniQ Basics",
+      "short": "UNIQ",
+      "tagline": "ESSENTIALS",
+      "category": "boutique",
+      "style": { "bg": "#d6001c", "ink": "#ffffff", "accent": "#ffd6dc", "trim": "#8f0013", "font": "bold", "glow": true }
+    },
+    {
+      "id": "zara",
+      "match": ["zara"],
+      "parody": "Zora Studio",
+      "short": "ZORA",
+      "tagline": "FASHION",
+      "category": "boutique",
+      "style": { "bg": "#f5f4f0", "ink": "#181818", "accent": "#7d776d", "trim": "#d0cdc5", "font": "serif", "glow": false }
+    },
+    {
+      "id": "hm",
+      "match": ["h&m"],
+      "parody": "H&N Fashion",
+      "short": "H&N",
+      "tagline": "CLOTHING",
+      "category": "boutique",
+      "style": { "bg": "#f6f5f2", "ink": "#cc0019", "accent": "#1c1c1c", "trim": "#d6d3cb", "font": "bold", "glow": false }
+    },
+    {
+      "id": "ikea",
+      "match": ["ikea"],
+      "parody": "FKEA Home",
+      "short": "FKEA",
+      "tagline": "FLATPACK GOODS",
+      "category": "boutique",
+      "style": { "bg": "#0051ba", "ink": "#ffda1a", "accent": "#ffffff", "trim": "#003478", "font": "bold", "glow": true }
+    },
+    {
+      "id": "ross",
+      "match": ["ross dress for less", "ross stores"],
+      "parody": "Moss Dress",
+      "short": "MOSS DRESS",
+      "tagline": "BARGAIN APPAREL",
+      "category": "boutique",
+      "style": { "bg": "#0073b7", "ink": "#ffffff", "accent": "#b9e1fa", "trim": "#004a78", "font": "bold", "glow": true }
+    },
+    {
+      "id": "costco",
+      "match": ["costco", "costco wholesale"],
+      "parody": "Cost-Go Bulk",
+      "short": "COST-GO",
+      "tagline": "WHOLESALE CLUB",
+      "category": "supermarket",
+      "style": { "bg": "#e31837", "ink": "#ffffff", "accent": "#005daa", "trim": "#960d22", "font": "bold", "glow": true }
+    },
+    {
+      "id": "grocery-outlet",
+      "match": ["grocery outlet", "grocery outlet bargain market"],
+      "parody": "Bargain Basket",
+      "short": "BARGAIN BASKET",
+      "tagline": "DISCOUNT GROCERY",
+      "category": "supermarket",
+      "style": { "bg": "#c81d25", "ink": "#fff7e0", "accent": "#f6c636", "trim": "#851016", "font": "bold", "glow": true }
+    },
+    {
+      "id": "amc",
+      "match": ["amc", "amc metreon", "amc kabuki", "amc theatres"],
+      "parody": "A-M-See Cinemas",
+      "short": "A-M-SEE",
+      "tagline": "MOTION PICTURES",
+      "category": "cinema",
+      "style": { "bg": "#17141a", "ink": "#ffe6a6", "accent": "#e31837", "trim": "#9e1026", "font": "bold", "glow": true }
+    },
+    {
+      "id": "equinox",
+      "match": ["equinox"],
+      "parody": "Solstice Club",
+      "short": "SOLSTICE",
+      "tagline": "ATHLETIC CLUB",
+      "category": "fitness",
+      "style": { "bg": "#16181c", "ink": "#f2f4f8", "accent": "#c8b37e", "trim": "#333740", "font": "clean", "glow": true }
+    },
+    {
+      "id": "24-hour-fitness",
+      "match": ["24 hour fitness"],
+      "parody": "25 Hour Fitness",
+      "short": "25 HR FITNESS",
+      "tagline": "GYM & WEIGHTS",
+      "category": "fitness",
+      "style": { "bg": "#c8102e", "ink": "#ffffff", "accent": "#0c356a", "trim": "#820a1d", "font": "bold", "glow": true }
+    },
+    {
+      "id": "planet-fitness",
+      "match": ["planet fitness"],
+      "parody": "Orbit Fitness",
+      "short": "ORBIT FITNESS",
+      "tagline": "GYM",
+      "category": "fitness",
+      "style": { "bg": "#5d2482", "ink": "#ffdc26", "accent": "#ffffff", "trim": "#3b1454", "font": "bold", "glow": true }
+    },
+    {
+      "id": "verizon",
+      "match": ["verizon", "verizon wireless"],
+      "parody": "Horizon Wireless",
+      "short": "HORIZON",
+      "tagline": "MOBILE & FIBER",
+      "category": "service",
+      "style": { "bg": "#141417", "ink": "#ffffff", "accent": "#e01a22", "trim": "#36363d", "font": "clean", "glow": true }
+    },
+    {
+      "id": "att",
+      "match": ["at&t", "at&t store"],
+      "parody": "A-T-N-Tea Mobile",
+      "short": "A-T-N-TEA",
+      "tagline": "WIRELESS",
+      "category": "service",
+      "style": { "bg": "#0082c8", "ink": "#ffffff", "accent": "#9cd8fa", "trim": "#005380", "font": "clean", "glow": true }
+    },
+    {
+      "id": "t-mobile",
+      "match": ["t-mobile"],
+      "parody": "T-Mobe Wireless",
+      "short": "T-MOBE",
+      "tagline": "5G WIRELESS",
+      "category": "service",
+      "style": { "bg": "#d6006e", "ink": "#ffffff", "accent": "#ffd1e9", "trim": "#8c0048", "font": "bold", "glow": true }
+    },
+    {
+      "id": "petco",
+      "match": ["petco"],
+      "parody": "PetGo Supplies",
+      "short": "PETGO",
+      "tagline": "PET MARKET",
+      "category": "boutique",
+      "style": { "bg": "#005596", "ink": "#ffffff", "accent": "#e31837", "trim": "#003761", "font": "bold", "glow": true }
+    },
+    {
+      "id": "shell",
+      "match": ["shell", "shell gas"],
+      "parody": "Clam Fuel",
+      "short": "CLAM FUEL",
+      "tagline": "GAS & MART",
+      "category": "service",
+      "style": { "bg": "#f5c211", "ink": "#c81912", "accent": "#ffffff", "trim": "#b88e06", "font": "bold", "glow": true }
+    },
+    {
+      "id": "chevron",
+      "match": ["chevron"],
+      "parody": "Chev-Run Fuel",
+      "short": "CHEV-RUN",
+      "tagline": "GAS STATION",
+      "category": "service",
+      "style": { "bg": "#0054a6", "ink": "#ffffff", "accent": "#e31837", "trim": "#003569", "font": "bold", "glow": true }
+    }
+  ],
+  "overrides": [],
+  "categories": {
+    "pizza":        { "label": "PIZZERIA",       "bg": "#8f1d18", "ink": "#fff5df", "accent": "#e3b34c", "trim": "#52100d", "font": "retro", "glow": true,  "blade": true,  "prop": "patio" },
+    "burger":       { "label": "BURGERS",        "bg": "#b62a1d", "ink": "#fff8e7", "accent": "#f6c142", "trim": "#6e170f", "font": "retro", "glow": true,  "blade": true,  "prop": "patio" },
+    "ice_cream":    { "label": "ICE CREAM",      "bg": "#e46b8c", "ink": "#fffaf5", "accent": "#ffe48f", "trim": "#9c3c58", "font": "retro", "glow": true,  "blade": true,  "prop": "patio" },
+    "coffee":       { "label": "COFFEE",         "bg": "#2b211a", "ink": "#f7ebd9", "accent": "#d99b43", "trim": "#18120d", "font": "serif", "glow": true,  "blade": true,  "prop": "cafe" },
+    "bakery":       { "label": "BAKERY",         "bg": "#f4ead5", "ink": "#4a2c18", "accent": "#c86d3b", "trim": "#8c5c38", "font": "serif", "glow": false, "blade": true,  "prop": "cafe" },
+    "restaurant":   { "label": "KITCHEN",        "bg": "#24303c", "ink": "#f8f2e4", "accent": "#e09c48", "trim": "#141b22", "font": "serif", "glow": true,  "blade": true,  "prop": "patio" },
+    "bar":          { "label": "TAVERN & BAR",   "bg": "#1a1824", "ink": "#ffdf8c", "accent": "#e85d3f", "trim": "#3a2520", "font": "retro", "glow": true,  "blade": true,  "prop": "aframe" },
+    "books":        { "label": "BOOKS",          "bg": "#1f3d2e", "ink": "#f7eed6", "accent": "#d4a64a", "trim": "#13261d", "font": "serif", "glow": false, "blade": true,  "prop": "books" },
+    "florist":      { "label": "FLOWERS & PLANTS","bg": "#275338", "ink": "#f6f5ea", "accent": "#e8a5b5", "trim": "#183624", "font": "serif", "glow": false, "blade": true,  "prop": "florist" },
+    "supermarket":  { "label": "MARKET",         "bg": "#1c4d35", "ink": "#f6f8f0", "accent": "#8bc34a", "trim": "#102e1f", "font": "bold",  "glow": true,  "blade": false, "prop": "grocery" },
+    "grocery":      { "label": "MARKET",         "bg": "#275736", "ink": "#faf6e8", "accent": "#f0b43c", "trim": "#183822", "font": "bold",  "glow": true,  "blade": true,  "prop": "grocery" },
+    "corner_store": { "label": "CORNER MARKET",  "bg": "#1f4e68", "ink": "#fff7df", "accent": "#f5a524", "trim": "#123040", "font": "bold",  "glow": true,  "blade": true,  "prop": "grocery" },
+    "pharmacy":     { "label": "PHARMACY",       "bg": "#174b7a", "ink": "#ffffff", "accent": "#76d1a4", "trim": "#0e2f4d", "font": "clean", "glow": true,  "blade": false, "prop": "none" },
+    "bank":         { "label": "BANK",           "bg": "#182d4a", "ink": "#f4f6fa", "accent": "#c8a85a", "trim": "#0e1c2e", "font": "clean", "glow": false, "blade": false, "prop": "none" },
+    "hardware":     { "label": "HARDWARE",       "bg": "#9e251b", "ink": "#fff5e6", "accent": "#e3b34c", "trim": "#631610", "font": "bold",  "glow": false, "blade": true,  "prop": "aframe" },
+    "boutique":     { "label": "SHOP",           "bg": "#f3efe6", "ink": "#222428", "accent": "#b07d52", "trim": "#c9c1b2", "font": "clean", "glow": false, "blade": true,  "prop": "planter" },
+    "salon":        { "label": "SALON & BARBER", "bg": "#23252c", "ink": "#f7f3ea", "accent": "#d97862", "trim": "#131519", "font": "clean", "glow": false, "blade": true,  "prop": "planter" },
+    "cinema":       { "label": "CINEMA",         "bg": "#1c1522", "ink": "#ffe38c", "accent": "#e33b42", "trim": "#6b1720", "font": "retro", "glow": true,  "blade": true,  "prop": "aframe" },
+    "fitness":      { "label": "STUDIO",         "bg": "#1d2733", "ink": "#f2f6fa", "accent": "#57c29e", "trim": "#11171f", "font": "clean", "glow": true,  "blade": false, "prop": "none" },
+    "market":       { "label": "FARMERS MARKET", "bg": "#2b5932", "ink": "#fff8e6", "accent": "#f0b43c", "trim": "#1b3b20", "font": "retro", "glow": false, "blade": false, "prop": "grocery" },
+    "service":      { "label": "SERVICES",       "bg": "#2e3640", "ink": "#f2f4f7", "accent": "#9eb5cc", "trim": "#1c2128", "font": "clean", "glow": false, "blade": false, "prop": "none" }
+  }
+}

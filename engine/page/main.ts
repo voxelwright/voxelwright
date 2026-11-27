@@ -26,6 +26,7 @@ import { engineOut, engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
+import { createNeighborhood, type Neighborhood } from './neighborhood.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
@@ -45,7 +46,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -442,6 +443,7 @@ async function main() {
   const takenOff = new Set<number>()
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
   let streetLife: Street | null = null
+  let neighborhood: Neighborhood | null = null
   const lively = !!LOCAL?.street && query.get('street') !== '0'
   if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
@@ -665,6 +667,7 @@ async function main() {
     landing = false
     farModel.left()
     if (streetLife) streetLife.enabled = true
+    if (neighborhood) neighborhood.enabled = true
   }
   // An eye that turned, or a window screen that is up (an egg playing, eggs.ts), stirs it as a hand does.
   let looked = ''
@@ -777,6 +780,7 @@ async function main() {
     fallOn(dt)
     lap('fallOn')
     streetLife?.frame(dt, v)
+    neighborhood?.frame(v)
     lap('street')
     world.update(ahead ?? v.eye)
     lap('update')
@@ -814,6 +818,7 @@ async function main() {
       if (!off.has('under')) roadTracks.draw(encoder, to, v, groundUnder)
       if (!off.has('wheels')) carWheels.draw(encoder, to, v)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
+      if (!off.has('signs')) neighborhood?.drawSigns(encoder, to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
@@ -2032,6 +2037,17 @@ async function main() {
     if (landing && first && !first.engaged) life.enabled = false
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
+  if (BAY_ON && !far && query.get('neighborhood') !== '0') {
+    neighborhood = await createNeighborhood({
+      device, format: gpu.format, pieces: falling, land: core,
+      hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks,
+      load: placesData,
+    }).catch((e: unknown) => { console.warn(`no neighborhood places: ${e instanceof Error ? e.message : String(e)}`); return null })
+    if (neighborhood) {
+      if (landing && first && !first.engaged) neighborhood.enabled = false
+      if (query.get('people') !== '0') folk.from.push(neighborhood.folk)
+    }
+  }
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
   // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
   // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
@@ -2101,6 +2117,7 @@ async function main() {
     farModel.forget()
     core.world_forget()
     streetLife?.reset()
+    neighborhood?.reset()
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
@@ -2240,7 +2257,7 @@ async function main() {
     }
     watchers.add(hatch)
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, get neighborhood() { return neighborhood }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   const carSummon = createCarSummon({
