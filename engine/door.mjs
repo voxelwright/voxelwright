@@ -125,13 +125,24 @@ const same = async (password, kept) => { if (!kept || typeof password !== 'strin
  * together wait as guesses sent one by one do: two seconds before the next, doubled with each, to half a minute. A
  * right one clears what it was counted against.
  */
-function tries() {
-  const by = new Map()
+export function passwordTries(perMinute = 24) {
+  const by = new Map(), budget = pool(perMinute, 60_000)
   const wait = (key) => { const t = by.get(key); return t ? Math.max(0, t.until - Date.now()) : 0 }
   return {
-    wait: (keys) => Math.max(0, ...keys.map(wait)),
-    tried(keys) { for (const key of keys) { const t = by.get(key) ?? { fails: 0, until: 0 }; t.fails++; t.until = Date.now() + Math.min(30_000, 2000 * 2 ** (t.fails - 1)); t.last = Date.now(); by.set(key, t) } },
-    passed(keys) { for (const key of keys) by.delete(key) },
+    reserve(keys) {
+      const delay = Math.max(0, ...keys.map(wait))
+      if (delay) return delay
+      if (!budget.take()) return Math.ceil(60_000 / perMinute)
+      for (const key of keys) {
+        const t = by.get(key) ?? { fails: 0 }
+        t.fails++
+        t.last = Date.now()
+        t.until = t.last + Math.min(30_000, 2000 * 2 ** (t.fails - 1))
+        by.set(key, t)
+      }
+      return 0
+    },
+    passed(keys) { budget.give(); for (const key of keys) by.delete(key) },
     // Forgotten a quarter of an hour after the last try.
     sweep() { for (const [key, t] of by) if (Date.now() - t.last > 15 * 60_000) by.delete(key) },
   }
@@ -237,7 +248,7 @@ export function door(o) {
   if (o.most) kept.most = Math.max(1, Math.min(64, Math.floor(o.most)))
   const ready = (async () => { if (o.password) kept.password = await seal(o.password); save() })()
   const adminSealed = o.admin ? seal(o.admin) : null
-  const failing = tries(), passwordBudget = pool(24, 60_000)
+  const failing = passwordTries()
   setInterval(() => failing.sweep(), 60_000).unref()
 
   /** What each person has made lately, by who they are: a page that joins again is the same person, with the same pools. */
@@ -541,12 +552,9 @@ export function door(o) {
     if (!welcomed().some((w) => w.you === you) && welcomed().length >= kept.most) return refuse(c, 'the server is full')
     if (kept.password) {
       if (typeof h.password !== 'string') return refuse(c, 'this server asks for a password')
-      const keys = [`c:${c.n}`, ...(place ? [`a:${place}`] : [])], wait = failing.wait(keys)
+      const keys = [`c:${c.n}`, ...(place ? [`a:${place}`] : [])], wait = failing.reserve(keys)
       if (wait) return refuse(c, `too many wrong passwords: wait ${Math.ceil(wait / 1000)} s`)
-      if (!passwordBudget.take()) return refuse(c, 'too many password attempts: wait a minute')
-      failing.tried(keys)
       if (!(await same(h.password, kept.password))) return refuse(c, 'wrong password')
-      passwordBudget.give()
       failing.passed(keys)
     }
     if (c.closed || c.refused) return
@@ -577,16 +585,13 @@ export function door(o) {
     if (!c.address) return { why: 'the peer address is not ready' }
     const place = placeOf(c.address)
     if (kept.bans.some((b) => b.you === c.you || b.place === place)) return { why: 'you are banned from this server' }
-    const keys = [`admin:${c.n}`, ...(place ? [`admin:${place}`] : [])], wait = failing.wait(keys)
+    const keys = [`admin:${c.n}`, ...(place ? [`admin:${place}`] : [])], wait = failing.reserve(keys)
     if (wait) return { why: `too many wrong passwords: wait ${Math.ceil(wait / 1000)} s` }
-    if (!passwordBudget.take()) return { why: 'too many password attempts: wait a minute' }
-    failing.tried(keys)
     if (!(await same(password, await adminSealed))) {
       // Said a second later, whatever the wait: a guess costs time.
       await new Promise((r) => setTimeout(r, 1000))
       return { why: 'wrong password' }
     }
-    passwordBudget.give()
     failing.passed(keys)
     c.admin = true
     log(`${c.name} (${c.you}) is an admin`)
@@ -725,7 +730,14 @@ export function door(o) {
     c.aborts.add(abort)
     try {
       const r = await fetch(`${o.world}${path}`, { method: h.m, headers: route.rate === 'fine' && !c.admin ? { 'x-world-stranger': c.you } : {}, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]), ...(h.m === 'POST' ? { body: json ? JSON.stringify(json) : raw } : {}) })
-      if (route.by === 'drive' && r.ok && typeof json.on === 'boolean') c.riding = json.on ? json.id : null
+      if (route.by === 'drive') {
+        if (r.ok && json.on === true) c.riding = json.id
+        // A dismantled vehicle no longer has a seat to leave.
+        if ((r.ok && json.on === false) || r.status === 409) {
+          if (c.riding === json.id) c.riding = null
+          if (c.seat === json.id) c.seat = null
+        }
+      }
       const bytes = Buffer.from(await r.arrayBuffer())
       if (r.status !== 202) untaken?.()
       reply(c, h.n, r.status, bytes, r.headers.get('content-type') ?? 'application/octet-stream')

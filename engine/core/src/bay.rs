@@ -243,6 +243,13 @@ fn read(b: &[u8]) -> Option<Pack> {
     if gw > 8192 || tw > 8192 || (head[8] > 0 && tw < 2) || b.len() > 256 << 20 { return None; }
     let wide = (head[5] - 1).checked_mul(head[4])?;
     if wide > 64_000 || head[6].checked_add(wide).is_none() || head[7].checked_add(wide).is_none() { return None; }
+    // The top grid is indexed relative to the ground origin using signed cell coordinates.
+    let top_span = head[9].saturating_sub(1).checked_mul(head[8])?;
+    for axis in [0, 1] {
+        let offset = head[10 + axis].checked_sub(head[6 + axis])?;
+        offset.checked_add(top_span)?;
+        head[10 + axis].checked_add(top_span)?;
+    }
     let samples = tw.checked_mul(tw)?;
     let top_bytes = samples.checked_mul(2)?;
     let (nb, nv, nt) = (usize::try_from(head[12]).ok()?, usize::try_from(head[13]).ok()?, usize::try_from(head[14]).ok()?);

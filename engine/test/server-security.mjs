@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { named } from '../guard.mjs'
-import { seatConflict, selectedAddress } from '../door.mjs'
+import { passwordTries, seatConflict, selectedAddress } from '../door.mjs'
 import askPlugin from '../plugins/ask/world.mjs'
 import { rowsOf } from '../plugins/build/world.mjs'
 import { placement } from '../workshop/route.mjs'
@@ -16,6 +16,13 @@ const pc = { sctp: { transport: { iceTransport: { getSelectedCandidatePair: () =
 assert.equal(selectedAddress(pc), null)
 pc.sctp.transport.iceTransport.getSelectedCandidatePair = () => ({ remote: { address: '192.0.2.1' } })
 assert.equal(selectedAddress(pc), '192.0.2.1')
+const passwords = passwordTries(2)
+assert.equal(passwords.reserve(['first']), 0)
+assert.ok(passwords.reserve(['first']) > 0)
+assert.equal(passwords.reserve(['second']), 0)
+assert.ok(passwords.reserve(['third']) > 0)
+passwords.passed(['second'])
+assert.equal(passwords.reserve(['third']), 0)
 const rider = { riding: 'bike' }, visitor = {}
 assert.ok(seatConflict(visitor, { id: 'bike', on: true }, [rider]))
 assert.ok(seatConflict(rider, { id: 'cart', on: true }, []))

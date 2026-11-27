@@ -12,7 +12,7 @@
   ".agents/skills/jolt-physics/SKILL.md": {"verified":"00420ce4a7390b907c04f07adcd84a232f5ae4d1","sources":{"home/package.json":"6d29e1328d33b477b6e7058abf53f6a5","home/src/engine/jolt.ts":"c37f9c4202828de87176606d2fa993d6"}},
   ".agents/skills/lead-orchestration/SKILL.md": {"verified":"f9a6b0a446ebed84ee4222918f4765d025f53a80","sources":{"AGENTS.md":"5b7a792dc11ff135858ebfa05f0dc8ea"}},
   ".agents/skills/lobby-transport/SKILL.md": {"verified":"d275af1c4ec25f6efc898f9e37606571023eeed1","sources":{"probes/lobby-transport/package.json":"ba2468a3402e625e3153a2002425ee3d"}},
-  ".agents/skills/master-server/SKILL.md": {"verified":"d275af1c4ec25f6efc898f9e37606571023eeed1","sources":{"master/src/config.rs":"17fb726a77712b7205a15a882e4ee581","master/Cargo.toml":"2d278ce86f503d10ec576ac26bb1052d"}},
+  ".agents/skills/master-server/SKILL.md": {"verified":"b92080f6783a3ec047f50bddbe745a97c0809ec6","sources":{"master/src/config.rs":"acff23266f3d9e21e6188d58d833212a","master/Cargo.toml":"2d278ce86f503d10ec576ac26bb1052d"}},
   ".agents/skills/mintlify-docs/SKILL.md": {"verified":"2a747d8235865ec64948fe0b4b777af9026e1c02","sources":{"guide/docs.json":"de0882f186839b5676dd7a7cf72b0373","scripts/mint.mjs":"f84c17a70e1f2117f223eef8cf67c9f8","scripts/doc-site.mjs":"bbc2a3d8a962c008366a1f01d7af1846"}},
   ".agents/skills/quickjs-sandbox/SKILL.md": {"verified":"00420ce4a7390b907c04f07adcd84a232f5ae4d1","sources":{"home/package.json":"a38f2ea9a4ee4fd4e6f3af8aff8b754c","home/src/invent/limits.ts":"14438986d95d6fd469a6f1693eeeddfc"}},
   ".agents/skills/raw-webgpu/SKILL.md": {"verified":"d275af1c4ec25f6efc898f9e37606571023eeed1","sources":{"engine/blocks/renderer.ts":"f6e0edefd400b8cde63bab6ff7ec5b62"}},
