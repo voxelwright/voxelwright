@@ -59,7 +59,8 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Get out | E | Exit (top-right utility rail) | Y / Triangle |
 | **Map** | | | |
 | Open and close | M (once in the city), Esc closes | Tap the minimap | View / Share |
-| Route to a place | Click it, a pin or a chip | Tap it | - |
+| Quick POI search | `/` focuses search, Enter commits, Esc clears | Tap search bar or category pill | - |
+| Route to a place | Click it, a pin, a search result or a chip | Tap it | - |
 | Clear the route | Backspace, Delete or a right-click | - | - |
 | Zoom | Wheel, = and - | Pinch | - |
 | Pan | Drag, W A S D or the arrows | Drag | - |
@@ -241,7 +242,7 @@ The **settings panel** is in sections: Time & weather (Light, Dark, SF now, the 
 
 The **minimap** (`engine/page/minimap.ts`) is a small 3D map drawn by the engine's own WebGPU device (`engine/page/map-gpu.ts`): extruded buildings, roads by class and a pink route ribbon. It sits bottom left on a desk and at the top on a phone and turns with your heading (your car's when driving). On foot it shows about 132 m. Flying widens it with speed. Driving, it zooms out to 1.85 times that by 180 km/h and centres up to 52 m ahead of the car, and your marker glows cyan above 45 km/h and pink in a drift (a still ring with reduced motion). `engine.map.stats` reports its `span`, `zoom` and `lookAhead`. It is hidden in the first view. Clicking it opens the full map.
 
-The **full-screen map** opens with M. Click a place, a landmark pin or a chip along the bottom to route there. A card shows the distance and rough drive and walk times. **Visit** fast-travels via the same 3D Map-to-Reality Optical Dive straight from the current map camera onto a verified clear street beside the destination (pressing M mid-dive cancels the dive and re-opens the map). The world stops drawing while the map covers it.
+The **full-screen map** opens with M. Click a place, a landmark pin or a chip along the bottom to route there. A frosted-glass **quick search** bar (`/` on desktop, or tap the search bar) searches all San Francisco points of interest (`engine/page/map-search.ts` over `places.json` and `map.bin`): businesses, coffee shops, restaurants, fast food, barbershops, hospitals, urgent care clinics, parks, plazas, landmarks, neighborhoods and streets. Tap a category suggestion pill or type a category (such as `barbershop`) to plot all matching pins on the map with numbered clusters and a distance-ranked list (with **Nearest** / **In View** filters and a **Search here** pill after panning), or type a specific place (such as `hi way burger`) for location-ranked suggestions with street addresses. A card shows the distance and rough drive and walk times. **Visit** fast-travels via the same 3D Map-to-Reality Optical Dive straight from the current map camera onto a verified clear street beside the destination (pressing M mid-dive cancels the dive and re-opens the map). The world stops drawing while the map covers it.
 
 **GPS** (`engine/page/gps.ts`) runs A* over the road graph. Both ends snap to a road within 700 m. Freeways and arterials cost less than side streets, and driving against a one-way costs more. When you stray more than 48 m from the route it routes again. Within 16 m of the destination it says you have arrived and clears the route. Distances are in feet and miles.
 
@@ -379,7 +380,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Stunts | `engine/page/stunts.ts` | `engine/test/stunts.mjs` |
 | Traffic & robotaxis | `engine/page/street.ts`, `engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts` | `engine/test/street.mjs`, `engine/test/crash-stack.mjs`, `engine/test/sf-robotaxi.mjs` |
 | HUD | `engine/page/hud.ts`, `engine/page/play-hud.ts`, `engine/page/radial.ts` | `engine/test/sf-hud.mjs` |
-| Map and GPS | `engine/page/minimap.ts`, `engine/page/gps.ts` | `engine/test/sf-map.mjs` |
+| Map and GPS | `engine/page/minimap.ts`, `engine/page/map-search.ts`, `engine/page/gps.ts` | `engine/test/sf-map.mjs`, `engine/test/map-search.mjs` |
 | Gamepad | `engine/page/gamepad.ts` | `engine/test/gamepad.mjs` |
 | Sky and weather | `engine/page/modes.ts`, `engine/page/almanac.ts`, `engine/page/weather.ts` | `engine/test/almanac.mjs`, `engine/test/sf-modes.mjs` |
 | Signs | `engine/page/boards.ts`, `engine/page/signs.ts` | `engine/test/sf-boards.mjs`, `engine/test/sf-leaving.mjs`, `engine/test/sf-type.mjs` |

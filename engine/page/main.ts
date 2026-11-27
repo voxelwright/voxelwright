@@ -28,7 +28,7 @@ import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
 import { adoptRobotaxiModels, buildRobotaxiModel, ROBOTAXI_SERVICES, type RobotaxiModel } from './robotaxi.ts'
-import { createNeighborhood, type Neighborhood } from './neighborhood.ts'
+import { createNeighborhood, type Neighborhood, type PlacesPayload } from './neighborhood.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
@@ -1438,14 +1438,30 @@ async function main() {
   let townCenter: [number, number] | null = null
   let entryCtrl: import('./entry.ts').EntryController | null = null
   let sfMapPromise: Promise<boolean> | null = null
+  let sfPlacesPromise: Promise<PlacesPayload | null> | null = null
+  const ensurePlacesPayload = (): Promise<PlacesPayload | null> => {
+    if (!BAY_ON) return Promise.resolve(null)
+    return (sfPlacesPromise ??= placesData().then((buf) => {
+      if (!buf) { sfPlacesPromise = null; return null }
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(buf)) as PlacesPayload
+        if (!parsed || !Array.isArray(parsed.shops) || !Array.isArray(parsed.plazas)) { sfPlacesPromise = null; return null }
+        mapSys?.setPlacesData(parsed)
+        return parsed
+      } catch {
+        sfPlacesPromise = null
+        return null
+      }
+    }).catch(() => { sfPlacesPromise = null; return null }))
+  }
   const loadSfMap = (tries: number): Promise<boolean> => mapData().then((bytes) => {
     const parsed = bytes ? parseMap(bytes, LOCAL?.name ?? 'San Francisco') : null
-    if (parsed) { mapSys?.setMapData(parsed); return true }
+    if (parsed) { mapSys?.setMapData(parsed); void ensurePlacesPayload(); return true }
     if (tries > 1) return new Promise<boolean>((r) => setTimeout(() => void loadSfMap(tries - 1).then(r), 8000))
     return false
   })
   const ensureMap = (): Promise<boolean> => {
-    if (mapSys?.ready) return Promise.resolve(true)
+    if (mapSys?.ready) { void ensurePlacesPayload(); return Promise.resolve(true) }
     if (!BAY_ON) { townCenter = [pose.x, pose.z]; mapSys?.setMapData(buildTownMap(core, pose.x, pose.z)); return Promise.resolve(true) }
     return (sfMapPromise ??= loadSfMap(3).then((ok) => { if (!ok) sfMapPromise = null; return ok }))
   }
@@ -2165,6 +2181,7 @@ async function main() {
       device, format: gpu.format, pieces: falling, land: core,
       hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks,
       load: placesData,
+      loadPayload: ensurePlacesPayload,
     })).then((n) => {
       neighborhood = n
       if (landing && first && !first.engaged) n.enabled = false

@@ -127,7 +127,9 @@ export function compileBrandRules(config) {
     const rawName = String(poi.n ?? poi.name ?? '').trim()
     const rawBrand = String(poi.b ?? poi.brand ?? '').trim()
     const rawAddr = String(poi.a ?? poi.addr ?? '').trim()
-    const rawCat = String(poi.c ?? poi.cat ?? 'boutique')
+    let rawCat = String(poi.c ?? poi.cat ?? 'boutique')
+    // Fix raw extract misclassification where "barber" matched "bar" substring.
+    if (rawCat === 'bar' && /\bbarber/i.test(`${rawName} ${rawBrand}`)) rawCat = 'salon'
     const nameNorm = normalizeName(rawName)
     const brandNorm = normalizeName(rawBrand)
     const addrNorm = normalizeName(rawAddr)
@@ -302,6 +304,9 @@ export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS
     if (res.brandId) item.br = res.brandId
     if (res.parodyOf) item.po = 1
     if (r.out) item.out = 1
+    const addr = String(r.a || r.st || '').trim()
+    if (addr) item.a = addr
+    if (res.name && res.name !== res.short) item.fn = res.name
     shops.push(item)
   }
 

@@ -60,6 +60,20 @@ const PLACES = [
   ['Oracle Park', 37.7786, -122.3893, 'landmark'],
   ['Chase Center', 37.7680, -122.3877, 'landmark'],
   ['City Hall', 37.7793, -122.4193, 'landmark'],
+  // Major San Francisco hospitals & medical centers
+  ['UCSF Medical Center (Parnassus)', 37.7631, -122.4586, 'hospital'],
+  ['UCSF Medical Center (Mission Bay)', 37.7662, -122.3899, 'hospital'],
+  ['UCSF Medical Center (Mount Zion)', 37.7848, -122.4393, 'hospital'],
+  ['Zuckerberg SF General Hospital', 37.7555, -122.4044, 'hospital'],
+  ['Kaiser Permanente SF Medical Center', 37.7827, -122.4426, 'hospital'],
+  ['CPMC Van Ness Campus', 37.7852, -122.4219, 'hospital'],
+  ['CPMC Davies Campus', 37.7689, -122.4357, 'hospital'],
+  ['CPMC Mission Bernal Campus', 37.7484, -122.4203, 'hospital'],
+  ['Saint Francis Memorial Hospital', 37.7894, -122.4167, 'hospital'],
+  ['St. Mary’s Medical Center', 37.7740, -122.4543, 'hospital'],
+  ['Chinese Hospital', 37.7955, -122.4090, 'hospital'],
+  ['San Francisco VA Medical Center', 37.7820, -122.5037, 'hospital'],
+  ['Laguna Honda Hospital', 37.7486, -122.4590, 'hospital'],
   // Neighborhoods across all 155 squares of San Francisco
   ['North Beach', 37.8035, -122.4095, 'hood'],
   ['Russian Hill', 37.8008, -122.4192, 'hood'],
@@ -503,7 +517,8 @@ export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-t
     if (ep.x < x0 || ep.x > x1 || ep.z < z0 || ep.z > z1 || !hasSquare(ep.x, ep.z)) continue
     const lower = ep.name.toLowerCase()
     if (!landmarks.some((l) => l.name.toLowerCase() === lower && Math.hypot(l.x - ep.x, l.z - ep.z) < 4000)) {
-      landmarks.push({ name: ep.name, x: ep.x, z: ep.z, kind: ep.kind === 'park' || ep.kind === 'hood' ? ep.kind : 'landmark' })
+      const k = ep.kind === 'park' || ep.kind === 'hood' || ep.kind === 'hospital' ? ep.kind : 'landmark'
+      landmarks.push({ name: ep.name, x: ep.x, z: ep.z, kind: k })
     }
   }
 
