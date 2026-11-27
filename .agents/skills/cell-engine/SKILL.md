@@ -3136,3 +3136,72 @@ version, so San Francisco has no water edge.
   its parts, lowest first; a building crossing a map tile's edge comes in two pieces.
 - Not built: a frame's edge (walking out of a zone), street names and addresses outside the baked squares,
   the sitting's `street` part in the Bay (it stands at the town's coordinates), packs in `world.mjs`.
+
+## Cars that strike cars (#72, `core/src/bodies/hull.rs`, `page/street.ts`; November 26)
+
+A playtest on a phone left an SUV on another's roof and three cars wedged nose into tail. Reproduced before it
+was mended, three ways: `cargo test --release pileup` (5 tests, all failing on main), `node test/crash-stack.mjs`
+(the town's street in Chrome: after 150 km/h into three parked cars, two 1.1 to 1.8 m in each other for the
+3.5 s watched and two or three of the four that could not be driven away), and `--sf <folder>` (the street itself: woken cars
+landing 2 to 3 m inside each other, in each other for the 6 s watched, two or three at rest 0.5 to 1.6 m up on
+others; and a car in a streetcar in four of six fillings of the street, twice over). After: none of it, in
+three runs of each; 17 to 21 cars woken, every one there at rest or sent away for room, the striker whole; the
+street's frame 0.02 to 0.06 ms for what strikes what and at most 0.24 ms for the streetcars (0.08 on main).
+
+- **Two hollow shells cannot be parted cell by cell.** A car's body is a shell a cell or two thick (the street's
+  SUV: 4,224 cells of 16,544, and not sealed). A point of one car past the other's shell touched nothing, and a
+  point in the shell was pushed the short way out of the shell: into the cabin, or up through the roof, since
+  `way_out` tries up first. A car put 1.5 m into a standing one stayed there for the 7 s it was watched; one
+  struck square in the side at 150 km/h was 0.8 m in it for 6.4 s; one let fall on another sank 0.6 m into its roof.
+- **Vehicles meet as hulls.** A hull is the rectangle round a vehicle's cells at each height: the cabin and the
+  boot are in it, and the corner a tapered nose leaves empty; over the bonnet is not. (First tried: its cells
+  and what lies between them. Two tapered corners then nested 4.7 cells into each other's outlines and
+  travelled so, and outlines are what the telemetry measures.) A pair that both ride are pushed one way for all
+  their touches: the way their boxes overlap least. Up and down only when they share under 0.4 of the lower
+  one's height: a car let fall on another rests on its roof, one that rear-ends another is not lifted there. The
+  pair is eased apart as one, a quarter of how far in, 2 cells a step at most (each touch eased for itself moved
+  a pair 4.5 cells a step). Its box's corners and edge middles are tried beside the body's own points, which
+  are six to eight cells apart on a van.
+- **The short way out is wrong once one is well inside** (over 5 cells, which no step at any speed gives a
+  touch). Two cars 3.3 m into each other nose to tail are nearer out sideways (2.2 m), and sideways is the kerb
+  and the parked row: the woken car was put in the kerb and broke. Well inside, a pair parts the way it took
+  least time to get so far at the speed they close with.
+- **A hull's blow lands in one step.** Shell against shell, a few points at a time, a car at 150 km/h into one
+  standing lost 186 cells a second in the step that breaks things (`tough`); hull against hull, 231. A fifth of
+  what another hull takes is not counted (`YIELDS`): 185, and a car breaks on another at the speed it did.
+- **`place` is the only moment that knows where things are.** The page learns of a touch an answer late and its
+  `place` lands a message later still: at 150 km/h the striker is 1 to 5 m into the place by then, its middle past
+  the drawn car's own as often as not. So the core moves a vehicle that is put where another is coming in out
+  ahead of that one, the way it is going (not the way their middles lie), keeping it as high over the road as it
+  was (a hill's road is two cells higher four metres on: put there at the height it had, a car stood in the road
+  and sprang onto the next one's roof), and moves on whatever stands where that takes it (`clear`). Put where
+  nothing moves it stays where it was put, as a world started again needs.
+- **A body is born square to the world and turned by its next message**, and steps may run between: a car that
+  comes to life is born 300 m over its place (sectors over the roofs cost nothing to make) and put down with its
+  push in one move.
+- **Only the ridden car woke what it struck.** A car thrown at 400 cells a second went through the drawn cars
+  beyond it and stopped in one; the next struck came to life in it. Now every thrown car, and every struck car
+  still on its way to life (with the push it will have), wakes what it reaches, and loses what it gives. A drawn
+  car cannot be made solid by pushes: thrown back off one for want of room, a car pressed on by the pile behind
+  went into it and stayed (2 m deep for 5.6 s). So whatever is reached at 22 km/h or more wakes, a car at rest
+  sent away to make room first; slower, the thrown car is stopped by it and wakes nothing, or one blow runs on
+  down a whole row (13 woke in one pileup, with room for six; a car already pressed 2 cells in wakes it
+  whatever its speed).
+- **A touch is looked for as far ahead as waking takes**, every ten cells of the way. Waking took 66 to 150 ms
+  and more within one pileup, and the shortest of the last four is looked ahead by (`wakeLag`): a car that wakes
+  late is put clear by the core, exactly, and one that wakes early leaps away untouched (by 2.6 and 3.7 m when
+  the mean was used). Under 6 m/s a frame ahead only: a car nudged at walking pace leapt half a metre early.
+- **A car just woken is not where it was drawn**, and its speed is not read from the move between the two: that
+  was 2,000 cells a second, and what it then struck was given that.
+- **The push up was 55 cells a second**: a hop of 15 cells, a car's height, with the striker going on under it.
+  Now 12 at most.
+- **A streetcar's lane is its rails.** Both drive loops left out whatever comes the other way ("it keeps to its
+  own lane"), and rails turn across the traffic's lanes: of eight cars found in streetcars on main, in twelve
+  fillings of the street, three headed the other way to it (the other five were in one that stood, from the first
+  frames after the street was filled: streetcars were placed clear of streetcars only, traffic of its own lane
+  only). A streetcar now looks along its rails as its body will stand, whichever way the other
+  heads (`railGap`); a streetcar, cable car or bus is in a car's way by where its sides are, not its middle
+  (`inPath`: a bus went 3.9 m into a standing streetcar whose middle was behind its own); nothing that drives is
+  set down on a vehicle (`taken`).
+- **Not done**: a car sent away to make room is gone, not drawn again where it lay; cable cars run to their
+  clock and stop for nothing; a streetcar and a car that meet nose to nose on one lane both wait.
