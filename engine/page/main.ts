@@ -75,8 +75,8 @@ const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
 const canvas = document.querySelector('canvas')!
 // The canvas's size on the page (CSS pixels), kept as the page lays it out (#73). Asked of the canvas in the middle of
-// every frame, after the HUD had written to the page, it had the page laid out there and again before it was shown:
-// the largest single cost on the page's thread in San Francisco (0.6 to 1.1 s of a 20 to 28 s drive, in Chrome's samples).
+// every frame, after the HUD had written to the page, it had the page laid out there and then: the largest single
+// self time on the page's thread in San Francisco (0.6 to 1.1 s of a 20 to 28 s drive, in Chrome's samples).
 const laid = { w: canvas.clientWidth, h: canvas.clientHeight }
 new ResizeObserver(() => { laid.w = canvas.clientWidth; laid.h = canvas.clientHeight }).observe(canvas)
 // One device class for the whole page (bay.ts `DEVICE`): what it draws and what it holds.
@@ -707,9 +707,10 @@ async function main() {
     return true
   }
   // Not asked of an eye going faster than anyone runs (#73): each cell asked about is asked of the page's own core,
-  // which makes the whole sector round it the first time, on this thread. At 180 km/h down Geary Boulevard that was
-  // 570 ms of a 12 s pass, 17 to 19 ms in single frames (test/drive-smooth.mjs --sf --profile), to learn that someone
-  // in a car on a street is not in a room: a room has walls on three sides within 8 m, and nothing passes through one at speed.
+  // which makes the whole sector round it the first time, on this thread. With the eye alone at 180 km/h down Geary
+  // Boulevard that was 570 ms of a 12 s pass, 17 to 19 ms in single frames (test/drive-smooth.mjs --sf --profile), to
+  // learn that nobody at that speed is in a room: a room has walls on three sides within 8 m. (A car's tracks, wheels
+  // and camera ask the core about the ground under it all the same, `groundUnder`: those sectors are still made here.)
   const ROOM_SPEED = 15
   const roomedBy = (dt: number, speed: number) => {
     const to = pose.y < SPACE && speed < ROOM_SPEED && inRoom() ? 1 : 0

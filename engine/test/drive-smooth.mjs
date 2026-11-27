@@ -1,7 +1,7 @@
 // Going fast through the city must not stutter (#73). The real page in Chrome with WebGPU; nothing is stubbed.
 //
 //   node test/drive-smooth.mjs [--sf [folder]] [--curve] [--car] [--kmh 180] [--seconds 12] [--scale 0.5|own] [--dpr 1]
-//                              [--hour 12.5] [--route ax,az,bx,bz] [--profile] [--report-only] [--json file] [--headed]
+//                              [--hour 12.5] [--route ax,az,bx,bz] [--profile] [--report-only] [--beside] [--json file] [--headed]
 //
 // The eye is carried along a long straight street at `--kmh`, a person's height over the road, the same cells every
 // run; before it, the same page stands at the street's start for five seconds. Every gap between the page's frames is
@@ -30,10 +30,11 @@ const sf = has('sf'), profile = has('profile'), reportOnly = has('report-only'),
  * What going fast may cost beside standing in the same run: frames over 33 ms, as a share of all frames more than
  * standing's; the page's thread, ms a frame at the 99th in a hundred and at most; the march on the GPU, times
  * standing's. And what the page must do about it: give the sun's tiles no more than their share of a moving frame
- * (times this, for what a count of whole tiles cannot split), have every tile drawn within so many seconds of
- * stopping, and keep the makers up with the eye (sectors still wanted over the last third of the way).
+ * (as many as the share holds of what a tile takes, and one for a reading of that taken between), have every tile
+ * drawn within so many seconds of stopping, and keep the makers up with the eye (sectors still wanted over the
+ * last third of the way).
  */
-const BOUND = { late: 0.04, thread99: 12, threadMost: 34, march: 1.35, share: 1.5, drawn: 20, wanted: 1500 }
+const BOUND = { late: 0.04, thread99: 12, threadMost: 34, march: 1.35, drawn: 20, wanted: 1500 }
 
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
@@ -167,13 +168,14 @@ try {
     } finally { rest?.() }
   } else {
     const how = car ? { mode: 'car', kmh: Number(arg('from', '100')), seconds, stand: 5, hold: 0 } : { mode: 'eye', kmh, seconds, stand: 5, hold: BOUND.drawn }
-    // Measuring only (`--report-only`, `--profile`): alone on the GPU where it can be had in three minutes.
-    const rest = reportOnly || profile ? await quiet({ within: 3 * 60_000 }) : null
+    // Measuring only (`--report-only`, `--profile`): alone on the GPU where it can be had in three minutes (`--beside`: without waiting for that).
+    const rest = (reportOnly || profile) && !has('beside') ? await quiet({ within: 3 * 60_000 }) : null
     let first
     try { first = judged(await pass(how), true) } finally { rest?.() }
     for (const c of first.held) check(c.ok, c.what)
+    if (reportOnly) for (const c of first.timings) check(c.ok, c.what)
     // What a busy GPU slows is measured once more with every turn on it held, and fails only if it is missed again (kit.mjs `timed`).
-    const timings = await timed({ check, first, firstAlone: !!rest, measure: async () => judged(await pass(how), false), passes: (j) => j.timings.every((c) => c.ok), say: (j) => j.timings.map((c) => `${c.ok ? '' : 'MISSED '}${c.what}`).join('; '), idle: (on) => page.evaluate((on) => { globalThis.engine.resting = on }, on) })
+    const timings = reportOnly ? first : await timed({ check, first, firstAlone: !!rest, measure: async () => judged(await pass(how), false), passes: (j) => j.timings.every((c) => c.ok), say: (j) => j.timings.map((c) => `${c.ok ? '' : 'MISSED '}${c.what}`).join('; '), idle: (on) => page.evaluate((on) => { globalThis.engine.resting = on }, on) })
     results.pass = timings.summary
   }
   if (arg('json', null)) writeFileSync(arg('json'), JSON.stringify(results))
@@ -396,12 +398,13 @@ function judged(r, say) {
   const going = r.frames.filter((f) => !f.held), stopped = r.frames.filter((f) => f.held), s = summary(going), rest = summary(r.still)
   const speeds = going.map((f) => f.kmh).sort((a, b) => a - b), median = round(speeds[speeds.length >> 1] ?? 0)
   // The sun's maps: what the tiles of a moving frame took of it (what a tile was last measured to take on the GPU, times those drawn), and how long after stopping until all were drawn and the world round the eye made.
-  const moving = going.filter((f) => f.room?.moving), tileTime = mean(moving, (f) => f.room.drew * f.room.tileMs), most = moving.reduce((n, f) => Math.max(n, f.room.drew * f.room.tileMs), 0), share = mean(moving, (f) => f.room.share), tile = mean(moving, (f) => f.room.tileMs)
+  const moving = going.filter((f) => f.room?.moving), share = mean(moving, (f) => f.room.share), tile = mean(moving, (f) => f.room.tileMs), drew = mean(moving, (f) => f.room.drew)
+  const over = moving.filter((f) => f.room.drew > Math.max(1, Math.floor(f.room.share / f.room.tileMs)) + 1)
   const drawnAt = stopped.find((f) => f.sun === 0 && f.wanted === 0), drawn = drawnAt ? round((drawnAt.t - stopped[0].t) / 1000) : null
   const held = [
     { ok: !r.why || r.why === 'the street ended', what: `it went its ${seconds} s${r.why ? ` (${r.why})` : ''}` },
     { ok: median >= Math.min(kmh, 100), what: `it went fast: ${median} km/h at the median` },
-    { ok: moving.length > 0 && tileTime <= share * BOUND.share && most <= Math.max(share, tile) * 2, what: moving.length ? `the sun's tiles in a moving frame took ${round(tileTime, 2)} ms of the GPU on average and ${round(most, 2)} at most (their share is ${round(share, 2)} ms; a tile takes ${round(tile, 2)} ms)` : `the page gives the sun's tiles no share of a frame: ${s.tiles} a frame on average, ${going.reduce((n, f) => Math.max(n, f.cat.tiles ?? 0), 0)} at most` },
+    { ok: moving.length > 0 && over.length === 0, what: moving.length ? `the sun's tiles kept to their share of a moving frame: ${round(drew, 2)} a frame, ${moving.reduce((n, f) => Math.max(n, f.room.drew), 0)} at most (a tile takes ${round(tile, 2)} ms of the GPU, the share is ${round(share, 2)} ms)${over.length ? `; ${over.length} frames drew more than it holds` : ''}` : `the page gives the sun's tiles no share of a frame: ${s.tiles} a frame on average, ${going.reduce((n, f) => Math.max(n, f.cat.tiles ?? 0), 0)} at most` },
     // (The eye alone stops where it is told to. A car is another matter, and is not held to it.)
     ...(stopped.length ? [{ ok: drawn !== null, what: `stopped, every tile of the sun's maps was drawn and the world made in ${drawn ?? `more than ${BOUND.drawn}`} s (${stopped[0].sun} tiles were not when it stopped)` }] : []),
     // (In San Francisco the makers fall behind from about 180 km/h, before this check and after: said, and held to nothing there.)
@@ -412,7 +415,7 @@ function judged(r, say) {
     { ok: s.thread99 <= BOUND.thread99 && s.threadMost <= BOUND.threadMost, what: `the page's thread ${s.thread} ms a frame, ${s.thread99} at the 99th of a hundred (${BOUND.thread99} allowed), ${s.threadMost} at most (${BOUND.threadMost})` },
     { ok: s.march <= Math.max(rest.march * BOUND.march, rest.march + 1), what: `the march ${s.march} ms going, ${rest.march} standing (no more than ${BOUND.march} times it)` },
   ]
-  return { held, timings, summary: { standing: rest, going: s, kmh: median, tileTime: round(tileTime, 2), drawn, why: r.why } }
+  return { held, timings, summary: { standing: rest, going: s, kmh: median, tiles: round(drew, 2), tileMs: round(tile, 2), drawn, why: r.why } }
 }
 
 /** Chrome's samples of the page's thread: the functions the time was in, itself and with what it called. */
