@@ -146,7 +146,7 @@ The building's style word packs cells per storey (bits 0 to 7), cells per bay (8
 
 Two trailers may follow the trunks, in this order. Any other trailing bytes make the pack invalid.
 
-**`SFST`, street fixtures.** Lamps, poles, signs, wires.
+**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |
