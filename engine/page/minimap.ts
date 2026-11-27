@@ -978,6 +978,12 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     clampTargetToMap()
   }
 
+  const releaseWm = () => {
+    gpu.release(wmGpu)
+    wmOv.width = 0
+    wmOv.height = 0
+  }
+
   const teardownEntryDom = () => {
     isOpen = false
     entrySession = null
@@ -994,7 +1000,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     leaveInput?.(); leaveInput = null
     updateHint()
     rebuildChips()
-    if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) wmRoot.hidden = true }, 200)
+    if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) { wmRoot.hidden = true; releaseWm() } }, 200)
   }
 
   const confirmEntryStart = () => {
@@ -1153,7 +1159,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       wmRoot.classList.remove('open')
       html.classList.remove('map-open')
       leaveInput?.(); leaveInput = null
-      if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) wmRoot.hidden = true }, 200)
+      if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) { wmRoot.hidden = true; releaseWm() } }, 200)
     }
   }
 
@@ -1966,7 +1972,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
 
     if (!engaged) {
-      if (!mmRoot.hidden) mmRoot.hidden = true
+      if (!mmRoot.hidden) { mmRoot.hidden = true; gpu.release(mmGpu); mmOv.width = 0; mmOv.height = 0 }
       if (!entrySession) {
         if (isOpen) toggle(false)
         return
@@ -2136,7 +2142,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       wmRoot.classList.remove('dive')
       html.classList.remove('map-dive')
       wmRoot.style.removeProperty('opacity')
-      if (!isOpen) wmRoot.hidden = true
+      if (!isOpen) { wmRoot.hidden = true; releaseWm() }
     }
   }
 

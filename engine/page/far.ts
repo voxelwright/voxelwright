@@ -423,7 +423,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const vertex: GPUVertexState = { module, entryPoint: 'vs', buffers: [{ arrayStride: 20, stepMode: 'instance', attributes: [0, 1, 2, 3, 4].map((n) => ({ shaderLocation: n, offset: n * 4, format: 'uint32' as const })) }] }
   const F = GPUShaderStage.FRAGMENT, VF = GPUShaderStage.VERTEX | F
   const viewLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }, { binding: 1, visibility: VF, buffer: {} }, { binding: 2, visibility: F, buffer: {} }, { binding: 3, visibility: F, texture: { sampleType: 'depth' } }, { binding: 4, visibility: F, texture: {} }, { binding: 5, visibility: F, buffer: { type: 'read-only-storage' } }] })
-  const blockLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }] })
+  const blockLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: { hasDynamicOffset: true, minBindingSize: 64 } }] })
   const layout = device.createPipelineLayout({ bindGroupLayouts: [viewLayout, blockLayout] })
   const pipelineFor = (entry: string, ...targets: GPUTextureFormat[]) => device.createRenderPipelineAsync({
     label: `far ${entry}`, layout, vertex, fragment: { module, entryPoint: entry, targets: targets.map((format) => ({ format })) },
@@ -446,11 +446,39 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   let styled = false
   let sunBaked: [number, number, number] | null = null
 
+  // ── Shared dynamic-offset uniform buffer for all section blocks (#83) ──
+  // Replaces thousands of per-section 64 B GPUBuffers and GPUBindGroups with one aligned slab and a slot free-list.
+  const blockStride = Math.max(64, device.limits.minUniformBufferOffsetAlignment)
+  let blockCap = 512, blockUsed = 0
+  const blockFree: number[] = []
+  let blockMirror = new Uint8Array(blockCap * blockStride)
+  let blockBuf = device.createBuffer({ label: 'far sections', size: blockCap * blockStride, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  let blockBind = device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: blockBuf, size: 64 } }] })
+  const secBytes = new Uint8Array(64)
+  const secF32 = new Float32Array(secBytes.buffer)
+  const secU32 = new Uint32Array(secBytes.buffer)
+  const allocBlock = (data: Uint8Array<ArrayBuffer>): number => {
+    const slot = blockFree.length ? blockFree.pop()! : blockUsed++
+    if (slot >= blockCap) {
+      while (slot >= blockCap) blockCap *= 2
+      const next = new Uint8Array(blockCap * blockStride)
+      next.set(blockMirror)
+      blockMirror = next
+      blockBuf.destroy()
+      blockBuf = device.createBuffer({ label: 'far sections', size: blockCap * blockStride, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+      device.queue.writeBuffer(blockBuf, 0, blockMirror, 0, blockUsed * blockStride)
+      blockBind = device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: blockBuf, size: 64 } }] })
+    }
+    blockMirror.set(data, slot * blockStride)
+    device.queue.writeBuffer(blockBuf, slot * blockStride, data)
+    return slot
+  }
+
   // ── Tiles ──
   const size = listing.size, bands = listing.bands, lods = listing.lods
-  interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; own: GPUBuffer; bind: GPUBindGroup; mid: number[] }[]; used: number }
-  /** Lets a band's buffers go: its faces and each of its sections' own uniforms. */
-  const drop = (h: Held) => { h.buffer.destroy(); for (const s of h.sections) s.own.destroy() }
+  interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; slot: number; mid: number[] }[]; used: number }
+  /** Lets a band's buffers go: destroys its face buffer and recycles its sections' uniform slots. */
+  const drop = (h: Held) => { h.buffer.destroy(); for (const s of h.sections) blockFree.push(s.slot) }
   // A tile's slots: its bands, then (last) the landing's cut of it.
   interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; recs: (Rec | null)[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[]; full: boolean }
   const C = bands.length
@@ -466,6 +494,49 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const cover = new Uint32Array(128)
   let covered = ''
 
+  // Offload header JSON parsing and 20-byte grouped face de-interleaving to a worker (#83) so tile loads never hitch frames.
+  type Unpacked = { head: Head; faces: Uint8Array<ArrayBuffer> }
+  let unpacker: Worker | null = null
+  let unpackSeq = 0
+  const unpacking = new Map<number, { resolve: (u: Unpacked) => void; reject: (e: Error) => void }>()
+  const unpackLocal = (buf: ArrayBuffer): Unpacked => {
+    const bytes = new Uint8Array(buf)
+    const length = new DataView(buf).getUint32(4, true)
+    const head = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as Head
+    let faces = bytes.subarray(8 + length)
+    const n = faces.length / 20
+    if (head.grouped) {
+      const flat = new Uint8Array(faces.length)
+      for (let j = 0; j < 20; j++) { const from = j * n; for (let i = 0; i < n; i++) flat[i * 20 + j] = faces[from + i] }
+      faces = flat
+    }
+    return { head, faces }
+  }
+  const unpack = (buf: ArrayBuffer): Promise<Unpacked> => {
+    if (typeof Worker === 'undefined') return Promise.resolve(unpackLocal(buf))
+    if (!unpacker) {
+      unpacker = new Worker(new URL('./far-unpack.ts', import.meta.url), { type: 'module' })
+      unpacker.onmessage = (e: MessageEvent<{ id: number; head?: Head; buf?: ArrayBuffer; offset?: number; length?: number; error?: string }>) => {
+        const job = unpacking.get(e.data.id)
+        if (!job) return
+        unpacking.delete(e.data.id)
+        if (e.data.error || !e.data.head || !e.data.buf) job.reject(new Error(e.data.error ?? 'far unpack failed'))
+        else job.resolve({ head: e.data.head, faces: new Uint8Array(e.data.buf, e.data.offset ?? 0, e.data.length) })
+      }
+      unpacker.onerror = () => {
+        for (const job of unpacking.values()) job.reject(new Error('far unpack worker failed'))
+        unpacking.clear()
+        unpacker?.terminate()
+        unpacker = null
+      }
+    }
+    const id = ++unpackSeq
+    return new Promise<Unpacked>((resolve, reject) => {
+      unpacking.set(id, { resolve, reject })
+      unpacker!.postMessage({ id, buf }, [buf])
+    })
+  }
+
   const load = async (t: Tile, band: number) => {
     const rec = t.recs[band]!
     t.held[band] = 'coming'
@@ -473,16 +544,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     try {
       const answer = await fetch(new URL(rec.path, new URL(base, location.href)))
       if (!answer.ok) throw new Error(`${answer.status}`)
-      const bytes = new Uint8Array(await answer.arrayBuffer())
-      const length = new DataView(bytes.buffer).getUint32(4, true)
-      const head = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as Head
-      let faces = bytes.subarray(8 + length)
-      const n = faces.length / 20
-      if (head.grouped) {
-        const flat = new Uint8Array(faces.length)
-        for (let j = 0; j < 20; j++) { const from = j * n; for (let i = 0; i < n; i++) flat[i * 20 + j] = faces[from + i] }
-        faces = flat
-      }
+      const raw = await answer.arrayBuffer()
+      const wireBytes = raw.byteLength
+      const { head, faces } = await unpack(raw)
       // The windows' styles from the first object that has them (a cut's are its bands').
       if (!styled && head.styles?.length) {
         const s = new Float32Array(16 * 8)
@@ -494,21 +558,22 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const buffer = device.createBuffer({ label: `far ${t.key}/${band}`, size: Math.max(20, faces.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
       device.queue.writeBuffer(buffer, 0, faces)
       const sections = head.sections.map((s) => {
-        const own = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-        device.queue.writeBuffer(own, 0, new Float32Array([s.pos[0] - anchor[0], s.pos[1] - anchor[1], s.pos[2] - anchor[2], s.cell]))
-        device.queue.writeBuffer(own, 16, new Uint32Array([0]))
-        device.queue.writeBuffer(own, 20, new Float32Array(s.uw ?? [0, 0]))
-        device.queue.writeBuffer(own, 28, new Uint32Array([s.layer === 'hero' ? 1 : s.layer.includes('crown') ? 2 : 0]))
-        device.queue.writeBuffer(own, 32, new Float32Array([...s.c0, 0, ...s.c2, 0]))
+        secF32[0] = s.pos[0] - anchor[0]; secF32[1] = s.pos[1] - anchor[1]; secF32[2] = s.pos[2] - anchor[2]; secF32[3] = s.cell
+        secU32[4] = 0
+        secF32[5] = s.uw?.[0] ?? 0; secF32[6] = s.uw?.[1] ?? 0
+        secU32[7] = s.layer === 'hero' ? 1 : s.layer.includes('crown') ? 2 : 0
+        secF32[8] = s.c0[0]; secF32[9] = s.c0[1]; secF32[10] = s.c0[2]; secF32[11] = 0
+        secF32[12] = s.c2[0]; secF32[13] = s.c2[1]; secF32[14] = s.c2[2]; secF32[15] = 0
+        const slot = allocBlock(secBytes)
         // The tile's box is what its faces fill, once any are here (a face may reach past its tile).
         if (!t.bounded) { t.lo = [...s.lo]; t.hi = [...s.hi]; t.bounded = true }
         for (let a = 0; a < 3; a++) { t.lo[a] = Math.min(t.lo[a], s.lo[a]); t.hi[a] = Math.max(t.hi[a], s.hi[a]) }
-        return { s, own, bind: device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: own } }] }), mid: [0, 1, 2].map((a) => (s.lo[a] + s.hi[a]) / 2) }
+        return { s, slot, mid: [0, 1, 2].map((a) => (s.lo[a] + s.hi[a]) / 2) }
       })
       t.held[band] = { band, buffer, bytes: faces.byteLength, sections, used: frame }
       stats.fetched++
       t.fails[band] = 0
-      stats.fetchedBytes += bytes.length
+      stats.fetchedBytes += wireBytes
     } catch (e) {
       // A listed object that does not come is a load error (release.md): said, left out, and tried again later.
       stats.failed++
@@ -709,13 +774,26 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     stats.held = held; stats.heldBytes = heldBytes
     // What the view holds before what it does not; in it the cut, then the coarse band before the finer, the biggest on the screen first.
     want.sort((a, b) => Number(!a.seen) - Number(!b.seen) || (a.seen && b.seen ? a.band - b.band || b.seen - a.seen : 0) || a.d - b.d || a.band - b.band)
-    for (const w of want) { if (stats.coming >= 6) break; void load(w.t, w.band < 0 ? C : w.band) }
-    // Over the budget: the least lately needed bands go, finest first.
+    for (const w of want) {
+      if (stats.coming >= 6) break
+      if (w.band > 0 && held >= BUDGET) continue
+      void load(w.t, w.band < 0 ? C : w.band)
+    }
+    // Over the budget: drop stale bands first, then finest out-of-view / furthest bands so phone/tablet stay within tier VRAM (#83).
     if (held > BUDGET) {
       const loose = tiles.flatMap((t) => t.held.map((h, k) => ({ t, h, k }))).filter((e) => e.k < C && e.h && e.h !== 'coming' && e.h.used < frame - 120) as { t: Tile; h: Held; k: number }[]
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
-      for (const e of loose) { if (held <= BUDGET * 0.9) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
+      for (const e of loose) { if (held <= BUDGET * 0.9) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20; heldBytes -= e.h.bytes }
+      if (held > BUDGET * 1.05) {
+        const finer = tiles.flatMap((t) => {
+          const d = away(eye, t.lo, t.hi), vis = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? 1 : 0
+          return t.held.map((h, k) => ({ t, h, k, d, vis }))
+        }).filter((e) => e.k > 0 && e.k < C && e.h && e.h !== 'coming') as { t: Tile; h: Held; k: number; d: number; vis: number }[]
+        finer.sort((a, b) => a.vis - b.vis || b.k - a.k || b.d - a.d)
+        for (const e of finer) { if (held <= BUDGET) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20; heldBytes -= e.h.bytes }
+      }
     }
+    stats.held = held; stats.heldBytes = heldBytes
     // The faces' light was read off a clear afternoon: it is theirs as far as the day is clear (the march's own overcast).
     const fair = Math.max(0, Math.min(1, march.day)) * (1 - Math.max(march.rain, march.cloud, 0.2 * march.fog))
     // The wedge (HANDOVER): for the march from the frame's corner, here from the eye (where a face is measured from).
@@ -756,7 +834,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       for (const h of (!t.full || exact) && cut && cut !== 'coming' ? [cut] : t.held.slice(0, C)) {
         if (!h || h === 'coming') continue
         out.setVertexBuffer(0, h.buffer)
-        for (const { s, bind: b } of h.sections) {
+        for (const { s, slot } of h.sections) {
+          const sf = Math.hypot(Math.max(Math.abs(s.lo[0] - eye[0]), Math.abs(s.hi[0] - eye[0])), Math.max(Math.abs(s.lo[1] - eye[1]), Math.abs(s.hi[1] - eye[1])), Math.max(Math.abs(s.lo[2] - eye[2]), Math.abs(s.hi[2] - eye[2])))
+          if (sf < (wedge ? near : reach)) continue
           const ds = away(eye, s.lo, s.hi)
           if (!inView(view, aspect, s.lo, s.hi)) continue
           const least = (self.detail * ds) / 10 / focal
@@ -768,7 +848,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
             if (!facing(run.way, s, eye)) continue
             const count = k < 0 ? run.count : run.lods[k]
             if (!count) continue
-            if (!bound) { out.setBindGroup(1, b); bound = true }
+            if (!bound) { out.setBindGroup(1, blockBind, [slot * blockStride]); bound = true }
             out.draw(4, count, 0, run.start)
             faces += count
           }
