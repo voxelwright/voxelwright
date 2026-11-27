@@ -159,7 +159,7 @@ html:not(.first)[data-hud]:has(#realm .lobbies, #lobby-tag) #card { top: calc(ma
 
 /* ── Contextual cues: slim 2-course smoked voxel card with miniature voxel keycap ── */
 #realm .cues { position: absolute; left: 0; top: 0; display: grid; gap: 6px; pointer-events: none !important; }
-html:has(#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])) #realm .cues { visibility: hidden; }
+html:has(#choice:not([hidden]), #ask.open, #connect[open], #radio-picker[open], #ai-line:not([hidden])) #realm .cues { visibility: hidden; }
 #realm .cue {
   display: inline-flex;
   align-items: center;
@@ -1050,7 +1050,7 @@ export function playHud(o: {
     if (cueChute) say(chute, touch ? 'Chute' : 'Space', 'Parachute')
     if (cueFly) say(fly, 'B', 'Fly')
     if (cueLand) say(land, 'B', 'Walk')
-    const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])')
+    const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open], #radio-picker[open], #ai-line:not([hidden])')
     html.classList.toggle('drawer', drawer)
     for (const [el, want] of [[chute, cueChute && free], [fly, cueFly && free], [land, cueLand && free]] as const) {
       const was = el.classList.contains('on')
