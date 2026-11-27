@@ -336,8 +336,8 @@ export interface Boards {
     at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean
     /** It has something to say: it comes in to its near round over some seconds, and goes back out when this is false again. */
     loud: boolean
-    /** Hidden while the sky-gap drone swarm is up (eggs.ts / eggs-sky.ts): the plane, tow line and banner cloth stay out of the sky so they never fly in front of the drones. */
-    hidden: boolean
+    /** Normalized screen-Y ceiling (0 top, 1 bottom) the plane and its banner fly above while the sky-gap drone swarm is up (eggs.ts / eggs-sky.ts), or null for its normal round altitude. */
+    above: number | null
     /** How far it has come in: 0 on its own round, 1 on the near one. */
     readonly come: number
     /** The cloth's box on the page now (client px), or null where any of it is behind the eye. */
@@ -740,7 +740,7 @@ export async function boards(o: Needs): Promise<Boards> {
   // ── The plane and its banner ──
   const whole_ = o.file.banner ?? null, shape0 = o.canvas.getBoundingClientRect()
   const towed: Banner | null = whole_ ? (whole_.upright && shape0.height > shape0.width ? { ...whole_, ...whole_.upright } : whole_) : null
-  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; hidden: boolean; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
+  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; above: number | null; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
   /** Keeps a called plane in the picture (below, where the picture's projection is): every frame of its flight. */
   let summon: (() => void) | null = null
   let boxAt: (phase: number) => { x0: number; y0: number; x1: number; y1: number } | null = () => null, read: (phase: number) => boolean = () => false
@@ -782,16 +782,43 @@ export async function boards(o: Needs): Promise<Boards> {
     const eased = () => come * come * (3 - 2 * come)
     /** A size of what flies, as far in as it has come. */
     const now = (pick: (r: Round) => number) => { const a = pick(own); return near === own || come === 0 ? a : a + (pick(near) - a) * eased() }
-    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it: between the two rounds as far in as it has come. Coming in, it is a plane that grows as it nears. */
-    const point = (phase: number, back: (r: Round) => number): [number, number, number] => {
+    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it, before any altitude lift. */
+    const basePoint = (phase: number, back: (r: Round) => number): [number, number, number] => {
       const p = own.along(phase * own.whole - back(own))
       if (near === own || come === 0) return p
       const q = near.along(phase * near.whole - back(near)), e = eased()
       return [p[0] + (q[0] - p[0]) * e, p[1] + (q[1] - p[1]) * e, p[2] + (q[2] - p[2]) * e]
     }
+    /** Extra altitude (cells) so the plane and its cloth fly above the sky-gap drone swarm when `above` is set. */
+    let lift = 0
+    const ABOVE_MARGIN = 0.03
+    const reduced = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+    const neededLift = (phase: number, ceiling: number): number => {
+      const v = o.view(), targetNdcY = 1 - 2 * Math.max(-0.5, ceiling - ABOVE_MARGIN)
+      const drop = now((r) => r.drop), halfTall = now((r) => r.tall) / 2, planeHalf = 7 * now((r) => r.cell)
+      const pts = [basePoint(phase, () => 0), basePoint(phase, (r) => r.body + r.gap), basePoint(phase, (r) => r.body + r.gap + 2 * r.half)]
+      let need = 0
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i], py = i === 0 ? p[1] - planeHalf : p[1] - drop - halfTall
+        const dx = p[0] - v.eye[0], dy = py - v.eye[1], dz = p[2] - v.eye[2]
+        const far = dx * v.forward[0] + dy * v.forward[1] + dz * v.forward[2]
+        if (far <= 1) continue
+        const upDot = dx * v.up[0] + dy * v.up[1] + dz * v.up[2]
+        const denom = v.up[1] - targetNdcY * v.tanHalf * v.forward[1]
+        if (denom <= 0.1) continue
+        const req = (targetNdcY * v.tanHalf * far - upDot) / denom
+        if (req > need) need = req
+      }
+      return Math.min(need, 20000)
+    }
+    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it: between the two rounds as far in as it has come, lifted when flying above drones. */
+    const point = (phase: number, back: (r: Round) => number): [number, number, number] => {
+      const p = basePoint(phase, back)
+      return lift ? [p[0], p[1] + lift, p[2]] : p
+    }
     /** Where on its round it is as it flies on, 0 to 1 (held, `flown.phase` is where it is held). */
-    let running = towed.start ?? 0, last = performance.now(), hidden = false
-    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, get hidden() { return hidden }, set hidden(on: boolean) { hidden = on; cloth.hidden = on; line.hidden = on; if (on) piece.cell = 0 }, get come() { return come }, call(on) { this.called = on }, get box() { return hidden ? null : boxAt(this.phase) }, get readable() { return !hidden && read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
+    let running = towed.start ?? 0, last = performance.now()
+    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, above: null, get come() { return come }, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
     /** Where the plane is and where its cloth's two ends are, at a place on its round (0 to 1). */
     const parts = (phase: number) => [point(phase, () => 0), point(phase, (r) => r.body + r.gap), point(phase, (r) => r.body + r.gap + 2 * r.half)]
     let looked = 0
@@ -826,7 +853,7 @@ export async function boards(o: Needs): Promise<Boards> {
     // (Run from its flight, which first runs before `onPicture` below is made: it is not called before an egg calls it.)
     summon = () => {
       const f = flown!
-      if (f.hidden || !f.called || f.hold !== null) { f.inView = false; return }
+      if (!f.called || f.hold !== null) { f.inView = false; return }
       const rect = o.canvas.getBoundingClientRect(), v = o.view(), aspect = rect.width / Math.max(1, rect.height)
       /** How much of it is on the picture at a place on its round: the plane, the cloth's ends, its middle. */
       const seen = (phase: number, edge: number) => { const [p, a, b] = parts(phase); return [p, a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] as [number, number, number]].filter((q) => { const at = onPicture([q[0], q[1] - now((r) => r.drop), q[2]], v, aspect); return at && Math.abs(at.x) < edge && Math.abs(at.y) < edge }).length }
@@ -850,6 +877,7 @@ export async function boards(o: Needs): Promise<Boards> {
       }
       if (!best) return
       running = f.phase = best.from
+      if (f.above !== null) lift = neededLift(f.phase, f.above)
       // It is out of sight there and comes in within a second or two: not looked for again until it has.
       looked = performance.now() + 5000
     }
@@ -860,13 +888,18 @@ export async function boards(o: Needs): Promise<Boards> {
       come = Math.max(0, Math.min(1, come + (f.loud ? dt : -dt) / 5))
       running = (running + dt / now((r) => r.lap)) % 1
       f.phase = f.hold ?? running
+      const targetLift = f.above !== null ? neededLift(f.phase, f.above) : 0
+      if (reduced?.matches) lift = targetLift
+      else {
+        const rate = targetLift > lift ? 6 : 3
+        lift += (targetLift - lift) * (1 - Math.exp(-dt * rate))
+        if (targetLift === 0 && Math.abs(lift) < 0.5) lift = 0
+      }
       summon?.()
       const at = point(f.phase, () => 0), ahead = point(f.phase, (r) => -10 * r.cell), heading = [ahead[0] - at[0], ahead[2] - at[2]], turn = Math.atan2(-heading[1], heading[0])
       f.at = at
       piece.pos = f.at
-      cloth.hidden = f.hidden
-      line.hidden = f.hidden
-      piece.cell = f.hidden ? 0 : now((r) => r.cell)
+      piece.cell = now((r) => r.cell)
       // Its nose along its way, banked into the round by how hard it is turning there.
       const next = point(f.phase, (r) => -100 * r.cell), bend = Math.atan2(next[2] - ahead[2], next[0] - ahead[0]) - Math.atan2(heading[1], heading[0])
       const bank = Math.max(-0.5, Math.min(0.5, Math.atan2(Math.sin(bend), Math.cos(bend)) * 1.6)), sn = Math.sin(turn / 2), c = Math.cos(turn / 2), sb = Math.sin(bank / 2), cb = Math.cos(bank / 2)
