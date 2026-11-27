@@ -245,11 +245,12 @@ try {
 
   // Kept over a reload, then off: every key put away, the stick the feet's again.
   await set({ steer: 'wheel', gas: 'auto', size: 1.2 })
+  const before = await page.evaluate(() => localStorage.getItem('vw.drive-touch.v1'))
   await page.close()
   await open()
   await enter()
   const kept = await page.evaluate(() => ({ ...globalThis.engine.alive.touch.settings }))
-  check(kept.steer === 'wheel' && kept.gas === 'auto' && kept.size === 1.2, `what was set is kept over a reload (${JSON.stringify(kept)})`)
+  check(kept.steer === 'wheel' && kept.gas === 'auto' && kept.size === 1.2, `what was set is kept over a reload (${JSON.stringify(kept)}; kept before: ${before}, after: ${await page.evaluate(() => localStorage.getItem('vw.drive-touch.v1'))})`)
   await laid('wheel-auto-large')
   await set({ steer: 'slide', gas: 'pedals', size: 1 })
   const leave = await page.evaluate(() => { const r = document.querySelector('[data-panel="living"] [data-act="leave"]').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
