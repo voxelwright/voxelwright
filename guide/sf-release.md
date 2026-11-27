@@ -144,6 +144,8 @@ The body follows at byte 64, in this order:
 
 The building's style word packs cells per storey (bits 0 to 7), cells per bay (8 to 15), a home flag (16), a special form (17 and 18: 1 Coit Tower, 2 the Transamerica Pyramid, 3 a tall lobby or arcade), a triple-storey flag (19), the ground floor's use (20 to 22) and a seed (24 to 31).
 
+On loading a fine tile, the core samples the roof inside each ordinary building's footprint to fill low or missing lidar returns along its edge. It also smooths isolated roof spikes and reconstructs missing street eaves in memory. Previously pinned BAY1 tiles receive these repairs when loaded by the updated core.
+
 Two trailers may follow the trunks, in this order. Any other trailing bytes make the pack invalid.
 
 **`SFST`, street fixtures.** Lamps, poles, signs, wires.

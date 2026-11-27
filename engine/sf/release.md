@@ -63,7 +63,7 @@ $PY engine/sf/release.py --restock --landing LANDING_DIR --base DIGEST - OUT
 
 Restock `--far` first, then cut the first view (`landing.mjs`) from that release and restock `--landing` with `--base` set to it, because a cut holds faces of the tiles it was made from.
 
-A restock checks the base manifest against its digest, clones the other objects, refuses a digest that already exists, prints the new digest and never moves `<out>/current.json`. The tiles are unchanged, so it needs no panel.
+A restock checks the base manifest against its digest and stages the changed library in its own directory. macOS clones files on APFS and Linux copies them. A successful restock prints the new digest. It keeps the base tiles and can reuse their panel.
 
 ## 4. Pin, build and bundle
 

@@ -1,16 +1,18 @@
 // Automated structural fidelity gate for every city landmark in sf/heroes.json (#60).
-// Verifies every landmark has a valid core rule, reach box, night record, non-empty voxel/face output at both near
-// and mid LODs, valid map fast-travel listing, and full bridge-end tile coverage so no landmark ships underbaked.
+// Samples the core's reach, lighting, ownership and face output at each landmark's bake resolution.
+// With a release manifest, compare the planned ground coverage with the actual tile and surveyed sea records.
 //
-//   node engine/sf/landmark-audit.mjs
+//   node engine/sf/landmark-audit.mjs [--manifest PATH]
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 import { landmarkTiles } from './landmark-tiles.mjs'
 import { place } from '../page/bay.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ENGINE = dirname(HERE)
+const { values: { manifest } } = parseArgs({ options: { manifest: { type: 'string' } } })
 
 const wasm = readFileSync(join(ENGINE, 'page', 'core.wasm'))
 const core = (await WebAssembly.instantiate(wasm, {})).instance.exports
@@ -32,7 +34,7 @@ for (const h of heroes) {
   ok(Math.hypot(toward.x - at.x, toward.z - at.z) > 10, `${h.name}: degenerate toward vector`)
   if (h.only === 'night') continue
 
-  // Sample a central block at near/mid LOD and verify the rule emits real faces.
+  // Sample a central block at the resolution used by the far baker.
   const step = Math.min(h.step ?? 8, 16)
   const s = step / 10
   const spanU = Math.min(180, reach[3] - reach[0])
@@ -60,9 +62,18 @@ const tileKeys = new Set(landmarkTiles().map(([l, x, z]) => `${l}/${x}_${z}`))
 const marin = place(37.8325, -122.4798)
 const marinL0 = `0/${Math.floor(marin.x / 2500)}_${Math.floor(marin.z / 2500)}`
 ok(tileKeys.has(marinL0), `landmark-tiles.mjs missing Marin Headlands north bridge end tile ${marinL0}`)
+if (manifest) {
+  const release = JSON.parse(readFileSync(manifest, 'utf8'))
+  const surveyed = new Set()
+  for (const { level, tiles, sea } of release.levels) {
+    for (const key of [...Object.keys(tiles), ...sea]) surveyed.add(`${level}/${key}`)
+  }
+  for (const key of tileKeys) ok(surveyed.has(key), `release lacks landmark terrain coverage at ${key}`)
+  ok(release.levels[0].tiles[marinL0.slice(2)], 'north bridge approach needs a level-0 land tile')
+}
 
 if (failures.length) {
   console.error(`landmark-audit FAILED (${failures.length}):\n  - ${failures.join('\n  - ')}`)
   process.exit(1)
 }
-console.log(`landmark-audit OK: ${heroes.length} landmarks verified, ${tileKeys.size} landmark tiles covered`)
+console.log(`landmark-audit OK: ${heroes.length} landmark rules, ${tileKeys.size} terrain tiles ${manifest ? 'checked against release' : 'planned'}`)

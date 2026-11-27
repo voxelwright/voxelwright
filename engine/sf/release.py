@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
 from compact_store import TileStore, link_libraries, read as read_base
@@ -97,9 +98,9 @@ def restock(out, life=None, cars=None, landing=None, base=None, far=None):
     files = {}
 
     def record(path, name):
-        files[name] = path
         with path.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        files[name] = path, digest
         return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
 
     replaced = [kind for kind, source in (("life", life), ("cars", cars)) if source]
@@ -135,25 +136,37 @@ def restock(out, life=None, cars=None, landing=None, base=None, far=None):
     dest = out / "releases" / digest
     if dest.exists():
         raise ValueError(f"{dest} already exists")
-    tmp = out / "releases" / f".restock-{digest}"
-    shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir()
-    for entry in old.iterdir():
-        if entry.name in (*replaced, "manifest.json") or entry.name.startswith(("panel-", ".")):
-            continue
-        subprocess.run(["/bin/cp", "-cR", entry, tmp / entry.name], check=True)
-    if landing:
-        shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
-    for path in gone:
-        (tmp / path).unlink(missing_ok=True)
-    if (old / ".bay-store").is_symlink():
-        (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
-    for name, source in files.items():
-        (tmp / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp / name).unlink(missing_ok=True)
-        shutil.copyfile(source, tmp / name)
-    (tmp / "manifest.json").write_bytes(manifest)
-    tmp.rename(dest)
+    with TemporaryDirectory(prefix=".restock-", dir=dest.parent) as work:
+        tmp = Path(work) / "release"
+        tmp.mkdir()
+        for entry in old.iterdir():
+            if entry.name in (*replaced, "manifest.json") or entry.name.startswith(("panel-", ".")):
+                continue
+            target = tmp / entry.name
+            if entry.is_symlink() and not (entry.name == "far" and (far or landing)):
+                target.symlink_to(os.readlink(entry))
+            elif sys.platform == "darwin":
+                subprocess.run(["/bin/cp", "-cRL", entry, target], check=True)
+            elif entry.is_dir():
+                shutil.copytree(entry, target)
+            else:
+                shutil.copy2(entry, target)
+        if landing:
+            shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
+        for path in gone:
+            (tmp / path).unlink(missing_ok=True)
+        if (old / ".bay-store").is_symlink():
+            (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
+        for name, (source, expected) in files.items():
+            target = tmp / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.unlink(missing_ok=True)
+            shutil.copyfile(source, target)
+            with target.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != expected:
+                    raise ValueError(f"{name} changed while restocking")
+        (tmp / "manifest.json").write_bytes(manifest)
+        tmp.rename(dest)
     print(digest, "staged with", len(files), "new objects; everything else as", release)
     return digest
 

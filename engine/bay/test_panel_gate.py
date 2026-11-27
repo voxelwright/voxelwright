@@ -11,10 +11,33 @@ from unittest.mock import patch
 from panel_gate import HERE
 
 sys.path.insert(0, str(HERE.parent / "sf"))
-from release import generate
+from release import encode, generate, restock
 
 
 class PanelPromotion(unittest.TestCase):
+    def test_landing_restock_leaves_shared_far_library_intact(self):
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            original = root / "shared" / "landing" / "1_2.far"
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"old faces")
+            manifest = encode({"far": {"tiles": {"1_2": [None, None, None]}}})
+            base = hashlib.sha256(manifest).hexdigest()
+            old = root / "releases" / base
+            old.mkdir(parents=True)
+            (old / "manifest.json").write_bytes(manifest)
+            (old / "far").symlink_to("../../shared")
+            cut = root / "cut"
+            path = "far/landing/1_2.far"
+            (cut / path).parent.mkdir(parents=True)
+            body = b"new faces"
+            (cut / path).write_bytes(body)
+            row = dict(path=path, sha256=hashlib.sha256(body).hexdigest(), bytes=len(body))
+            (cut / "landing.json").write_bytes(encode(dict(version=1, eye=[0, 0, 0], tiles={"1_2": row})))
+            digest = restock(root, landing=cut, base=base)
+            self.assertEqual((root / "releases" / digest / path).read_bytes(), body)
+            self.assertEqual((old / path).read_bytes(), b"old faces")
+
     def test_one_lower_view_or_an_unscored_core_preserves_the_pin(self):
         scores = json.loads((HERE / "panel-floors.json").read_text())
         with TemporaryDirectory() as folder:

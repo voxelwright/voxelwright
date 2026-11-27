@@ -209,6 +209,11 @@ def kept(name, make, remember=True):
 readers = {}
 
 
+def feature_cache(theme):
+    # Building records decoded before version 3 discarded roof and facade tags.
+    return f'{RELEASE}/{3 if theme == "buildings" else 2}'
+
+
 def features(theme, z, x, y):
     """One map tile of Overture: {layer: [(type, rings in longitude and latitude, properties)]}."""
     def make():
@@ -245,7 +250,7 @@ def features(theme, z, x, y):
                     rows.append((kind.replace('Multi', ''), [ll(r) for r in part], keep))
             out[name] = rows
         return out
-    return kept(f'{RELEASE}/2/{theme}/{z}/{x}_{y}', make)
+    return kept(f'{feature_cache(theme)}/{theme}/{z}/{x}_{y}', make)
 
 
 decoded = {}
@@ -395,7 +400,7 @@ def draw(frame, x0, z0, n, step, zoom, fine):
         ys = range(int((1 - math.asinh(math.tan(math.radians(north))) / math.pi) / 2 * m), int((1 - math.asinh(math.tan(math.radians(south))) / math.pi) / 2 * m) + 1)
         for ty in ys:
             for tx in xs:
-                rows = kept(f'{RELEASE}/2/{frame.name}/{theme}-{layer}/{z}/{tx}_{ty}', lambda: [(k, [frame.cells(r) for r in rings], p) for k, rings, p in features(theme, z, tx, ty).get(layer, [])])
+                rows = kept(f'{feature_cache(theme)}/{frame.name}/{theme}-{layer}/{z}/{tx}_{ty}', lambda: [(k, [frame.cells(r) for r in rings], p) for k, rings, p in features(theme, z, tx, ty).get(layer, [])])
                 for kind, rings, p in rows:
                     lo, hi = np.min([r.min(0) for r in rings], 0), np.max([r.max(0) for r in rings], 0)
                     if hi[0] >= x0 - 200 and hi[1] >= z0 - 200 and lo[0] < x0 + wide + 200 and lo[1] < z0 + wide + 200:

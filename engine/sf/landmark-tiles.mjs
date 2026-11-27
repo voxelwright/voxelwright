@@ -1,8 +1,8 @@
 // The cell tiles round the realm's landmarks (#450, sf/heroes.json), so that a visitor who walks to one stands on
 // ground and not in the sea: the planet's tiles (bay/earth.py) within `REACH` tiles of each landmark at each level.
-// sf/build.mjs copies them; this makes those not made yet, with the planet's own maker.
+// coverage.py uses --json to include outlying tiles in the city bake. --make warms the local planet cache.
 //
-//   node sf/landmark-tiles.mjs [--make]
+//   node sf/landmark-tiles.mjs [--json | --make]
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -38,7 +38,12 @@ export function landmarkTiles() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const all = landmarkTiles(), missing = all.filter(([l, x, z]) => !existsSync(join(EARTH, String(l), `${x}_${z}.bay`)))
+  const all = landmarkTiles()
+  if (process.argv.includes('--json')) {
+    console.log(JSON.stringify(all))
+    process.exit(0)
+  }
+  const missing = all.filter(([l, x, z]) => !existsSync(join(EARTH, String(l), `${x}_${z}.bay`)))
   console.log(`${all.length} tiles round the landmarks, ${missing.length} not made yet`)
   if (process.argv.includes('--make') && missing.length) {
     // The planet's maker, asked a tile a line (bay/earth.py `serve`), six at once.

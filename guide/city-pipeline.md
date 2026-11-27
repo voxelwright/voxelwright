@@ -11,7 +11,7 @@ Raw and baked data live under `~/.village/engine`, never in git. Git holds the c
 
 `sf-squares.json` lists every 1 km square that touches DataSF's shoreline polygons: 155 squares with lidar (`lidar`) and 11 made from planet data (`planet`), offshore islands among them. A square is named by the kilometres of its south-west corner in UTM zone 10N, for example `551.7_4183.5`. `coverage.py` regenerates the list from DataSF and the USGS lidar project, and records a hash of each response.
 
-The release pinned now names all 155 lidar squares. Around them, the run cuts planet tiles from Overture and Mapterhorn out to 500 m, 4 km and 16 km at the three levels (`RADIUS` in `full_run.py`).
+The release pinned now names all 155 lidar squares. Around the county, the run cuts planet tiles from Overture and Mapterhorn out to 500 m, 4 km and 16 km at the three levels (`RADIUS` in `coverage.py`). The inventory's `landmarkExtras` lists the additional tiles needed to walk up to landmarks outside those bounds, including the Marin approach to the Golden Gate Bridge. The six-square pilot omits the surrounding planet tiles.
 
 ## Stages
 
@@ -101,7 +101,7 @@ Every city follows three tiers so ordinary streets, parks and iconic landmarks a
 
 ```sh
 ~/.village/engine/bay/venv/bin/python -m unittest discover -s engine/bay -p 'test_*.py'
-node engine/sf/landmark-audit.mjs   # verifies every landmark rule, ownership and bridge-end tiles
+node engine/sf/landmark-audit.mjs --manifest "$RELEASE/manifest.json"
 cd engine && npm run sf      # the realm's checks in Chrome
 ```
 

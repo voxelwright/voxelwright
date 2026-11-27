@@ -1,6 +1,7 @@
 """Regression tests for the upgraded multi-city pipeline (#60): Overture semantic tags, roof sculpting,
 OSM semantic extraction, inland water preservation, and ordinary-house facade rules."""
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -10,11 +11,21 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import earth
+from coverage import landmark_extras
+from full_run import plan
 import street_detail
 import street_sources
 
 
 class TestMultiCityProcedure(unittest.TestCase):
+    def test_city_plan_covers_landmark_walkups(self):
+        survey = json.loads(Path(__file__).with_name("sf-squares.json").read_text())
+        self.assertEqual(survey["landmarkExtras"], landmark_extras(survey))
+        city = plan(survey["lidar"], survey["planet"], True, survey["landmarkExtras"])
+        # At the Marin end of the Golden Gate Bridge, beyond the county's lidar squares.
+        self.assertIn((0, 182, 250), city)
+        self.assertNotIn((0, 182, 250), plan([], [], False, survey["landmarkExtras"]))
+
     def test_earth_parses_overture_materials_and_colors(self):
         # Explicit hex & named colours map into valid engine palette indices (1..255).
         red_idx = earth.parse_color_index("#b44638")
