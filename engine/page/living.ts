@@ -736,7 +736,7 @@ export function living(o: {
     }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
     refreshCard = () => {
-      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['V', inside ? `back to ${DRIVE_CAM_LABELS[outside]}` : 'seat'], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio station'], ['R', 'playlists'], ['F', 'repair']] : [['V', 'look from the seat']]
+      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['V', inside ? `back to ${DRIVE_CAM_LABELS[outside]}` : 'look from the seat'], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio station'], ['R', 'playlists'], ['F', 'repair']] : [['V', 'look from the seat']]
       o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     }
     refreshCard()
