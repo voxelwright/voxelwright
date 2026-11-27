@@ -89,6 +89,8 @@
   html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="drive-hud"] { display: flex; }
   html:has(#ask.open) [data-panel="drive-hud"] { display: none; }
   [data-panel="drive-hud"] .dh-top { display: flex; align-items: baseline; gap: 6px; }
+  /* What to do to start (auto gas waiting for a touch) or that tilt waits, drive-touch.ts `note()`. */
+  [data-panel="drive-hud"] .dh-note { font: 700 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #8fd0ff; }
   [data-panel="drive-hud"] .dh-cam { font: 700 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(232, 236, 241, 0.82); border-bottom: 1px solid rgba(232, 236, 241, 0.14); padding-bottom: 4px; transition: opacity 0.25s ease-out; }
   @media (prefers-reduced-motion: reduce) { [data-panel="drive-hud"] .dh-cam { transition: none; } }
   [data-panel="drive-hud"] .dh-spd { font: 700 28px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; min-width: 44px; text-align: right; }
@@ -173,7 +175,10 @@
   [data-panel="radio-yt"] .ryt-frame { width: 216px; height: 200px; background: #090c11; }
   [data-panel="radio-yt"] .ryt-frame iframe { display: block; width: 216px; height: 200px; border: 0; }
   @media (pointer: coarse) {
-    [data-panel="radio-yt"] { right: auto; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); }
+    /* By touch the bottom corners are the thumbs' (drive-touch.ts): the player stands at the top left, over the minimap on
+       a phone on its side (there is no other room 216 x 232 clear of the thumbs), under it upright. */
+    [data-panel="radio-yt"] { right: auto; left: max(12px, env(safe-area-inset-left)); bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 12px); z-index: 2; }
+    @media (orientation: portrait) { [data-panel="radio-yt"] { top: calc(env(safe-area-inset-top, 0px) + 150px); } }
     html.yt-mini [data-panel="radio-toast"] { bottom: auto; }
   }
   [data-panel="radio-toast"].has-track { border-radius: 14px; padding: 7px 12px 7px 9px; }

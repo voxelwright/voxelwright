@@ -208,7 +208,8 @@ const slimCard = {
 
 // ---------------------------------------------------------------------------------------------
 // Slim recess. For the floating touch thumbstick (.float), builds a HOLLOW stepped octagonal
-// gimbal ring so the game world shows straight through its center; elsewhere a sleek 2-course well.
+// gimbal ring so the game world shows straight through its center; for a touch steering wheel
+// (data-vx-ring, page/drive-touch.ts) the same ring with a thicker rim; elsewhere a sleek 2-course well.
 const slimRecess = {
   pad: 5,
   glowRadius: 2.2,
@@ -216,10 +217,10 @@ const slimRecess = {
 
   build(live, m) {
     const { W, H, el } = live;
-    if (el.classList.contains('float')) {
+    if (el.classList.contains('float') || el.hasAttribute('data-vx-ring')) {
       const cx = (W - 1) / 2, cy = (H - 1) / 2;
       const rOut = Math.min(W, H) / 2 - 0.3;
-      const rIn = rOut - 2.1;
+      const rIn = rOut - (el.hasAttribute('data-vx-ring') ? 3.4 : 2.1);
       const gimbal = m.part('ring');
       gimbal.grounded = false;
       // Stepped circular/octagonal hollow voxel ring — 100% open interior!

@@ -63,6 +63,9 @@ export interface Input {
   hold(code: string, down: boolean): void
   /** Where the left thumb went down to steer, and where it is now (client px), while it is down: for what shows the stick. */
   readonly thumb: { readonly from: readonly [number, number]; readonly at: readonly [number, number] } | null
+  /** Which half of the screen a touch on the picture is the move stick in (the other turns the head), or null for none:
+   * every touch on the picture turns the head. 'left' unless a lane says otherwise (drive-touch.ts while driving). */
+  stickSide: 'left' | 'right' | null
   /** Full analog driving axes from a connected gamepad, or null when no gamepad is active. */
   readonly driveAxes?: DriveAxes | null
   /** Polls connected gamepads once per frame (zero overhead when no gamepad is connected). */
@@ -82,6 +85,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   let right = 0, up = 0
   const touch = { move: null as null | { id: number; x: number; y: number; dx: number; dy: number }, turn: null as null | { id: number; x: number; y: number } }
   const stick: [number, number] = [0, 0]
+  let stickSide: 'left' | 'right' | null = 'left'
   const empty = () => { down.clear(); right = 0; up = 0 }
   const top = () => stack[stack.length - 1]
   /** From the top down, until one takes it or a solid one has been asked. */
@@ -128,7 +132,8 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     // A browser may only keep the screen on once it has been touched.
     void (navigator as Navigator & { wakeLock?: { request(kind: 'screen'): Promise<unknown> } }).wakeLock?.request('screen').catch(() => {})
     canvas.setPointerCapture(e.pointerId)
-    if (e.clientX < innerWidth / 2) touch.move = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 }
+    const left = e.clientX < innerWidth / 2
+    if (stickSide && left === (stickSide === 'left')) touch.move = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 }
     else touch.turn = { id: e.pointerId, x: e.clientX, y: e.clientY }
   })
   canvas.addEventListener('pointermove', (e) => {
@@ -190,5 +195,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
       down.add(code)
     },
     get thumb() { const m = touch.move; return m ? { from: [m.x, m.y] as const, at: [m.x + m.dx * 60, m.y + m.dy * 60] as const } : null },
+    get stickSide() { return stickSide },
+    set stickSide(side) { if (side === stickSide) return; stickSide = side; touch.move = null },
   }
 }

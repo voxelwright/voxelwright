@@ -60,6 +60,8 @@ const DRIVE_ICONS: Record<string, string> = {
   repair: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.8a3.8 3.8 0 0 0-4.9 4.9L4 13.3a1.6 1.6 0 1 0 2.3 2.3l4.6-4.6a3.8 3.8 0 0 0 4.9-4.9l-2.1 2.1-2.3-2.3 2.1-2.1z"/></svg>',
   lights: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6a4 4 0 0 0 0 8H11V6H9.5z"/><path d="M13.5 7l3.5-1M13.5 10H17.5M13.5 13l3.5 1"/></svg>',
   rear: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5L3 11l2.5 2.5"/><path d="M3.5 11h9a3.5 3.5 0 0 0 0-7H9"/></svg>',
+  left: '<svg class="hud-ic" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 5.5L8 12l6.5 6.5"/></svg>',
+  right: '<svg class="hud-ic" viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 5.5L16 12l-6.5 6.5"/></svg>',
   boost: '<svg class="hud-ic" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5L4.5 11h5l-1 6.5L15.5 9h-5l.5-6.5z"/></svg>',
 }
 const toolSvg = (toolName: string) => {
@@ -547,9 +549,8 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html[data-hud] [data-panel="living"] { right: calc(env(safe-area-inset-right, 0px) + 14px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); gap: 8px; }
   html[data-hud] [data-panel="living"] .vx-button { min-inline-size: 74px; min-block-size: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; touch-action: none; user-select: none; -webkit-user-select: none; }
 
-  /* Ergonomic two-zone touch driving HUD (GTA Definitive Edition & CarX Street):
-     1. Bottom-right .drive-pedals: only 4 pure icon-only driving controls (Gas, Brake/Rev, Drift, Boost) — zero text clutter.
-     2. Top-right .drive-util: quiet 44x44 icon-only utility keys (Horn, Radio, Cam, Exit + contextual Repair when damaged). */
+  /* Touch driving (#140): the steering and the pedals are drive-touch.ts's (.dt-cluster, placed from its layout); the
+     quiet icon-only utility keys (Horn, Radio, Cam, Exit + Repair when damaged) stand along the top right. */
   html[data-hud].driving [data-panel="living"] {
     position: fixed;
     inset: 0;
@@ -562,11 +563,10 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
     min-block-size: 44px;
     padding: 0;
     pointer-events: auto;
-    opacity: 0.82;
-    transition: opacity 0.2s ease-out;
   }
+  html[data-hud].driving [data-panel="living"] .drive-util .vx-button { opacity: 0.82; transition: opacity 0.2s ease-out; }
   html[data-hud].driving [data-panel="living"] .vx-button[aria-pressed="true"] { opacity: 1; }
-  html[data-hud="wheel"].away.driving [data-panel="living"] .vx-button:not([aria-pressed="true"]) { opacity: 0.64; }
+  html[data-hud="wheel"].away.driving [data-panel="living"] .drive-util .vx-button:not([aria-pressed="true"]) { opacity: 0.64; }
   html[data-hud].driving [data-panel="living"] .vx-button .vx-label {
     display: inline-flex;
     align-items: center;
@@ -575,25 +575,6 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { display: none; }
   html[data-hud].driving [data-panel="living"] [data-act="seat"] { display: none !important; }
   html[data-hud].driving [data-panel="living"] [data-act="repair"][hidden] { display: none !important; }
-
-  /* Bottom-right primary driving cluster: tall Gas pedal (right), shorter Brake/Rev (left), Drift (above Gas), Boost (above Brake).
-     114px wide on portrait (leaves 34px clearance to bottom-left 216x200 radio-yt on 390px phones). */
-  html[data-hud].driving [data-panel="living"] .drive-pedals {
-    position: absolute;
-    right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
-    display: grid;
-    grid-template-columns: 50px 56px;
-    grid-template-rows: 46px 76px;
-    gap: 8px;
-    align-items: end;
-    justify-items: stretch;
-    pointer-events: none;
-  }
-  html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 1; grid-row: 1; inline-size: 50px; block-size: 46px; }
-  html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 1; inline-size: 56px; block-size: 46px; opacity: 0.92; }
-  html[data-hud].driving [data-panel="living"] [data-act="brake"] { grid-column: 1; grid-row: 2; inline-size: 50px; block-size: 56px; }
-  html[data-hud].driving [data-panel="living"] [data-act="gas"] { grid-column: 2; grid-row: 2; inline-size: 56px; block-size: 76px; opacity: 0.9; }
 
   /* Top-right quiet utility rail (portrait: clean row below drive-hud & Settings gear; landscape: beside Settings gear). */
   html[data-hud].driving [data-panel="living"] .drive-util {
@@ -629,15 +610,6 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   }
   @media (orientation: landscape) {
     html[data-hud]:not(.driving) [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 10px); inline-size: calc(2 * 96px + 10px); column-gap: 10px; }
-    html[data-hud].driving [data-panel="living"] .drive-pedals {
-      grid-template-columns: 54px 60px;
-      grid-template-rows: 48px 80px;
-      gap: 10px;
-    }
-    html[data-hud].driving [data-panel="living"] [data-act="boost"] { inline-size: 54px; block-size: 48px; }
-    html[data-hud].driving [data-panel="living"] [data-act="drift"] { inline-size: 60px; block-size: 48px; }
-    html[data-hud].driving [data-panel="living"] [data-act="brake"] { inline-size: 54px; block-size: 60px; }
-    html[data-hud].driving [data-panel="living"] [data-act="gas"] { inline-size: 60px; block-size: 80px; }
     html[data-hud].driving [data-panel="living"] .drive-util {
       top: calc(env(safe-area-inset-top, 0px) + 14px);
       right: calc(max(14px, env(safe-area-inset-right, 0px) + 14px) + 54px);
@@ -1025,7 +997,7 @@ export function playHud(o: {
       askWasOpen = askOpen
       if (html.classList.contains('riding')) {
         const driving = html.classList.contains('driving')
-        for (const el of document.querySelectorAll<HTMLElement>('[data-panel="living"] .vx-button')) {
+        for (const el of document.querySelectorAll<HTMLElement>('[data-panel="living"] :is(.vx-button, .vx-recess)')) {
           if (driving && coarse.matches) {
             const act = el.dataset.act ?? ''
             if (DRIVE_ICONS[act]) decorateAction(el, DRIVE_ICONS[act], el.textContent?.trim() || act)
@@ -1154,7 +1126,8 @@ export function playHud(o: {
       let dx = th.at[0] - th.from[0], dy = th.at[1] - th.from[1]
       const far = Math.hypot(dx, dy)
       if (far > 32) { dx *= 32 / far; dy *= 32 / far }
-      cap.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`
+      // (A slide steers across only, drive-touch.ts: its cap does not go up or down.)
+      cap.style.translate = `${Math.round(dx)}px ${html.classList.contains('steer-slide') ? 0 : Math.round(dy)}px`
     }
     // While the radial tool wheel is open, the body stands: what is held to move it is let go each frame, before
     // it is read (person.ts). (Keys only: by touch a thumb on the stick still steers, as one moves while changing a weapon
