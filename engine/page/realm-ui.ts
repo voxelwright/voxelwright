@@ -48,6 +48,8 @@ export interface RealmPage {
   modes?: Omit<ModesPage, 'sky' | 'hour' | 'setHour'>
   /** Opens the in-game feedback / bug reporter (#64, feedback.ts). */
   report?(): void
+  /** Opens the touch driving controls sheet (#140, drive-touch.ts): shown by touch only. */
+  driveControls?(): void
   /** Unobtrusive PWA install action (pwa.ts): shown in Settings only when installable and not yet installed. */
   install?: { available(): boolean; prompt(): Promise<unknown>; subscribe(fn: () => void): () => void }
 }
@@ -95,6 +97,8 @@ const STYLE = /* css */ `
 #realm .sky .part.acts .foot { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 3); }
 #realm .sky .part.acts .foot > .vx-button { flex: 1 1 40%; justify-content: center; min-inline-size: 0; white-space: nowrap; }
 #realm .sky .part.acts .foot > .home { flex-basis: 100%; }
+/* Controls… (touch driving, #140) is for a phone: a desk drives by its keys or a pad. */
+@media (pointer: fine) { #realm .sky .part.acts .foot > .controls { display: none; } }
 @media (pointer: fine) {
   html:not(.first) #realm .sky { inline-size: calc(var(--vx) * 172); grid-template-columns: 1fr 1fr; column-gap: calc(var(--vx) * 7); align-items: start; }
   html:not(.first) #realm .sky .part { display: grid; gap: calc(var(--vx) * 3); align-content: start; }
@@ -274,7 +278,7 @@ export function realmControls(page: RealmPage) {
       </div>` : ''}
       <div class="part acts" role="group" aria-label="Actions">
       <div class="vx-groove" role="separator"></div>
-      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}${page.report ? '<button class="vx-button report" type="button" aria-haspopup="dialog" title="Report a bug or something that looks off (F8)">Report…</button>' : ''}${page.install ? '<button class="vx-button install" type="button" hidden title="Install Voxelwright for fullscreen and offline play">Install app</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}${page.driveControls ? '<button class="vx-button controls" type="button" aria-haspopup="dialog" title="How a car steers and drives by touch">Controls…</button>' : ''}${page.report ? '<button class="vx-button report" type="button" aria-haspopup="dialog" title="Report a bug or something that looks off (F8)">Report…</button>' : ''}${page.install ? '<button class="vx-button install" type="button" hidden title="Install Voxelwright for fullscreen and offline play">Install app</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
     </section>
     <div class="vx-toggle-group tools" role="radiogroup" aria-label="Tool">
@@ -327,6 +331,7 @@ export function realmControls(page: RealmPage) {
   root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
   root.querySelector('button.radio')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.radio?.() })
   root.querySelector('button.report')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.report?.() })
+  root.querySelector('button.controls')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.driveControls?.() })
   const installBtn = root.querySelector<HTMLButtonElement>('button.install')
   if (installBtn && page.install) {
     const syncInstall = () => {

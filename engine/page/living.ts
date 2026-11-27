@@ -7,7 +7,7 @@ import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import { cockpit, type CockpitState } from './cockpit.ts'
 import { VehicleDeformation, type DeformState } from './deform.ts'
 import { createDriveCam, DRIVE_CAM_LABELS, nextDriveCam, type DriveCamMode } from './drive-cam.ts'
-import { touchSteerCurve } from './gamepad.ts'
+import { driveTouch, type DriveTouch } from './drive-touch.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -193,6 +193,8 @@ export interface Living {
   /** Makes a vehicle's look as it was made: no dents, scuffs or cracks, and its engine quiet. */
   repair(thing: Thing): void
   /** Live wheel-animation inputs while driving a wheeled vehicle, or null (wheels.ts). */
+  /** How a car is driven by touch (drive-touch.ts): its scheme, its settings and the Controls sheet. */
+  readonly touch: DriveTouch
   readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
 }
 
@@ -338,13 +340,17 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { go: 0, brake: 0, rise: 0, boost: false, horn: false }
+  // (A car's own keys, its steering, pedals, drift and boost, are drive-touch.ts's; these are a hovering thing's and the horn.)
+  const held = { rise: 0, horn: false }
+  const touch = driveTouch({ input: o.input })
   const buttons = o.hud.panel('living')
   const cabin = cockpit(o.hud)
   // Sleek speed, gear, RPM bar, subtle boost bar, camera-mode toast and DRIFT indicator shown while driving a car.
   const drivePanel = o.hud.panel('drive-hud')
-  drivePanel.innerHTML = '<div class="dh-cam" hidden></div><div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div><div class="dh-boost"><i style="width:100%"></i></div>'
+  drivePanel.innerHTML = '<div class="dh-cam" hidden></div><div class="dh-note" hidden></div><div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div><div class="dh-boost"><i style="width:100%"></i></div>'
   const dhCam = drivePanel.querySelector<HTMLElement>('.dh-cam')!
+  const dhNote = drivePanel.querySelector<HTMLElement>('.dh-note')!
+  let lastNote = ''
   const dhSpd = drivePanel.querySelector<HTMLElement>('.dh-spd')!
   const dhGear = drivePanel.querySelector<HTMLElement>('.dh-gear')!
   const dhDrift = drivePanel.querySelector<HTMLElement>('.dh-drift')!
@@ -389,7 +395,9 @@ export function living(o: {
     telemetryNow = null
     wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
-    held.go = 0; held.brake = 0; held.rise = 0; held.boost = false; held.horn = false
+    held.rise = 0; held.horn = false
+    touch.release()
+    lastNote = ''; dhNote.hidden = true
     cabin.reset()
     o.lens?.(0, 0, 0, 0)
     o.audio?.drive(null)
@@ -454,28 +462,16 @@ export function living(o: {
     repairBtn.hidden = !isDamaged(riding)
   }
   const showButtons = (scheme: Scheme | null) => {
-    held.go = 0; held.brake = 0; held.rise = 0; held.boost = false; held.horn = false
+    held.rise = 0; held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
+    if (scheme?.name !== 'drive') touch.show(false)
     if (!scheme) { buttons.replaceChildren(); seat = null; repairBtn = null; return }
     if (scheme.name === 'drive') {
-      // Ergonomic two-zone touch driving layout (GTA Definitive Edition & CarX Street):
-      // bottom-right holds only the 4 driving action controls (Gas, Brake/Rev, Drift, Boost);
-      // top-right holds quiet icon-only utility keys (Horn, Radio, Cam, Exit, and contextual Repair when damaged).
+      // By touch the car's own keys are the scheme's (drive-touch.ts: steering under one thumb, pedals, drift and boost
+      // under the other); along the top right, quiet icon-only keys (Horn, Radio, Cam, Exit, and Repair when damaged).
       seat = null
-      const pedals = Object.assign(document.createElement('div'), { className: 'drive-pedals' })
       const util = Object.assign(document.createElement('div'), { className: 'drive-util' })
-      const gasBtn = button('gas', 'Gas', () => { held.go = 1 }, () => { held.go = 0 })
-      gasBtn.setAttribute('aria-label', 'Accelerate')
-      const brakeBtn = button('brake', 'Brake', () => { held.brake = 1 }, () => { held.brake = 0 })
-      brakeBtn.setAttribute('aria-label', 'Brake or reverse')
-      const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
-      driftBtn.dataset.vxKind = 'main'
-      driftBtn.setAttribute('aria-label', 'Handbrake drift')
-      const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
-      boostBtn.setAttribute('aria-label', 'Nitrous boost')
-      pedals.append(boostBtn, driftBtn, brakeBtn, gasBtn)
-
       const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
       hornBtn.setAttribute('aria-label', 'Honk horn')
       util.append(hornBtn)
@@ -497,7 +493,7 @@ export function living(o: {
       syncRepairBtn()
       util.append(repairBtn)
 
-      buttons.replaceChildren(util, pedals)
+      buttons.replaceChildren(util, ...touch.show(true))
       return
     }
     repairBtn = null
@@ -858,6 +854,7 @@ export function living(o: {
     get telemetry() { return telemetryNow },
     get cockpit() { return cabin.state },
     get wheelDrive() { return wheelDriveNow },
+    touch,
     look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, low: w.low, per: w.per, cracks: p.cracks ? p.cracks.map((c) => (c ? ([...c] as [number, number, number]) : null)) : null } }) }),
     get rider() {
       const at = riding && where(riding)
@@ -1009,29 +1006,25 @@ export function living(o: {
         const way = (o.input.held(line.keys[0]) ? 1 : 0) - (o.input.held(line.keys[1]) ? 1 : 0)
         for (const axis of ['go', 'turn', 'rise'] as const) if (line[axis]) axes[axis] += way * line[axis]
       }
-      // Gamepad full analog driving axes (triggers + curved left stick) and smooth-curved touch thumbstick + ergonomic pedals.
+      // A pad's analog axes (triggers and a curved left stick), and by touch the scheme's keys (drive-touch.ts), added to
+      // what the keys say. A car by touch never reads the move stick but through its scheme (slide steers by it, across only).
       const gp = o.input.driveAxes ?? null
-      const stick = o.input.stick
-      const hasTouch = o.input.thumb !== null
-      const pedalActive = isDrive && (held.go > 0 || held.brake > 0)
-      const pedalGo = isDrive ? held.go - held.brake : 0
-      if (isDrive && gp && !hasTouch && !pedalActive) {
-        axes.go = Math.max(-1, Math.min(1, axes.go + gp.go))
-        axes.turn = Math.max(-1, Math.min(1, axes.turn + gp.turn))
-        axes.rise = Math.max(-1, Math.min(1, axes.rise + gp.handbrake + held.rise))
+      const t = isDrive ? touch.read() : null
+      if (isDrive) { const n = touch.note(); if (n !== lastNote) { lastNote = n; dhNote.textContent = n; dhNote.hidden = !n } }
+      if (isDrive && t) {
+        axes.go = Math.max(-1, Math.min(1, axes.go + t.go + (gp?.go ?? 0)))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + t.turn + (gp?.turn ?? 0)))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + t.rise + (gp?.handbrake ?? 0)))
       } else {
-        const turnStick = isDrive ? touchSteerCurve(stick[0], 0) : stick[0]
-        // Dedicate the left thumb strictly to horizontal steering whenever right-thumb Gas/Brake pedals are pressed;
-        // keep left-stick vertical throttle/reverse as a graceful one-handed fallback when neither pedal is held.
-        const stickGo = pedalActive ? 0 : -stick[1]
-        axes.go = Math.max(-1, Math.min(1, axes.go + pedalGo + stickGo + (isDrive && gp ? gp.go : 0)))
-        axes.turn = Math.max(-1, Math.min(1, axes.turn + turnStick + (isDrive && gp ? gp.turn : 0)))
-        axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise + (isDrive && gp ? gp.handbrake : 0)))
+        const stick = o.input.stick
+        axes.go = Math.max(-1, Math.min(1, axes.go - stick[1]))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + stick[0]))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise))
       }
       const asked = once
       once = undefined
       if (asked === 'leave') { mount(null); return false }
-      const boostAsk = isDrive && (o.input.held('ShiftLeft') || o.input.held('ShiftRight') || held.boost || (gp?.boost ?? 0) > 0.5)
+      const boostAsk = isDrive && (o.input.held('ShiftLeft') || o.input.held('ShiftRight') || !!t?.boost || (gp?.boost ?? 0) > 0.5)
       const rainWet = isDrive && o.fx ? Math.max(0, Math.min(1, o.fx.rain())) : 0
       // Said when it changes, and again four times a second: what a thing is told holds for a second only.
       const now = `${Math.round(axes.go * 1000)},${Math.round(axes.turn * 1000)},${Math.round(axes.rise * 1000)},${boostAsk ? 1 : 0},${Math.round(rainWet * 10)}`

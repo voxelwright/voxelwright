@@ -149,7 +149,7 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
   // Controls against each other, by their visible bounds (including voxel overhang only where a voxel canvas is drawn).
   const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, cv = el.hasAttribute('data-vx-live') ? el.querySelector(':scope > .vx-canvas') : null, live = !!cv && cv.checkVisibility({ visibilityProperty: true, opacityProperty: true }), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, [data-panel="drive-hud"], #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, [data-panel="living"] .vx-recess, [data-panel="drive-hud"], [data-panel="radio-yt"], #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -318,6 +318,14 @@ try {
               })
               check(!!gasRes && gasRes.pressed && gasRes.released && gasRes.kmh > 3, `drive: holding Gas pedal accelerates cleanly (${JSON.stringify(gasRes)})`)
             }
+            // (#140, the owner's fault: with #75's keys a drag up the left half of the picture drove the car as well as steering
+            // it. Now it turns the head and never drives.)
+            const lx = Math.round(vw * 0.25), ly = Math.round(vh * 0.35)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: lx, y: ly, id: 21 }] })
+            for (let i = 1; i <= 6; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: lx, y: ly - i * 12, id: 21 }] }); await page.waitForTimeout(40) }
+            const dragged = await page.evaluate(() => globalThis.engine.alive.wheelDrive?.throttle ?? null)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            check(dragged === 0, `drive: a drag up the left half of the picture does not drive the car (throttle ${dragged})`)
             await tap('radio')
             const opened = await until(page, () => document.querySelector('#radio-picker')?.open, 5000)
             check(opened, 'tapping Radio opens the media picker')

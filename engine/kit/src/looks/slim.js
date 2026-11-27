@@ -208,7 +208,9 @@ const slimCard = {
 
 // ---------------------------------------------------------------------------------------------
 // Slim recess. For the floating touch thumbstick (.float), builds a HOLLOW stepped octagonal
-// gimbal ring so the game world shows straight through its center; elsewhere a sleek 2-course well.
+// gimbal ring so the game world shows straight through its center; for a touch steering wheel
+// (data-vx-ring, page/drive-touch.ts) a thick rim with three spokes, a hub and a lit top stripe; elsewhere a
+// sleek 2-course well.
 const slimRecess = {
   pad: 5,
   glowRadius: 2.2,
@@ -216,6 +218,29 @@ const slimRecess = {
 
   build(live, m) {
     const { W, H, el } = live;
+    if (el.hasAttribute('data-vx-ring')) {
+      // A steering wheel (page/drive-touch.ts turns the whole element): a thick rim, three spokes (left, right, down)
+      // to a hub, and a lit stripe at the top of the rim, where the wheel's top is.
+      const cx = (W - 1) / 2, cy = (H - 1) / 2;
+      const rOut = Math.min(W, H) / 2 - 0.3, rIn = rOut - 3.6, hub = rOut * 0.24;
+      const wheel = m.part('ring');
+      wheel.grounded = false;
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const dx = x - cx, dy = y - cy, d = Math.hypot(dx, dy);
+          const rim = d <= rOut && d >= rIn;
+          const spoke = d < rIn && d > hub - 0.5 && ((Math.abs(dy) < 1.6 && Math.abs(dx) > 0) || (dy > 0 && Math.abs(dx) < 1.6));
+          if (rim) {
+            const top = dy < 0 && Math.abs(dx) < 1.4;
+            wheel.plot(x, y, 0, 'steel');
+            wheel.plot(x, y, 1, top ? 'light' : d >= rIn + 0.8 && d <= rOut - 0.8 ? 'chalk' : 'steel');
+          } else if (spoke) wheel.plot(x, y, 0, 'steel');
+          else if (d <= hub) { wheel.plot(x, y, 0, 'steel'); wheel.plot(x, y, 1, d <= hub - 1.2 ? 'chalk' : 'steel'); }
+        }
+      }
+      live.faceZ = 2;
+      return;
+    }
     if (el.classList.contains('float')) {
       const cx = (W - 1) / 2, cy = (H - 1) / 2;
       const rOut = Math.min(W, H) / 2 - 0.3;
