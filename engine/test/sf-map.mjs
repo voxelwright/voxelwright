@@ -25,7 +25,12 @@ mkdirSync(shots, { recursive: true })
 const site = await plain(dist, '127.0.0.1', 0)
 const back = await turn()
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { back(); process.exit(1) })
-const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
+let browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
+const freshBrowser = async () => {
+  await browser?.close()
+  browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
+  return browser
+}
 
 const until = (page, fn, ms = 60_000) => page.waitForFunction(fn, null, { timeout: ms }).then(() => true, () => false)
 
@@ -134,6 +139,89 @@ try {
   check(mode3d.mode === '3d', `3D button switches fullscreen map to 3D tilted view (render ${mode3d.renderMs} ms)`)
   await page.screenshot({ path: join(shots, '03-desk-fullscreen-3d-route.png') })
 
+  // ── Quick POI Search E2E (Apple Maps-style category pills, "barbershop" map pins/clusters, "hi way burger" location suggestions) ──
+  await page.click('#world-map .wm-2d')
+  await page.waitForTimeout(350)
+  // Wait for bay/places.json to populate full POI index (> 10,000 POIs)
+  const poisLoaded = await until(page, () => (globalThis.engine.map.searchState?.pois ?? 0) > 10_000, 15_000)
+  check(poisLoaded, `full SF POI catalog loaded into map quick search (pois=${await page.evaluate(() => globalThis.engine.map.searchState.pois)})`)
+
+  // Focus search input -> Recents & Suggested Places sheet + category pills appear
+  await page.click('#world-map .wm-search-input')
+  await page.waitForTimeout(300)
+  const searchOpenSnap = await page.evaluate(() => ({
+    open: globalThis.engine.map.searchState.open,
+    pills: document.querySelectorAll('#world-map .wm-cat-pill').length,
+    suggested: document.querySelectorAll('#world-map .wm-row').length,
+  }))
+  check(searchOpenSnap.open && searchOpenSnap.pills >= 8 && searchOpenSnap.suggested >= 4,
+    `focusing search opens quick-search card with ${searchOpenSnap.pills} category pills and ${searchOpenSnap.suggested} suggested places`)
+  await page.screenshot({ path: join(shots, '03b-desk-search-open.png') })
+
+  // Tap "Barbershops" category pill -> plots barbershop pins + numbered clusters on map & shows distance-ranked list!
+  await page.locator('#world-map .wm-cat-pill', { hasText: 'Barbershops' }).click()
+  await page.waitForTimeout(700)
+  const barberSnap = await page.evaluate(() => ({
+    ...globalThis.engine.map.searchState,
+    rows: document.querySelectorAll('#world-map .wm-row').length,
+    inputVal: document.querySelector('#world-map .wm-search-input')?.value ?? '',
+  }))
+  check(barberSnap.categoryId === 'barbershop' && barberSnap.total >= 90 && barberSnap.rows >= 20 && barberSnap.clusters >= 2,
+    `Barbershops category pill shows ${barberSnap.total} SF barbershops (${barberSnap.clusters} pins/clusters in view, ${barberSnap.rows} list rows)`)
+  // Verify filter bar is unclipped and readable (>= 24 px height)
+  const filterBarH = await page.evaluate(() => Math.round(document.querySelector('#world-map .wm-filter-bar')?.getBoundingClientRect().height ?? 0))
+  check(filterBarH >= 24, `search filter bar renders unclipped (height=${filterBarH} px)`)
+  await page.screenshot({ path: join(shots, '03c-desk-search-barbershop.png') })
+
+  // Pan away during active category search -> "Search here" floating pill appears!
+  await page.keyboard.down('KeyD'); await page.waitForTimeout(550); await page.keyboard.up('KeyD')
+  await page.waitForTimeout(350)
+  const searchHereVisible = await page.evaluate(() => !document.querySelector('#world-map .wm-search-here')?.hidden)
+  check(searchHereVisible, 'panning during category search reveals floating "Search here" pill')
+  if (searchHereVisible) {
+    await page.click('#world-map .wm-search-here')
+    await page.waitForTimeout(300)
+    const searchHereHiddenAfter = await page.evaluate(() => !!document.querySelector('#world-map .wm-search-here')?.hidden)
+    check(searchHereHiddenAfter, 'clicking "Search here" re-anchors results and hides pill')
+  }
+
+  // Type specific place query "hi way burger" -> shows location-ranked Hi-Way suggestions with street addresses!
+  await page.click('#world-map .wm-search-clear')
+  await page.fill('#world-map .wm-search-input', 'hi way burger')
+  await page.waitForTimeout(300)
+  const hiWaySuggestions = await page.evaluate(() =>
+    [...document.querySelectorAll('#world-map .wm-row')].map((r) => ({
+      name: r.querySelector('.wm-row-name')?.textContent ?? '',
+      sub: r.querySelector('.wm-row-sub')?.textContent ?? '',
+      addr: r.querySelector('.wm-row-addr')?.textContent ?? '',
+      dist: r.querySelector('.wm-row-dist')?.textContent ?? '',
+    })),
+  )
+  check(
+    hiWaySuggestions.length >= 2 && hiWaySuggestions[0].name.toLowerCase().includes('hi-way') && hiWaySuggestions[0].addr.length > 0,
+    `"hi way burger" returns location-ranked Hi-Way suggestions with addresses (${JSON.stringify(hiWaySuggestions.slice(0, 2))})`,
+  )
+  await page.screenshot({ path: join(shots, '03d-desk-search-hiway.png') })
+
+  // Click first Hi-Way suggestion -> sets GPS route & computes A* path cleanly!
+  await page.locator('#world-map .wm-row').first().click()
+  await page.waitForTimeout(550)
+  const hiWayRoute = await page.evaluate(() => ({
+    dest: globalThis.engine.map.destination?.name ?? '',
+    routed: globalThis.engine.map.route?.routed ?? false,
+    totalM: Math.round(globalThis.engine.map.route?.totalM ?? 0),
+    searchOpen: globalThis.engine.map.searchState.open,
+  }))
+  check(hiWayRoute.dest.toLowerCase().includes('hi-way') && hiWayRoute.routed && hiWayRoute.totalM > 10 && !hiWayRoute.searchOpen,
+    `clicking Hi-Way suggestion sets GPS route and collapses autocomplete cleanly (${JSON.stringify(hiWayRoute)})`)
+  // Restore Ferry Building route & 3D mode for subsequent checks
+  await page.evaluate(() => {
+    const chip = [...document.querySelectorAll('#world-map .wm-chip')].find((b) => b.textContent.includes('Ferry Building'))
+    chip?.click()
+  })
+  await page.click('#world-map .wm-3d')
+  await page.waitForTimeout(500)
+
   // Measure frame pacing smoothness while fullscreen 3D map is animating/panning!
   const mapFps = await page.evaluate(async () => {
     const gaps = []
@@ -229,16 +317,18 @@ try {
   check(deskFaults.length === 0, `zero WebGPU device faults on desktop${deskFaults.length ? `: ${deskFaults.join(' | ')}` : ''}`)
 
   await deskCtx.close()
+  await freshBrowser()
 
   // ── 2. Upright Phone (390 x 844, touch + iPhone safe insets) ──
   console.log('\nupright phone (390x844):')
   const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   const pPage = await phoneCtx.newPage()
   pPage.on('pageerror', (e) => errors.push(`phone: ${e.message}`))
+  pPage.on('console', (m) => { if (m.type() === 'error') console.log(`  [phone console] ${m.text()}`) })
   const cdpP = await phoneCtx.newCDPSession(pPage)
   await cdpP.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 59, bottom: 34, left: 0, right: 0 } })
   await pPage.goto(`${site.url}/sf/index.html`)
-  await pPage.waitForFunction(() => globalThis.engine?.seen?.near > 0 && globalThis.engine.explore && globalThis.engine.map, null, { timeout: 180_000 })
+  await pPage.waitForFunction(() => globalThis.engine?.seen?.near > 0 && globalThis.engine.explore && globalThis.engine.map, null, { timeout: 120_000 })
   await pPage.evaluate(() => { globalThis.engine.scale = 0.6; void globalThis.engine.explore.go() })
   await until(pPage, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet && globalThis.engine.map.ready, 90_000)
   await pPage.evaluate(() => { globalThis.engine.me.standOff = 0 })
@@ -257,17 +347,35 @@ try {
   await pPage.waitForTimeout(550)
   check(await pPage.evaluate(() => globalThis.engine.map.open), 'tapping minimap on phone opens fullscreen map')
   await pPage.screenshot({ path: join(shots, '07-phone-portrait-fullscreen.png') })
+  await until(pPage, () => (globalThis.engine.map.searchState?.pois ?? 0) > 10_000, 15_000)
+  // Portrait phone: open Apple Maps-style bottom search sheet & tap Barbershops pill!
+  await pPage.click('#world-map .wm-search-input')
+  await pPage.waitForTimeout(350)
+  await pPage.screenshot({ path: join(shots, '07b-phone-portrait-search-sheet.png') })
+  const pBarberPill = pPage.locator('#world-map .wm-cat-pill', { hasText: 'Barbershops' })
+  await pBarberPill.scrollIntoViewIfNeeded()
+  await pBarberPill.click()
+  await pPage.waitForTimeout(700)
+  const pBarber = await pPage.evaluate(() => ({
+    ...globalThis.engine.map.searchState,
+    sheetRect: document.querySelector('#world-map .wm-search')?.getBoundingClientRect().toJSON(),
+  }))
+  check(pBarber.categoryId === 'barbershop' && pBarber.total >= 90 && (pBarber.sheetRect?.top ?? 0) > 360,
+    `portrait phone Barbershops sheet stays compact in bottom half leaving map pins clear above (${JSON.stringify({ total: pBarber.total, clusters: pBarber.clusters, top: Math.round(pBarber.sheetRect?.top ?? 0) })})`)
+  await pPage.screenshot({ path: join(shots, '07c-phone-portrait-barbershop.png') })
   await phoneCtx.close()
+  await freshBrowser()
 
   // ── 3. Landscape Phone (844 x 390, touch + iPhone safe insets) ──
   console.log('\nlandscape phone (844x390):')
   const sideCtx = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   const sPage = await sideCtx.newPage()
   sPage.on('pageerror', (e) => errors.push(`side: ${e.message}`))
+  sPage.on('console', (m) => { if (m.type() === 'error') console.log(`  [side console] ${m.text()}`) })
   const cdpS = await sideCtx.newCDPSession(sPage)
   await cdpS.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 21, left: 59, right: 59 } })
   await sPage.goto(`${site.url}/sf/index.html`)
-  await sPage.waitForFunction(() => globalThis.engine?.seen?.near > 0 && globalThis.engine.explore && globalThis.engine.map, null, { timeout: 180_000 })
+  await sPage.waitForFunction(() => globalThis.engine?.seen?.near > 0 && globalThis.engine.explore && globalThis.engine.map, null, { timeout: 120_000 })
   await sPage.evaluate(() => { globalThis.engine.scale = 0.6; void globalThis.engine.explore.go() })
   await until(sPage, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet && globalThis.engine.map.ready, 90_000)
   await sPage.evaluate(() => {
@@ -279,6 +387,14 @@ try {
   await sPage.screenshot({ path: join(shots, '08-phone-landscape-minimap.png') })
   const sBox = await sPage.locator('#minimap').boundingBox()
   check(!!sBox && sBox.x >= 59 && sBox.width >= 120, `landscape phone minimap clears safe area left (x=${sBox?.x}, w=${sBox?.width})`)
+  if (sBox) await sPage.touchscreen.tap(sBox.x + sBox.width / 2, sBox.y + sBox.height / 2)
+  await sPage.waitForTimeout(550)
+  await until(sPage, () => (globalThis.engine.map.searchState?.pois ?? 0) > 10_000, 15_000)
+  const sBarberPill = sPage.locator('#world-map .wm-cat-pill', { hasText: 'Barbershops' })
+  await sBarberPill.scrollIntoViewIfNeeded()
+  await sBarberPill.click()
+  await sPage.waitForTimeout(700)
+  await sPage.screenshot({ path: join(shots, '09-phone-landscape-barbershop.png') })
   await sideCtx.close()
 
   check(gpuErrors.length === 0, `zero WebGPU / console errors${gpuErrors.length ? `: ${gpuErrors.slice(0, 3).join(' | ')}` : ''}`)

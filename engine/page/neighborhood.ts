@@ -36,6 +36,10 @@ export interface RawShop {
   br?: string
   po?: number
   out?: number
+  /** Street address or street name from open-data extract (for map search & location disambiguation). */
+  a?: string
+  /** Full display name when longer than the storefront sign short label `n`. */
+  fn?: string
 }
 
 export interface PlazaConfig {
@@ -108,6 +112,8 @@ export interface NeighborhoodOptions {
   clock: () => number
   shocks: readonly Shock[]
   load: () => Promise<ArrayBuffer | null>
+  /** Optional shared parsed payload loader (avoids double JSON.parse when map search also consumes places.json). */
+  loadPayload?: () => Promise<PlacesPayload | null>
 }
 
 export interface Neighborhood {
@@ -260,38 +266,38 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
   const loadOnce = () => {
     if (loading || ready) return
     loading = true
-    void o.load().then((buf) => {
+    const req: Promise<PlacesPayload | null> = o.loadPayload
+      ? o.loadPayload()
+      : o.load().then((buf) => (buf ? (JSON.parse(new TextDecoder().decode(buf)) as PlacesPayload) : null))
+    void req.then((parsed) => {
       loading = false
-      if (!buf) return
-      try {
-        const parsed = JSON.parse(new TextDecoder().decode(buf)) as PlacesPayload
-        if (!parsed || !Array.isArray(parsed.shops) || !Array.isArray(parsed.plazas)) return
-        payload = parsed
-        styles = (parsed.styles ?? []).map(([bg, ink, accent, trim, font, glow]) => ({
-          bg, ink, accent, trim, font: font || 'clean', glow: glow === 1,
-        }))
-        parodyTotal = 0
-        shopGrid.clear()
-        for (const s of parsed.shops) {
-          if (s.po) parodyTotal++
-          const k = bucketKey(Math.floor(s.x / GRID_CELL), Math.floor(s.z / GRID_CELL))
-          let arr = shopGrid.get(k)
-          if (!arr) shopGrid.set(k, (arr = []))
-          arr.push(s)
-        }
-        plazaGrid.clear()
-        for (const p of parsed.plazas) {
-          const k = bucketKey(Math.floor(p.x / GRID_CELL), Math.floor(p.z / GRID_CELL))
-          let arr = plazaGrid.get(k)
-          if (!arr) plazaGrid.set(k, (arr = []))
-          arr.push(p)
-        }
-        ready = true
-        lastSyncX = -1e9
-      } catch (e) {
-        console.warn('neighborhood places parse failed:', e)
+      if (!parsed || !Array.isArray(parsed.shops) || !Array.isArray(parsed.plazas)) return
+      payload = parsed
+      styles = (parsed.styles ?? []).map(([bg, ink, accent, trim, font, glow]) => ({
+        bg, ink, accent, trim, font: font || 'clean', glow: glow === 1,
+      }))
+      parodyTotal = 0
+      shopGrid.clear()
+      for (const s of parsed.shops) {
+        if (s.po) parodyTotal++
+        const k = bucketKey(Math.floor(s.x / GRID_CELL), Math.floor(s.z / GRID_CELL))
+        let arr = shopGrid.get(k)
+        if (!arr) shopGrid.set(k, (arr = []))
+        arr.push(s)
       }
-    }).catch(() => { loading = false })
+      plazaGrid.clear()
+      for (const p of parsed.plazas) {
+        const k = bucketKey(Math.floor(p.x / GRID_CELL), Math.floor(p.z / GRID_CELL))
+        let arr = plazaGrid.get(k)
+        if (!arr) plazaGrid.set(k, (arr = []))
+        arr.push(p)
+      }
+      ready = true
+      lastSyncX = -1e9
+    }).catch((e) => {
+      loading = false
+      console.warn('neighborhood places parse failed:', e)
+    })
   }
 
   /** Safe ground elevation in world cells (returns null if chunk terrain isn't loaded yet). */
