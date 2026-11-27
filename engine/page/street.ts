@@ -47,7 +47,7 @@ interface Car {
   x: number; y: number; z: number; heading: number; pitch: number; v: number
   piece: Piece | null; shown: string
   // Driving: the road, its lane, how far along, the road before (for the corner) and the one after.
-  road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number
+  road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number; queued?: boolean
   /** The junction it last came to a stop at (a stop sign's), and how long it has waited on a control (lights, a sign, its turn). */
   stopped?: number; held?: number
   slot?: number; thing?: Thing | null; waking?: boolean
@@ -132,6 +132,62 @@ export function boxGap(ax: number, az: number, afx: number, afz: number, ahl: nu
   }
   axis(afx, afz); axis(arx, arz); axis(bfx, bfz); axis(brx, brz)
   return gap
+}
+
+/**
+ * Forward swept-corridor OBB check: returns the nearest distance along `(hx, hz)` from `(x, z)` where an oriented
+ * obstacle enters the corridor of half-width `half`, or `Infinity` if clear.
+ */
+export function sweptPathNear(
+  x: number, z: number, hx: number, hz: number, half: number,
+  ob: { x: number; z: number; long: number; wide: number; hx: number; hz: number },
+): number {
+  const dx = ob.x - x, dz = ob.z - z
+  const a0 = dx * hx + dz * hz, l0 = dz * hx - dx * hz
+  const ca = ob.hx * hx + ob.hz * hz, sa = ob.hz * hx - ob.hx * hz
+  let near = Infinity
+  for (let k = 0; k < 4; k++) {
+    const s0 = k === 0 || k === 3 ? 1 : -1, t0 = k < 2 ? 1 : -1, s1 = k === 3 || k === 2 ? 1 : -1, t1 = k === 0 || k === 3 ? 1 : -1
+    const pa = a0 + s0 * ob.long * ca - t0 * ob.wide * sa, pl = l0 + s0 * ob.long * sa + t0 * ob.wide * ca
+    const qa = a0 + s1 * ob.long * ca - t1 * ob.wide * sa, ql = l0 + s1 * ob.long * sa + t1 * ob.wide * ca
+    let from = 0, to = 1
+    if (Math.abs(ql - pl) < 1e-9) { if (Math.abs(pl) > half) continue } else {
+      const u = (-half - pl) / (ql - pl), v = (half - pl) / (ql - pl)
+      from = Math.max(0, Math.min(u, v)); to = Math.min(1, Math.max(u, v))
+      if (from > to) continue
+    }
+    near = Math.min(near, pa + (qa - pa) * from, pa + (qa - pa) * to)
+  }
+  return near
+}
+
+/**
+ * Bumper-to-obstacle following/crossing gap (cells) for a traffic vehicle relative to one obstacle, or `Infinity` when
+ * clear. Uses exact swept-path OBB checks for long transit vehicles AND for oblique-crossing cars (`-0.82 <= dot < -0.25`)
+ * so diagonal intersections (like Columbus Ave) never drive through turning cross-traffic.
+ */
+export function trafficObstacleGap(
+  c: { x: number; z: number; hx: number; hz: number; halfL: number; halfW: number; v: number; id: number },
+  ob: { x: number; z: number; hx: number; hz: number; long: number; wide: number; v: number; id?: number },
+): number {
+  const dx = ob.x - c.x, dz = ob.z - c.z
+  if (Math.abs(dx) > 450 || Math.abs(dz) > 450) return Infinity
+  if (ob.long > 40) {
+    const near = sweptPathNear(c.x, c.z, c.hx, c.hz, c.halfW + 1, ob)
+    return near > 0 && near <= 400 ? near - c.halfL : Infinity
+  }
+  const dot = ob.hx * c.hx + ob.hz * c.hz
+  if (ob.long > 3 && dot < -0.82) return Infinity
+  if (ob.long > 3 && dot < -0.25) {
+    const near = sweptPathNear(c.x, c.z, c.hx, c.hz, c.halfW + 1, ob)
+    if (near <= 0 || near > 300) return Infinity
+    if (ob.id !== undefined && c.v < 2 && ob.v < 2 && c.id < ob.id && near > c.halfL - 4) return Infinity
+    return near - c.halfL
+  }
+  const ahead = dx * c.hx + dz * c.hz, across = Math.abs(dx * c.hz - dz * c.hx)
+  const ext = Math.abs(ob.hx * c.hz - ob.hz * c.hx) * ob.long + Math.abs(dot) * ob.wide
+  if (ahead <= 0 || ahead > 400 || across > c.halfW + ext * 0.9 + 2) return Infinity
+  return ahead - c.halfL - (Math.abs(dot) * ob.long + Math.abs(ob.hx * c.hz - ob.hz * c.hx) * ob.wide)
 }
 
 /**
@@ -1526,15 +1582,31 @@ export function street(o: {
     if (r.open !== null) return r.open
     if (probes <= 0) return false
     probes--
-    let ok = true
-    for (let s = 0; s <= r.len && ok; s += 30) { along(r.p, r.cum, s, P); const f = o.land.feet_at(Math.round(P.x), Math.round(P.z)), g = o.land.ground_at(Math.round(P.x), Math.round(P.z)); if (f - g > 30) ok = false }
-    r.open = ok
-    return ok
+    // Verify centerline and every driving lane against buildings, and never cache `open = true` while a tile is unloaded (`ground_at <= -150`).
+    let openLanes = r.lanes
+    for (let s = 0; s <= r.len; s += 30) {
+      along(r.p, r.cum, s, P)
+      const cx = Math.round(P.x), cz = Math.round(P.z)
+      const cg = o.land.ground_at(cx, cz)
+      if (cg <= -150) return false
+      if (o.land.feet_at(cx, cz) - cg > 30) { r.open = false; return false }
+      for (let lane = 0; lane < openLanes; lane++) {
+        lanePoint(r, lane, s, P)
+        const lx = Math.round(P.x), lz = Math.round(P.z)
+        const lg = o.land.ground_at(lx, lz)
+        if (lg <= -150) return false
+        if (o.land.feet_at(lx, lz) - lg > 30) { openLanes = lane; break }
+      }
+      if (openLanes <= 0) { r.open = false; return false }
+    }
+    if (openLanes < r.lanes) r.lanes = openLanes
+    r.open = true
+    return true
   }
   /** The road a vehicle takes next at a road's end: liking a straight way and a wide one; a trolleybus keeps under its wires where it can, a bus to the main streets, a truck off the small ones. */
   const choose = (r: Road, kind = 'car'): Road | null => {
     let total = 0
-    const options: [Road, number][] = []
+    const all: [Road, number, number][] = []
     for (const k of r.next) {
       const n = roads.get(k)
       if (!n || !open(n)) continue
@@ -1544,9 +1616,13 @@ export function street(o: {
       if (kind === 'trolley') like *= n.wired ? 50 : 0.02
       else if (kind === 'bus') like *= n.cls >= 3 ? 8 : n.cls === 2 ? 1 : 0.05
       else if (kind === 'truck') like *= n.cls >= 2 ? 3 : n.flags & 4 ? 0.02 : 0.5
-      options.push([n, like]); total += like
+      all.push([n, like, straight])
     }
-    if (!options.length) return null
+    if (!all.length) return null
+    // Avoid sharp hairpin/acute turns (> ~115°, e.g. diagonal Columbus Ave turn-backs across adjacent lanes) whenever any gentler continuation exists.
+    const gentle = all.filter(([, , straight]) => straight >= -0.42)
+    const options = gentle.length ? gentle : all
+    for (const [, like] of options) total += like
     let pick = random() * total
     for (const [n, like] of options) { pick -= like; if (pick <= 0) return n }
     return options[options.length - 1][0]
@@ -1654,6 +1730,8 @@ export function street(o: {
       if (!r || !open(r)) continue
       const s = random() * r.len, lane = Math.floor(random() * r.lanes)
       lanePoint(r, lane, s, P)
+      const sg = o.land.ground_at(Math.round(P.x), Math.round(P.z))
+      if (sg <= -150 || o.land.feet_at(Math.round(P.x), Math.round(P.z)) - sg > 30) continue
       const d = Math.hypot(P.x - eye[0], P.z - eye[2])
       if (d > DRIVEN || (!any && (d < 1200 || !unseen(P.x, P.z, view)))) continue
       if (traffic.some((c) => c.road === r && c.lane === lane && Math.abs(c.s! - s) < 120)) continue
@@ -2070,20 +2148,8 @@ export function street(o: {
    */
   const PATH = { near: 0 }
   const inPath = (x: number, z: number, hx: number, hz: number, half: number, ob: (typeof obstacles)[number]) => {
-    // The obstacle in the vehicle's own frame: ahead and to its left, and the obstacle's heading there.
-    const dx = ob.x - x, dz = ob.z - z, a0 = dx * hx + dz * hz, l0 = dz * hx - dx * hz, ca = ob.hx * hx + ob.hz * hz, sa = ob.hz * hx - ob.hx * hz
-    let near = Infinity
-    for (let k = 0; k < 4; k++) {
-      const s0 = k === 0 || k === 3 ? 1 : -1, t0 = k < 2 ? 1 : -1, s1 = k === 3 || k === 2 ? 1 : -1, t1 = k === 0 || k === 3 ? 1 : -1
-      const pa = a0 + s0 * ob.long * ca - t0 * ob.wide * sa, pl = l0 + s0 * ob.long * sa + t0 * ob.wide * ca
-      const qa = a0 + s1 * ob.long * ca - t1 * ob.wide * sa, ql = l0 + s1 * ob.long * sa + t1 * ob.wide * ca
-      // The stretch of this edge within the path's two sides.
-      let from = 0, to = 1
-      if (Math.abs(ql - pl) < 1e-9) { if (Math.abs(pl) > half) continue } else { const u = (-half - pl) / (ql - pl), v = (half - pl) / (ql - pl); from = Math.max(0, Math.min(u, v)); to = Math.min(1, Math.max(u, v)); if (from > to) continue }
-      near = Math.min(near, pa + (qa - pa) * from, pa + (qa - pa) * to)
-    }
-    PATH.near = near
-    return near < Infinity
+    PATH.near = sweptPathNear(x, z, hx, hz, half, ob)
+    return PATH.near < Infinity
   }
   /** How long a vehicle is, halved, from which it is a streetcar, a cable car or a bus (cells): in the way by where its sides are (`inPath`), not its middle. */
   const LONG = 40
@@ -2100,31 +2166,12 @@ export function street(o: {
     for (const b of o.bodies()) obstacles.push({ x: b[0], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
     for (let i = traffic.length - 1; i >= 0; i--) {
       const c = traffic[i], r = c.road!, hx = Math.cos(c.heading), hz = Math.sin(c.heading)
-      let gap = Infinity, lead = 0, why = ''
+      let gap = Infinity, lead = 0, why = '', leadCar: Car | undefined
+      const meCar = { x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, id: c.id }
       for (const ob of obstacles) {
         if (ob.car === c) continue
-        const dx = ob.x - c.x, dz = ob.z - c.z
-        if (Math.abs(dx) > 450 || Math.abs(dz) > 450) continue
-        let g: number
-        if (ob.long > LONG) {
-          // A streetcar, a cable car or a bus is in the way by its sides, not its middle (`inPath`): whichever way it
-          // heads, and wherever its middle is. Its lane is its rails, which turn across the traffic's; and a body 12 or
-          // 14 m long that stands across the lane has its middle beside or behind what its end is in front of. Left
-          // out for coming the other way, or for its middle being behind, it was driven through (a bus 3.9 m into a
-          // standing streetcar for 1.1 s). Not waited for when the part of it in the path begins behind this one's own
-          // middle: then it is alongside, and going on leaves it.
-          if (!inPath(c.x, c.z, hx, hz, c.model.wide / 2 + 1, ob) || PATH.near <= 0 || PATH.near > 400) continue
-          g = PATH.near - c.model.long / 2
-        } else {
-          const ahead = dx * hx + dz * hz, across = Math.abs(dx * hz - dz * hx)
-          // Whatever stands in its way: across from its middle line by less than the two of them are wide.
-          const ext = Math.abs(ob.hx * hz - ob.hz * hx) * ob.long + Math.abs(ob.hx * hx + ob.hz * hz) * ob.wide
-          if (ahead <= 0 || ahead > 400 || across > c.model.wide / 2 + ext * 0.9 + 2) continue
-          // A vehicle coming the other way keeps to its own lane: waited for, two meeting at a corner would wait for ever.
-          if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
-          g = ahead - c.model.long / 2 - (Math.abs(ob.hx * hx + ob.hz * hz) * ob.long + Math.abs(ob.hx * hz - ob.hz * hx) * ob.wide)
-        }
-        if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz); why = ob.car ? 'car' : ob.long === 3 ? 'person' : 'vehicle' }
+        const g = trafficObstacleGap(meCar, ob.car ? { ...ob, id: ob.car.id } : ob)
+        if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz); why = ob.car ? 'car' : ob.long === 3 ? 'person' : 'vehicle'; leadCar = ob.car }
       }
       // At a junction of three ways or more: as its lights say, after a full stop at a sign, or by turns where nothing
       // controls it. Whoever crosses it holds it; those whose way crosses theirs wait at the line.
@@ -2242,10 +2289,12 @@ export function street(o: {
       if (nudged && !c.rtStuck && why !== 'lights' && gap > 8 && c.v < 18) c.v = Math.min(gap * 1.4, c.v + GATHER * 1.6 * dt)
       if (gap < 5) c.v = Math.min(c.v, Math.max(0, gap) * 2)
       c.s! += c.v * dt
-      // Waiting on a control is not being stuck: a red light outlasts every patience below.
+      // Waiting on a control — or queued behind a vehicle waiting on one (red light, stop sign, bus stop, turn) — is not stuck.
+      const queued = held || why === 'bus stop' || why === 'lights' || why === 'stop sign' || why === 'oncoming' || why === 'its turn' || (why === 'car' && !!leadCar?.queued)
+      c.queued = c.v < 2 && queued
       c.held = held && c.v < 2 ? (c.held ?? 0) + dt : 0
-      c.stuck = c.v < 2 && !held && !c.rtStuck ? c.stuck! + dt : 0
-      c.wait = c.v < 2 ? why : ''
+      c.stuck = c.v < 2 && !queued && !c.rtStuck ? c.stuck! + dt : 0
+      c.wait = c.v < 2 ? (why === 'car' && leadCar?.queued ? 'queue' : why) : ''
       // Annoyed nearby cars honk and flash high beams when blocked behind or around a stuck robotaxi!
       if (!c.rtStuck && c.v < 10) {
         const blockedByRT = traffic.some((sc) => {

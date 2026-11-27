@@ -18,6 +18,29 @@ const RELEASE_PREFIX = 'vw-release-'
 // mobile and desktop storage quotas (~180 MiB or 35% of available quota, and at most 600 entries).
 const MAX_TILE_BYTES = 180 * 1024 * 1024
 const MAX_TILE_ENTRIES = 600
+const RELEASE_FETCH_TIMEOUT_MS = 12_000
+
+async function fetchWithTimeout(request, timeoutMs = RELEASE_FETCH_TIMEOUT_MS) {
+  if (typeof AbortController !== 'function' || typeof setTimeout !== 'function' || !(timeoutMs > 0)) {
+    return fetch(request)
+  }
+  const ac = new AbortController()
+  let onAbort = null
+  const timer = setTimeout(() => ac.abort(new Error('sw fetch timeout')), timeoutMs)
+  try {
+    const req = fetch(request, { signal: ac.signal })
+    return await Promise.race([
+      req,
+      new Promise((_, rej) => {
+        onAbort = () => rej(new Error('sw fetch timeout'))
+        ac.signal.addEventListener('abort', onAbort, { once: true })
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+    if (onAbort) ac.signal.removeEventListener('abort', onAbort)
+  }
+}
 
 // In-memory LRU accounting for the active SW lifecycle; falls back cleanly to Cache.keys() insertion order after restarts.
 const tileSizes = new Map()
@@ -182,15 +205,25 @@ async function handleReleaseAsset(request, pathname, event) {
     tileTouched.set(request.url, Date.now())
     return hit
   }
-  const res = await fetch(request)
+  const res = await fetchWithTimeout(request, RELEASE_FETCH_TIMEOUT_MS)
   if (res.ok) {
     const copy = res.clone()
     event.waitUntil((async () => {
-      const size = await responseSize(copy)
-      await cache.put(request, copy)
-      tileSizes.set(request.url, size)
-      tileTouched.set(request.url, Date.now())
-      await enforceTileBudget(cacheName)
+      try {
+        const header = Number(copy.headers.get('content-length'))
+        let size = Number.isFinite(header) && header > 0 ? header : 0
+        if (size > 0) {
+          await cache.put(request, copy)
+        } else {
+          // Buffer once instead of double-cloning the response stream (avoids WebKit stream backpressure stalls).
+          const buf = await copy.arrayBuffer()
+          size = buf.byteLength
+          await cache.put(request, new Response(buf, { status: copy.status, statusText: copy.statusText, headers: copy.headers }))
+        }
+        tileSizes.set(request.url, size)
+        tileTouched.set(request.url, Date.now())
+        await enforceTileBudget(cacheName)
+      } catch { /* quota or aborted cache write must never stall tile delivery */ }
     })())
   }
   return res

@@ -61,8 +61,10 @@ let get: (url: string | URL, init?: RequestInit) => Promise<Response> = (url, in
 let passed: (url: string, body: ArrayBuffer) => void = () => {}
 /** Whether this context fetches its own tiles (a page, the world's process) or asks the page for them (a worker). */
 let owns = typeof document !== 'undefined'
-/** How often a tile that does not come is asked for again, and how long is waited before the first time again (doubled each time). */
-let tries = 3, wait = 1000
+/** How often a tile that does not come is asked for again, how long is waited before the first time again (doubled each time), and how long one attempt may hang before aborting (ms). */
+let tries = 3, wait = 1000, fetchTimeout = 12_000
+/** Sets the per-attempt tile fetch timeout (ms), for checks. */
+export const setFetchTimeout = (ms: number) => { fetchTimeout = ms }
 /** Told that a core has taken a tile, by where it starts and how wide it is (the world's process has its solver make again what it kept of the cells there). */
 let taken: (core: object, x0: number, z0: number, size: number) => void = () => {}
 /** Where tiles that did not come are not asked for again until a while has passed (the world's process, `hold`): by `level/key`, until when (Infinity: still on its way after it was given up on). */
@@ -269,8 +271,8 @@ export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } :
 /** The tiles the page holds for its cores: each fetched once, the last wanted kept up to `HOLD.bytes`. */
 const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number }>()
 let heldTotal = 0, heldClock = 0
-/** What the page has done for its tiles, for the checks: requests, failures, retries, and how many asks were answered from what it held. */
-export const tally = { fetched: 0, failed: 0, retried: 0, shared: 0, water: 0, held: 0, bytes: 0 }
+/** What the page has done for its tiles, for the checks: requests, failures, retries, timeouts, and how many asks were answered from what it held. */
+export const tally = { fetched: 0, failed: 0, retried: 0, timedOut: 0, shared: 0, water: 0, held: 0, bytes: 0 }
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
@@ -310,18 +312,38 @@ export async function tile(level: number, key: string): Promise<ArrayBuffer | nu
 async function fetchTile(found: NonNullable<ReturnType<Source['find']>>): Promise<ArrayBuffer | null> {
   for (let again = 0; ; again++) {
     tally.fetched++
-    const answer = await get(found.url).catch(() => null)
-    // Under the page server a 404 or 204 is a place nobody made: sea. In a release a listed tile is never water.
-    if (answer && !found.listed && (answer.status === 404 || answer.status === 204)) return null
-    if (answer?.ok) {
-      const body = await answer.arrayBuffer()
-      if (!found.listed && !body.byteLength) return null
-      // What the manifest says it is: a host that sends Brotli without saying so, or a file cut short, is caught here.
-      if (found.bytes === undefined) { tally.bytes += body.byteLength; return body }
-      const sum = found.sha256 ? await digest(body) : null
-      if (body.byteLength === found.bytes && (!found.sha256 || (sum ?? found.sha256) === found.sha256)) { tally.bytes += body.byteLength; if (sum) passed(found.url, body); return body }
+    const ac = typeof AbortController === 'function' ? new AbortController() : null
+    let timedOut = false
+    let onAbort: (() => void) | null = null
+    const timer = ac && fetchTimeout > 0 && Number.isFinite(fetchTimeout)
+      ? setTimeout(() => { timedOut = true; ac.abort(new Error('tile fetch timeout')) }, fetchTimeout)
+      : null
+    let answer: Response | null = null
+    try {
+      const req = get(found.url, ac ? { signal: ac.signal } : undefined)
+      answer = await (ac
+        ? Promise.race([req, new Promise<never>((_, rej) => { onAbort = () => rej(new Error('tile fetch timeout')); ac.signal.addEventListener('abort', onAbort, { once: true }) })])
+        : req)
+      // Under the page server a 404 or 204 is a place nobody made: sea. In a release a listed tile is never water.
+      if (answer && !found.listed && (answer.status === 404 || answer.status === 204)) return null
+      if (answer?.ok) {
+        const read = answer.arrayBuffer()
+        const body = await (ac
+          ? Promise.race([read, new Promise<never>((_, rej) => { if (ac.signal.aborted) rej(new Error('tile fetch timeout')); else ac.signal.addEventListener('abort', () => rej(new Error('tile fetch timeout')), { once: true }) })])
+          : read)
+        if (!found.listed && !body.byteLength) return null
+        // What the manifest says it is: a host that sends Brotli without saying so, or a file cut short, is caught here.
+        if (found.bytes === undefined) { tally.bytes += body.byteLength; return body }
+        const sum = found.sha256 ? await digest(body) : null
+        if (body.byteLength === found.bytes && (!found.sha256 || (sum ?? found.sha256) === found.sha256)) { tally.bytes += body.byteLength; if (sum) passed(found.url, body); return body }
+      }
+    } catch {
+      if (timedOut) tally.timedOut++
+    } finally {
+      if (timer !== null) clearTimeout(timer)
+      if (ac && onAbort) ac.signal.removeEventListener('abort', onAbort)
     }
-    if (again >= tries) { tally.failed++; throw new Error(`${new URL(found.url).pathname}: ${answer ? answer.status : 'no answer'}`) }
+    if (again >= tries) { tally.failed++; throw new Error(`${new URL(found.url).pathname}: ${timedOut ? 'timeout' : answer ? answer.status : 'no answer'}`) }
     tally.retried++
     await pause(wait * 2 ** again)
   }
@@ -489,8 +511,8 @@ let clock = 0
  * Until it resolves the core answers water there. A place no tile knows stays water. Resolves false where a tile
  * that should be there did not come: what was made from it is water there, and is to be made again later.
  */
-export async function need(core: object, x0: number, z0: number, x1: number, z1: number, cell: number): Promise<boolean> {
-  return (await ground(core, x0, z0, x1, z1, cell)) === null
+export async function need(core: object, x0: number, z0: number, x1: number, z1: number, cell: number, within?: number): Promise<boolean> {
+  return (await ground(core, x0, z0, x1, z1, cell, within)) === null
 }
 /** The tiles a box of cells `cell` wide needs, by key, and where each starts. */
 const keysOf = (x0: number, z0: number, x1: number, z1: number, level: number, size: number) => {
@@ -647,7 +669,7 @@ export async function lists(): Promise<(x: number, z: number) => boolean> {
 }
 
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */
-export const near = (core: object, x: number, z: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1), need(core, x - 4000, z - 4000, x + 4000, z + 4000, 16), need(core, x - 8000, z - 8000, x + 8000, z + 8000, 32)]).then((w) => w.every(Boolean))
+export const near = (core: object, x: number, z: number, within?: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1, within), need(core, x - 4000, z - 4000, x + 4000, z + 4000, 16, within), need(core, x - 8000, z - 8000, x + 8000, z + 8000, 32, within)]).then((w) => w.every(Boolean))
 
 /** What the page says of a square: its streets by name and its addresses, in cells. */
 export interface Names { square: string; at: [number, number, number]; names: string[]; ways: { name: number; line: [number, number][] }[]; addresses: [number, number, number, string][]; credit: string }
