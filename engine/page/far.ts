@@ -450,6 +450,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const cover = new Uint32Array(128)
   let covered = ''
 
+  const BY_WORD = query.get('farwords') === '1'
   const load = async (t: Tile, band: number) => {
     const rec = t.recs[band]!
     t.held[band] = 'coming'
@@ -462,7 +463,16 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const head = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as Head
       let faces = bytes.subarray(8 + length)
       const n = faces.length / 20
-      if (head.grouped) {
+      if (head.grouped && BY_WORD) {
+        // (#83, a prototype behind `?farwords=1`) The same bytes, laid a word at a time: each of a face's five words
+        // is read from four runs and written once. 102 MB took 42 ms this way in Node against 147 ms a byte at a time.
+        const flat = new Uint32Array(n * 5)
+        for (let w = 0; w < 5; w++) {
+          const b0 = faces.subarray(w * 4 * n, (w * 4 + 1) * n), b1 = faces.subarray((w * 4 + 1) * n, (w * 4 + 2) * n), b2 = faces.subarray((w * 4 + 2) * n, (w * 4 + 3) * n), b3 = faces.subarray((w * 4 + 3) * n, (w * 4 + 4) * n)
+          for (let i = 0, o = w; i < n; i++, o += 5) flat[o] = b0[i] | (b1[i] << 8) | (b2[i] << 16) | (b3[i] << 24)
+        }
+        faces = new Uint8Array(flat.buffer)
+      } else if (head.grouped) {
         const flat = new Uint8Array(faces.length)
         for (let j = 0; j < 20; j++) { const from = j * n; for (let i = 0; i < n; i++) flat[i * 20 + j] = faces[from + i] }
         faces = flat

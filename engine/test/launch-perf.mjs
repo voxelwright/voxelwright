@@ -67,7 +67,7 @@ async function holding(page, browser) {
     return {
       heap: performance.memory.usedJSHeapSize, heapTotal: performance.memory.totalJSHeapSize, cores: { page: m.page, workers: m.workers }, tilesHeld: m.tiles,
       workers: [...last].map(([who, s]) => ({ who, wasm: s.wasm, heap: s.heap })),
-      pool: { usedMb: (e.world.stats.poolUsed * 4) / 2 ** 20, mb: (e.world.stats.poolWords * 4) / 2 ** 20, sectors: e.world.stats.ready }, farStats: e.far?.stats ? { faces: e.far.stats.faces, fetched: e.far.stats.fetched, held: e.far.held?.().length } : null,
+      pool: { usedMb: (e.world.stats.poolUsed * 4) / 2 ** 20, mb: (e.world.stats.poolWords * 4) / 2 ** 20, sectors: e.world.stats.ready, made: e.world.stats.made, makeMs: Math.round(e.world.stats.makeMs), tally: { ...e.tiles.tally } }, farStats: e.far?.stats ? { faces: e.far.stats.faces, fetched: e.far.stats.fetched, held: e.far.held?.().length } : null,
       gpu: L.held(), canvas: [document.querySelector('canvas').width, document.querySelector('canvas').height], scale: e.scale, pose: [Math.round(e.pose.x), Math.round(e.pose.y), Math.round(e.pose.z)],
       far: e.far ? { tiles: e.far.tiles?.size ?? e.far.held ?? null } : null,
     }
