@@ -465,7 +465,7 @@ export function eggs(page: EggsPage) {
        stands by, so that hidden its key is where it was). */
     @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
       html.first .vx-card.egg-player { inline-size: calc(43vw - max(16px, env(safe-area-inset-right))); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 6px 6px 9px; }
-      html.first .egg-player .line { order: 1; flex: 1 1 calc(100% - 2 * var(--key) - 16px); }
+      html.first .egg-player .line { order: 1; flex: 1 1 calc(100% - 2 * var(--key) - 12px); box-sizing: border-box; }
       html.first .egg-player .mute { order: 2; } html.first .egg-player .stop { order: 3; }
       html.first .egg-player .pause { order: 4; } html.first .egg-player .seek { order: 5; flex: 1 1 0; block-size: var(--key); }
       html.first .egg-player .next { order: 6; } html.first .egg-player .tuck { order: 7; }
