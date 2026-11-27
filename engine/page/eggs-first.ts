@@ -55,8 +55,6 @@ const SMALL = 34
 const THUMB = 44
 
 const STYLE = /* css */ `
-/* A video's player in the first view (eggs.ts laidOn): on a wide picture its top left is the banner's round, so it stands at the bottom right, over the city. Gone in, it is where the realm lays it, clear of the thumbs. */
-@media (min-aspect-ratio: 1/1) { html.first #first > .egg-player { inset: auto max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) auto !important; } }
 `
 
 export function firstTaps(o: FirstNeeds) {
