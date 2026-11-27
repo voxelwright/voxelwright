@@ -80,7 +80,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
 | `living.ts`, `person.ts`, `people.ts`, `residents.ts` | Living things, a person's own body, figures and the town's residents ([living things and people](/living)). |
-| `street.ts`, `waitwhat.ts` | San Francisco street life (parked and moving traffic, pedestrians, cable cars), WaitWhat autonomous robotaxis (roof LiDAR, 4-way amber hazards, intersection/narrow-street freezes with bystander filming/yelling and blocked-car honking), and WaitWhat Station charging depot. |
+| `street.ts`, `robotaxi-services.ts`, `ojai-sculpt.ts`, `robotaxi.ts` | San Francisco street life (parked and moving traffic, pedestrians, cable cars) and service-agnostic autonomous robotaxis (declarative multi-service registry in `robotaxi-services.ts` with PayMo as the primary fleet, sculpted Waymo Ojai monobox EVs in `ojai-sculpt.ts`, spinning roof LiDAR, 4-way amber hazards, intersection/narrow-street freezes with bystander filming/yelling and blocked-car honking, and per-service charging stations). |
 | `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
 | `ask.ts`, `making.ts`, `kept.ts`, `maker.ts`, `models.ts` | The ask bar's wishes: the helper, the ghost of what is kept, and making in the page with a visitor's own AI ([making](/making)). |

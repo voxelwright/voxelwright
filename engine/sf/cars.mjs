@@ -21,7 +21,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { read } from '../make/cells.mjs'
 import { coarser } from '../page/car-sculpt.ts'
-import { boxTruck, cableCar, cityBus, HANDLING, sportsCoupe, streetcar, trolleybus, van, waitwhat } from './fleet.mjs'
+import { ROBOTAXI_SERVICES } from '../page/robotaxi-services.ts'
+import { boxTruck, cableCar, cityBus, HANDLING, robotaxi, sportsCoupe, streetcar, trolleybus, van } from './fleet.mjs'
 import { cleanShell } from './sculpt-cars.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -137,7 +138,7 @@ kept('hatch', join(root, 'make/kept/0782ba87f3267813204077d0.json'), 'blue saloo
 // ── The fleet, written by hand (sf/fleet.mjs): what no kept record has ──
 // Each look as written, then coarser by halves down to a cell of 10 cm, which is its body. The coupe, van and truck are
 // driven like any kept car (a motor, seats); the rest are driven by the street.
-for (const [id, make, colours] of [['coupe', sportsCoupe, ['white', 'black', 'silver', 'blue', 'green']], ['waitwhat', waitwhat, []], ['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
+for (const [id, make, colours] of [['coupe', sportsCoupe, ['white', 'black', 'silver', 'blue', 'green']], ...ROBOTAXI_SERVICES.map((s) => [s.id, () => robotaxi(s), []]), ['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
   const v = make(), clean = cleanShell(v.cells, v.size, (k) => v.paint.includes(k))
   if (clean.specks + clean.holes + clean.leaks + clean.pimples) console.log(`  ${id}: cleaned its look: ${clean.specks} specks, ${clean.holes} holes, ${clean.leaks} leaks, ${clean.pimples} pimples`)
   v.cells = clean.kinds

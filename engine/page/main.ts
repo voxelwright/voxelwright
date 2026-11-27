@@ -1874,7 +1874,7 @@ async function main() {
       },
       onShout: (info) => {
         ears?.spoke({ name: info.name, text: info.text, at: info.at }, 'babble')
-        window.dispatchEvent(new CustomEvent('voxelwright:waitwhat-shout', { detail: info }))
+        window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
       },
     })
     streetLife = life

@@ -130,7 +130,7 @@ The street's kept cars get their motors from `HANDLING` in `engine/sf/fleet.mjs`
 | `saloon` | grey saloon | 475 (171 km/h) | 112 | 1.38 | 0.58 | 210 |
 | `hatch` | blue saloon, taxi | 445 (160 km/h) | 100 | 1.42 | 0.60 | 200 |
 | `suv` | grey SUV | 420 (151 km/h) | 96 | 1.48 | 0.54 | 280 |
-| `waitwhat` | WaitWhat | 435 (157 km/h) | 108 | 1.46 | 0.56 | 250 |
+| `robotaxi` | PayMo (Waymo Ojai) | 440 (158 km/h) | 108 | 1.52 | 0.58 | 270 |
 | `van` | delivery van | 345 (124 km/h) | 84 | 1.32 | 0.48 | 360 |
 | `truck` | box truck | 295 (106 km/h) | 76 | 1.28 | 0.42 | 500 |
 
@@ -196,7 +196,7 @@ They react to you:
 - **Crashes.** Hit a car and it wakes as a real body and is knocked by the impact, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams only bounce you off. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
-- **WaitWhat robotaxis and WaitWhat Station** (`engine/page/waitwhat.ts`). Pearl-white autonomous crossovers with a spinning roof LiDAR turret and empty driver seat circulate out of **WaitWhat Station** on Stockton St between Beach and North Point (listed in `engine/sf/map.mjs` and reachable via the map's Visit menu), boosting their traffic share nearby. They usually drive smoothly, but occasionally hesitate and freeze at busy intersections or narrow streets with flashing 4-way amber hazards (`engine/page/pieces.ts`); blocked cars honk and flash high beams while nearby pedestrians stop to yell and hold up smartphones to film them (`engine/page/people.ts`). You can also take and drive any WaitWhat with E.
+- **Autonomous robotaxis (PayMo) and charging stations** (`engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts`). Core traffic, depot, hazard and crowd mechanics read from the service registry (`ROBOTAXI_SERVICES`), so renaming a service or registering rival operators is a single config change. The active **PayMo** fleet runs sculpted Waymo Ojai (Zeekr RT) monobox EVs with a two-tone gloss-black floating roof, B-pillarless panoramic glasshouse, full-width front Stargate visor lightbar, spinning roof LiDAR turret and empty driver seat, circulating out of **PayMo Station** on Stockton St between Beach and North Point (listed in `engine/sf/map.mjs` and reachable via the map's Visit menu), boosting their traffic share nearby. They usually drive smoothly, but occasionally hesitate and freeze at busy intersections or narrow streets with flashing 4-way amber hazards (`engine/page/pieces.ts`); blocked cars honk and flash high beams while nearby pedestrians stop to yell and hold up smartphones to film them (`engine/page/people.ts`). You can also take and drive any robotaxi with E.
 
 ### Stunts
 
@@ -361,7 +361,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Seat, wheels, summoning | `engine/page/cockpit.ts`, `engine/page/wheels.ts`, `engine/page/summon.ts` | - |
 | Radio, pass-by whooshes | `engine/page/sound/radio.ts` | `engine/test/radio.mjs` |
 | Stunts | `engine/page/stunts.ts` | `engine/test/stunts.mjs` |
-| Traffic & WaitWhat | `engine/page/street.ts`, `engine/page/waitwhat.ts` | `engine/test/street.mjs`, `engine/test/sf-waitwhat.mjs` |
+| Traffic & robotaxis | `engine/page/street.ts`, `engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts` | `engine/test/street.mjs`, `engine/test/sf-robotaxi.mjs` |
 | HUD | `engine/page/hud.ts`, `engine/page/play-hud.ts`, `engine/page/radial.ts` | `engine/test/sf-hud.mjs` |
 | Map and GPS | `engine/page/minimap.ts`, `engine/page/gps.ts` | `engine/test/sf-map.mjs` |
 | Gamepad | `engine/page/gamepad.ts` | `engine/test/gamepad.mjs` |
