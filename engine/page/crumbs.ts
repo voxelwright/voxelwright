@@ -25,11 +25,11 @@ const FAR = 100000.0;
   if (axis == 0u) { p = vec3f(side * 0.5, corner.x, corner.y * side); n = vec3f(side, 0.0, 0.0); }
   else if (axis == 1u) { p = vec3f(corner.x * side, side * 0.5, corner.y); n = vec3f(0.0, side, 0.0); }
   else { p = vec3f(corner.x, corner.y * side, side * 0.5); n = vec3f(0.0, 0.0, side); }
-  // Crash fragments carry a spin angle. Ordinary and carried crumbs use a negative sentinel.
+  // Paint has a positive spin angle. Matte splinters count down from -2. Block debris uses -1.
   let shard = step(0.0, colour.a);
-  if (shard > 0.5) {
-    p = vec3f(p.x * 1.45, p.y * 0.24, p.z * 0.95);
-    let a = colour.a;
+  if (colour.a != -1.0) {
+    p *= select(vec3f(1.90,0.23,0.43), vec3f(1.45,0.24,0.95), shard > 0.5);
+    let a = select(-2.0 - colour.a, colour.a, shard > 0.5);
     let ca = cos(a); let sa = sin(a);
     let cb = cos(a * 0.63 + 0.7); let sb = sin(a * 0.63 + 0.7);
     p = vec3f(p.x * ca - p.z * sa, p.y, p.x * sa + p.z * ca);
@@ -63,7 +63,9 @@ const FAR = 100000.0;
 export interface Crumbs {
   /** Throws `count` crumbs of one colour (linear red, green, blue) out of a ball at `at` (finest cells, the world's), `radius` cells across. */
   /** `lasts` is how many seconds they are there for (a few, unless said); `fast` how hard they are thrown, 1 as a blast throws. */
-  burst(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number], edge: number, lasts?: number, fast?: number, shard?: boolean): void
+  burst(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number], edge: number, lasts?: number, fast?: number, shard?: boolean | 'splinter'): void
+  /** Small bits released by the core. Wood and foliage break into matte slivers. */
+  dust(at: readonly [number, number, number], kind: number, amount: number, colour: readonly [number, number, number]): void
   /** Moves them `dt` seconds on. `ground` says how high the land is at a column. */
   step(dt: number, ground: (x: number, z: number) => number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
@@ -87,7 +89,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   })
   const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const instances = device.createBuffer({ size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+  const instances = device.createBuffer({ label: 'crumb instances', size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
   // Where each is in the world (cells, as doubles: the world is big), how it moves, how long it has left.
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3), life = new Float32Array(MOST), edge = new Float32Array(MOST), tone = new Float32Array(MOST * 3), spin = new Float32Array(MOST)
@@ -99,6 +101,14 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
     carried,
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() { return live },
+    dust(this: Crumbs, at, kind, amount, colour) {
+      const material = kind & 15
+      if (material === 10 || material === 13) {
+        this.burst(at, 1.3, Math.min(28, amount), colour, 0.24, 2.5, 0.38, 'splinter')
+      } else {
+        this.burst(at, 2, amount * 3, colour, 0.8)
+      }
+    },
     burst(at, radius, count, colour, size, lasts = 2.5, fast = 1, shard = false) {
       for (let k = 0; k < count; k++) {
         const i = next++ % MOST
@@ -111,6 +121,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         life[i] = lasts * (0.65 + Math.random() * 0.7)
         edge[i] = size * (0.6 + Math.random() * 0.8)
         spin[i] = shard ? Math.random() * 2 * Math.PI : -1
+        if (shard === 'splinter') spin[i] = -2 - spin[i]
         const shade = 0.75 + Math.random() * 0.4
         tone[i * 3] = colour[0] * shade; tone[i * 3 + 1] = colour[1] * shade; tone[i * 3 + 2] = colour[2] * shade
       }
@@ -123,13 +134,13 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         live++
         v[i * 3 + 1] -= 98 * dt
         for (let a = 0; a < 3; a++) p[i * 3 + a] += v[i * 3 + a] * dt
-        const floor = ground(p[i * 3], p[i * 3 + 2]) + 1 + edge[i] * (spin[i] >= 0 ? 0.14 : 0.5)
+        const floor = ground(p[i * 3], p[i * 3 + 2]) + 1 + edge[i] * (spin[i] === -1 ? 0.5 : 0.14)
         if (p[i * 3 + 1] < floor) {
           p[i * 3 + 1] = floor
           v[i * 3 + 1] = Math.abs(v[i * 3 + 1]) * 0.25
           v[i * 3] *= 0.5; v[i * 3 + 2] *= 0.5
-        } else if (spin[i] >= 0) {
-          spin[i] += dt * (6 + 0.14 * Math.abs(v[i * 3 + 1]))
+        } else if (spin[i] !== -1) {
+          spin[i] += Math.sign(spin[i] || 1) * dt * (6 + 0.14 * Math.abs(v[i * 3 + 1]))
         }
       }
     },

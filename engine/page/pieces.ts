@@ -13,7 +13,7 @@
 // its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only a struck piece pays for it:
 // it draws from a copy of its faces split into rows a cell long, so every corner lies on the cells' lattice and faces
 // that meet still meet once bent (a merged row bent at its two ends only would open a gap beside its neighbours).
-import type { CrashOpening } from './crash-opening.ts'
+import { fenderOpening, type CrashOpening } from './crash-opening.ts'
 import { shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
@@ -39,7 +39,7 @@ struct U {
   c2: vec3f, lampAxis: f32,
   // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them. mirrors: 0 is
   // the M key's mirrors off, under which glass is seen through, tinted, and mirrors nothing (#74).
-  smoothOn: f32, mirrors: f32, pad1: f32, pad2: f32,
+  smoothOn: f32, mirrors: f32, frontZ: f32, pad2: f32,
   // Its dents (#37): none for a piece that was never struck, and then nothing of them is worked out.
   deform: Deform,
   // Per-window crack origins (#61): front, rear, left, right; each (originX, originY, originZ, strength).
@@ -115,7 +115,7 @@ fn unfold(word: u32) -> vec3f {
   }
   // Bent by its dents (#37, #62; at once back for a piece never struck). Where the cell is, for its paint and its lamps,
   // stays where it was made: a bent panel keeps its own paint.
-  let bent = deformPoint(p, lit, u.deform);
+  let bent = deformPoint(p, lit, u.deform, u.frontZ > 0.5);
   let world = u.pos + turned * ((bent.pos - u.com) * u.cell) - u.eye;
   let d = dot(world, u.forward);
   out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
@@ -291,7 +291,7 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       let across = dot(rel, side);
       let inward = dot(rel, dir);
       // The horizontal bumper crosses the vertical door and rolls over the shoulders.
-      let frontZ = select(u.midZ > u.midX, u.lampAxis >= 3.0, u.lampAxis > 0.0);
+      let frontZ = u.frontZ > 0.5;
       let lateral = abs(select(dir.z, dir.x, frontZ));
       // Across a quarter panel the bumper rubs the upper flank of the crease.
       // At a low hit the contact centre can be in the empty wheel opening.
@@ -547,16 +547,16 @@ const OWN = 192, DEFORM_AT = OWN / 4, CRACKS_BYTES = 16 * 4, CRACKS_AT = (OWN + 
  * a row of smooth faces is merged only where its corners' words are alike, so each piece of it keeps its first ones and
  * the last keeps the row's last.
  */
-function sortFaces(born: Born, unit: boolean, opening?: CrashOpening) {
+function sortFaces(born: Born, unit: boolean, openings: readonly CrashOpening[]) {
   const all = born.faces, smooth = born.smooth, total = all.length / 2
   let size = total
   if (unit) { size = 0; for (let f = 0; f < total; f++) size += (all[f * 2 + 1] & 255) || 1 }
-  const sorted = new Uint32Array((size + (opening?.walls.length ?? 0) / 2) * 6)
+  const sorted = new Uint32Array((size + openings.reduce((sum, opening) => sum + opening.walls.length / 2, 0)) * 6)
   let at = 0, glass = 0
   for (const glassy of [false, true]) {
     // Interior walls are solid and draw before the glass. Their square normals
     // catch light on the recessed edge of the broken lamp surround.
-    if (glassy && opening) for (let w = 0; w < opening.walls.length; w += 2) {
+    if (glassy) for (const opening of openings) for (let w = 0; w < opening.walls.length; w += 2) {
       sorted[at * 6] = opening.walls[w]
       sorted[at * 6 + 1] = opening.walls[w + 1]
       at++
@@ -568,7 +568,7 @@ function sortFaces(born: Born, unit: boolean, opening?: CrashOpening) {
       for (let k = 0; k < long; k++) {
         // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
         const start = axis === 0 ? a + (k << 20) : a + k
-        if (opening?.removed.has(start)) continue
+        if (openings[0]?.removed.has(start) || openings[1]?.removed.has(start)) continue
         sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
         if (smooth) {
           sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
@@ -609,25 +609,42 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   interface Faces { faces: GPUBuffer; count: number; glass: number }
   /** unit: the same faces a cell long, made the first time one of its pieces is drawn bent (#37). */
   interface Shared extends Faces { users: number; unit?: Faces }
-  interface Held extends Piece { pocket?: { opening: CrashOpening; mesh: Faces }; faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number; glass: number; held: Shared }
+  interface Held extends Piece {
+    tear?: { state: DeformState; revision: number; opening?: CrashOpening }
+    pocket?: { nose?: CrashOpening; fender?: CrashOpening; mesh: Faces }
+    faces: GPUBuffer
+    uniforms: GPUBuffer
+    bind: GPUBindGroup
+    count: number
+    glass: number
+    held: Shared
+  }
   /** A look's faces on the GPU: the solid ones first, then the glass, each with its corners' smooth words. */
-  const upload = (born: Born, unit = false, opening?: CrashOpening): Faces => {
-    const { sorted, count, glass } = sortFaces(born, unit, opening)
-    const faces = device.createBuffer({ label: opening ? 'broken nose mesh' : 'piece faces', size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+  const upload = (born: Born, unit = false, openings: readonly CrashOpening[] = []): Faces => {
+    const { sorted, count, glass } = sortFaces(born, unit, openings)
+    const faces = device.createBuffer({ label: openings.length ? 'torn body mesh' : 'piece faces', size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
     device.queue.writeBuffer(faces, 0, sorted)
     return { faces, count, glass }
   }
   const release = (held: Shared) => { held.faces.destroy(); held.unit?.faces.destroy() }
   /** The faces a piece is drawn from now: a cell long once it is bent. */
   const facesOf = (piece: Held): Faces => {
-    const opening = piece.deform?.dentCount && piece.deform.hoodDamage >= 0.35 ? piece.opening : undefined
-    if (piece.pocket && piece.pocket.opening !== opening) {
+    const state = piece.deform
+    if (state?.dentCount && piece.skin && (piece.tear?.state !== state || piece.tear.revision !== state.revision)) {
+      piece.tear = { state, revision: state.revision, opening: fenderOpening(piece.skin, piece.born.size, piece.cell, state) }
+    }
+    const nose = state?.dentCount && state.hoodDamage >= 0.35 ? piece.opening : undefined
+    const fender = state?.dentCount ? piece.tear?.opening : undefined
+    if (piece.pocket && (piece.pocket.nose !== nose || piece.pocket.fender !== fender)) {
       piece.pocket.mesh.faces.destroy()
       piece.pocket = undefined
     }
-    if (!piece.deform?.dentCount) return piece
-    if (opening) {
-      piece.pocket ??= { opening, mesh: upload(piece.born, true, opening) }
+    if (!state?.dentCount) { piece.tear = undefined; return piece }
+    if (nose || fender) {
+      if (!piece.pocket) {
+        const openings = [nose, fender].filter((v): v is CrashOpening => v !== undefined)
+        piece.pocket = { nose, fender, mesh: upload(piece.born, true, openings) }
+      }
       return piece.pocket.mesh
     }
     return piece.held.unit ??= upload(piece.born, true)
@@ -697,7 +714,9 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
         f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
-        f[45] = mirrors ? 1 : 0; f[46] = 0; f[47] = 0
+        f[45] = mirrors ? 1 : 0
+        f[46] = (piece.deform?.front ?? 0) >= 2 ? 1 : 0
+        f[47] = 0
         packDeformUniforms(piece.deform, f, DEFORM_AT)
         const cracks = piece.cracks, gc = piece.deform?.glassCrack
         for (let k = 0; k < 4; k++) {

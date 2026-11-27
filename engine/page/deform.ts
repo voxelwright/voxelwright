@@ -221,11 +221,17 @@ export function deformPointCpu(
     const shoulderSlope = 0.63 * horizontal * 6 * edgeT * (1 - edgeT) * Math.sign(line)
     const inward = depth * (1 - 0.10 * horizontal), oblique = 1 - 0.66 * horizontal * rib
     const compression = oblique * shoulder
-    const slope = -4 * inward * inv * support * compression
-    const baseSlope = inward * inv * support * support
+    // Broadside contact presses a face into the door between its two shoulders.
+    // At the perimeter this still goes to zero with zero slope.
+    const lateral = state.front >= 2 ? dx : dz, sideWeight = lateral * lateral
+    const core = support * support
+    const plate = support * (2 - support)
+    const pressed = core + sideWeight * (plate * plate - core)
+    const slope = -4 * inward * inv * compression * (support + sideWeight * (2 * plate * (1 - support) - support))
+    const baseSlope = inward * inv * pressed
     const flank = baseSlope * shoulder * 0.66 * horizontal * 6 * t * (1 - t) * Math.sign(along) / 0.89
     const transverse = baseSlope * oblique * shoulderSlope
-    push(dx, dy, dz, inward * support * support * compression,
+    push(dx, dy, dz, inward * pressed * compression,
       slope * x + flank * ax + transverse * acrossX,
       slope * y + flank * ay + transverse * acrossY,
       slope * z + flank * az + transverse * acrossZ)
@@ -290,7 +296,7 @@ fn deformNoise(p: vec3f) -> f32 {
     e.z,
   );
 }
-fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
+fn deformPoint(p: vec3f, n: vec3f, def: Deform, frontZ: bool) -> DeformResult {
   var result = DeformResult(p, n, 0.0, 0.0);
   // No dent arithmetic on healthy cars; the branch itself still has a cost.
   if (def.status.x < 0.5) { return result; }
@@ -321,9 +327,14 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
     let oblique = 1.0 - 0.66 * horizontal * ridge;
     let compression = oblique * shoulder;
     let flank = 0.66 * horizontal * 6.0 * t * (1.0 - t) * sign(along) / 0.89;
-    let grad = (inward / zone.w) * (-4.0 * support * compression * u + core * (flank * shoulder * axis + oblique * shoulderSlope * across));
+    let lateral = select(dir.z, dir.x, frontZ);
+    let sideWeight = lateral * lateral;
+    let plate = support * (2.0 - support);
+    let pressed = mix(core, plate * plate, sideWeight);
+    let slope = mix(support, 2.0 * plate * (1.0 - support), sideWeight);
+    let grad = (inward / zone.w) * (-4.0 * slope * compression * u + pressed * (flank * shoulder * axis + oblique * shoulderSlope * across));
     result.norm -= grad * (dot(dir, result.norm) / (1.0 + dot(dir, grad)));
-    result.pos += dir * (inward * core * compression);
+    result.pos += dir * (inward * pressed * compression);
 
     // Tuck the upper sheet down along one diagonal seam. Its axis is perpendicular
     // to up; its depth and the inward displacement together fit within crush.w.

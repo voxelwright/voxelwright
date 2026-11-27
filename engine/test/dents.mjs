@@ -170,6 +170,9 @@ await page.evaluate(() => {
   // visible billows at their drawn size and age to catch a puff painted on the metal.
   const steamAt = e.alive.where(globalThis.car).at.map((v,i) => v + (i === 1 ? 100 : 0))
   globalThis.steamClearance = []
+  globalThis.woodChips = []
+  // Wood from struck scenery used to leave hand-sized boxes among the paint chips.
+  e.debris.dust(steamAt, 10, 4, [0.49,0.26,0.10])
   for (let i=0; i<16; i++) emit(steamAt, 0.50, 1)
   const draw = e.smoke.draw.bind(e.smoke)
   const write = GPUQueue.prototype.writeBuffer
@@ -177,7 +180,18 @@ await page.evaluate(() => {
     globalThis.puffAnchor = view.eye.map(x => Math.floor(x / 64) * 64)
     draw(encoder, target, view)
   }
+  const drawCrumbs = e.debris.draw.bind(e.debris)
+  e.debris.draw = (encoder, target, view) => {
+    globalThis.puffAnchor = view.eye.map(x => Math.floor(x / 64) * 64)
+    drawCrumbs(encoder, target, view)
+  }
   GPUQueue.prototype.writeBuffer = function(buffer, offset, data, start, count) {
+    if (buffer.label === 'crumb instances' && globalThis.woodChips.length < 4) {
+      for (let i=0; i<count; i+=8) {
+        if (Math.hypot(...steamAt.map((v,j) => data[i+j] + globalThis.puffAnchor[j] - v)) > 5) continue
+        if (data[i+4] > data[i+5] && data[i+5] > data[i+6]) globalThis.woodChips.push([data[i+3], data[i+7]])
+      }
+    }
     if (buffer.label === 'puff instances') {
       for (let i = 0; i < count; i += 12) {
         const age = data[i+10], visibleFrom = data[i+11]
@@ -187,7 +201,7 @@ await page.evaluate(() => {
         }
       }
     }
-    if (buffer.label === 'broken nose mesh') globalThis.brokenNose = data.slice()
+    if (buffer.label === 'torn body mesh') globalThis.brokenNose = data.slice()
     if (buffer.label === 'puff instances' && globalThis.burningVent && globalThis.flameDraws.length < 24) {
       const errors = []
       for (let i = 0; i < count; i += 12) {
@@ -249,6 +263,8 @@ await page.evaluate(() => {
 })
 await page.waitForFunction(() => Math.abs(globalThis.engine.alive.where(globalThis.car).rot[1]) > 0.64)
 await page.waitForTimeout(180)
+const wood = await page.evaluate(() => globalThis.woodChips)
+check(wood.length >= 4 && wood.every(([size, spin]) => size < 0.38 && spin <= -2), 'wood dust draws small matte splinters')
 const steam = await page.evaluate(() => ({ samples: globalThis.steamClearance.length, low: Math.min(...globalThis.steamClearance) }))
 check(steam.samples > 0 && steam.low > 0.6, `visible steam clears the emitting surface (${steam.low?.toFixed(2)} cells)`)
 const turnedVent = await ventInBody()
