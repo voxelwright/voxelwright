@@ -40,10 +40,7 @@ async fn main() -> ExitCode {
         );
     }
     match &cfg.behind_proxy {
-        Some(h) if !cfg.listen.ip().is_loopback() => eprintln!(
-            "--behind-proxy {h} on a non-loopback address: anyone who reaches this port directly can write that header"
-        ),
-        Some(h) => eprintln!("callers are named by the {h} header"),
+        Some(h) => eprintln!("trusted proxies name callers with the {h} header"),
         None => eprintln!(
             "callers are named by their socket's peer address (behind a proxy, add --behind-proxy)"
         ),

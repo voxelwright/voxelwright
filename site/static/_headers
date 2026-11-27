@@ -5,6 +5,17 @@
 # feeds and every unhashed script stay that way. Only a file whose name changes when its bytes do
 # is kept for good.
 
+# Security headers on every file of the origin (build.mjs keeps "/*" as it is when the site is mounted;
+# src/worker.mjs sets the same on what it answers). The CSP limits only framing, plugins and <base>:
+# the pages' inline scripts (speculation rules, the early theme script) stay allowed.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'
+
 # The kit's shared modules are named by their content hash (chunk-<hash>.js).
 /vendor/village/kit/shared/chunk-*
   Cache-Control: public, max-age=31536000, immutable

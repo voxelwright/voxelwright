@@ -1,4 +1,4 @@
-# The master server (master/): test it on every push that touches it. The release
+# The master server (master/): test it on every push and pull request that touches it. The release
 # binaries for five platforms and the Docker image are built only when the workflow
 # is run by hand (Actions, master, Run workflow) and kept as workflow artifacts:
 # a macOS minute is billed as ten and a Windows one as two, and six pushes of the
@@ -8,6 +8,10 @@ name: master
 
 on:
   push:
+    paths:
+      - 'master/**'
+      - '.github/workflows/master.yml'
+  pull_request:
     paths:
       - 'master/**'
       - '.github/workflows/master.yml'

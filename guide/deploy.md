@@ -3,14 +3,14 @@ title: Deploy
 description: How San Francisco reaches voxelwright.world and the blog reaches zahynailo.dev, from assembly to rollback.
 ---
 
-Two Cloudflare Workers serve everything public. **`voxelwright`** serves the San Francisco realm at voxelwright.world. **`zahynailo`** serves the owner's front page and blog at zahynailo.dev. Both are built from one checkout by [deploy/](https://github.com/voxelwright/voxelwright/tree/main/deploy), and every push to main that touches `engine/`, `site/` or `deploy/` ships both.
+Two Cloudflare Workers serve everything public. **`voxelwright`** serves the San Francisco realm at voxelwright.world. **`zahynailo`** serves the owner's front page and blog at zahynailo.dev. Both are built from one checkout by [deploy/](https://github.com/voxelwright/voxelwright/tree/main/deploy), and every push to main that touches `engine/`, `site/` or `deploy/` (other than documentation Markdown) ships both.
 
 | Worker | Domains | Assets folder | Worker code |
 | --- | --- | --- | --- |
 | `voxelwright` | voxelwright.world, www.voxelwright.world | `deploy/dist-world` | `worker.mjs` (entry point `world-worker.mjs`) for `/releases/*`, `/bay/*` and `/weather` only |
-| `zahynailo` | zahynailo.dev, www.zahynailo.dev, and its workers.dev address | `deploy/dist` | none: static assets only |
+| `zahynailo` | zahynailo.dev, www.zahynailo.dev | `deploy/dist` | none: static assets only |
 
-One [cloudflare.config.ts](https://github.com/voxelwright/voxelwright/blob/main/deploy/cloudflare.config.ts) describes both. `cf deploy --mode world` picks `voxelwright`, and plain `cf deploy` picks `zahynailo`. [wrangler.config.ts](https://github.com/voxelwright/voxelwright/blob/main/deploy/wrangler.config.ts) points each mode at its folder.
+One [cloudflare.config.ts](https://github.com/voxelwright/voxelwright/blob/main/deploy/cloudflare.config.ts) describes both. `cf deploy --mode world` picks `voxelwright`, and plain `cf deploy` picks `zahynailo`. [wrangler.config.ts](https://github.com/voxelwright/voxelwright/blob/main/deploy/wrangler.config.ts) points each mode at its folder. Neither Worker has a `workers.dev` address (`workersDev: false`), so nothing reaches them without the zones' redirects in front.
 
 ## How a request is answered
 
@@ -38,10 +38,25 @@ Cloudflare runs a zone's Single Redirect rules before either Worker. Then each W
 - **`deploy/dist`** is `site/dist` as it is: the front page at `/`, the blog under `/blog/`, `/robots.txt`, `/404.html` and the site's `_headers`. See [the site](/site).
 - **`deploy/dist-world`** is `engine/dist-sf` with its `sf/` folder lifted to the root, beside the engine's own folders. Assembly then:
   - adds the early-alpha notice (`alpha.js`) to every HTML page through [notice.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/notice.mjs);
-  - gives `index.html` its canonical and social tags and points its `/blog/` links at zahynailo.dev;
-  - writes `_headers` (`/current.json` is `no-cache`, so a new pin shows at once), `/robots.txt` and `/404.html`;
+  - gives `index.html` the title `Voxelwright — San Francisco`, a description, the site's favicon (`/favicon.svg`, from the site build), its canonical and Open Graph and X tags, and points its `/blog/` links at zahynailo.dev;
+  - publishes the world's own share card, `deploy/og-world.png` (1200 × 630, the voxel skyline under the Voxelwright plate), at `/og.png`;
+  - writes `/robots.txt`, a dark `/404.html` in the realm's `#10141a`, and `_headers` (below);
   - keeps `.br` copies only under `releases/` and `bay/`, where the Worker sends them;
-  - drops the plain copy of a `.bay`, `.far` or `.bin` file under those folders when its `.br` copy exists.
+  - drops the plain copy of a `.bay`, `.far` or `.bin` file under those folders when its `.br` copy exists;
+  - leaves out the release's street graphs (`releases/<pin>/graph/`), which no page code reads.
+
+The early-alpha notice says the realm is in active development. It never shows over the realm's failure screen: when the page sets `data-failed` on `<html>`, the notice is not added, or leaves.
+
+### Headers on voxelwright.world
+
+| Path | Headers |
+| --- | --- |
+| `/*` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `Permissions-Policy: camera=(), microphone=(), geolocation=()` and the CSP |
+| `/current.json` | `Cache-Control: no-cache`, so a new pin shows at once |
+| `/loading-*.webp` | `public, max-age=31536000, immutable`: the loader's pictures are named by their content |
+| `/kit/fonts/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
+
+[worker.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/worker.mjs) holds the security headers once (`securityHeaders`, `worldCsp`). Assembly writes them into `_headers` and the Worker sets them on every answer it makes. The CSP allows scripts from the realm itself, WebAssembly (`'wasm-unsafe-eval'`) and YouTube's player (the car radio). It allows no inline script except the page's own: assembly hashes each inline `<script>` of the published pages, after every rewrite, and lists each `'sha256-…'` in `script-src`. Styles may be inline. Images, media and workers may come from `blob:`; frames from YouTube; connections from the realm, the AI providers, any `https:` and `wss:` (a player's own provider and the lobbies). It forbids plugins and `<base>`, and only the realm and zahynailo.dev may frame it. A page that gains an inline script gets its hash at the next assembly; a script added to the page at run time is refused.
 
 Assembly fails when two sources would write the same path, when a folder holds more than 20,000 files, or when one file is over 25 MiB. Those are the Workers Free plan's limits for one version.
 
@@ -57,18 +72,21 @@ For a `GET` or `HEAD` under `/releases/` or `/bay/`, [worker.mjs](https://github
 | No `.br` copy, or a client without `br`, and the plain file exists | The plain file |
 | No `br`, and only `<path>.br` exists (a Brotli-only binary) | `406` with `Vary: Accept-Encoding` |
 | Anything under `/releases/` that is sent | `Cache-Control: public, max-age=31536000, immutable`, because a release is named by its hash |
+| Anything under `/bay/` that is sent (`200` or `304`) | `Cache-Control: public, max-age=86400, stale-while-revalidate=604800`: the bay's files change only when the realm is rebuilt |
+
+Every answer, the `404`, `406` and the weather's included, carries the security headers above. The `.br` address is built by copying the request's URL and setting its path, so a path that starts with `//` never reaches another host.
 
 Every WebGPU browser sends `Accept-Encoding: br`, so dropping the plain binaries costs real visitors nothing.
 
 ## The weather endpoint
 
-`GET /weather` answers San Francisco's weather now for the realm's "SF now" sky. The Worker reads the last eight observations from the National Weather Service's SFO station (`api.weather.gov/stations/KSFO`), takes the newest one that reports cloud layers, and answers:
+`GET /weather` (or `HEAD`; any other method gets `405` with `Allow: GET, HEAD`) answers San Francisco's weather now for the realm's "SF now" sky. The Worker reads the last eight observations from the National Weather Service's SFO station (`api.weather.gov/stations/KSFO`), takes the newest one that reports cloud layers, and answers:
 
 ```json
 { "observed": { "time": "<ISO time>", "present": ["<raw weather>"], "clouds": ["<layer amount>"], "ceiling": null, "visibility": null } }
 ```
 
-`clouds` lists each layer's amount (`FEW`, `BKN`, `OVC` and so on). `ceiling` is the lowest base among the broken, overcast and obscured layers, and `visibility` the station's figure, each as the service gives it, or `null`. The upstream answer is cached ten minutes at the edge and the response five minutes in the browser. If the service fails, the Worker answers `502` with `{ "error": ... }` and `no-store`, and the sky keeps its own weather.
+`clouds` lists each layer's amount (`FEW`, `BKN`, `OVC` and so on). `ceiling` is the lowest base among the broken, overcast and obscured layers, and `visibility` the station's figure, each as the service gives it, or `null`. The Worker names itself to the service as `voxelwright.world (https://voxelwright.world)`. The upstream answer is cached ten minutes at the edge, and a failed one a minute, so an outage still costs one call a minute; the response is kept five minutes in the browser. If the service fails, the Worker answers `502` with `{ "error": ... }` and `no-store`, and the sky keeps its own weather.
 
 ## The data bundle
 
@@ -99,7 +117,7 @@ npm --prefix deploy run ship
     Refuses a dirty working tree (unless `--allow-dirty`). Fails fast if `npx cf accounts list` fails, which means the local `cf` CLI is not signed in.
   </Step>
   <Step title="Build">
-    `npm --prefix engine run core`, `node engine/sf/build.mjs`, `npm --prefix site run build` and `node deploy/assemble.mjs`. It uses `VOXELWRIGHT_EGG_MEDIA`, or `~/.village/engine/sf/eggs/media` when that folder exists, unless `--public` is passed.
+    `npm --prefix engine run core`, `node engine/sf/build.mjs`, `npm --prefix site run build` and `node deploy/assemble.mjs`. The eggs are procedural unless media is asked for: `--egg-media` takes `~/.village/engine/sf/eggs/media` (and fails when it is missing), and `VOXELWRIGHT_EGG_MEDIA` names a folder. `--public` overrides both.
   </Step>
   <Step title="Deploy">
     `npx cf deploy --mode world --message <HEAD sha>` for voxelwright.world, then `npx cf deploy --message <HEAD sha>` for zahynailo.dev.
@@ -112,7 +130,8 @@ npm --prefix deploy run ship
 | Flag | Effect |
 | --- | --- |
 | `--world-only`, `--site-only` | Deploy one Worker. |
-| `--public` | Build with procedural eggs only. |
+| `--egg-media` | Build the private egg clips in, from `~/.village/engine/sf/eggs/media`. |
+| `--public` | Procedural eggs only, even when `VOXELWRIGHT_EGG_MEDIA` is set. The default already is procedural. |
 | `--skip-build` | Deploy whatever the last assembly left in the two folders. |
 | `--skip-live` | Skip the live checks. |
 | `--allow-dirty` | Ship uncommitted changes. The message still names `HEAD`. |
@@ -121,7 +140,7 @@ npm --prefix deploy run ship
 `ship` does not install packages, run tests, fetch the data bundle or roll back. Its live check fails when `/weather` fails, so an outage at the weather service fails a good deploy.
 
 <Warning>
-Shipping changes both public sites at once, and so does merging. The `deploy` workflow runs on every push to main whose changes touch `engine/**`, `site/**`, `deploy/**` or the workflow itself, a README edit included.
+Shipping changes both public sites at once, and so does merging. The `deploy` workflow runs on every push to main whose changes touch `engine/**`, `site/**`, `deploy/**` or the workflow itself. Markdown files are left out, except blog posts under `site/posts/`, so a docs-only merge does not redeploy.
 
 The workflow has no approval step of its own. It deploys both Workers in the `production` environment, and only that environment's protection rules, kept in GitHub's settings, can hold it back.
 
@@ -132,7 +151,7 @@ Changing the workflow, the environment or the redirects changes what the public 
 
 ## In CI
 
-[deploy.yml](https://github.com/voxelwright/voxelwright/blob/main/.github/workflows/deploy.yml) runs on main in the `production` environment, which holds `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It fetches the private egg media when the `EGG_OVERLAY_TAG` variable names a release. It installs, tests and builds the site, fetches the data bundle, builds the core and the realm, then installs and tests `deploy/` and assembles both folders before either Worker moves.
+[deploy.yml](https://github.com/voxelwright/voxelwright/blob/main/.github/workflows/deploy.yml) runs on main in the `production` environment, which holds `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It fetches the private egg media when the `EGG_OVERLAY_TAG` variable names a release. It installs, tests and builds the site, fetches the data bundle, builds the core and the realm, then installs and tests `deploy/` and assembles both folders before either Worker moves. The workflow's token is read-only, except in the separate `release` job that runs `release.mjs` after both Workers pass.
 
 [publish.sh](https://github.com/voxelwright/voxelwright/blob/main/deploy/publish.sh) then deploys `voxelwright`, then `zahynailo`, and checks each one:
 

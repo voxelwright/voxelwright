@@ -37,6 +37,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CANNOT } from '../make/rules.mjs'
 
+export const placement = (w) => Array.isArray(w?.at) && w.at.length === 3 && w.at.every(Number.isFinite) && ['north', 'east', 'south', 'west'].includes(w.facing) ? { at: w.at, facing: w.facing } : undefined
+
 export const KEPT = join(homedir(), '.village', 'engine', 'workshop')
 const ID = /^[0-9a-f]{10}$/, BRIEF = /^[A-Za-z0-9_-]{16}$/
 /** The most gaps shown, how long a brief waits to be sent (ms), and the most a body may be. */
@@ -111,7 +113,7 @@ export function workshop({ journal = CANNOT, world, kept = KEPT, project, provid
         const id = createHash('sha256').update(line.toLowerCase()).digest('hex').slice(0, 10)
         let g = by.get(id)
         if (!g) { if (by.size >= GAPS_MOST) continue; by.set(id, g = { id, line, count: 0, askers: [], sent: was.get(id) ?? null }) }
-        const asker = { by: quoted(j.by, 24) || 'someone', wish: quoted(j.wish, 600), name: quoted(j.name, 60), rule: /^[a-z0-9][a-z0-9-]{0,23}$/.test(j.rule ?? '') ? j.rule : '', realm: /^[a-z0-9][a-z0-9-]{0,39}$/.test(j.realm ?? '') ? j.realm : '', where: j.where?.at ? { at: j.where.at, facing: j.where.facing } : undefined, at: quoted(j.at, 30) }
+        const asker = { by: quoted(j.by, 24) || 'someone', wish: quoted(j.wish, 600), name: quoted(j.name, 60), rule: /^[a-z0-9][a-z0-9-]{0,23}$/.test(j.rule ?? '') ? j.rule : '', realm: /^[a-z0-9][a-z0-9-]{0,39}$/.test(j.realm ?? '') ? j.realm : '', where: placement(j.where), at: quoted(j.at, 30) }
         // The same ask is written on this machine and told to the server: it is one ask.
         if (g.askers.some((a) => a.by === asker.by && a.wish === asker.wish && a.rule === asker.rule)) continue
         g.count++
@@ -174,7 +176,7 @@ export function workshop({ journal = CANNOT, world, kept = KEPT, project, provid
           if (s.state === 'in' && s.again?.length && again) {
             // The owner said yes to this when sending: each rule that wanted it, asked for again in the same words.
             const asked = []
-            for (const a of s.again.slice(0, 3)) { const r = await again({ wish: a.wish, realm: a.realm, change: a.rule, where: a.where, by: a.by }).catch((e) => ({ state: 'refused', why: e.message })); asked.push({ rule: a.rule, realm: a.realm, state: r.state, name: quoted(r.name, 60), why: quoted(r.why, 200) }) }
+            for (const a of s.again.slice(0, 3)) { const r = await again({ wish: a.wish, realm: a.realm, change: a.rule, where: placement(a.where), by: a.by }).catch((e) => ({ state: 'refused', why: e.message })); asked.push({ rule: a.rule, realm: a.realm, state: r.state, name: quoted(r.name, 60), why: quoted(r.why, 200) }) }
             await note({ gap, state: 'asked', asked }); say(`gap ${gap}: asked again: ${asked.map((a) => `${a.rule} ${a.state}`).join(', ')}`)
           }
         } catch (e) { say(`gap ${gap} could not be followed: ${e.message}`) }

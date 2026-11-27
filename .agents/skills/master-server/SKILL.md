@@ -5,7 +5,7 @@ description: The crates, versions and verified recipes behind master/ (village-m
 
 # Master server
 
-Pinned in `master/Cargo.lock`, built with Rust 1.96.1 (edition 2024), checked November 25,
+Pinned in `master/Cargo.lock`, built with Rust 1.96.1 (edition 2024), checked November 26,
 2026. The protocol and its numbers are in `guide/master.md`; why WebRTC is in
 `.agents/skills/lobby-transport/SKILL.md`.
 
@@ -13,6 +13,8 @@ Pinned in `master/Cargo.lock`, built with Rust 1.96.1 (edition 2024), checked No
 
 | Crate | Version | Why |
 | --- | --- | --- |
+| `ipnet` | 2.12.2 | parse and match trusted proxy networks |
+| `sha2`, `subtle` | 0.10.9, 2.6.1 | SHA-256 and fixed-length constant-time comparison for operator tokens |
 | `tokio` | 1.54.1 | the runtime, `current_thread`: one thread serves everything (`rt net time macros sync signal` only) |
 | `axum` | 0.8.9 | routing, extractors and its WebSocket upgrade (`http1 tokio ws json`, no defaults) |
 | `hyper` | 1.13.0 | the HTTP/1 connection itself, for its header-read timeout (below) |
@@ -52,8 +54,9 @@ No TLS, no allocator, no logging crate (plain `eprintln!`, never an address). Te
   body trickles in ends with 408.
 - **A WebSocket upgrade ends hyper's connection future**, so a per-connection guard does not
   count held host sockets: count those separately (a host slot is taken before the upgrade).
-- **hyper's header-read timeout also covers an idle keep-alive connection**: it starts in
-  `poll_read_head` whenever the connection is idle (hyper 1.13.0 `proto/h1/conn.rs:224`).
+- **HTTP admission.** The master disables HTTP keep-alive. Upgraded WebSockets stay open and must send hello within their first 16 messages. Public status and ICE share the lookup budget.
+- **Proxy trust.** With `--behind-proxy HEADER`, the master accepts the header from loopback peers by default. Each explicit `--trusted-proxy IP-OR-CIDR` contributes to a replacement allowlist. Match the socket IP before grouping the caller by IPv6 /64. The rightmost address in the last header is the caller, so a multi-hop proxy must verify and rewrite it. Only trusted proxy connections skip the per-peer TCP cap.
+- **Full tables.** STUN drops new sources when its table stays full after a sweep. Pressure-triggered STUN and HTTP address sweeps are each limited to once per second. HTTP keeps entries with open connections, lobby slots or an active authentication lockout.
 - **Chromium 158's mDNS-only offer works on one machine with no STUN**: the node-datachannel
   host's answer carries real host candidates and the pair opens host-host (200 to 270 ms click to
   open). No `--disable-features=WebRtcHideLocalIpsWithMdns` needed.
@@ -71,5 +74,5 @@ internet or across any real network; a browser other than Playwright Chromium 15
 it; `workflow_dispatch` (works only once the file is on the default branch); the Docker image
 run locally (no daemon here; CI builds and runs `--version`); memory on Linux (measured on
 macOS arm64 only); behaviour past 1,000 lobbies or 100 joins a second; whether hyper's
-IPv6 limits beyond the /56 and /48 caps (a holder of many /48s still adds up). Refresh
+IPv6 limits beyond the /64 and /48 caps (a holder of many /48s still adds up). Refresh
 when a pinned version changes or a probe contradicts a line above.

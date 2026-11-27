@@ -23,6 +23,10 @@ pub struct Config {
     #[arg(long, value_name = "HEADER")]
     pub behind_proxy: Option<String>,
 
+    /// Peers allowed to supply the caller header. Repeat to trust several networks.
+    #[arg(long = "trusted-proxy", value_name = "IP-OR-CIDR", value_parser = proxy_network)]
+    pub trusted_proxy: Vec<ipnet::IpNet>,
+
     /// A STUN server for GET /ice, as an RTCIceServer url (stun:host:port). Repeatable.
     #[arg(long = "stun", value_name = "URL")]
     pub stun: Vec<String>,
@@ -45,12 +49,12 @@ pub struct Config {
     pub admin_token_file: Option<PathBuf>,
 
     /// Lobbies at once, in all (sockets waiting for their hello count).
-    #[arg(long, default_value_t = 5000)]
+    #[arg(long, default_value_t = 2000)]
     pub max_lobbies: usize,
     /// Lobbies at once from one address.
     #[arg(long, default_value_t = 4)]
     pub max_lobbies_per_addr: u32,
-    /// Lobbies at once from one IPv6 /48 (one address is a /56 there).
+    /// Lobbies at once from one IPv6 /48 (one address is a /64 there).
     #[arg(long, default_value_t = 16)]
     pub max_lobbies_per_48: u32,
     /// Host sockets opened a minute by one address.
@@ -59,7 +63,7 @@ pub struct Config {
     /// Joins a minute by one address.
     #[arg(long, default_value_t = 30)]
     pub joins_per_minute: u32,
-    /// Lookups (GET /lobbies, GET /lobbies/<id or code>, admin attempts) a minute by one address.
+    /// Lookups (GET /, /ice, /lobbies and /lobbies/<id or code>) a minute by one address.
     #[arg(long, default_value_t = 120)]
     pub lookups_per_minute: u32,
     /// Messages a second a host may send (pings included) before its socket is closed.
@@ -71,11 +75,10 @@ pub struct Config {
     /// Open TCP connections in all.
     #[arg(long, default_value_t = 4096)]
     pub max_connections: usize,
-    /// Open TCP connections from one peer (not applied with --behind-proxy, where every
-    /// connection comes from the proxy).
+    /// Open TCP connections from one peer (trusted proxies exempt).
     #[arg(long, default_value_t = 8)]
     pub max_connections_per_addr: u32,
-    /// Open TCP connections from one IPv6 /48 (not applied with --behind-proxy).
+    /// Open TCP connections from one IPv6 /48 (trusted proxies exempt).
     #[arg(long, default_value_t = 64)]
     pub max_connections_per_48: u32,
     /// Addresses tracked for limits at once; a new address past this is refused.
@@ -122,6 +125,24 @@ pub struct Config {
     /// Seconds a request may take in all (a join's wait included).
     #[arg(long, default_value_t = 15.0)]
     pub request: f64,
+}
+
+fn proxy_network(raw: &str) -> Result<ipnet::IpNet, String> {
+    raw.parse()
+        .or_else(|_| raw.parse::<std::net::IpAddr>().map(ipnet::IpNet::from))
+        .map_err(|_| "expected an IP address or CIDR".into())
+}
+
+impl Config {
+    pub fn trusts_proxy(&self, ip: std::net::IpAddr) -> bool {
+        let ip = ip.to_canonical();
+        self.behind_proxy.is_some()
+            && if self.trusted_proxy.is_empty() {
+                ip.is_loopback()
+            } else {
+                self.trusted_proxy.iter().any(|n| n.contains(&ip))
+            }
+    }
 }
 
 impl Default for Config {

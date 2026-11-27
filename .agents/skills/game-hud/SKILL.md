@@ -5,7 +5,7 @@ description: Rules for the controls laid over a game's picture while someone pla
 
 # Game HUD
 
-Version 5, 2026-11-26 (slim Voxelmorphism v1 in-play HUD; version 3 2026-11-24 the pie wheel; version 2 2026-11-22 for #450, version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
+Version 6, 2026-11-26 (#75: the Make bar dismissible, no Back or Seat key over play, Settings in sections, the first view slim; version 5 the slim Voxelmorphism v1 in-play HUD; version 3 2026-11-24 the pie wheel; version 2 2026-11-22 for #450, version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
 browser, on a desk (keyboard and mouse, pointer lock) and on a phone (touch, upright and on its side). It does not
 cover menus (the Sky panel open is one: what it covers is measured and said, not failed), the first view or the
 kit's own look (`engine/kit/SPEC.md`, `DESIGN.md`).
@@ -15,12 +15,10 @@ than flat CSS glass — by refining the kit itself into a compact, low-profile h
 `engine/kit/src/looks/slim.js`): `--vx: 2px` on HUD keys and `--vx: 3px` on the Settings enclosure, 3-course floating
 keycaps with 1.5-voxel press travel, translucent smoked polycarbonate (`transmission: 0.14–0.15`) with Fresnel rim
 gleam, deep cobalt enamel (`transmission: 0.06`) on primary/active actions, and a hollow stepped octagonal voxel
-thumbstick gimbal with backlit compass ticks and a sculpted concave voxel cap. The first view (`html.first`) stays on
-the `lit` look. Layout stays lean and contextual: Credits moves out of gameplay corners into the Settings header
-(Mapillary attribution sits neatly inside the minimap corner); the Make composer collapses to a slim voxel trigger
+thumbstick gimbal with backlit compass ticks and a sculpted concave voxel cap. Layout stays lean and contextual: Credits
+moves out of gameplay corners into the Settings panel's keys (Mapillary attribution sits neatly inside the minimap corner); the Make composer collapses to a slim voxel trigger
 (`✦ Make ↵` bottom-right on desktop, `✦` 44×44 voxel key bottom-left on mobile that fades out while steering) and
-expands into a centered composer only when opened; mobile puts the minimap top-left, inlaid-relief Back (`<`) and
-Settings (`⚙`) slim voxel keys side-by-side top-right, the hollow voxel thumbstick under the left thumb, compact
+expands into a centered composer only when opened; mobile puts the minimap top-left, the Settings (`⚙`) slim voxel key alone top-right, the hollow voxel thumbstick under the left thumb, compact
 icon-led slim voxel thumb controls bottom-right, and suppresses the redundant floating `Fly` banner.
 
 **Cross-lane slots (November 26):**
@@ -28,8 +26,18 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
   sitting at `left: safe + 66px, bottom: safe + 14px` beside `✦` Make (`SLIM_ICONS.car`), auto-hiding while steering,
   riding, choosing a tool, or with a drawer/composer open.
 - **Driving 2-column slim voxel keypad (`html.driving [data-panel="living"]`):** compact `118px`-wide (`52px + 8px + 58px`)
-  bottom-right cluster (`Drift` cobalt primary, `Horn`, `Get off` in right column; `Seat`, `Cam`, and `Radio`/`Lights`/`Rear`
-  in left column, leaving `>= 28px` clearance on `390px` phones to the right of a `216×200` bottom-left `[data-panel="radio-yt"]`).
+  bottom-right cluster (`Drift` cobalt primary, `Boost`, `Horn`, `Get off` in right column; `Cam`, `Radio`, `Repair`
+  in left column, no `Seat` key: Cam cycles through the seat view, #74), leaving `>= 28px` clearance on `390px` phones to the right of a `216×200` bottom-left `[data-panel="radio-yt"]`).
+
+**Direction (owner, November 26, #75):** the Make bar opened must always have a way out by touch: a × key before the
+line, a press anywhere on the picture (its click is swallowed, so it does nothing else), or Escape; each gives the keys
+back to the world and brings the keys of play straight back. No Back (`<`) key over play: Back to the view lives in the
+Settings panel (and Backquote). The first view uses the same slim look as play (credits and lockers keys, the gear, the
+panel, the EXPLORE hint as a smoked plate with the cobalt edge). The Settings panel is in sections that are always all
+shown (tests press its controls by place): Time & weather, Graphics (with the resolution), and the keys that act; two
+columns at a desk in play, one on an upright phone, columns on a phone on its side. `sf-hud.mjs` fails a section
+missing, two panel controls meeting, a Back key in the HUD, a Seat key while driving, a Make bar that does not close, and a
+first-view key not built slim. It switches street life off: a stopped car beside the body offers E over it.
 
 **Direction (owner, November 22):** the wheel, as the lead recommended. It is what the page has with no switch;
 `?hud=classic` keeps the controls as they were, and `?hud=context` and `?hud=quiet` stay to compare. The wand is a

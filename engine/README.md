@@ -98,6 +98,7 @@ npm run sf                        # the San Francisco realm from static files, i
 npm run lobby                     # every check of playing in someone else's server
 npm run typecheck
 node test/bench.mjs               # how fast the march is against test/baseline.json
+node test/drive-smooth.mjs --curve    # what going at 0, 60, 120 and 180 km/h costs a frame (--sf <folder> for San Francisco)
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march, A and B measured turn about
 node test/look.mjs --out file.png --at 0,40,0 --look 20,-8   # one picture with given settings
 node test/read.mjs                # the device reports the server kept

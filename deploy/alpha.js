@@ -4,10 +4,13 @@
 //
 // It is drawn with the Voxelmorphism kit both pages already load (the realm adds the sheet from its script, so the
 // notice waits for the kit's tokens, up to a few seconds). Storage can be missing or refuse; then it simply shows.
+// Never over the realm's failure screen: when the page marks itself failed (<html data-failed>, its WebGPU fallback),
+// the notice is not added, or leaves if it already was.
 ;(() => {
   const KEY = 'zahynailo-alpha-notice', SEEN = 'dismissed-1'
   const dismissed = () => { try { return localStorage.getItem(KEY) === SEEN } catch { return false } }
-  if (dismissed()) return
+  const failed = () => document.documentElement.dataset.failed !== undefined
+  if (dismissed() || failed()) return
 
   const style = document.createElement('style')
   style.textContent = `
@@ -30,7 +33,7 @@
   box.id = 'alpha-notice'
   box.setAttribute('aria-labelledby', 'alpha-notice-title')
   box.innerHTML = `<div><h2 id="alpha-notice-title">Early alpha</h2>
-<p>This site is in active development. Content and posts are on the way. Things may break, memory may leak.</p></div>
+<p>This realm is in active development. Things may break or change.</p></div>
 <button class="vx-button vx-close" type="button" aria-label="Dismiss the notice">×</button>`
   const close = box.querySelector('button')
   // On a page that scrolls (the blog), room at its foot so the notice never covers its last lines.
@@ -50,12 +53,16 @@
 
   const started = performance.now()
   const show = () => {
+    if (failed()) return
     const ready = getComputedStyle(document.documentElement).getPropertyValue('--vx').trim() !== ''
     if (!ready && performance.now() - started < 4000) return void setTimeout(show, 100)
-    if (dismissed()) return
+    if (dismissed() || failed()) return
     document.head.append(style)
     body.append(box)
     room(true)
   }
+  // The page can fail at any time after this script runs: leave with it.
+  new MutationObserver(() => { if (failed() && box.isConnected) { box.remove(); room(false) } })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-failed'] })
   show()
 })()

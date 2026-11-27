@@ -11,6 +11,8 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { checkSubmission } from "./core.mjs";
 
+// A full commit id, and nothing git could read as an option or a revision expression.
+const COMMIT = /^[0-9a-f]{40}$/;
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 /** A bare "private repo" seeded from a source checkout's HEAD, and the editor's working clone. */
@@ -37,6 +39,10 @@ export function publishGit(editor, submission, writer = "editor") {
   git(editor, "fetch", "--quiet", "origin");
   const branch = git(editor, "rev-parse", "--abbrev-ref", "origin/HEAD").replace("origin/", "");
   const head = git(editor, "rev-parse", `origin/${branch}`);
+  if (!COMMIT.test(head)) return { ok: false, status: 500, errors: ["the store's main is not a commit"] };
+  if (submission.baseCommit != null && (typeof submission.baseCommit !== "string" || !COMMIT.test(submission.baseCommit))) {
+    return { ok: false, status: 422, errors: ["baseCommit must be a full 40-character commit id"] };
+  }
   if (submission.baseCommit && submission.baseCommit !== head) {
     // The editor knows which commit the post was opened at; anything newer touching this post is a conflict.
     const touched = git(editor, "log", "--format=%H", `${submission.baseCommit}..${head}`, "--", `posts/${checked.post.slug}`);

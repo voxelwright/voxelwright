@@ -7,8 +7,8 @@ description: How Voxelwright's lead (orchestrator) agent runs many builder agent
 
 This skill holds what the leads have learned from running Voxelwright's factory
 since November 2026. AGENTS.md has the rules. This skill explains how to follow
-them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
--speed.md, -parts-and-kits.md, 2026-11-21/report.md) and in issue #465.
+them. The evidence is in the November 20 and 21, 2026 retrospectives and in
+issue #465.
 
 ## Taking stock
 
@@ -138,8 +138,8 @@ When a fix lands:
 - fix the shared rule, not the instance;
 - check a sample of other places, not only the one the owner pointed at.
 
-The parts-and-kits report (`~/.village/retro/2026-11-20-parts-and-kits.md`)
-proposes how to structure parts so that one edit reaches every use.
+Structure parts so that one edit reaches every use: a shared part or material
+has one definition that every building reads.
 
 ## Reporting to the owner
 

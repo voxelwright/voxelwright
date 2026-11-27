@@ -94,6 +94,7 @@ pub async fn serve(listener: TcpListener, st: Shared) {
                 }
             });
             let conn = http1::Builder::new()
+                .keep_alive(false)
                 .timer(TokioTimer::new())
                 .header_read_timeout(header_read)
                 .max_buf_size(64 * 1024)

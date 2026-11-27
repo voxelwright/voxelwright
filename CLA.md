@@ -1,6 +1,6 @@
 # Voxelwright Individual Contributor License Agreement
 
-Adapted from the [Apache Software Foundation Individual Contributor License Agreement v2.2](https://www.apache.org/licenses/icla.pdf). This version changes the title, names Pavlo Zahynailo as the recipient and adjusts references to the Foundation, its representatives and its users. It removes the Foundation-specific nonprofit undertaking, submission address, profile fields and privacy-policy reference. It retains the full name, signature and date fields. Section 2 expressly permits the owner to license contributions under other terms. Formatting has been adapted for Markdown.
+Adapted from the [Apache Software Foundation Individual Contributor License Agreement v2.2](https://www.apache.org/licenses/icla.pdf). This version changes the title, names Pavlo Zahynailo as the recipient and adjusts references to the Foundation, its representatives and its users. It removes the Foundation-specific nonprofit undertaking, submission address, profile fields and privacy-policy reference. It replaces the paper name, signature and date fields with electronic acceptance in a pull request (see How to accept). Section 2 expressly permits the owner to license contributions under other terms. Formatting has been adapted for Markdown.
 
 Thank you for your interest in Voxelwright, owned by Pavlo Zahynailo (the "Owner"). To clarify the intellectual property license
 granted with Contributions from any person or entity, the Owner
@@ -10,10 +10,7 @@ terms below. This agreement is for your protection as a Contributor
 as well as the protection of the Owner and the project's users. It does not
 change your rights to use your own Contributions for any other purpose.
 
-Please complete and sign this Agreement.
-Read this document carefully before signing and keep a copy for your records.
-
-    Full name: _____________________________________________________
+Read this document carefully before accepting it and keep a copy for your records.
 
 You accept and agree to the following terms and conditions for Your
 Contributions (present and future) that you submit to the Owner. Except
@@ -110,4 +107,12 @@ are personally aware, and conspicuously marking the work as
 which you become aware that would make these representations
 inaccurate in any respect.
 
-    Please sign: __________________________________ Date: ________________
+## How to accept
+
+Accept this Agreement electronically. Put this line, with your full legal name, in the description of your first pull request to the Voxelwright repository:
+
+```text
+CLA-signed: <your full legal name>
+```
+
+The line, the GitHub account that opened the pull request and the pull request's timestamp together form your signature and its date. You accept the version of this Agreement on the main branch when you open that pull request. Your acceptance applies to that and every later Contribution you submit to the Owner. To submit on behalf of an employer or other entity, ask the Owner for a Corporate CLA before opening a pull request.

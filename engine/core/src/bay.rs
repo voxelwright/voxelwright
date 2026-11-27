@@ -37,11 +37,13 @@ struct Marks {
 /// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments, or -1.
 pub fn marks() -> i32 {
     let bytes = ROOM.with_borrow_mut(std::mem::take);
+    if bytes.len() % 4 != 0 || bytes.len() > 128 << 20 { return -1; }
     let w: Vec<i32> = bytes.chunks_exact(4).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     if w.len() < 3 || w[0] != 0x4b52_414d { return -1; }
-    let (nc, ns) = (w[1] as usize, w[2] as usize);
-    if w.len() != 3 + nc * 4 + ns * 5 { return -1; }
-    let covers = w[3..3 + nc * 4].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    let (Ok(nc), Ok(ns)) = (usize::try_from(w[1]), usize::try_from(w[2])) else { return -1; };
+    let Some(end) = nc.checked_mul(4).and_then(|n| n.checked_add(3)) else { return -1; };
+    if ns.checked_mul(5).and_then(|n| end.checked_add(n)) != Some(w.len()) { return -1; }
+    let covers = w[3..end].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
     MARKS.with_borrow_mut(|held| *held = Marks { covers });
     ns as i32
 }
@@ -236,8 +238,21 @@ fn read(b: &[u8]) -> Option<Pack> {
     if head[0] != 0x3159_4142 || head[4] <= 0 || head[5] <= 1 || head[8] < 0 || head[9] < 0 || head[12..15].iter().any(|&n| n < 0) {
         return None;
     }
-    let (gw, tw) = (head[5] as usize, if head[8] > 0 { head[9] as usize } else { 0 });
-    let (nb, nv, nt) = (head[12] as usize, head[13] as usize, head[14] as usize);
+    let gw = usize::try_from(head[5]).ok()?;
+    let tw = if head[8] > 0 { usize::try_from(head[9]).ok()? } else { 0 };
+    if gw > 8192 || tw > 8192 || (head[8] > 0 && tw < 2) || b.len() > 256 << 20 { return None; }
+    let wide = (head[5] - 1).checked_mul(head[4])?;
+    if wide > 64_000 || head[6].checked_add(wide).is_none() || head[7].checked_add(wide).is_none() { return None; }
+    // The top grid is indexed relative to the ground origin using signed cell coordinates.
+    let top_span = head[9].saturating_sub(1).checked_mul(head[8])?;
+    for axis in [0, 1] {
+        let offset = head[10 + axis].checked_sub(head[6 + axis])?;
+        offset.checked_add(top_span)?;
+        head[10 + axis].checked_add(top_span)?;
+    }
+    let samples = tw.checked_mul(tw)?;
+    let top_bytes = samples.checked_mul(2)?;
+    let (nb, nv, nt) = (usize::try_from(head[12]).ok()?, usize::try_from(head[13]).ok()?, usize::try_from(head[14]).ok()?);
     let mut from: usize = 64;
     let mut take = |n: usize| {
         let part = b.get(from..from.checked_add(n)?)?;
@@ -247,10 +262,10 @@ fn read(b: &[u8]) -> Option<Pack> {
     let shorts = |p: &[u8]| p.chunks_exact(2).map(|w| i16::from_le_bytes([w[0], w[1]])).collect::<Vec<_>>();
     let ints = |p: &[u8]| p.chunks_exact(4).map(|w| i32::from_le_bytes([w[0], w[1], w[2], w[3]])).collect::<Vec<_>>();
     let ground = shorts(take(gw.checked_mul(gw)?.checked_mul(2)?)?);
-    let top = shorts(take(tw * tw * 2)?);
-    let class = take(tw * tw)?.to_vec();
-    let tint = take(tw * tw)?.to_vec();
-    let walls = if head[15] & 1 == 1 { take(tw * tw * 2)?.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).collect() } else { Vec::new() };
+    let top = shorts(take(top_bytes)?);
+    let class = take(samples)?.to_vec();
+    let tint = take(samples)?.to_vec();
+    let walls = if head[15] & 1 == 1 { take(top_bytes)?.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).collect() } else { Vec::new() };
     let rows = ints(take(nb.checked_mul(24)?)?);
     let mut verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
     let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
@@ -281,7 +296,7 @@ fn read(b: &[u8]) -> Option<Pack> {
             let width = u16::from_le_bytes(tail.get(8..10)?.try_into().ok()?) as usize;
             let height = u16::from_le_bytes(tail.get(10..12)?.try_into().ok()?) as usize;
             if edge as usize >= nv || width == 0 || height == 0 { return None; }
-            let end = 12 + width.checked_mul(height)?;
+            let end = 12usize.checked_add(width.checked_mul(height)?)?;
             if paint.insert(edge, tail.get(12..end)?).is_some() { return None; }
             tail = tail.get(end..)?;
         }
@@ -323,7 +338,6 @@ fn read(b: &[u8]) -> Option<Pack> {
     let under_leaf_road = road_greys(&class, &tint, tw);
     let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     // Which buildings and trunks reach into each patch.
-    let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
     p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
     p.stems = vec![Vec::new(); (p.pw * p.pw) as usize];
@@ -1756,5 +1770,27 @@ mod tests {
         let packs = [pack];
         let c = column(&packs, 285, 285, 1);
         assert!(matches!(c.what, What::Open), "trunkless tall canopy should not float");
+    }
+}
+
+#[cfg(test)]
+mod header_limits {
+    use super::*;
+
+    #[test]
+    fn marks_reject_impossible_counts() {
+        for (covers, segments) in [(-1, 0), (0, -1), (i32::MAX, 0), (0, i32::MAX)] {
+            ROOM.with_borrow_mut(|r| *r = [0x4b52_414d, covers, segments].into_iter().flat_map(i32::to_le_bytes).collect());
+            assert_eq!(marks(), -1);
+        }
+    }
+
+    #[test]
+    fn pack_rejects_oversize_grids_and_spans() {
+        for (gw, step, tw) in [(i32::MAX, 1, 0), (2, 1, i32::MAX), (3, i32::MAX, 2)] {
+            let words = [0x3159_4142, 0, 0, 0, step, gw, 0, 0, 1, tw, 0, 0, 0, 0, 0, 0];
+            let bytes: Vec<_> = words.into_iter().flat_map(i32::to_le_bytes).collect();
+            assert!(read(&bytes).is_none());
+        }
     }
 }

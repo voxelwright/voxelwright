@@ -33,7 +33,8 @@ const STYLE = /* css */ `
    opens (realm-ui.ts), with the weather, the hour and the graphics (#506): what is for playing, saying and putting the
    world back (its foot) is the realm's. */
 html.first :is(#hud, #aim, #where, #over, #realm > :not(.fold, .sky)) { visibility: hidden; opacity: 0; }
-html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
+/* (Over the first view's own .part display: contents on a phone on its side, below.) */
+html.first #realm .sky .part.acts { display: none !important; }
 /* Open in the first view, the panel leaves the EXPLORE board, its tower and BLOG in sight (#506, measured by
    test/sf-sky.mjs). On a desk it hangs in the top right corner as in the realm, right of the tower. Held upright, a
    phone has EXPLORE and its tower down the last eighth of its picture and BLOG low in the middle: the panel hangs
@@ -43,15 +44,15 @@ html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
    and the graphics side by side under it, over BLOG's top (its ticks left out for the height, and its fader where the
    realm has the sky's keys: the realm's own panel has it). */
 @media (pointer: coarse) and (orientation: portrait) {
-  html.first #realm.folds .sky { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 64px), calc(var(--vx) * 76)); }
+  html.first #realm.folds .sky { top: calc(max(12px, env(safe-area-inset-top)) + 72px); left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 64px), calc(var(--vx) * 76)); }
   /* (With the sky's keys, #524, its foot a cell less, so that its solid stands clear of BLOG's top.) */
   html.first #realm.folds .sky:has(.modes) { padding-block-end: calc(var(--vx) * 4); }
 }
 @media (pointer: coarse) and (orientation: landscape) {
-  html.first #realm.folds .sky { top: max(20px, env(safe-area-inset-top)); left: calc(var(--first-corner-right, calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 78px)) + 14px); right: 39vw; inline-size: auto; padding-inline: calc(var(--vx) * 3); column-gap: calc(var(--vx) * 3); grid-template-columns: 1.15fr 1fr; align-items: start; }
+  html.first #realm.folds .sky { top: max(20px, env(safe-area-inset-top)); left: calc(var(--first-corner-right, calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 78px)) + 14px); right: 43vw; inline-size: auto; padding-inline: calc(var(--vx) * 3); column-gap: calc(var(--vx) * 3); grid-template-columns: 1.15fr 1fr; align-items: start; }
   html.first #realm.folds .sky .part { display: contents; }
   html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { grid-column: 1 / -1; }
-  html.first #realm.folds .sky .ticks { display: none; }
+  html.first #realm.folds .sky :is(.ticks, .sep) { display: none; }
   /* (The sky's keys, Light, Dark and SF now, three across under the hour where its fader is in the realm's own panel:
      a row more would take the panel down over BLOG, #524.) */
   html.first #realm.folds .sky .modes { display: grid; grid-column: 1 / -1; grid-row: 2; }
