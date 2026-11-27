@@ -508,9 +508,10 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 124px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
   html:not(.first)[data-hud] [data-panel="wand-take"] button.vx-button { block-size: 44px; min-block-size: 44px; }
   html[data-hud] [data-panel="wand-take"] .vx-kbd { display: none; }
-  /* (Upright, under the wand's key; on its side where it was, above the body.) */
+  /* (Upright with a wand key, context and quiet, under that key; with the wheel, and on its side, where it was: lower it
+     was over the pie's top wedge.) */
   html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 100px); }
-  @media (orientation: portrait) { html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 180px); } }
+  @media (orientation: portrait) { html[data-hud]:not([data-hud="wheel"]) [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 180px); } }
 
   /* Sky drawer open: gameplay chrome steps aside cleanly. */
   html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .lobbies, #lobby-tag, #ask:not(.open), #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
