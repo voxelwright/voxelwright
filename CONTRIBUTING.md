@@ -4,7 +4,7 @@ Start by walking the city with `./world` (see the [README](README.md)), then rea
 
 ## Branches and commits
 
-Track work in a GitHub issue. Use a branch named `feature/<issue>-<name>` and commit subjects of the form `[#<issue>] <change>`. Run the flow you changed by hand, then its tests, then the root gate with current main merged into the branch.
+Track work in a GitHub issue. Use a branch named `feature/<issue>-<name>` and commit subjects of the form `[#<issue>] <change>`. Run the flow you changed by hand, then its tests, then the root gate with current main merged into the branch. Add an optional `## Release notes` section to the pull request body when you want custom player- or reader-facing wording in the GitHub Release created on deploy.
 
 ## Test the part you changed
 
@@ -21,7 +21,7 @@ Run each command from the repository root.
 | Kit | `cd engine/kit && PORT=5989 node tools/serve.mjs`, then in another terminal `cd engine/kit && PORT=5989 node tools/links.mjs` | Opens every showcase page in Playwright's Chromium and fails on an error. Playwright comes from `npm ci` in `engine/`. |
 | Master | `cd master && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` | Formatting, lints and tests. `node master/test/e2e.mjs` runs real WebRTC joins against the release build (`cargo build --release`) after `npm ci` in `probes/lobby-transport`. |
 | Site | `cd site && npm ci && npm run check` | Builds the site, checks the output and runs the tests. |
-| Deploy | `cd deploy && npm ci && npm test` | The assembly, notice, ship and Worker tests. |
+| Deploy | `cd deploy && npm ci && npm test` | The assembly, notice, ship, release and Worker tests. |
 | Docs | `node scripts/docs.mjs` | Every page against its sources, and every path, link, command and flag it mentions. |
 
 ## The root gate
