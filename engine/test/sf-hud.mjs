@@ -86,7 +86,7 @@ const firstView = async (page, phone) => {
   const laid = await panelLaid(page)
   check(laid.parts.slice(0, 2).join() === 'world,gfx' && !laid.parts.includes('acts') && laid.meet.length === 0 && laid.out.length === 0, `first view: the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
   const panel = await slimKey(page, '#realm .sky')
-  check(panel?.look === 'slim', `first view: the Settings panel is in the slim look (${panel?.look})`)
+  check(panel?.look === 'slim' && panel.live && panel.faceZ > 0 && panel.faceZ <= 4, `first view: the Settings panel is built in the slim look, a low enclosure (${JSON.stringify(panel)})`)
   await page.screenshot({ path: join(shots, `default-first-sky-${NAMED[phone ? (page.viewportSize().width > page.viewportSize().height ? 'side' : 'phone') : 'wide']}.png`) })
   if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
   await page.waitForTimeout(400)
