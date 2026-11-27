@@ -102,7 +102,7 @@ export let ON = STREAM || SQUARES.length > 0
 /** Where on Earth the address says the page starts (`&ll=`): never in a world the server keeps, whose frame is its release's. */
 const ll = WORLD ? null : query.get('ll')
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = (STREAM ? `?bay=${asked}${ll ? `&ll=${ll}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
+export const BAY = (STREAM ? `?bay=${asked}${ll ? `&ll=${ll}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '') + (ON && query.get('core') === 'shared' ? '&core=shared' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
@@ -314,7 +314,8 @@ if (typeof document === 'undefined' && typeof self !== 'undefined') {
   // The page's first message to a worker that streams the Bay. It is this module's alone: the worker's own handler
   // (worker.ts, mover.ts) never sees it, since this listener was added first, when this module was evaluated.
   self.addEventListener('message', (e: MessageEvent) => {
-    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[] } | null
+    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[]; coreModule?: WebAssembly.Module } | null
+    if (told?.coreModule) { e.stopImmediatePropagation(); moduleCame(told.coreModule); return }
     if (!told?.tiles) return
     e.stopImmediatePropagation()
     port = told.tiles; toldLevels = told.levels ?? LEVELS; toldKeep = told.keep ?? HOLD.keep
@@ -350,6 +351,7 @@ export function share(worker: Worker): Worker {
     try { const body = await tile(level, key); port1.postMessage({ id, body } satisfies Said) } catch (e) { port1.postMessage({ id, error: String((e as Error).message ?? e) } satisfies Said) }
   }
   const give = (levels: Level[]) => worker.postMessage({ tiles: port2, levels, keep: HOLD.keep }, [port2])
+  if (SHARED_CORE) void compiledCore.then((coreModule) => worker.postMessage({ coreModule }))
   if (STREAM) void where().then((s) => give(s.levels), () => give(LEVELS))
   else give(LEVELS)
   // Silence is counted in pings gone unanswered, a second apart, not in time: a page whose timers slept (a tab in the
@@ -375,8 +377,23 @@ export async function memory(): Promise<{ page: number; workers: number[]; tiles
   return { page: opened.reduce((n, c) => n + c.memory.buffer.byteLength, 0), workers: [...sharing.values()].map((s) => s.memory.bytes), tiles: heldTotal }
 }
 
+/**
+ * (#83, a prototype behind `?core=shared`) The core compiled once, by the page, and sent to each worker `share` is
+ * given, which makes its own instance of it and fetches and compiles nothing. Only a worker's first core: one built
+ * again and swapped in (`recore`) is fetched as before.
+ */
+const SHARED_CORE = query.get('core') === 'shared'
+let moduleCame: (m: WebAssembly.Module) => void = () => {}
+const compiledCore = new Promise<WebAssembly.Module>((r) => { moduleCame = r })
+let sharedOnce = false
+
 /** A core from its address, holding the Bay's packs where the page asked for the Bay. */
 export async function open<T>(url: string): Promise<T> {
+  if (SHARED_CORE && !sharedOnce) {
+    sharedOnce = true
+    if (typeof document !== 'undefined') moduleCame(await WebAssembly.compileStreaming(fetch(url)))
+    return prepare<T>(new WebAssembly.Instance(await compiledCore, {}).exports)
+  }
   const core = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
   return prepare<T>(core)
 }

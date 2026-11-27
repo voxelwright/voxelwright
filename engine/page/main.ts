@@ -26,6 +26,7 @@ import { engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
+import { adoptRobotaxiModels } from './robotaxi.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
@@ -76,6 +77,18 @@ const numbers = (name: string, fallback: number[]) => query.get(name)?.split(','
 const canvas = document.querySelector('canvas')!
 // One device class for the whole page (bay.ts `DEVICE`): what it draws and what it holds.
 const phone = DEVICE === 'phone'
+// (#83) Prototypes of what a first visit need not wait for, each behind a word of `?late=`:
+//   taxi   the robotaxis' models are made in a worker (robotaxi-maker.ts), and the street is set up when they come;
+//   sound  the audio context is made once the first picture is drawn, not before it.
+const LATE = new Set((new URLSearchParams(location.search).get('late') ?? '').split(','))
+const robotaxisMade = LATE.has('taxi') ? new Promise<void>((done) => {
+  const maker = new Worker(new URL('./robotaxi-maker.ts', import.meta.url), { type: 'module' })
+  maker.onmessage = (e: MessageEvent<Parameters<typeof adoptRobotaxiModels>[0]>) => { adoptRobotaxiModels(e.data); maker.terminate(); done() }
+  // Without it the street makes them itself, as before.
+  maker.onerror = () => { maker.terminate(); done() }
+}) : null
+let firstPictured: () => void = () => {}
+const firstPicture = new Promise<void>((r) => { firstPictured = r })
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
 const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
 const over = hud(controls)
@@ -229,7 +242,8 @@ async function main() {
     const radio = ears.radio
     void (radioPickerPromise ??= import('./radio-ui.ts').then(({ createRadioPicker }) => createRadioPicker({ radio, input: controls }), (e) => { radioPickerPromise = null; throw e })).then((p) => p.open(tab)).catch(() => {})
   }
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)) }).catch(() => {})
+  const startSound = () => void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)) }).catch(() => {})
+  if (query.get('sound') !== '0') { if (LATE.has('sound')) void firstPicture.then(() => setTimeout(startSound, 0)); else startSound() }
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -787,7 +801,7 @@ async function main() {
       over.status(`${saying ? `${saying} · ` : ''}${(1000 / frameMs).toFixed(0)} fps · march ${gpuMs.toFixed(1)} ms at ${to.size[0]} x ${to.size[1]} · ${s.wanted ? `making ${s.wanted} sectors` : 'world made'} · ${(s.poolUsed / 262144).toFixed(0)} of ${(s.poolWords / 262144).toFixed(0)} MB${s.full ? ` · ${s.full} did not fit` : ''} · ${pose.x.toFixed(0)}, ${pose.y.toFixed(0)}, ${pose.z.toFixed(0)} m · ${speed.toFixed(0)} m/s`)
     }
     // For whoever measures (test/sf.mjs): the first picture handed to the GPU, and the first with every box of the world made.
-    if (!seen.first) seen.first = performance.now()
+    if (!seen.first) { seen.first = performance.now(); firstPictured() }
     // The picture with the place in it (as player/stage.ts counts it): every box whole across its middle half.
     // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
     // view, so that the skyline is in the first picture; then what the view needs past the cut, and once the visitor leaves the first view the rest (leaveLanding).
@@ -1871,7 +1885,8 @@ async function main() {
     return alive.spawn({ ...making, low })
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
-  if (LOCAL?.street && lively && !far) {
+  const startStreet = () => {
+    if (!(LOCAL?.street && lively && !far)) return
     const nearMissWhoosh: Patch = { how: 'struck', hard: 0.1, rough: 1, shape: 'lump', pitch: 95, ring: 0.04, damp: 0.95, air: { from: 1800, to: 220, for: 0.28, gain: 0.9, q: 1.1 }, gain: 0.55 }
     const life = streetOf({
       life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
@@ -1902,6 +1917,7 @@ async function main() {
     if (landing && first && !first.engaged) life.enabled = false
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
+  if (robotaxisMade) void robotaxisMade.then(startStreet); else startStreet()
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
   // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
   // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
