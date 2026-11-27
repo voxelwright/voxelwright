@@ -170,11 +170,11 @@ function position(p, s) {
   for (let i = 0; i < s.dentCount; i++) {
     const d = s.dents[i], r = Math.hypot(...q.map((v, a) => v - d.center[a]))
     if (d.radius <= 0.0001 || r >= d.radius || d.depth <= 0) continue
-    const t = r / d.radius, h = (1 - t) ** 2 * (1 + 2 * t), core = h * (1.35 - 0.35 * h), env = 16 * t * t * (1 - t) * (1 - t)
+    const t = r / d.radius, h = (1 - t) ** 2 * (1 + 2 * t), core = h * (1.55 - 0.55 * h), env = 16 * t * t * (1 - t) * (1 - t)
     const u = q.map((x, a) => (x - d.center[a]) / d.radius)
-    const p1 = 10 * t + u[0] * 5.5 + u[1] * 2.5 + u[2] * 8.5
-    const p2 = 6 * t + u[0] * -7.5 + u[1] * 4.5 + u[2] * 4.0
-    const amount = d.depth * core * (1 + 0.18 * env * (0.62 * Math.sin(p1) + 0.38 * Math.sin(p2)))
+    const p1 = 3.2 * t + u[0] * 2.4 + u[1] * 1.2 + u[2] * 3.0
+    const p2 = 2.0 * t + u[0] * -2.8 + u[1] * 1.8 + u[2] * 1.6
+    const amount = d.depth * core * (1 + 0.16 * env * (0.62 * Math.sin(p1) + 0.38 * Math.sin(p2)))
     for (let a = 0; a < 3; a++) q[a] += d.dir[a] * amount
   }
   return q

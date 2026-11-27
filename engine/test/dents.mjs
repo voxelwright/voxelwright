@@ -84,18 +84,29 @@ const differ = (a, b) => page.evaluate(async ([a, b]) => {
 await aim()
 const dented = await shoot('dented')
 const kept = await page.evaluate(() => { const d = globalThis.engine.alive.damage(globalThis.car); return d.dentCount })
-// #61: repair key F is shown on the drive card and repairs the ridden car.
+// #61, #62: mount into the first-person seat, check the drive card lists F repair, verify the central
+// forward driving sightline stays clear through cracked glass (vs repaired from the exact same seat view),
+// and repair via KeyF.
 await page.evaluate(() => globalThis.engine.alive.mount(globalThis.car))
 await page.waitForTimeout(150)
 const card = await page.evaluate(() => document.querySelector('#card')?.textContent ?? '')
 check(/F\s*repair/i.test(card), `drive card lists F repair ("${card}")`)
+await page.evaluate(() => globalThis.engine.alive.view(true))
+await page.waitForTimeout(500)
+const seatClip = { x: 540, y: 210, width: 200, height: 150 }
+const seatDamaged = await page.screenshot({ clip: seatClip })
+if (out) await page.screenshot({ path: join(out, 'seat-dented.png') })
 await page.keyboard.down('KeyF'); await page.waitForTimeout(80); await page.keyboard.up('KeyF')
-await page.waitForTimeout(150)
-await page.evaluate(() => globalThis.engine.alive.mount(null))
+await page.waitForTimeout(450)
+const seatRepaired = await page.screenshot({ clip: seatClip })
+if (out) await page.screenshot({ path: join(out, 'seat-repaired.png') })
+const seatDrift = await differ(seatDamaged, seatRepaired)
+check(seatDrift < 22, `first-person central road sightline stays clear with a cracked windshield (${seatDrift.toFixed(2)} levels/px diff vs repaired)`)
+await page.evaluate(() => { globalThis.engine.alive.view(false); globalThis.engine.alive.mount(null) })
 await aim()
 const repaired = await shoot('repaired'), again = await shoot('repaired-again')
 const change = await differ(dented, repaired), noise = await differ(repaired, again)
-check(kept > 0 && change > Math.max(1.5, noise * 3), `the struck corner looks different dented (${change.toFixed(2)} levels a pixel on average from the same view repaired; ${noise.toFixed(2)} between two pictures of it repaired)`)
+check(kept > 0 && change > Math.max(4, noise * 3), `the struck corner looks clearly different dented (${change.toFixed(2)} levels a pixel on average from the same view repaired; ${noise.toFixed(2)} between two pictures of it repaired)`)
 const mended = await page.evaluate(() => {
   const e = globalThis.engine, d = e.alive.damage(globalThis.car)
   const wheels = [...(e.wheels.state.get(globalThis.car.id)?.wheels ?? [])].map((w) => ({ off: Math.hypot(...w.offset), tilt: w.tilt }))

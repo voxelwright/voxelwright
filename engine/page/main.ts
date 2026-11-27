@@ -1014,13 +1014,13 @@ async function main() {
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
       sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
-      // A hard crash (#37, #62): road dust, tight cluster of dark bumper/trim fragments, varied paint chips, and glinting glass/lamp shards near the impact.
+      // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)
         smoke.crash(at, strength)
-        debris.burst(at, 1.6, Math.round(4 + strength * 6), [c[0] * 0.85, c[1] * 0.85, c[2] * 0.85], 0.28, 15, 0.24 + strength * 0.14)
-        debris.burst(at, 1.8, Math.round(6 + strength * 10), [0.07, 0.07, 0.08], 0.34, 15, 0.22 + strength * 0.14)
-        debris.burst([at[0], at[1] + 2, at[2]], 1.8, Math.round((glass ? 12 : 5) + strength * 10), [0.62, 0.70, 0.75], 0.20, 14, 0.28 + strength * 0.16)
+        debris.burst(at, 1.1, Math.round(7 + strength * 6), [c[0] * 0.92, c[1] * 0.92, c[2] * 0.92], 0.26, 15, 0.08 + strength * 0.06)
+        debris.burst(at, 1.1, Math.round(6 + strength * 5), [0.06, 0.06, 0.07], 0.30, 15, 0.07 + strength * 0.05)
+        debris.burst([at[0], at[1] + 0.8, at[2]], 1.0, Math.round((glass ? 12 : 6) + strength * 8), [0.74, 0.82, 0.88], 0.20, 14, 0.09 + strength * 0.06)
       },
       engine: (at, level, dt) => smoke.engine(at, level, dt),
       rain: () => march.rain,

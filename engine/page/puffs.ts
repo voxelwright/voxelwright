@@ -288,29 +288,30 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
     },
     engine(at, level, dt) {
-      // living.ts passes 0.8 * full roof height: drop 1.6 cells to sit cleanly on the hood surface
-      // (never buried inside it like a soot stain) and emit a continuous overlapping stream of
-      // slender curling wisps so the rising column always connects to the engine bay in both outside and seat views.
-      const hood: [number, number, number] = [at[0], at[1] - 1.6, at[2]]
+      // Emit cleanly just above the buckled front hood ridge (never intersecting the hood mesh like a
+      // dark painted stain): pale radiator steam at the base, thickening into sunlit charcoal smoke as it rises.
+      const seam: [number, number, number] = [at[0], at[1] + 0.3, at[2]]
       if (level < 0.7) {
         const frac = (level - 0.35) / 0.35
-        if (Math.random() < dt * (14 + 14 * frac)) {
+        if (Math.random() < dt * (14 + 12 * frac)) {
           const w = rnd(0.84, 0.95)
-          puff(hood, 0.5, rnd(0.6, 1.8), rnd(8, 14), { size: rnd(0.65, 1.0), grow: rnd(1.8, 2.8), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.28 + 0.08 * frac, late: -0.06 })
+          puff(seam, 0.75, rnd(0.6, 1.7), rnd(8, 14), { size: rnd(0.65, 1.0), grow: rnd(1.8, 2.8), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.24 + 0.08 * frac, late: 0.0 })
         }
         return
       }
-      // Continuous connected billowing smoke column rising cleanly from the engine bay.
-      if (Math.random() < dt * 22) {
-        const grey = rnd(0.24, 0.38)
-        puff(hood, 0.55, rnd(0.8, 2.2), rnd(9, 16), { size: rnd(0.75, 1.15), grow: rnd(2.0, 3.2), life: rnd(1.5, 2.3), heat: 0, cool: 0, rise: 17, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.36, late: -0.06 })
+      // Pale warm-grey steam escaping cleanly off the buckled hood crest (no dark decal on the paint).
+      if (Math.random() < dt * 15) {
+        const wisp = rnd(0.56, 0.70)
+        puff(seam, 0.85, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.65, 1.0), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.20, late: 0.0 })
       }
-      if (Math.random() < dt * 11) {
-        const wisp = rnd(0.58, 0.74)
-        puff(hood, 0.5, rnd(0.7, 2.0), rnd(8, 14), { size: rnd(0.60, 0.95), grow: rnd(1.6, 2.6), life: rnd(1.0, 1.6), heat: 0, cool: 0, rise: 15, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.24, late: -0.06 })
+      // Warm-charcoal engine smoke (clearly damaged-engine smoke rather than a pitch-black oil fire)
+      // fading in softly off the hood crest and keeping the right driving lane readable from the seat.
+      if (Math.random() < dt * 16) {
+        const grey = rnd(0.34, 0.48)
+        puff(seam, 0.85, rnd(0.8, 2.1), rnd(11, 17), { size: rnd(0.85, 1.25), grow: rnd(2.4, 3.6), life: rnd(1.6, 2.4), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.24, late: 0.03 })
       }
-      // Burning: tongues of flame in the smoke, compact right at the hood seam.
-      if (level > 0.92 && Math.random() < dt * 12) puff(hood, 0.7, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.95, 1.7), grow: rnd(0.8, 1.8), life: rnd(0.28, 0.55), heat: 0.72, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.25, late: -0.06 })
+      // Burning: compact flickering orange tongues at the hood seam.
+      if (level > 0.92 && Math.random() < dt * 12) puff(seam, 0.8, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.95, 1.7), grow: rnd(0.8, 1.8), life: rnd(0.28, 0.55), heat: 0.72, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.22, late: 0.0 })
     },
     step(dt) {
       live = 0
