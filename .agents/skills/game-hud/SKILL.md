@@ -5,7 +5,7 @@ description: Rules for the controls laid over a game's picture while someone pla
 
 # Game HUD
 
-Version 6, 2026-11-26 (#75: the Make bar dismissible, no Back or Seat key over play, Settings in sections, the first view slim; version 5 the slim Voxelmorphism v1 in-play HUD; version 3 2026-11-24 the pie wheel; version 2 2026-11-22 for #450, version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
+Version 7, 2026-11-27 (#140: touch driving schemes; version 6, 2026-11-26, #75: the Make bar dismissible, no Back or Seat key over play, Settings in sections, the first view slim; version 5 the slim Voxelmorphism v1 in-play HUD; version 3 2026-11-24 the pie wheel; version 2 2026-11-22 for #450, version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
 browser, on a desk (keyboard and mouse, pointer lock) and on a phone (touch, upright and on its side). It does not
 cover menus (the Sky panel open is one: what it covers is measured and said, not failed), the first view or the
 kit's own look (`engine/kit/SPEC.md`, `DESIGN.md`).
@@ -25,9 +25,22 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
 - **On-foot bottom-left utility slot (`[data-panel="summon"] .vx-button` / `.foot-summon`):** `44×44` slim voxel key
   sitting at `left: safe + 66px, bottom: safe + 14px` beside `✦` Make (`SLIM_ICONS.car`), auto-hiding while steering,
   riding, choosing a tool, or with a drawer/composer open.
-- **Driving two-zone slim voxel HUD (`html.driving [data-panel="living"]`):** ergonomic GTA Definitive Edition & CarX Street split, pure icon-only (no text labels) with pointer-captured multi-touch:
-  - **Bottom-right driving pad (`.drive-pedals`):** only 4 driving controls — tall `Gas` pedal (`56×76` portrait / `60×80` landscape) on the right edge, shorter `Brake/Rev` pedal (`50×56` / `54×58`) beside it, cobalt primary `Drift` (`56×46` / `60×48`) above Gas, and `Boost` (`50×46` / `54×48`) above Brake (`114px` wide on `390px` portrait phones, leaving `34px` >= `28px` clearance to bottom-left `216×200` `[data-panel="radio-yt"]`). While Gas or Brake is held, the left thumbstick steers horizontally without accidental throttle drop-out; when neither pedal is held, left-stick vertical remains a one-handed fallback.
-  - **Top-right utility rail (`.drive-util`):** quiet `44×44` icon-only keys (`Horn`, `Radio`, `Cam`, `Get off` — no `Seat` key since Cam cycles through seat, #74) tucked beside Settings (`⚙`) in landscape or cleanly below `drive-hud` & `⚙` in portrait. `Repair` stays hidden while undamaged (Rule 8) and appears below `⚙` (landscape) / `Exit` (portrait) only when the car takes damage.
+- **Touch driving schemes (#140, `engine/page/drive-touch.ts`, `.dt-cluster` in `[data-panel="living"]`):** one way to
+  steer and one way to drive, never two at once (#75's stick steered and, with no pedal held, drove too). The left half of
+  the picture turns the head while driving (`input.stickSide = null`), except with Slide, where it is a slide that steers
+  across only. Settings → `Controls…` (touch only) opens the sheet (`#drive-controls`): Steer with Arrows (default) /
+  Wheel / Slide / Tilt, Gas Pedals (default) / Auto, Pedals on the Right (default) / Left, Key size, Key opacity, Steering
+  sensitivity, Center tilt. `layout()` places every key from the bottom corners: the main pedal tall at the edge
+  (`80×108` at Medium on its side), Boost above it, Brake and Drift beside it; arrows `84×84`; the wheel a `150` px
+  hollow voxel ring (`.vx-recess[data-vx-ring]`) with a stick cap on its rim. Keys shrink to fit: the clusters stay
+  `>= 24px` apart, the driving cluster stays in the lower half, no key goes under 44 px (`test/drive-touch.mjs` checks
+  every scheme, hand and size on four phone screens). A cluster is one pad: a thumb sliding from key to key holds the
+  key it is on. Everything is let go on touch end or cancel, blur, the page hidden, or anything opened over the keys.
+- **Top-right utility rail (`.drive-util`):** quiet `44×44` icon-only keys (`Horn`, `Radio`, `Cam`, `Get off`, no `Seat`
+  key since Cam cycles through seat, #74) beside Settings (`⚙`) on its side, below `drive-hud` and `⚙` upright. `Repair`
+  stays hidden while undamaged (Rule 8) and appears below them only when the car takes damage.
+- **YouTube mini-player (`[data-panel="radio-yt"]`) by touch:** the bottom corners are the thumbs', so it stands at the
+  top left (over the minimap on its side, below it upright). `sf-hud.mjs` counts it among the controls that must not meet.
 
 **Direction (owner, November 26, #75):** the Make bar opened must always have a way out by touch: a × key before the
 line, a press anywhere on the picture (its click is swallowed, so it does nothing else), or Escape; each gives the keys

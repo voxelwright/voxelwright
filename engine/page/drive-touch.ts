@@ -138,12 +138,12 @@ export function wheelSteer(turn: number, sens: number): number {
 export interface Placed { act: string; x: number; y: number; w: number; h: number; side: 'left' | 'right' }
 
 /**
- * Where each key stands for a scheme, a hand and a screen `width` px wide (before the safe area and the 14 px margin,
- * which CSS adds). The steering thumb's keys are on one side, the driving thumb's on the other. Upright, the keys are a
- * little smaller; on any screen they shrink until the two thumbs' clusters are 24 px apart or more (allowing an iPhone's
- * 59 px safe area at each side when it is on its side), and no key is under 44 px a side.
+ * Where each key stands for a scheme, a hand and a screen (before the safe area and the 14 px margin, which CSS adds).
+ * The steering thumb's keys are on one side, the driving thumb's on the other. Upright, the keys are a little smaller;
+ * on any screen they shrink until the two thumbs' clusters are 24 px apart or more (allowing an iPhone's 59 px safe area
+ * at each side when it is on its side) and the driving cluster is in the lower half, and no key is under 44 px a side.
  */
-export function layout(s: DriveTouchSettings, steer: Steer, view: { width: number; portrait: boolean }, tiltAsk = false): Placed[] {
+export function layout(s: DriveTouchSettings, steer: Steer, view: { width: number; height: number; portrait: boolean }, tiltAsk = false): Placed[] {
   const brakeAcross = s.gas === 'pedals' && steer === 'tilt'
   const widths = (k: number) => {
     const gap = 10 * k, pedals = 80 * k + gap + 74 * k
@@ -153,6 +153,9 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
   const room = view.width - 28 - (view.portrait ? 0 : 118) - 24
   let k = s.size * (view.portrait ? 0.84 : 1)
   if (widths(k) > room) k *= room / widths(k)
+  // And low: the driving thumb's cluster (main pedal, a gap, boost) within the lower half, allowing 35 px of safe area and margin.
+  const tall = (108 + 10 + 56) * k, low = view.height / 2 - 35 - 4
+  if (tall > low) k *= low / tall
   const px = (v: number) => Math.max(44, Math.round(v * k))
   const gap = Math.round(10 * k)
   const drive: 'left' | 'right' = s.hand, steerSide: 'left' | 'right' = s.hand === 'right' ? 'left' : 'right'
@@ -208,23 +211,26 @@ html.thumb-down [data-panel="living"] .dt-cluster .dt-ghost { opacity: 0; }
 #drive-controls::backdrop { background: rgba(4, 6, 10, 0.18); }
 #drive-controls[open] { display: grid; }
 #drive-controls * { box-sizing: border-box; }
-#drive-controls .dc-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 10px 10px 16px; background: rgba(14, 18, 26, 0.96); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
-#drive-controls h2 { margin: 0; font: 700 15px/1.1 -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
-#drive-controls .dc-close { inline-size: 44px; block-size: 44px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: inherit; font: 500 22px/1 -apple-system, system-ui, sans-serif; }
-#drive-controls .dc-body { display: grid; gap: 12px; padding: 12px 16px 16px; }
+#drive-controls [hidden] { display: none !important; }
+#drive-controls .dc-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 16px; background: rgba(14, 18, 26, 0.96); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+#drive-controls h2 { margin: 0 auto 0 0; font: 700 15px/1.1 -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
+#drive-controls .dc-head button { min-inline-size: 44px; block-size: 44px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: inherit; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
+#drive-controls .dc-head .dc-done { background: rgba(56, 120, 255, 0.34); border-color: rgba(120, 170, 255, 0.85); }
+#drive-controls .dc-body { display: grid; gap: 10px; padding: 10px 16px 14px; }
 #drive-controls .dc-row { display: grid; gap: 6px; }
 #drive-controls .dc-row > .dc-name { font: 600 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(232, 236, 241, 0.62); }
 #drive-controls .dc-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
-#drive-controls .dc-seg label { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-block-size: 48px; padding: 6px 4px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); border: 1.5px solid rgba(255, 255, 255, 0.1); text-align: center; font: 600 13px/1.1 -apple-system, system-ui, sans-serif; cursor: pointer; }
+#drive-controls .dc-seg label { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-block-size: 44px; padding: 4px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); border: 1.5px solid rgba(255, 255, 255, 0.1); text-align: center; font: 600 13px/1.1 -apple-system, system-ui, sans-serif; cursor: pointer; }
 #drive-controls .dc-seg label small { font: 500 10.5px/1.15 -apple-system, system-ui, sans-serif; color: rgba(232, 236, 241, 0.6); }
 #drive-controls .dc-seg input { position: absolute; opacity: 0; pointer-events: none; }
 #drive-controls .dc-seg label:has(input:checked) { background: rgba(56, 120, 255, 0.28); border-color: rgba(120, 170, 255, 0.85); }
 #drive-controls .dc-seg label:has(input:disabled) { opacity: 0.4; }
 #drive-controls .dc-seg label:has(input:focus-visible) { outline: 2px solid #8fb6ff; outline-offset: 2px; }
-#drive-controls input[type="range"] { inline-size: 100%; block-size: 32px; accent-color: #5b8cff; }
+#drive-controls input[type="range"] { inline-size: 100%; block-size: 44px; margin: -6px 0; accent-color: #5b8cff; }
 #drive-controls .dc-note { margin: 0; min-block-size: 1.35em; color: rgba(232, 236, 241, 0.74); font-size: 12px; }
 #drive-controls .dc-note[data-tone="warn"] { color: #ffc46b; }
 #drive-controls .dc-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+#drive-controls .dc-tilt { grid-template-columns: 1fr auto; align-items: center; }
 #drive-controls .dc-acts button { flex: 1 1 auto; min-block-size: 44px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: inherit; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
 #drive-controls .dc-acts button:disabled { opacity: 0.4; }
 @media (orientation: landscape) and (max-height: 500px) {
@@ -407,7 +413,7 @@ export function driveTouch(o: {
     const tiltAsk = settings.steer === 'tilt' && tilt === 'ask'
     const c = Object.assign(document.createElement('div'), { className: 'dt-cluster' })
     c.style.setProperty('--dt-alpha', String(settings.opacity))
-    for (const p of layout(settings, steer, { width: innerWidth, portrait: portrait.matches }, tiltAsk)) {
+    for (const p of layout(settings, steer, { width: innerWidth, height: innerHeight, portrait: portrait.matches }, tiltAsk)) {
       let el: HTMLElement
       if (p.act === 'wheel') {
         el = Object.assign(document.createElement('div'), { className: 'vx-recess dt-wheel' })
@@ -498,6 +504,7 @@ export function driveTouch(o: {
 
   // Laid out again: when the scheme, the hand, the size or the orientation changes, or tilt comes or goes.
   const relay = () => {
+    if (sheet?.open) fill()
     if (!shown || !cluster) return
     releaseAll()
     const old = cluster
@@ -541,16 +548,15 @@ export function driveTouch(o: {
     const d = document.createElement('dialog')
     d.id = 'drive-controls'
     d.setAttribute('aria-labelledby', 'dc-title')
-    d.innerHTML = `<div class="dc-head"><h2 id="dc-title">Driving controls</h2><button class="dc-close" type="button" aria-label="Close">×</button></div>
+    d.innerHTML = `<div class="dc-head"><h2 id="dc-title">Driving controls</h2><button class="dc-reset" type="button">Reset</button><button class="dc-done" type="button">Done</button></div>
 <div class="dc-body">
 ${seg('steer', 'Steer with', [['arrows', 'Arrows', 'left & right'], ['wheel', 'Wheel', 'turn it'], ['slide', 'Slide', 'thumb across'], ['tilt', 'Tilt', 'turn the phone']])}
+<div class="dc-row dc-tilt wide"><p class="dc-note" role="status"></p><div class="dc-acts"><button class="dc-center" type="button">Center tilt</button></div></div>
 ${seg('gas', 'Gas', [['pedals', 'Pedals', 'gas & brake'], ['auto', 'Auto', 'brake only']])}
 ${seg('hand', 'Pedals on the', [['right', 'Right'], ['left', 'Left']])}
 ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']])}
-<div class="dc-row dc-sens"><label class="dc-name" for="dc-sens">Steering sensitivity</label><input id="dc-sens" name="dc-sens" type="range" min="50" max="200" step="5"></div>
 <div class="dc-row"><label class="dc-name" for="dc-opacity">Key opacity</label><input id="dc-opacity" name="dc-opacity" type="range" min="30" max="100" step="5"></div>
-<div class="dc-row dc-tilt wide"><p class="dc-note" role="status"></p><div class="dc-acts"><button class="dc-center" type="button">Center tilt</button></div></div>
-<div class="dc-row wide"><div class="dc-acts"><button class="dc-reset" type="button">Reset to default</button><button class="dc-done" type="button">Done</button></div></div>
+<div class="dc-row dc-sens"><label class="dc-name" for="dc-sens">Steering sensitivity</label><input id="dc-sens" name="dc-sens" type="range" min="50" max="200" step="5"></div>
 </div>`
     document.body.append(d)
     d.addEventListener('change', (e) => {
@@ -572,7 +578,6 @@ ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']]
       if (t.name === 'dc-opacity') { settings = parseSettings({ ...settings, opacity: Number(t.value) / 100 }); save(); cluster?.style.setProperty('--dt-alpha', String(settings.opacity)) }
       if (t.name === 'dc-sens') { settings = parseSettings({ ...settings, sens: Number(t.value) / 100 }); save() }
     })
-    d.querySelector('.dc-close')!.addEventListener('click', () => d.close())
     d.querySelector('.dc-done')!.addEventListener('click', () => d.close())
     d.querySelector('.dc-center')!.addEventListener('click', () => { if (tilt === 'live') { set({ tiltZero: clamp(tiltTurn, -0.6, 0.6) }); fill() } })
     d.querySelector('.dc-reset')!.addEventListener('click', () => { set({ ...DEFAULTS }); fill() })

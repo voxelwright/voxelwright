@@ -523,7 +523,8 @@
   },
   "guide/gameplay.md": {
     "engine/page/keys.ts": "lines:^Key[A-Z]: '|^export const (OWN|YIELDED|FREE)",
-    "engine/page/living.ts": "lines:^const (LEAVE|GO|TURN|DRIFT|RISE): Binding|^(drive|fly|hover|ride): \\{ name|^const headlightLevel|^const cycleLights|^const extraRows|^const boostAsk|button\\('(drift|boost)'",
+    "engine/page/living.ts": "lines:^const (LEAVE|GO|TURN|DRIFT|RISE): Binding|^(drive|fly|hover|ride): \\{ name|^const headlightLevel|^const cycleLights|^const extraRows|^const boostAsk",
+    "engine/page/drive-touch.ts": "lines:^export const (DEFAULTS|TILT_LOCK|WHEEL_LOCK)|^export type (Steer|Gas)|^const KEY =",
     "engine/page/drive-cam.ts": "lines:^export const DRIVE_CAM_MODES",
     "engine/page/stunts.ts": "lines:^const [A-Z_]+ = |^export type StuntKind",
     "engine/page/tracks.ts": "lines:^const (MAX_SEGS|MAX_SPILLS|LIFE) =",

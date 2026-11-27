@@ -43,11 +43,12 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Set what is ahead alight | F | - | - |
 | Take the wand | Q | Wand on the wheel | - |
 | **Driving** | | | |
-| Throttle, brake and reverse | W, S | Gas & Brake pedals (bottom-right), or left half forward/back one-handed | RT, LT (analog) |
-| Steer | A, D | Left half (side to side; pure steering while pedals are held) | Left stick |
-| Drift (handbrake) | Hold Space | Hold Drift (above Gas) | A / Cross (analog) |
-| Boost | Hold Shift | Hold Boost (above Brake) | B / Circle |
+| Throttle, brake and reverse | W, S | Gas and Brake (under the right thumb), or Brake alone with auto gas ([touch schemes](#touch-driving)) | RT, LT (analog) |
+| Steer | A, D | Arrows (the default), a wheel, a slide or tilting the phone, under the left thumb ([touch schemes](#touch-driving)) | Left stick |
+| Drift (handbrake) | Hold Space | Hold Drift (beside Gas) | A / Cross (analog) |
+| Boost | Hold Shift | Hold Boost (above Gas) | B / Circle |
 | Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Gas and Drift at a standstill, then let go of Drift | RT and A, then let go of A |
+| Change how touch drives | - | Settings, Controls… | - |
 | Next camera (the seat among them) | C | Cam (top-right utility rail) | RB or D-pad down |
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
@@ -232,7 +233,26 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
-**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for a two-zone icon-only layout: four pointer-captured driving controls sit under the right thumb (tall Gas pedal, Brake/Reverse pedal, Drift and Boost — dedicating the left stick to smooth horizontal steering while pedals are pressed), while quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for the touch driving scheme (below): the steering under one thumb and the pedals under the other. Quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+
+### Touch driving
+
+`engine/page/drive-touch.ts` owns how a phone drives a car. A scheme is one way of steering and one way of driving, never two at once: the left half of the picture turns the head while you drive, and never drives. Settings → **Controls…** (by touch only) opens a sheet that sets the scheme, and the keys behind it change as you choose:
+
+| Setting | Choices | Default |
+| --- | --- | --- |
+| Steer with | **Arrows**: Left and Right under the steering thumb. **Wheel**: a ring turned round its middle, which comes back to the middle when let go. **Slide**: a slide that comes where the thumb goes down on its half of the picture, across only. **Tilt**: turn the phone like a wheel. | Arrows |
+| Gas | **Pedals**: Gas and Brake. **Auto**: the car drives itself forward once a key or the picture is first touched; Brake slows it, and held at a stop backs up. | Pedals |
+| Pedals on the | Right or Left (the steering goes to the other side) | Right |
+| Key size | Small, Medium, Large. The keys also shrink to fit the screen: the two clusters stay 24 px apart, the driving cluster stays in the lower half, and no key is under 44 px. | Medium |
+| Key opacity | 30% to 100% | 82% |
+| Steering sensitivity | 50% to 200%, for Wheel, Slide and Tilt. At 100% full lock is 110 degrees of the wheel (`WHEEL_LOCK`) or 24 degrees of tilt (`TILT_LOCK`). | 100% |
+
+The driving cluster has the main pedal tall at the edge (Gas, or Brake with auto gas), Boost above it, and Brake and Drift beside it. With Tilt and Pedals, Brake moves under the other thumb, so each thumb has a pedal. The keys of a cluster work as one pad. A thumb that slides from one key to the next lets go of the first and holds the second without lifting, so you can rock between Left and Right or Gas and Brake. Every key is let go when its touch ends or is cancelled, the page is hidden or loses focus, or Settings, the map, the radio, the ask bar or the sheet opens over the keys. Auto gas stops then too, and waits for the next touch. While it waits, the driving panel says `Auto gas · touch to go`.
+
+**Tilt** reads the phone's angles (`deviceorientation`) only while it is the scheme and you are driving. It works out which way is up on the screen, so it works upright and on either side, and with the phone held up or leaned back. Lying flat, the steering lets go. Center tilt in the sheet makes how you hold the phone straight ahead. Where the browser asks before a page may read the sensor (Safari on iOS), the first touch after getting in asks, and until then a **Tap to steer by tilt** key stands over the arrows, which steer meanwhile. If access is refused, the device has no sensor, or the page is not served over https, the arrows steer and the sheet says why.
+
+The settings are kept in this browser (`localStorage`, `vw.drive-touch.v1`). Anything kept that is out of range is brought back in range, and anything unknown is the default. Desktop keys and a pad drive as before, and their axes add to the touch keys'.
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 
