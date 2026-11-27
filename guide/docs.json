@@ -21,7 +21,7 @@
       { "group": "Play", "pages": ["gameplay", "sound"] },
       {
         "group": "World and engine",
-        "pages": ["engine", "engine-core", "engine-page", "cells", "city-pipeline", "sf-release", "making", "living", "engine-plugins", "render-passes", "plugin-types"]
+        "pages": ["engine", "engine-core", "engine-page", "cells", "city-pipeline", "sf-release", "making", "living", "engine-plugins", "render-passes", "plugin-types", "studio"]
       },
       { "group": "Look", "pages": ["kit", "blocks-and-fonts"] },
       { "group": "Servers and the web", "pages": ["multiplayer", "master", "hosting", "deploy", "site"] },
