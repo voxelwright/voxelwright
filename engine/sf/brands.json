@@ -80,6 +80,51 @@
       "style": { "bg": "#2b1c12", "ink": "#f6ead6", "accent": "#d98c3f", "trim": "#1a110b", "font": "retro", "glow": true }
     },
     {
+      "id": "carbon-health",
+      "match": ["carbon health", "carbon health urgent care", "carbon health urgent primary care"],
+      "parody": "Carbonic Health",
+      "short": "CARBONIC HEALTH",
+      "tagline": "URGENT CARE",
+      "category": "urgent_care",
+      "style": { "bg": "#0e4d5c", "ink": "#ffffff", "accent": "#ff5a5f", "trim": "#072d36", "font": "clean", "glow": true }
+    },
+    {
+      "id": "gohealth",
+      "match": ["gohealth", "gohealth urgent care", "ucsf health gohealth", "dignity health gohealth"],
+      "parody": "GoWell Urgent Care",
+      "short": "GOWELL",
+      "tagline": "URGENT CARE",
+      "category": "urgent_care",
+      "style": { "bg": "#0d4a8a", "ink": "#ffffff", "accent": "#38d9a9", "trim": "#072d54", "font": "clean", "glow": true }
+    },
+    {
+      "id": "sutter-urgent-care",
+      "match": ["sutter urgent care", "sutter walk-in care", "sutter walk in care"],
+      "parody": "Sutter QuickCare",
+      "short": "SUTTER QUICKCARE",
+      "tagline": "URGENT CARE",
+      "category": "urgent_care",
+      "style": { "bg": "#006d77", "ink": "#ffffff", "accent": "#ffd166", "trim": "#00444a", "font": "clean", "glow": true }
+    },
+    {
+      "id": "concentra",
+      "match": ["concentra", "concentra urgent care"],
+      "parody": "Con-Centric Care",
+      "short": "CON-CENTRIC",
+      "tagline": "URGENT CARE",
+      "category": "urgent_care",
+      "style": { "bg": "#143d6b", "ink": "#ffffff", "accent": "#ff6b35", "trim": "#0a2340", "font": "bold", "glow": true }
+    },
+    {
+      "id": "minuteclinic",
+      "match": ["minuteclinic", "minute clinic"],
+      "parody": "SecondClinic",
+      "short": "SECONDCLINIC",
+      "tagline": "WALK-IN CARE",
+      "category": "urgent_care",
+      "style": { "bg": "#c8102e", "ink": "#ffffff", "accent": "#ffd4d4", "trim": "#850016", "font": "bold", "glow": true }
+    },
+    {
       "id": "walgreens",
       "match": ["walgreens", "walgreens pharmacy"],
       "parody": "Wallgreens",
@@ -599,6 +644,7 @@
     "grocery":      { "label": "MARKET",         "bg": "#275736", "ink": "#faf6e8", "accent": "#f0b43c", "trim": "#183822", "font": "bold",  "glow": true,  "blade": true,  "prop": "grocery" },
     "corner_store": { "label": "CORNER MARKET",  "bg": "#1f4e68", "ink": "#fff7df", "accent": "#f5a524", "trim": "#123040", "font": "bold",  "glow": true,  "blade": true,  "prop": "grocery" },
     "pharmacy":     { "label": "PHARMACY",       "bg": "#174b7a", "ink": "#ffffff", "accent": "#76d1a4", "trim": "#0e2f4d", "font": "clean", "glow": true,  "blade": false, "prop": "none" },
+    "urgent_care":  { "label": "URGENT CARE",    "bg": "#0e5a6d", "ink": "#ffffff", "accent": "#ff5a5f", "trim": "#083844", "font": "clean", "glow": true,  "blade": true,  "prop": "aframe" },
     "bank":         { "label": "BANK",           "bg": "#182d4a", "ink": "#f4f6fa", "accent": "#c8a85a", "trim": "#0e1c2e", "font": "clean", "glow": false, "blade": false, "prop": "none" },
     "hardware":     { "label": "HARDWARE",       "bg": "#9e251b", "ink": "#fff5e6", "accent": "#e3b34c", "trim": "#631610", "font": "bold",  "glow": false, "blade": true,  "prop": "aframe" },
     "boutique":     { "label": "SHOP",           "bg": "#f3efe6", "ink": "#222428", "accent": "#b07d52", "trim": "#c9c1b2", "font": "clean", "glow": false, "blade": true,  "prop": "planter" },

@@ -177,6 +177,48 @@ try {
   check(!!wsPlaza && wsPlaza.roadPropHits === 0, `Washington Square has zero props on asphalt road (hits=${wsPlaza?.roadPropHits})`)
   await shot('07-north-beach-washington-sq')
 
+  // 8. Urgent care clinic check (#135): Market & Buchanan (1998 Market St -> Carbon Health / CARBONIC HEALTH)
+  // Stand just 10 m southeast of the 1998 Market St facade (clear of Market St center streetcar tracks)
+  await moveTo({ x: 50529.5, y: 0, z: 69578.0, yaw: -0.78, pitch: 0.08, fov: 65, hour: 16.0, aboveGround: 2.2 })
+  const ucStats = await page.evaluate(() => {
+    const e = globalThis.engine
+    const near = e.neighborhood.near(50522, 69570, 60)
+    const clinic = near.shops.find((s) => s.category === 'urgent_care') ?? null
+    if (clinic) {
+      e.pose.yaw = Math.atan2(clinic.x - e.pose.x, -(clinic.z - e.pose.z))
+      e.pose.pitch = 0.06
+    }
+    const gY = Math.round(e.ground(50524.2, 69572.2) * 10)
+    let stubVoxels = 0
+    for (let x = 505240; x <= 505249; x += 2) {
+      for (let z = 695720; z <= 695729; z += 2) {
+        for (let y = gY + 4; y <= gY + 38; y += 3) {
+          if (e.kind(x, y, z) !== 0) stubVoxels++
+        }
+      }
+    }
+    let spilloverVoxels = 0
+    for (let y = gY + 120; y <= gY + 265; y += 5) {
+      if (e.kind(505262, y, 695672) !== 0) spilloverVoxels++
+    }
+    return {
+      clinic,
+      signs: e.neighborhood.visibleSigns().filter((s) => s.category === 'urgent_care'),
+      insp: e.neighborhood.inspect().shops.find((s) => s.brandId === 'carbon-health') ?? null,
+      stubVoxels,
+      spilloverVoxels,
+    }
+  })
+  await page.waitForTimeout(800)
+  report.marketBuchananUrgentCare = ucStats
+  console.log('Market & Buchanan urgent care:', JSON.stringify(ucStats))
+  check(!!ucStats.clinic && ucStats.clinic.brandId === 'carbon-health', `Market & Buchanan urgent care loaded (${ucStats.clinic?.name})`)
+  check(ucStats.signs.length >= 1, `Market & Buchanan urgent care sign active (${ucStats.signs.map((s) => `${s.kind}:${s.title}`).join(', ')})`)
+  check(!!ucStats.insp && ucStats.insp.signYM >= ucStats.insp.groundM + 2.8 && ucStats.insp.roadPropHits === 0, `Market & Buchanan urgent care mounted cleanly above ground with zero road props`)
+  check(ucStats.stubVoxels === 0, `Market & Buchanan sidewalk in front of urgent care has zero jagged canopy stub voxels (got ${ucStats.stubVoxels})`)
+  check(ucStats.spilloverVoxels === 0, `Market & Buchanan adjacent facade has zero phantom 26 m canopy spillover voxels (got ${ucStats.spilloverVoxels})`)
+  await shot('08-market-buchanan-urgent-care')
+
   check(errors.length === 0, `zero page/console errors (${errors.length}${errors.length ? ': ' + errors[0] : ''})`)
   if (shotsDir) writeFileSync(join(shotsDir, 'report.json'), JSON.stringify(report, null, 2))
 } finally {

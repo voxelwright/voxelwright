@@ -90,3 +90,40 @@ class RoadFixtures(unittest.TestCase):
         self.assertGreaterEqual(hyd_bodies[0][0], 220)
         self.assertEqual(stats["roadFixturesSnapped"], 2)
         self.assertEqual(stats["roadFixturesDropped"], 1)
+
+
+class CanopyCleanup(unittest.TestCase):
+    def test_sidewalk_stubs_and_roof_spillover_spikes_are_cleaned(self):
+        import numpy as np
+        from bake import clean_canopy_grid
+
+        canopy = np.zeros((32, 32), dtype=bool)
+        over = np.zeros((32, 32), dtype=np.float32)
+        street = np.ones((32, 32), dtype=bool)
+
+        # 2x2 sidewalk canopy stub (2.7..3.5 m) -> must be dropped
+        canopy[4:6, 4:6] = True
+        over[4:6, 4:6] = [[2.7, 2.8], [2.9, 3.5]]
+        # 5-cell building-wall spillover (26.2 m) next to a real 6.2 m street tree -> spike dropped, tree kept
+        canopy[10:12, 10:12] = True
+        over[10:12, 10:12] = 26.2
+        canopy[12, 10] = True
+        over[12, 10] = 10.2
+        canopy[10:15, 14:20] = True
+        over[10:15, 14:20] = 4.8
+        over[12, 17] = 6.2
+        # Attached 1-cell 25 m roof spillover touching the real tree -> clamped back to tree height
+        canopy[10, 14] = True
+        over[10, 14] = 25.0
+        # Low 1.2 m yard bush off street -> must stay
+        street[22:28, 22:28] = False
+        canopy[24:26, 24:26] = True
+        over[24:26, 24:26] = 1.2
+
+        clean_c, clean_o = clean_canopy_grid(canopy, over, street)
+        self.assertFalse(clean_c[4:6, 4:6].any())
+        self.assertFalse(clean_c[10:12, 10:12].any())
+        self.assertTrue(clean_c[10:15, 14:20].all())
+        self.assertAlmostEqual(float(clean_o[10, 14]), 4.8, places=1)
+        self.assertAlmostEqual(float(clean_o[12, 17]), 6.2, places=1)
+        self.assertTrue(clean_c[24:26, 24:26].all())

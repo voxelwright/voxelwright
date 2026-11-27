@@ -262,6 +262,17 @@ function drawBadge(pen: OffscreenCanvasRenderingContext2D, category: string, x: 
       pen.stroke()
       break
     }
+    case 'urgent_care': {
+      // Crisp medical cross emblem inside a subtle ring
+      pen.beginPath()
+      pen.arc(0, 0, r * 0.84, 0, Math.PI * 2)
+      pen.stroke()
+      const arm = r * 0.54
+      const thick = r * 0.28
+      pen.fillRect(-thick * 0.5, -arm, thick, arm * 2)
+      pen.fillRect(-arm, -thick * 0.5, arm * 2, thick)
+      break
+    }
     case 'plaza': {
       // Stylized redwood / civic tree emblem
       pen.beginPath()
@@ -358,7 +369,7 @@ function paintSign(pen: OffscreenCanvasRenderingContext2D, spec: SignSpec) {
     }
   }
 
-  const hasBadge = spec.kind === 'plaza' || ['pizza', 'burger', 'coffee', 'ice_cream', 'books', 'florist', 'supermarket', 'grocery', 'corner_store', 'market'].includes(spec.category)
+  const hasBadge = spec.kind === 'plaza' || ['pizza', 'burger', 'coffee', 'ice_cream', 'books', 'florist', 'supermarket', 'grocery', 'corner_store', 'market', 'urgent_care'].includes(spec.category)
   if (hasBadge) {
     drawBadge(pen, spec.kind === 'plaza' ? 'plaza' : spec.category, 56, H * 0.5, 24, accent)
     if (spec.kind === 'plaza') drawBadge(pen, 'plaza', W - 56, H * 0.5, 24, accent)

@@ -412,6 +412,7 @@ fn read(b: &[u8]) -> Option<Pack> {
     }
     let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     despike_roofs(&mut p.top, &p.class, tw, p.tstep);
+    clean_canopy(&mut p);
     repair_building_roofs(&mut p);
     // Which buildings and trunks reach into each patch.
     p.pw = (wide >> PATCH) + 1;
@@ -620,6 +621,215 @@ fn despike_roofs(top: &mut [i16], class: &[u8], tw: usize, tstep: i32) {
             }
         }
     }
+}
+
+/// Clean L0 (`tstep == 5`, 0.5 m) sidewalk canopy stubs, building-wall lidar spillover spikes,
+/// and phantom trunks that stole a street tree's real trunk.
+/// - Drops tiny isolated canopy stubs (`<= 6` 4-connected cells, `<= 1.5 m^2`) that rise `>= 1.8 m`
+///   above ground or sit on street/pavement/road, while keeping low yard bushes (`< 1.8 m`).
+/// - Despikes narrow canopy cells jumping `> 4.5 m` above their 5x5 canopy neighborhood.
+/// - Drops phantom trunks whose recorded height no longer matches the cleaned canopy, and restores
+///   a grounded trunk at the crown peak of any large tree (`>= 9` cells, `>= 2.8 m` tall) left trunkless.
+fn clean_canopy(p: &mut Pack) {
+    if p.tstep != 5 || p.tw < 5 {
+        return;
+    }
+    let tw = p.tw as usize;
+    let n = tw * tw;
+    let is_real_canopy = |cls: u8, t: i16| {
+        t != NONE && cls & CANOPY != 0 && matches!(cls & 7, ROAD | PAVEMENT | GRASS_HERE)
+    };
+    let cell_ground = |p: &Pack, i: usize, j: usize| -> i32 {
+        let x = p.tx0 + i as i32 * p.tstep + 2;
+        let z = p.tz0 + j as i32 * p.tstep + 2;
+        p.ground(x, z)
+    };
+
+    // Pass 1: connected components of canopy cells; drop tiny tall/street stubs and record real crowns.
+    let mut visited = vec![0u8; n];
+    let mut queue: Vec<usize> = Vec::new();
+    let mut large_comps: Vec<Vec<usize>> = Vec::new();
+    for j in 0..tw {
+        for i in 0..tw {
+            let start = j * tw + i;
+            if visited[start] != 0 || !is_real_canopy(p.class[start], p.top[start]) {
+                continue;
+            }
+            visited[start] = 1;
+            queue.clear();
+            queue.push(start);
+            let mut head = 0usize;
+            while head < queue.len() {
+                let k = queue[head];
+                head += 1;
+                let (cy, cx) = (k / tw, k % tw);
+                if cx > 0 {
+                    let nk = k - 1;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+                if cx + 1 < tw {
+                    let nk = k + 1;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+                if cy > 0 {
+                    let nk = k - tw;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+                if cy + 1 < tw {
+                    let nk = k + tw;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+            }
+            if queue.len() <= 6 {
+                let mut max_tall = i32::MIN;
+                let mut on_street = false;
+                for &k in &queue {
+                    let (cy, cx) = (k / tw, k % tw);
+                    let tall = p.top[k] as i32 - cell_ground(p, cx, cy);
+                    max_tall = max_tall.max(tall);
+                    if matches!(p.class[k] & 7, ROAD | PAVEMENT) {
+                        on_street = true;
+                    }
+                }
+                if max_tall >= 18 || on_street {
+                    for &k in &queue {
+                        p.class[k] &= !CANOPY;
+                        p.top[k] = NONE;
+                    }
+                }
+            } else if queue.len() >= 9 {
+                large_comps.push(queue.clone());
+            }
+        }
+    }
+
+    // Pass 2: despike narrow canopy height spikes (> 4.5 m above 5x5 canopy neighbors with < 6 peers).
+    let orig_top = p.top.clone();
+    let orig_cls = p.class.clone();
+    for j in 0..tw {
+        for i in 0..tw {
+            let k = j * tw + i;
+            if !is_real_canopy(orig_cls[k], orig_top[k]) {
+                continue;
+            }
+            let t0 = orig_top[k] as i32;
+            let mut peers = 0usize;
+            let mut lower = [0i16; 25];
+            let mut lower_n = 0usize;
+            for ny in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                let row = ny * tw;
+                for nx in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let nk = row + nx;
+                    if !is_real_canopy(orig_cls[nk], orig_top[nk]) {
+                        continue;
+                    }
+                    let nt = orig_top[nk] as i32;
+                    if nt >= t0 - 45 {
+                        peers += 1;
+                    } else if lower_n < lower.len() {
+                        lower[lower_n] = orig_top[nk];
+                        lower_n += 1;
+                    }
+                }
+            }
+            if peers < 6 {
+                if lower_n >= 3 {
+                    lower[..lower_n].sort_unstable();
+                    p.top[k] = lower[lower_n / 2];
+                } else if t0 - cell_ground(p, i, j) > 60 {
+                    p.class[k] &= !CANOPY;
+                    p.top[k] = NONE;
+                }
+            }
+        }
+    }
+
+    // Pass 3: drop phantom trunks disconnected from cleaned canopy, and restore trunks for large crowns.
+    let mut kept_trunks: Vec<[i32; 4]> = Vec::with_capacity(p.trunks.len());
+    for &tr in &p.trunks {
+        let ci = (tr[0] - p.tx0).div_euclid(p.tstep);
+        let cj = (tr[1] - p.tz0).div_euclid(p.tstep);
+        if ci < 0 || ci >= p.tw || cj < 0 || cj >= p.tw {
+            kept_trunks.push(tr);
+            continue;
+        }
+        let (ci, cj) = (ci as usize, cj as usize);
+        let mut near_canopy = 0usize;
+        for ny in cj.saturating_sub(3)..=(cj + 3).min(tw - 1) {
+            let row = ny * tw;
+            for nx in ci.saturating_sub(3)..=(ci + 3).min(tw - 1) {
+                let nk = row + nx;
+                if is_real_canopy(p.class[nk], p.top[nk]) {
+                    near_canopy += 1;
+                }
+            }
+        }
+        if near_canopy < 4 {
+            continue;
+        }
+        let mut max_top = i32::MIN;
+        for ny in cj.saturating_sub(5)..=(cj + 5).min(tw - 1) {
+            let row = ny * tw;
+            for nx in ci.saturating_sub(5)..=(ci + 5).min(tw - 1) {
+                let nk = row + nx;
+                if is_real_canopy(p.class[nk], p.top[nk]) {
+                    max_top = max_top.max(p.top[nk] as i32);
+                }
+            }
+        }
+        if tr[2] > max_top + 30 {
+            continue;
+        }
+        kept_trunks.push(tr);
+    }
+
+    for comp in &large_comps {
+        let mut live = 0usize;
+        let mut best_k = usize::MAX;
+        let mut best_tall = i32::MIN;
+        for &k in comp {
+            if !is_real_canopy(p.class[k], p.top[k]) {
+                continue;
+            }
+            live += 1;
+            if p.class[k] & 7 == ROAD {
+                continue;
+            }
+            let (cy, cx) = (k / tw, k % tw);
+            let tall = p.top[k] as i32 - cell_ground(p, cx, cy);
+            if tall > best_tall {
+                best_tall = tall;
+                best_k = k;
+            }
+        }
+        if live < 9 || best_k == usize::MAX || best_tall < 28 {
+            continue;
+        }
+        let (by, bx) = (best_k / tw, best_k % tw);
+        let px = p.tx0 + bx as i32 * p.tstep + 2;
+        let pz = p.tz0 + by as i32 * p.tstep + 2;
+        let has_trunk = kept_trunks.iter().any(|tr| {
+            let dx = tr[0] - px;
+            let dz = tr[1] - pz;
+            dx * dx + dz * dz <= 45 * 45
+        });
+        if !has_trunk {
+            kept_trunks.push([px, pz, p.top[best_k] as i32, 1 + i32::from(best_tall > 90)]);
+        }
+    }
+    p.trunks = kept_trunks;
 }
 
 /// What a building's photographs say of it as evidence (bay/facade_evidence.py, written by bay/evidence_tile.py), in
@@ -1938,7 +2148,7 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
                             heroes::valley_palm_stem(u, w)
                         }) => OwnedWhat::Open,
                     Some((far, trunk)) if tall >= 28 => {
-                        let high = (trunk[2] - g).max(tall);
+                        let high = (trunk[2] - g).max(tall).min(tall + 40);
                         let measured = trunk[3] >> 8;
                         let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
                         if far > rim + 4.0 {
@@ -2263,7 +2473,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                     // A tree: its crown is round underneath, deepest at the trunk and rising to its rim; past the
                     // rim what the lidar saw is a spray of leaves and no more.
                     Some((far, trunk)) if tall >= 28 => {
-                        let high = (trunk[2] - g).max(tall);
+                        let high = (trunk[2] - g).max(tall).min(tall + 40);
                         let measured = trunk[3] >> 8;
                         let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
                         // Suppress detached lidar leaf specks hovering past the tree's own crown rim (e.g. on adjacent upper walls).
@@ -2526,11 +2736,12 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 0
             } else if measured_foliage(*tint) {
                 // Correlated openings expose the branch structure and the sky.
-                // Keep the trunk and the denser centre of the surveyed crown.
-                let fringe = *edge > 0.76 || mid < *foot + 7 || mid > *top - 6;
+                // Keep the trunk, denser centre, and compact ground shrubs intact.
+                let bush = trunk.is_none() && *top - *foot < 28;
+                let fringe = if bush { mid > *top - 3 } else { *edge > 0.76 || mid < *foot + 7 || mid > *top - 6 };
                 let cluster = hash3((x+z).div_euclid(9), mid.div_euclid(6), (x-z).div_euclid(9), 43);
-                let gap = size <= 8 && cluster % 100 < if fringe { 48 } else { 22 };
-                if gap || (size <= 2 && hash3(x >> 1, mid >> 1, z >> 1, 3) % 9 == 0) {
+                let gap = !bush && size <= 8 && cluster % 100 < if fringe { 48 } else { 22 };
+                if gap || (size <= 2 && (!bush || fringe) && hash3(x >> 1, mid >> 1, z >> 1, 3) % 9 == 0) {
                     0
                 } else { kind(LEAVES, *tint) }
             } else if size == 1 && hash3(x >> 1, y >> 1, z >> 1, 3) % 7 == 0 {
@@ -3679,6 +3890,93 @@ mod tests {
         }
         // Wall continues cleanly up near the eave (260).
         assert_ne!(kind_single(300, 250, 201), 0, "wall must continue unbroken up to eave");
+        clear();
+    }
+
+    #[test]
+    fn sidewalk_canopy_stubs_and_phantom_roof_trunks_are_cleaned() {
+        // Reproduces Market & Buchanan (1998 Market St):
+        // - 2x2 (4-cell) 2.7..3.5 m sidewalk canopy stub on GRASS_HERE surrounded by PAVEMENT
+        // - 5-cell 26.2 m building-wall lidar spillover sliver + phantom 26.2 m trunk
+        // - Real 6.2 m (6x5 = 30-cell) street tree right next door whose trunk was stolen by the phantom spike
+        // - Real 18 m (7x7 = 49-cell) park tree with its own trunk
+        // - Low 1.2 m (2x2) yard bush surrounded by YARD (must stay intact)
+        let (gw, tw) = (33i32, 64i32); // gstep=10 (1 m), tstep=5 (0.5 m) => 320 x 320 cells (32 m)
+        let g = 100i16;
+        let mut b = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 320, 10, gw, 0, 0, 5, tw, 0, 0, 0, 0, 2, 0] { b.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b.extend(g.to_le_bytes()); }
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        let mut tint = vec![124u8; (tw * tw) as usize];
+
+        // 1. Jagged 2x2 sidewalk canopy stub (2.7..3.5 m tall) at cells i=10..12, j=10..12 (x=50..60, z=50..60).
+        for (di, dj, h) in [(0, 0, 27), (1, 0, 28), (0, 1, 29), (1, 1, 35)] {
+            let k = ((10 + dj) * tw + (10 + di)) as usize;
+            cls[k] = GRASS_HERE | CANOPY;
+            top[k] = g + h;
+            tint[k] = 84;
+        }
+        // 2. 5-cell 26.2 m building-wall spillover sliver at i=18..20, j=14..17 (x=90..100, z=70..85).
+        for (i, j, h) in [(18, 14, 262), (19, 14, 261), (18, 15, 262), (19, 15, 261), (18, 16, 102)] {
+            let k = (j * tw + i) as usize;
+            cls[k] = PAVEMENT | CANOPY;
+            top[k] = g + h;
+        }
+        // 3. Real 6.2 m street tree (6x5 = 30 cells) at i=22..28, j=14..19 (x=110..140, z=70..95), peak at (25, 16).
+        for j in 14..19 {
+            for i in 22..28 {
+                let k = (j * tw + i) as usize;
+                cls[k] = GRASS_HERE | CANOPY;
+                top[k] = g + if i == 25 && j == 16 { 62 } else { 48 };
+            }
+        }
+        // 4. Real 18 m broad park tree (7x7 = 49 cells) at i=42..49, j=42..49 (x=210..245, z=210..245).
+        for j in 42..49 {
+            for i in 42..49 {
+                let k = (j * tw + i) as usize;
+                cls[k] = GRASS_HERE | CANOPY;
+                top[k] = g + if i == 45 && j == 45 { 180 } else { 165 };
+            }
+        }
+        // 5. Low 1.2 m yard bush (2x2) at i=4..6, j=44..46 surrounded by YARD.
+        for j in 42..48 { for i in 2..8 { cls[(j * tw + i) as usize] = YARD; } }
+        for j in 44..46 {
+            for i in 4..6 {
+                let k = (j * tw + i) as usize;
+                cls[k] = GRASS_HERE | CANOPY;
+                top[k] = g + 12;
+            }
+        }
+        for t in &top { b.extend(t.to_le_bytes()); }
+        b.extend(&cls);
+        b.extend(&tint);
+        // Trunks: [0] phantom 26.2 m trunk at spillover (92, 72); [1] real 18 m park trunk at (227, 227).
+        for tr in [[92i32, 72, g as i32 + 262, 2], [227, 227, g as i32 + 180, 2 | (35 << 8)]] {
+            for w in tr { b.extend(w.to_le_bytes()); }
+        }
+
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+
+        // Sidewalk stub must be completely gone above ground.
+        for y in (g as i32 + 2)..=(g as i32 + 40) {
+            assert_eq!(kind_single(52, y, 52), 0, "sidewalk canopy stub must be cleared at y={y}");
+            assert_eq!(kind_single(57, y, 57), 0, "sidewalk canopy stub must be cleared at y={y}");
+        }
+        // Phantom 26.2 m roof spillover must be completely gone.
+        for y in (g as i32 + 2)..=(g as i32 + 265) {
+            assert_eq!(kind_single(92, y, 72), 0, "phantom roof canopy spillover must be cleared at y={y}");
+        }
+        // Real 6.2 m street tree must have a grounded WOOD trunk at its peak (127, 82) and thick leafy crown (not a 30 cm wafer).
+        assert_eq!(material(kind_single(127, g as i32 + 10, 82)), WOOD, "real street tree must receive a grounded trunk");
+        let leaf_span = ((g as i32 + 20)..=(g as i32 + 60)).filter(|&y| material(kind_single(122, y, 82)) == LEAVES).count();
+        assert!(leaf_span >= 12, "real street tree crown must be thick, not a thin floating crust (got {leaf_span} cells)");
+        // Real 18 m park tree and low 1.2 m yard bush must remain intact.
+        assert_eq!(material(kind_single(227, g as i32 + 30, 227)), WOOD, "real 18 m park tree trunk must stay");
+        assert!(((g as i32 + 120)..=(g as i32 + 178)).any(|y| material(kind_single(220, y, 227)) == LEAVES), "real 18 m park tree crown must stay");
+        assert_eq!(material(kind_single(22, g as i32 + 6, 222)), LEAVES, "low 1.2 m yard bush must stay");
         clear();
     }
 }
