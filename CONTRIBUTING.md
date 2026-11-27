@@ -35,7 +35,7 @@ Run it from the repository root and put its result line in the pull request.
 
 - **What it runs.** The checks in `scripts/checks.mjs` that are not marked local-only: the four documentation checks (`docs`, `docs-mentions`, `docs-coverage`, `docs-site`) and 14 checks of the paused Village home and host. The street's checks and most of the home's browser checks are local-only and run without `--ci`. `npm run check -- --list` shows which is which.
 - **What it does not run.** None of the engine's, the kit's, the master's, the site's or the deploy's own tests. Run those for the part you changed.
-- **What GitHub runs.** The same gate on pull requests and pushes to main (`check.yml`). The master's format, lint and tests on pushes that touch `master/` (`master.yml`). The site and deploy tests before each deploy from main (`deploy.yml`).
+- **What GitHub runs.** On pull requests and pushes to main (`check.yml`): the same gate, the deploy and site tests, the core's `cargo test` on Rust 1.96 and the engine's `tsc --noEmit`, with no GPU, no city data and no Playwright browser. The master's format, lint and tests on pull requests and pushes that touch `master/` (`master.yml`). The site and deploy tests again before each deploy from main (`deploy.yml`).
 
 See [repository checks](guide/checks.md).
 
@@ -51,4 +51,10 @@ See [Keeping a page current](guide/documentation.md).
 
 ## Agreement
 
-Outside contributions require a signed [individual contributor agreement](CLA.md) and Pavlo Zahynailo's approval. AI-written contributions are welcome. The human submitting the work signs the agreement and must have the rights it grants. The owner's agents may merge their own changes once the required checks and review pass.
+Outside contributions require an accepted [individual contributor agreement](CLA.md) and Pavlo Zahynailo's approval. Accept it once, electronically, by putting this line with your full legal name in the description of your first pull request:
+
+```text
+CLA-signed: <your full legal name>
+```
+
+AI-written contributions are welcome. The human submitting the work accepts the agreement and must have the rights it grants. The owner's agents may merge their own changes once the required checks and review pass.

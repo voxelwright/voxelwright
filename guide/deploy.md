@@ -3,7 +3,7 @@ title: Deploy
 description: How San Francisco reaches voxelwright.world and the blog reaches zahynailo.dev, from assembly to rollback.
 ---
 
-Two Cloudflare Workers serve everything public. **`voxelwright`** serves the San Francisco realm at voxelwright.world. **`zahynailo`** serves the owner's front page and blog at zahynailo.dev. Both are built from one checkout by [deploy/](https://github.com/voxelwright/voxelwright/tree/main/deploy), and every push to main that touches `engine/`, `site/` or `deploy/` ships both.
+Two Cloudflare Workers serve everything public. **`voxelwright`** serves the San Francisco realm at voxelwright.world. **`zahynailo`** serves the owner's front page and blog at zahynailo.dev. Both are built from one checkout by [deploy/](https://github.com/voxelwright/voxelwright/tree/main/deploy), and every push to main that touches `engine/`, `site/` or `deploy/` (other than documentation Markdown) ships both.
 
 | Worker | Domains | Assets folder | Worker code |
 | --- | --- | --- | --- |
@@ -140,7 +140,7 @@ npm --prefix deploy run ship
 `ship` does not install packages, run tests, fetch the data bundle or roll back. Its live check fails when `/weather` fails, so an outage at the weather service fails a good deploy.
 
 <Warning>
-Shipping changes both public sites at once, and so does merging. The `deploy` workflow runs on every push to main whose changes touch `engine/**`, `site/**`, `deploy/**` or the workflow itself, a README edit included.
+Shipping changes both public sites at once, and so does merging. The `deploy` workflow runs on every push to main whose changes touch `engine/**`, `site/**`, `deploy/**` or the workflow itself. Markdown files are left out, except blog posts under `site/posts/`, so a docs-only merge does not redeploy.
 
 The workflow has no approval step of its own. It deploys both Workers in the `production` environment, and only that environment's protection rules, kept in GitHub's settings, can hold it back.
 
@@ -151,7 +151,7 @@ Changing the workflow, the environment or the redirects changes what the public 
 
 ## In CI
 
-[deploy.yml](https://github.com/voxelwright/voxelwright/blob/main/.github/workflows/deploy.yml) runs on main in the `production` environment, which holds `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It fetches the private egg media when the `EGG_OVERLAY_TAG` variable names a release. It installs, tests and builds the site, fetches the data bundle, builds the core and the realm, then installs and tests `deploy/` and assembles both folders before either Worker moves.
+[deploy.yml](https://github.com/voxelwright/voxelwright/blob/main/.github/workflows/deploy.yml) runs on main in the `production` environment, which holds `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It fetches the private egg media when the `EGG_OVERLAY_TAG` variable names a release. It installs, tests and builds the site, fetches the data bundle, builds the core and the realm, then installs and tests `deploy/` and assembles both folders before either Worker moves. The workflow's token is read-only, except in the separate `release` job that runs `release.mjs` after both Workers pass.
 
 [publish.sh](https://github.com/voxelwright/voxelwright/blob/main/deploy/publish.sh) then deploys `voxelwright`, then `zahynailo`, and checks each one:
 

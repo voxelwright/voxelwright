@@ -2,7 +2,7 @@
 
 Builds and ships the two Cloudflare Workers. `voxelwright` serves the San Francisco realm at voxelwright.world. `zahynailo` serves the owner's front page and blog at zahynailo.dev as static assets only. The main-branch workflow (`.github/workflows/deploy.yml`) builds both once and ships both. [The deploy guide](../guide/deploy.md) explains the request routing, the Brotli handling, `/weather`, the data bundle and the CI checks.
 
-**Every push to main that touches `engine/`, `site/` or `deploy/` deploys both sites publicly.**
+**Every push to main that touches `engine/`, `site/` or `deploy/` deploys both sites publicly.** Markdown outside `site/posts/` does not trigger a deploy.
 
 ## Files
 
