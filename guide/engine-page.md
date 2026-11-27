@@ -123,6 +123,41 @@ Every drivable car and kart wears a 2.5 cm fine look (`car()`, `KEPT.car`, `KEPT
 
 Crashes at 2.8 m/s or more throw sparks, road dust and flakes of paint and trim. A newly cracked window also sheds glass. Broken wood and foliage from the surroundings scatter as small matte splinters. Pale steam, then grey smoke and finally flame escape at the grille or lamp opening nearest the struck corner. The broken housing loses its lens, including the amber tip. Its back and side walls remain visible. The flame starts in the empty space behind the torn lip and follows it as the car moves. The escaping vapour becomes visible as it rises clear of the body. Reduced motion suppresses the debris and thins the smoke. Press `F` while driving (touch **Repair**, gamepad D-pad right) or call `living.repair(thing)` to restore the body, wheels, windows and engine. Removing the car clears its damage. `node engine/test/dents.mjs` checks the struck corner against the repaired view, the driver’s sightline, horizontal streaks on glass after a side hit, the flame’s rendered position as the car turns, wheel alignment, per-window cracks and repair.
 
+## What the page refuses
+
+A link, a page that frames the realm and someone else's server can all send the page something. The page guards each of these inputs, and `engine/test/client-security.mjs` checks every guard (#81).
+
+- **Records from a server.** `told.ts` reads the core's records, from this page's worker or from a shared world's stream. A record that runs past the words that came, or is shorter than its kind's fixed part, or is not whole rows of a list kind (8 words a move, 12 a living thing), stops the reading. The page keeps what was read before it. The check also reads every record of a real crash in the core.
+- **Messages from a host page.** `host.ts` hears and tells only a host on this site's origin, `https://zahynailo.dev`, or, when the realm is served from `127.0.0.1` or `localhost`, a page on this machine. It posts to that origin, never to `'*'`. The host's origin comes from `location.ancestorOrigins`, then `document.referrer`. Where neither says, what the realm would tell is held until a trusted host first speaks.
+- **A sign's picture.** `screens.ts` `picture` shows this site's own pictures, any `https:` address and raster pictures drawn in the page (`data:image/png`, `jpeg`, `gif` or `webp`, base64). It refuses `javascript:`, `blob:`, `http:` from elsewhere and SVG.
+- **The far model's paths.** `?far=` and `?farlanding=` must be paths on this site (`far.ts` `samePath`), with no scheme, `//`, `..` or backslash, even percent-encoded. Otherwise the page draws the realm's own far model and says so on the console. The release's own manifest and the realm's `far` folder are used as they are. `?far=` with no value still turns the far model off.
+- **Numbers in the address.** The measuring knobs go through `march.ts` `bounded`, which keeps each in range and ignores `NaN`, `Infinity` and words: `workers` 1 to 8, `pool` 16 to 2048 MiB (and no more than the device allows), `levels` 1 to the march's most, `fine` 0 to 2, `scale` 0.25 to 1.5, `tries` 1 to 64, `panes` 1 to 8, `through` 0.1 to 64, `farfaces` 100,000 to 20,000,000, `farreach` 0 to 20,000 m, `farthest` 100 to 50,000 m, `farnear` 0 to 5,000 m and `fardetail` 0.05 to 16.
+- **A worker's address.** `bay.ts` passes on `?ll=` only as two finite numbers on Earth, encoded. Anything else is left out.
+
+## Device classes and what each holds
+
+`bay.ts` `tierOf` sorts the device into a phone (a touch screen under 600 points on its short side), a tablet (a touch screen under 900 points, or a touch device that reports 4 GB of memory or less) or a desktop. `BUDGETS` says what each class holds. A tablet draws as a desktop does (`DEVICE` is `'desktop'`) and holds less.
+
+| | Phone | Tablet | Desktop |
+| --- | --- | --- | --- |
+| Pool of cells on the GPU | 128 MiB | 192 MiB | 256 MiB |
+| Makers of sectors (workers) | 2 | up to 3 | up to 6 |
+| Tile bytes the page keeps for its workers | 24 MiB | 48 MiB | 96 MiB |
+| Far model faces (20 bytes each) | 3,000,000 (about 60 MiB) | 6,000,000 | 12,000,000 |
+
+The canvas draws at most two device pixels to a CSS pixel. A band of the far model that is let go destroys its section buffers with its faces.
+
+Street life asks the network for nothing until it first wakes, which is when the visitor leaves the first view. It then fetches the life files' listing, the transit routes, the kept vehicles' listing and each kept vehicle. A visitor who leaves from the landing costs none of these requests. Squares of street life come nearest first, three at a time. A square stays held once it has come: street life does not yet let squares go, because its walks, roads and parked cars refer to one another across squares. The street names under the picture (`whereabouts`) keep the 32 nearest squares and never let go of one the eye is near.
+
+## When it cannot open, or the GPU is lost
+
+When the realm cannot open, `loading.fail()` dims the first view and sets `data-failed="1"` on the `<html>` element, so that no site notice is shown over the reason. `main.ts` `failCard` shows a card in the middle of the page:
+
+- **Without WebGPU** the card says WebGPU is needed. On a touch device, or in an app's own browser such as X's, it says to open the link in Safari or Chrome. Elsewhere it names a recent Chrome, Edge or Safari. **Copy link** copies the page's address and says **Copied** only if the copy worked. The card links to zahynailo.dev and to the project on GitHub.
+- **After any other failure** the card has a **Reload** key.
+
+If the GPU device is lost (`probe/gpu.ts` `onLost`: a reset, a phone short of memory, a long while in the background), the frame loop stops. A realm shows a card with a key to reload it, such as **Reload San Francisco**, and tells its host `error` with `fatal: true`. The engine's own pages say so in the status line.
+
 ## Invariants
 
 - Keys, pointer and touch for play go through `input.ts`: a lane pushes a mode on its stack and pops it, rather than reading keys itself. Some DOM panels, such as the EXPLORE board (`explore.ts`), world entry (`entry.ts`), and the AI dialog (`connect.ts`), still listen for their own events.

@@ -317,14 +317,14 @@ A click casts the spell in hand, Fireball at first. Typing a spell's words on th
 
 ## Query parameters
 
-Add these to the page's address. "Realm" means the San Francisco realm, as `./world` serves it. "Server" means `/city` from the engine's page server, `engine/serve.mjs`.
+Add these to the page's address. "Realm" means the San Francisco realm, as `./world` serves it. "Server" means `/city` from the engine's page server, `engine/serve.mjs`. A number outside its range is kept to the nearest end of it, and one that is not a number is ignored ([what the page refuses](/engine-page#what-the-page-refuses)).
 
 | Parameter | Where | Does |
 | --- | --- | --- |
 | `at=x,y,z` | Both | Start the eye there, in metres, instead of the arrival |
 | `look=yaw,pitch` | Both | Start looking that way, in degrees |
 | `fov`, `roll` | Both | Lens width and roll, in degrees |
-| `ll=lat,lon` | Both | Start at that place on Earth in a Bay world (not in a shared world) |
+| `ll=lat,lon` | Both | Start at that place on Earth in a Bay world (not in a shared world). Two finite numbers, or it is ignored |
 | `first=0` | Realm | Skip the first view |
 | `walk=1` | Both | Start on foot |
 | `living=car`, `living=finecar` | Both | A test car in the street ahead |
@@ -353,10 +353,10 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `lobbies=1`, `master=`, `lobby=` | Both | Find and join lobbies through a master server |
 | `fly=1`, `breaks=0`, `seconds=` | Server | The measuring flight (the default at `/`) and its settings |
 | `shadows=0`, `mirrors=0`, `maps=0`, `heat=1`, `flat=1` | Both | Drawing switches, as the keys give |
-| `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale, march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
-| `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring |
+| `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale (0.25 to 1.5), march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
+| `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring (`fine` 0 to 2, `workers` 1 to 8, `pool` 16 to 2048 MiB) |
 | `panes`, `through`, `tries`, `fog`, `walk=loop` | Both | Glass, finer-cell and sea-fog settings, and a march variant, for measuring |
-| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring |
+| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring. `far` and `farlanding` must be paths on this site; `farfaces` is 100,000 to 20,000,000 |
 | `portalworkers`, `portalkeeps` | Server | Workers and keep time for a portal's world |
 
 ## Where it lives and how it is checked
