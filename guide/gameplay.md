@@ -74,6 +74,7 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Hour back or forward 30 minutes | [ and ] | Hour fader, in settings | - |
 | Rain on or off | R | Rain, in settings | - |
 | Reset the world | Backspace | Reset world, in settings | - |
+| Report an issue (canvas + last 30 s trace) | F8, `/bug <note>` on the ask bar, or Report in settings | Report, in settings | - |
 | Mirrors, shadows, traced shadows, heat view | Shift+M, L, K, H (on foot) | - | - |
 | In a [shared world](/multiplayer): pick up, throw, portal, realm wheel | G, T, P, Tab | - | - |
 
@@ -277,7 +278,7 @@ SF now also asks `/weather` every 10 minutes. On the public site a Worker answer
 
 `engine/page/weather.ts` eases between weathers: rain over 5 s, cloud over 6 s, fog over 12 s. Fog rolls in from the west as a bank whose top is 140 m up. Rain, fog and cloud turn more windows and lamps on.
 
-The panel also has an hour fader, weather buttons, graphics presets (Low, Medium, High), a dynamic resolution switch with a target frame rate, and Reset world. Moving the fader, choosing a weather or pressing [ or ] takes the sky out of its mode. The choice is kept in the browser. `?hour=` or `?rain=` pins the sky instead.
+The panel also has an hour fader, weather buttons, graphics presets (Low, Medium, High), a dynamic resolution switch with a target frame rate, Reset world, and a Report… key beside Credits that opens the F8 feedback dialog. Moving the fader, choosing a weather or pressing [ or ] takes the sky out of its mode. The choice is kept in the browser. `?hour=` or `?rain=` pins the sky instead.
 
 ## Signs and the banner plane
 
@@ -331,6 +332,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `haze`, `clouds` | Realm | Scale the realm's haze and clouds |
 | `hud=wheel`, `context`, `quiet`, `classic` | Realm | The style of play controls |
 | `debug=1` | Realm | Show the line of numbers |
+| `telemetry=1` | Realm | Enable posting `/api/feedback` and `/api/session` traces on a local realm build |
 | `status=1` | Both | Show the status line on a phone |
 | `boards=0`, `boards=edit` | Realm | No signs, or the sign editor |
 | `face=zakon`, `face=block` | Realm | The typeface for signs and keys |
@@ -379,6 +381,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Signs | `engine/page/boards.ts`, `engine/page/signs.ts` | `engine/test/sf-boards.mjs`, `engine/test/sf-leaving.mjs`, `engine/test/sf-type.mjs` |
 | Eggs, lockers | `engine/page/eggs.ts`, `engine/page/lockers.ts` | `engine/test/sf-eggs.mjs`, `engine/test/sf-lockers.mjs` |
 | Wand, spells | `engine/page/wand.ts`, `engine/page/spells.ts` | `engine/test/wand.mjs`, `engine/test/spells.mjs` |
+| Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 

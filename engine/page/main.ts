@@ -70,6 +70,8 @@ import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
 import { createCarSummon } from './summon.ts'
+import { createRecorder, type Recorder } from './recorder.ts'
+import { feedbackUi, type FeedbackUi } from './feedback.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -671,6 +673,8 @@ async function main() {
 
   const watchers = new Set<(gap: number) => void>()
   let mapSys: MapSystem | null = null
+  let telemetry: Recorder | null = null
+  let feedback: FeedbackUi | null = null
   let paused = false, saying = ''
   /** Parts of a frame left out, by name, for finding what a slow frame is spent on: pieces, crumbs, puffs, flames, spoil. */
   const off = new Set<string>()
@@ -730,6 +734,7 @@ async function main() {
     const dt = Math.min(0.1, (now - last) / 1000)
     const gap = now - last
     for (const each of watchers) each(gap)
+    telemetry?.frame(dt, gap, now)
     if (paused || mapSys?.opaque) { last = now; requestAnimationFrame(frame); return }
     // Rest is not lateness: the screen's rate, and how long a frame takes, are counted only from frames at that rate.
     if (wasResting && !resting) frameMs = screenMs
@@ -810,6 +815,7 @@ async function main() {
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
     device.queue.submit([encoder.finish()])
+    telemetry?.onPresented(canvas)
     lap('draw')
     over.frame(project)
     if (timed) {
@@ -1200,6 +1206,7 @@ async function main() {
   }
   /** A blast at a place (the world's finest cells), whatever is or is not there. */
   const strike = (at: readonly [number, number, number], radius = force, spark = sparks) => {
+    telemetry?.edit({ op: 'strike', at: [at[0], at[1], at[2]], radius, spark })
     fell.asks++
     waiting++
     mover.postMessage({ blast: [at[0], at[1], at[2]], radius, after: heard, spark } satisfies Ask)
@@ -1476,6 +1483,7 @@ async function main() {
     const v = view(), hit = await march.pick(v)
     if (!hit) return null
     const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + 1))) as [number, number, number]
+    telemetry?.edit({ op: 'ignite', at, radius })
     // The answer says how many cells burn, which is what keeps the mover asked from then on.
     ticking = true
     mover.postMessage({ ignite: at, radius, tick: 0 } satisfies Ask)
@@ -1485,7 +1493,10 @@ async function main() {
   /** A cannon's shot: a steel ball 80 cm across, sent the way the eye looks at 42 m a second. What it strikes breaks. */
   const shoot = () => {
     const v = view()
-    mover.postMessage({ ball: { from: [v.eye[0] + v.forward[0] * 14, v.eye[1] + v.forward[1] * 14, v.eye[2] + v.forward[2] * 14], speed: [v.forward[0] * 420, v.forward[1] * 420, v.forward[2] * 420], radius: 4, kind: 12 | (5 << 8) } } satisfies Ask)
+    const from: [number, number, number] = [v.eye[0] + v.forward[0] * 14, v.eye[1] + v.forward[1] * 14, v.eye[2] + v.forward[2] * 14]
+    const vel: [number, number, number] = [v.forward[0] * 420, v.forward[1] * 420, v.forward[2] * 420]
+    telemetry?.edit({ op: 'shoot', from, speed: vel, radius: 4 })
+    mover.postMessage({ ball: { from, speed: vel, radius: 4, kind: 12 | (5 << 8) } } satisfies Ask)
     // Until the answer says how many bodies there are, there is at least this one to move.
     bodies = Math.max(bodies, 1)
   }
@@ -1504,6 +1515,7 @@ async function main() {
     const v = view(), hit = await march.pick(v)
     if (!hit) return null
     const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + 2))) as [number, number, number], reach = 44, runs: number[] = []
+    telemetry?.edit({ op: 'cut', at, radius: reach })
     for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) {
       const half = Math.floor(Math.sqrt(reach * reach - dz * dz))
       runs.push(at[0] - half, at[0] + half + 1, at[1] + dy, at[2] + dz, 0)
@@ -1518,6 +1530,7 @@ async function main() {
     const v = view(), hit = await march.pick(v)
     if (!hit) return null
     const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t - 6))) as [number, number, number]
+    telemetry?.edit({ op: 'place', at, radius: 5, kind: 8 | (30 << 8) })
     make(ball(at[0], at[1], at[2], 5, 8 | (30 << 8)), at)
     return { at, ...hit }
   }
@@ -1539,7 +1552,7 @@ async function main() {
   pickTool(tool)
   tools.forEach((_, i) => own.keys.set(`Digit${i + 1}`, () => pickTool(i)))
   own.keys.set('KeyF', () => void ignite())
-  own.use = () => { const { name, use } = tools[tool]; void Promise.resolve(use()).then((hit) => ears?.used(name, hit as Parameters<NonNullable<typeof ears>['used']>[1])); return true }
+  own.use = () => { const { name, use } = tools[tool]; void Promise.resolve(use()).then((hit) => { telemetry?.event('tool', { name, ...(hit && typeof hit === 'object' ? { at: (hit as { at?: number[] }).at, material: (hit as { material?: number }).material } : {}) }); ears?.used(name, hit as Parameters<NonNullable<typeof ears>['used']>[1]) }); return true }
 
   /** What is ahead when the head is turned a little (radians right and up) from where it looks: for the checks. */
   const pick = async (right = 0, up = 0, plain = false) => {
@@ -2105,7 +2118,7 @@ async function main() {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     keptGraphics()
-    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, report: () => void feedback?.open(), say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
       modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}), ...(query.get('sound') !== '0' ? { radio: () => openRadioPicker() } : {}),
       // The servers (#526, lobbies.ts): where the realm's rule allows lobbies and a master is known, out of any lobby; fetched when first pressed.
@@ -2193,7 +2206,8 @@ async function main() {
     street: () => streetLife,
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
   })
-  own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  const summonCarNow = () => { telemetry?.event('summon'); return carSummon.summon() }
+  own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void summonCarNow() })
   // Mobile touch trigger for Summon Car (G): sleek 44x44 slim voxel key beside ✦ Make at bottom-left (play-hud.ts).
   const summonPanel = over.panel('summon')
   const summonBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button' })
@@ -2201,11 +2215,40 @@ async function main() {
   summonBtn.setAttribute('data-vx-icon-only', '')
   summonBtn.setAttribute('aria-label', 'Summon sports car')
   summonBtn.title = 'Summon sports car (G)'
-  summonBtn.addEventListener('click', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  summonBtn.addEventListener('click', () => { if (!alive.riding && !(first && !first.engaged) && !far) void summonCarNow() })
   summonPanel.append(summonBtn)
-  resetting.add(() => carSummon.clear())
+  resetting.add(() => { carSummon.clear(); telemetry?.edit({ op: 'reset' }) })
+  // Black-box gameplay flight recorder & passive anomaly watchers + F8 / /bug feedback UI (#64).
+  telemetry = createRecorder({
+    build: 'city-4',
+    localRealm: LOCAL?.id ?? null,
+    bay: BAY_ON,
+    env: () => report.env,
+    release: () => (BAY_ON ? where().then((s) => s.release, () => null) : Promise.resolve(null)),
+    gpuFaults: () => gpu.faults,
+    input: controls,
+    pose,
+    fov: () => fov,
+    view,
+    march,
+    me,
+    alive,
+    street: () => streetLife,
+    worldStats: () => world.stats,
+    mended: () => ({ movers: moversLost, makers: world.stats.crashed }),
+    tileFails: () => tally.failed,
+    perf: () => ({ frameMs, gpuMs, cpuMs, scale, bodies, loose: loose(), burning, resting, paused, mapOpen: !!mapSys?.opaque, firstStill: firstStill() }),
+    settings: () => ({ hour, rain: march.rain, fog: marine.strength, graphics: preset, hud: (globalThis as unknown as { engine?: { playHud?: { mode: string | null } } }).engine?.playHud?.mode ?? null }),
+    clock: () => folkClock.now(),
+    groundAt: (x, z) => core.ground_at(x, z),
+    topAt: (x, z) => core.top_at(x, z),
+    worldKind: (x, y, z) => core.world_kind(x, y, z),
+    whereLabel: () => document.querySelector('#where > div')?.textContent?.trim() ?? '',
+    endpointBase: !LOCAL || query.get('telemetry') === '1' ? '' : null,
+  })
+  feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon(), wheels: carWheels, smoothing: () => smoothing.size })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) { const reach = e.radius ?? 44, runs: number[] = []; for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) { const half = Math.floor(Math.sqrt(reach * reach - dz * dz)); runs.push(e.at[0] - half, e.at[0] + half + 1, e.at[1] + dy, e.at[2] + dz, 0) } make(rows(Int32Array.from(runs), [e.at[0] - reach, e.at[1], e.at[2] - reach, e.at[0] + reach + 1, e.at[1] + 2, e.at[2] + reach + 1]), e.at); cuts.push({ at: e.at, radius: reach }) } else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
