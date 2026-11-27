@@ -420,7 +420,7 @@
     "engine/core/src/kinds.rs": "lines:^pub const [A-Z_]+: (u8|Kind) =|^pub const fn (kind|material|colour|grey)",
     "engine/core/src/bay.rs": "lines:^//! The frame|^fn pick\\(|^pub fn least_step",
     "engine/page/bay.ts": "lines:^export const FRAME",
-    "engine/page/main.ts": "lines:levels: Number\\(query.get\\('levels'\\)",
+    "engine/page/main.ts": "lines:levels: bounded\\(query.get\\('levels'\\)",
     "engine/serve.mjs": "lines:^const frame = \\(kind, seq, payload\\)|keep\\((ECHO|LOG),",
     "engine/page/frames.ts": "lines:^export const LOG"
   },

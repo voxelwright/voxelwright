@@ -43,12 +43,26 @@ export interface Struck { a: number; b: number; at: [number, number, number]; sp
 
 const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7, FLOW = 8, BURST = 9, STRUCK = 10, LIVE = 11, FIGURE = 12
 
+/** The fewest words a record of each kind holds, and for kinds that are a list of rows, each row's words. */
+const LEAST: Record<number, number> = { [EDIT]: 6, [BORN]: 11, [GONE]: 8, [DUST]: 5, [BROKE]: 1, [FIRE]: 1, [FLOW]: 0, [BURST]: 4, [STRUCK]: 10, [LIVE]: 0, [FIGURE]: 7, [MOVES]: 0 }
+const STRIDE: Record<number, number> = { [LIVE]: 12, [MOVES]: 8 }
+/** Whether a record of `n` words at `at` lies inside the words and is the shape its kind says. Unknown kinds only need to fit. */
+export function fits(tag: number, n: number, at: number, length: number): boolean {
+  if (!Number.isInteger(n) || at > length || n > length - at) return false
+  if (n < (LEAST[tag] ?? 0)) return false
+  const stride = STRIDE[tag]
+  return !stride || n % stride === 0
+}
+
 export function read(words: Uint32Array<ArrayBuffer>): Told {
   const f = new Float32Array(words.buffer, words.byteOffset, words.length), i32 = new Int32Array(words.buffer, words.byteOffset, words.length)
   const told: Told = { edits: [], born: [], gone: [], dust: [], broke: [], fire: null, moves: [], water: null, bursts: [], struck: [], live: [], figures: [] }
   const placed = (at: number): Placed => ({ id: words[at], pos: [f[at + 1], f[at + 2], f[at + 3]], rot: [f[at + 4], f[at + 5], f[at + 6], f[at + 7]] })
-  for (let i = 0; i < words.length;) {
+  for (let i = 0; i + 2 <= words.length;) {
     const tag = words[i], n = words[i + 1], at = i + 2
+    // A record that would run past the words, or is shorter than its kind's fixed part, or not whole strides of it, is
+    // not one (#81): reading stops there with what was read. Words from another's server must not freeze the tab.
+    if (!fits(tag, n, at, words.length)) break
     if (tag === EDIT) told.edits.push({ box: [i32[at], i32[at + 1], i32[at + 2], i32[at + 3], i32[at + 4], i32[at + 5]], runs: i32.slice(at + 6, at + n) })
     else if (tag === BORN) told.born.push({ id: words[at], cells: words[at + 1], size: [words[at + 2], words[at + 3], words[at + 4]], com: [f[at + 5], f[at + 6], f[at + 7]], low: [i32[at + 8], i32[at + 9], i32[at + 10]], faces: words.slice(at + 11, at + n) })
     else if (tag === GONE) told.gone.push(placed(at))

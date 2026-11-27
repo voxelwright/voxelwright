@@ -252,7 +252,7 @@ for (const [label, opts, safe] of [
   const reopened = await rp.waitForFunction(() => document.querySelector('#connect')?.open, null, { timeout: 15_000 }).then(() => true, () => false)
   if (phone) await rp.tap('#connect .forget').catch(() => {}); else await rp.click('#connect .forget').catch(() => {})
   await rp.waitForTimeout(500)
-  const forgotten = await rp.evaluate(() => localStorage.getItem('village.ai') === null)
+  const forgotten = await rp.evaluate(() => localStorage.getItem('village.ai') === null && sessionStorage.getItem('village.ai') === null)
   check(reopened && forgotten, `roof (${label}): "Your AI" on that line opens the panel (${reopened}), and Forget there forgets the key (${forgotten})`)
   await rc.close()
 }
@@ -296,7 +296,9 @@ const stands = (done) => realm.evaluate((id) => {
 const lineSays = () => realm.evaluate(() => { const l = document.querySelector('#ai-line'); return l && !l.hidden ? l.textContent : '' })
 /** The realm's settings, opened where they are folded, and its key for the visitor's own AI pressed. */
 const settingsKey = async () => { await realm.evaluate(() => globalThis.engine.realmControls.fold(false)); await realm.click('#realm button.ai') }
-const stored = () => realm.evaluate(() => localStorage.getItem('village.ai'))
+const stored = () => realm.evaluate(() => localStorage.getItem('village.ai') ?? sessionStorage.getItem('village.ai'))
+/** Where it is kept (#81): 'tab' (sessionStorage, the default), 'browser' (localStorage, asked for), or 'none'. */
+const keptWhere = () => realm.evaluate(() => localStorage.getItem('village.ai') ? 'browser' : sessionStorage.getItem('village.ai') ? 'tab' : 'none')
 
 // A second tab of the same browser, its connector fetched before anything is connected: asked, it offers to connect.
 const second = await c.newPage()
@@ -338,6 +340,11 @@ for (const route of ROUTES) {
     check(named.every((n) => n.name), `every control in the panel has a name a screen reader says (${named.map((n) => n.name).join(' | ')})`)
     const link = await realm.evaluate(() => { const a = document.querySelector('#connect .get'); return { target: a.target, rel: a.rel, href: a.href } })
     check(link.target === '_blank' && /noopener/.test(link.rel) && /noreferrer/.test(link.rel) && link.href.startsWith('https://'), `the way to the provider's keys opens a new tab with no opener and no referrer (${link.href})`)
+    // Remembered only when asked (#81): off as the panel opens, ticked here so the second tab can follow.
+    const ticked = await realm.evaluate(() => document.querySelector('#connect-remember')?.checked)
+    check(ticked === false, `"Remember key in this browser" is not ticked unasked (${ticked})`)
+    await realm.click('#connect label.remember')
+    await realm.focus('#connect-key')
     await page.keyboard.press('Enter')
   } else await realm.click('#connect .go')
   const done = await ended()
@@ -349,6 +356,8 @@ for (const route of ROUTES) {
   check((await realm.evaluate(() => globalThis.engine.things.all.size)) === n0 + 1, `${route}: one thing more`)
   const kept = JSON.parse((await stored()) ?? 'null')
   check(kept?.route === route && kept.model === FIRST[route], `${route}: what is connected is kept under village.ai (${kept?.route}, ${kept?.model})`)
+  const where = await keptWhere(), want = route === 'anthropic' ? 'browser' : 'tab'
+  check(where === want, `${route}: kept ${want === 'browser' ? 'in this browser, as asked' : 'for this tab alone, as nothing asked otherwise'} (${where})`)
   await realm.evaluate(() => globalThis.engine.unmake())
 
   if (route === 'anthropic') {
@@ -435,7 +444,7 @@ for (const [name, p] of [['realm', realm], ['second tab', second]]) {
   if (p === second) await p.evaluate(() => { globalThis.engine = globalThis.conn })
   const seen = await p.evaluate(() => {
     const out = { address: location.href + ' ' + history.length, dom: document.documentElement.outerHTML + ' ' + document.body.innerText, storage: {}, engine: [] }
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k !== 'village.ai') out.storage[k] = localStorage.getItem(k) }
+    for (const s of [localStorage, sessionStorage]) for (let i = 0; i < s.length; i++) { const k = s.key(i); if (k !== 'village.ai') out.storage[k] = s.getItem(k) }
     // Everything `engine` holds that can be reached in a few steps, without calling anything.
     const seen = new Set(), walk = (v, depth) => {
       if (v === null || v === undefined || depth > 4) return

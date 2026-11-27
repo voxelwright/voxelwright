@@ -1,7 +1,7 @@
 // A visitor's own AI (#526): how a page asks the model of whoever is at it, with a key they gave it.
 //
 // A realm served as plain files has no helper and no server of ours that could hold a key. So the key stays in the
-// visitor's browser (localStorage, this origin) and each question goes straight from the page to the provider the
+// visitor's browser (this tab's sessionStorage, or this origin's localStorage when they ask it to be remembered, #81) and each question goes straight from the page to the provider the
 // key is for: Anthropic, OpenAI, Gemini or OpenRouter. All four answer a page on another origin (measured from
 // https://zahynailo.dev on November 24, 2026, with a key that is none: each said so in JSON the page could read).
 //
@@ -339,14 +339,35 @@ export async function models(route: Route, key: string, how: { fetch?: Fetch; si
 
 const KEPT = 'village.ai'
 const ROUTES = new Set<string>(Object.keys(AT))
-/** What this browser was connected to, or null. Kept here only: it is in no address, and no server is told. */
-export function kept(): Connected | null {
+/** The browser's two stores: this tab's (gone when it closes) and this site's (kept until forgotten). Null where one may not be used. */
+const store = (which: 'session' | 'local'): Storage | null => { try { return (which === 'session' ? globalThis.sessionStorage : globalThis.localStorage) ?? null } catch { return null } }
+const read = (s: Storage | null): Connected | null => {
   try {
-    const v = JSON.parse(localStorage.getItem(KEPT) ?? 'null')
+    const v = JSON.parse(s?.getItem(KEPT) ?? 'null')
     return v && ROUTES.has(v.route) && typeof v.key === 'string' && v.key && typeof v.model === 'string' && v.model ? { route: v.route, key: v.key, model: v.model } : null
   } catch { return null }
 }
-/** Keeps what was connected, or with null forgets it. False where this browser keeps nothing (a private window): it then lasts as long as the page. */
-export function keep(c: Connected | null): boolean {
-  try { if (c) localStorage.setItem(KEPT, JSON.stringify(c)); else localStorage.removeItem(KEPT); return true } catch { return false }
+/**
+ * What this browser was connected to, or null: this tab's first, then what this browser remembers (#81). Kept here
+ * only: it is in no address, and no server is told.
+ */
+export function kept(): Connected | null { return read(store('session')) ?? read(store('local')) }
+/** Whether what is connected is remembered by this browser (the visitor asked it to), not this tab alone. */
+export function remembered(): boolean { return read(store('local')) !== null }
+/**
+ * Keeps what was connected, or with null forgets it from both stores. By default for this tab alone (sessionStorage:
+ * gone when the tab closes, #81); with `remember`, by this browser until it is forgotten (localStorage, as before).
+ * False where this browser keeps nothing (a private window): it then lasts as long as the page.
+ */
+export function keep(c: Connected | null, remember = false): boolean {
+  const session = store('session'), local = store('local')
+  if (!c) {
+    let ok = true
+    for (const s of [session, local]) try { s?.removeItem(KEPT) } catch { ok = false }
+    return ok && !!(session || local)
+  }
+  const into = remember ? local : session, other = remember ? session : local
+  try { if (!into) return false; into.setItem(KEPT, JSON.stringify(c)) } catch { return false }
+  try { other?.removeItem(KEPT) } catch { /* the other store may not be used: nothing is in it */ }
+  return true
 }

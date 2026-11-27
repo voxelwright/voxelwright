@@ -8,7 +8,20 @@ import { SIDE, type World } from './world.ts'
 import { grid as marksGrid, MARKS } from './marks.ts'
 
 // One more than as things are only where `?fine=2` (#259, finer boxes round the eye) asks for an eleventh box.
-export const MAX_LEVELS = 10 + Math.max(0, Number(new URLSearchParams(globalThis.location?.search ?? '').get('fine') ?? 0) - 1)
+/**
+ * A number an address asks for (#81: the measuring knobs, `?workers=`, `?pool=`, `?farfaces=` and the like), kept
+ * between `least` and `most`, and whole where `whole`. Where the address says nothing, or nothing that is a finite
+ * number, the fallback: a crafted link cannot ask for a billion workers, a pool past the device, or a shader with NaN in it.
+ */
+export function bounded(said: string | null | undefined, fallback: number, least: number, most: number, whole = false): number {
+  const n = said === null || said === undefined || said.trim() === '' ? NaN : Number(said)
+  if (!Number.isFinite(n)) return fallback
+  const kept = Math.min(most, Math.max(least, n))
+  return whole ? Math.round(kept) : kept
+}
+/** `?fine=` (#259): 0, 1 or 2 more boxes of finer cells. */
+export const FINE_ASKED = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('fine'), 0, 0, 2, true)
+export const MAX_LEVELS = 10 + Math.max(0, FINE_ASKED - 1)
 
 /** The colours every thing in the world shares: 0 is the material's own, 1 to 15 white to black, then 24 hues in ten tones (kinds.rs). */
 export function palette(): Float32Array<ArrayBuffer> {
@@ -651,7 +664,7 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
  * between them it is marched on from the cell's far side.
  */
 /** How many cells of finer cells a ray may pass through between their cells before one is taken whole (`tries`, for measuring). */
-const TRIES = Number(new URLSearchParams(globalThis.location?.search ?? '').get('tries') ?? 16)
+const TRIES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('tries'), 16, 1, 64, true)
 const FINER = /* wgsl */ `
 // Where a cell's block of finer cells is in its sector's tree (and, in the top bit, whether it is 8 a side and not
 // 4): 0 where the cell holds none. The cell's leaf is found from the top: this is asked of a ray that met such a
@@ -760,14 +773,14 @@ const MARCHED = (bricks: boolean | undefined) => /* wgsl */ `var hit = march(ro,
   if ((hit.kind & 64u) != 0u && !through) { hit = refine(ro, rd, hit, most, wide, spread, rough, eyed); }`}`
 
 /** How many pixels wide a cell of a pane must be for the look to go through it (`through`, for measuring). */
-const THROUGH = Number(new URLSearchParams(globalThis.location?.search ?? '').get('through') ?? 2).toFixed(2)
+const THROUGH = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('through'), 2, 0.1, 64).toFixed(2)
 /**
  * How many panes of glass a look may meet (#163, `panes` for measuring): it goes through all but the last, which is
  * drawn with what is likely behind it (a dim room, or from inside, the day outside). 1 is none. Past one pane, a
  * look out of a tower to the next one cost three quarters of the frame again, and the far side of a car or a room
  * is seldom made out through two tints.
  */
-const PANES = Number(new URLSearchParams(globalThis.location?.search ?? '').get('panes') ?? 2)
+const PANES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('panes'), 2, 1, 8, true)
 
 const INLOOP = new URLSearchParams(globalThis.location?.search ?? '').get('walk') === 'loop'
 
