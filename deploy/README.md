@@ -35,7 +35,7 @@ npm --prefix deploy run ship
 npm --prefix deploy run ship -- --dry-run      # print the steps only
 ```
 
-It builds the core, the realm, the site and both folders, deploys `voxelwright` then `zahynailo` with `HEAD`'s SHA as the message, and checks what is live. Flags: `--world-only`, `--site-only`, `--egg-media` (build the private egg clips in; the default is procedural eggs), `--public` (procedural eggs even when `VOXELWRIGHT_EGG_MEDIA` is set), `--skip-build`, `--skip-live`, `--allow-dirty`, `--dry-run`. It does not install packages, run tests or fetch the data bundle.
+It builds the core, the realm, the site and both folders, deploys `voxelwright` then `zahynailo` with `HEAD`'s SHA as the message, and checks what is live. Flags: `--world-only`, `--site-only`, `--public` (procedural eggs only), `--skip-build`, `--skip-live`, `--allow-dirty`, `--dry-run`. It does not install packages, run tests or fetch the data bundle.
 
 Or step by step:
 
@@ -70,7 +70,7 @@ cd engine && node sf/loading.mjs
 
 ## Private egg media
 
-The realm's and the landing's video eggs read clips from the folder in `VOXELWRIGHT_EGG_MEDIA`: `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A build without it ships procedural eggs only. `ship` builds procedural eggs unless `--egg-media` (for `~/.village/engine/sf/eggs/media`) or `VOXELWRIGHT_EGG_MEDIA` asks for the clips. The public data bundle never holds the clips.
+The realm's and the landing's video eggs read clips from the folder in `VOXELWRIGHT_EGG_MEDIA`: `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A build without it ships procedural eggs only. `ship` uses `~/.village/engine/sf/eggs/media` when it exists (unless `--public` is passed). Easter eggs stay enabled in production: keep `EGG_OVERLAY_TAG` set on the repository and never disable them. The public data bundle never holds the clips.
 
 CI reads them from a private release. The repository variable `EGG_OVERLAY_TAG` names it (`eggs-overlay-<first 16 hex of the archive's SHA-256>`), `EGG_OVERLAY_REPO` picks the repository (default: this one), and the production secret `EGG_OVERLAY_TOKEN` reads another repository. Leave the tag unset for procedural eggs. When a clip changes, rebuild the archive and upload it:
 

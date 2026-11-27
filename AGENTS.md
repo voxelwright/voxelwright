@@ -56,6 +56,7 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - Keep evidence short: the command, the result and the measurements that matter.
   Routine changes need no receipt archives.
 - Keep README commands current. Maintain the public guide in `guide/` alongside its source.
+- Easter eggs stay in production: keep `EGG_OVERLAY_TAG` set on the repository and keep `deploy/ship.mjs` including local egg media by default. Never unset, remove, or disable production Easter eggs.
 - Bring the owner results and things to try, not permission questions. Ask
   only when something below is his to decide, with a recommendation.
 

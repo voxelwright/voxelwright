@@ -4,7 +4,7 @@ import { buildPlan, parseShipArgs, resolveEggMedia } from './ship.mjs'
 
 test('parseShipArgs handles defaults, targets and rejects conflicting or unknown flags', () => {
   assert.deepEqual(parseShipArgs([]), {
-    help: false, world: true, site: true, publicOnly: false, eggMedia: false,
+    help: false, world: true, site: true, publicOnly: false,
     skipBuild: false, skipLive: false, allowDirty: false, dryRun: false,
   })
   const worldOnly = parseShipArgs(['--world-only', '--public', '--skip-live', '--dry-run'])
@@ -13,19 +13,15 @@ test('parseShipArgs handles defaults, targets and rejects conflicting or unknown
   assert.equal(worldOnly.publicOnly, true)
   assert.equal(worldOnly.skipLive, true)
   assert.equal(worldOnly.dryRun, true)
-  assert.equal(parseShipArgs(['--egg-media']).eggMedia, true)
   assert.throws(() => parseShipArgs(['--world-only', '--site-only']), /at most one/)
   assert.throws(() => parseShipArgs(['--bogus']), /unknown argument/)
 })
 
-test('resolveEggMedia ships procedural eggs unless media is asked for by flag or env, and --public always wins', () => {
-  // the default: a local media folder present is not enough
-  assert.equal(resolveEggMedia({ publicOnly: false, env: {}, defaultDir: '/d', exists: () => true }), null)
-  assert.equal(resolveEggMedia({ publicOnly: false, eggMedia: true, env: {}, defaultDir: '/d', exists: () => true }), '/d')
-  assert.throws(() => resolveEggMedia({ publicOnly: false, eggMedia: true, env: {}, defaultDir: '/d', exists: () => false }), /no egg media at \/d/)
+test('resolveEggMedia picks up local media by default, respects env override and --public opt-out', () => {
+  assert.equal(resolveEggMedia({ publicOnly: false, env: {}, defaultDir: '/d', exists: () => true }), '/d')
+  assert.equal(resolveEggMedia({ publicOnly: false, env: {}, defaultDir: '/d', exists: () => false }), null)
   assert.equal(resolveEggMedia({ publicOnly: false, env: { VOXELWRIGHT_EGG_MEDIA: '/x' }, defaultDir: '/d', exists: () => false }), '/x')
   assert.equal(resolveEggMedia({ publicOnly: true, env: { VOXELWRIGHT_EGG_MEDIA: '/x' }, defaultDir: '/d', exists: () => true }), null)
-  assert.equal(resolveEggMedia({ publicOnly: true, eggMedia: true, env: {}, defaultDir: '/d', exists: () => true }), null)
 })
 
 test('buildPlan builds once and deploys chosen targets with commit SHA message', () => {
