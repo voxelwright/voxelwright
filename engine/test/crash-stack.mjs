@@ -358,10 +358,37 @@ if (!parts.includes('sf')) {
       if (car) {
         await page.evaluate((c) => { const e = globalThis.engine; e.me.walk(false); const side = c.heading + Math.PI / 2, x = c.x + Math.cos(side) * 30, z = c.z + Math.sin(side) * 30; Object.assign(e.pose, { x: x / 10, z: z / 10, y: e.ground(x / 10, z / 10) + 2, yaw: Math.atan2(-Math.cos(side), Math.sin(side)), pitch: -0.1 }); e.me.walk(true) }, car)
         const woke = await page.waitForFunction(() => globalThis.engine.alive.near !== null, null, { timeout: 30_000 }).then(() => true, () => false)
-        await page.waitForTimeout(1500)
+        // Watch the waking car's body over 1.5 s on rAF to verify it stays planted at its drawn stance with no jump (#147).
+        const motion = woke ? await page.evaluate((c) => new Promise((resolve) => {
+          const e = globalThis.engine
+          const rot = (q, v) => { const [x, y, z, w] = q, ix = w * v[0] + y * v[2] - z * v[1], iy = w * v[1] + z * v[0] - x * v[2], iz = w * v[2] + x * v[1] - y * v[0], iw = -x * v[0] - y * v[1] - z * v[2]; return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x] }
+          let samples = 0, maxAbsDy = 0, cornerDrift = 0, baseCorners = null
+          const t0 = performance.now()
+          const sample = () => {
+            const t = e.alive.near
+            const w = t?.alive ? e.alive.where(t) : null
+            if (t && w && Math.hypot(w.at[0] - c.x, w.at[2] - c.z) < 25 && Math.abs(w.at[1] - c.y) < 100) {
+              const com = t.parts?.[0]?.born?.com ?? [t.size[0] / 2, t.size[1] / 3, t.size[2] / 2]
+              const foot = rot(w.rot, [t.size[0] / 2 - com[0], -com[1], t.size[2] / 2 - com[2]])
+              const fy = w.at[1] + foot[1]
+              maxAbsDy = Math.max(maxAbsDy, Math.abs(fy - c.y))
+              const corners = [[0, 0, 0], [t.size[0], 0, 0], [0, 0, t.size[2]], [t.size[0], 0, t.size[2]]].map(([lx, ly, lz]) => {
+                const o = rot(w.rot, [lx - com[0], ly - com[1], lz - com[2]])
+                return [w.at[0] + o[0], w.at[1] + o[1], w.at[2] + o[2]]
+              })
+              if (!baseCorners) baseCorners = corners
+              else for (let k = 0; k < 4; k++) cornerDrift = Math.max(cornerDrift, Math.hypot(corners[k][0] - baseCorners[k][0], corners[k][1] - baseCorners[k][1], corners[k][2] - baseCorners[k][2]))
+              samples++
+            }
+            if (performance.now() - t0 < 1500) requestAnimationFrame(sample)
+            else resolve({ samples, maxAbsDy, cornerDrift })
+          }
+          requestAnimationFrame(sample)
+        }), car) : { samples: 0, maxAbsDy: Infinity, cornerDrift: Infinity }
         // Where the living thing nearest its place stands: its middle of mass, which is within a few cells of the middle of where it was drawn, and its floor on the road.
         const stood = await page.evaluate((c) => { const e = globalThis.engine; let best = null; for (const t of e.alive.things) { const w = t.alive && e.alive.where(t); if (!w) continue; const d = Math.hypot(w.at[0] - c.x, w.at[2] - c.z); if (!best || d < best.d) best = { d, name: t.name, high: w.at[1] - t.size[1] / 2 - e.feet(Math.round(w.at[0]), Math.round(w.at[2])), near: e.alive.near === t } } return best }, car)
         check(woke && !!stood && stood.d < 6 && Math.abs(stood.high) < 4, `sf: it came to life where it stood (${stood ? `${round(stood.d)} cells from the middle of where it was drawn, its floor ${round(stood.high)} cells over the road` : 'nothing alive there'})`)
+        check(motion.samples > 5 && motion.maxAbsDy < 0.25 && motion.cornerDrift < 0.5, `sf: waking parked car stays planted with no visible jump (max |dy|=${round(motion.maxAbsDy, 3)} cells, corner drift=${round(motion.cornerDrift, 2)} cells across ${motion.samples} frames)`)
         if (woke && stood?.near) {
           await page.keyboard.press('KeyE')
           const riding = await page.waitForFunction(() => globalThis.engine.alive.riding !== null, null, { timeout: 10_000 }).then(() => true, () => false)
