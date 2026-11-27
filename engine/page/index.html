@@ -48,6 +48,10 @@
   #ask.open #ask-row #ask-which { background: rgba(18, 23, 32, 0.08); }
   #ask.open #ask-row #ask-send { width: 34px; padding: 0; border-radius: 3px; background: #1e4ed8; color: #f6f7fa; }
   #ask:not(.open) #ask-send { display: none; }
+  /* The way out of the open bar (#75): a quiet key before the line. Closed, the bar has nothing to close. */
+  #ask:not(.open) #ask-close { display: none; }
+  #ask.open #ask-row #ask-close { width: 34px; padding: 0; color: #4a5361; }
+  #ask.open #ask-row #ask-close:hover { color: #121720; }
   #choice { align-self: center; max-width: 100%; padding: 10px 12px; border-radius: 3px; background: rgba(16, 22, 32, 0.86); border: 1.5px solid rgba(94, 114, 146, 0.45); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36); pointer-events: auto; }
   @media (pointer: coarse) { #choice { box-sizing: border-box; align-self: flex-start; max-width: calc(100vw - 28px); } }
   #choice p { margin: 0 2px 8px; font-size: 14px; }
