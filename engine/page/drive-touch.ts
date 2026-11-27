@@ -138,39 +138,49 @@ export function wheelSteer(turn: number, sens: number): number {
 export interface Placed { act: string; x: number; y: number; w: number; h: number; side: 'left' | 'right' }
 
 /**
- * Where each key stands for a scheme, a hand and a screen (before the safe area and the 14 px margin, which CSS adds).
- * The steering thumb's keys are on one side, the driving thumb's on the other. On an upright phone the keys are a little
- * smaller, so that the two clusters keep a gap between them.
+ * Where each key stands for a scheme, a hand and a screen `width` px wide (before the safe area and the 14 px margin,
+ * which CSS adds). The steering thumb's keys are on one side, the driving thumb's on the other. Upright, the keys are a
+ * little smaller; on any screen they shrink until the two thumbs' clusters are 24 px apart or more (allowing an iPhone's
+ * 59 px safe area at each side when it is on its side), and no key is under 44 px a side.
  */
-export function layout(s: DriveTouchSettings, steer: Steer, portrait: boolean, tiltAsk = false): Placed[] {
-  const k = s.size * (portrait ? 0.84 : 1), gap = Math.round(10 * k)
+export function layout(s: DriveTouchSettings, steer: Steer, view: { width: number; portrait: boolean }, tiltAsk = false): Placed[] {
+  const brakeAcross = s.gas === 'pedals' && steer === 'tilt'
+  const widths = (k: number) => {
+    const gap = 10 * k, pedals = 80 * k + gap + 74 * k
+    const steering = steer === 'arrows' ? 2 * 84 * k + gap * 1.4 : steer === 'wheel' ? 150 * k : brakeAcross ? 92 * k : 0
+    return pedals + steering
+  }
+  const room = view.width - 28 - (view.portrait ? 0 : 118) - 24
+  let k = s.size * (view.portrait ? 0.84 : 1)
+  if (widths(k) > room) k *= room / widths(k)
+  const px = (v: number) => Math.max(44, Math.round(v * k))
+  const gap = Math.round(10 * k)
   const drive: 'left' | 'right' = s.hand, steerSide: 'left' | 'right' = s.hand === 'right' ? 'left' : 'right'
   const out: Placed[] = []
-  const put = (act: string, side: 'left' | 'right', x: number, y: number, w: number, h: number) => out.push({ act, side, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) })
+  const put = (act: string, side: 'left' | 'right', x: number, y: number, w: number, h: number) => out.push({ act, side, x: Math.round(x), y: Math.round(y), w, h })
   // The driving thumb's cluster: the main pedal tall at the edge; drift beside it (brake below drift with pedals);
   // boost over the main pedal. With tilt and pedals, brake goes under the steering thumb, which has nothing else to do.
-  const mainW = 80 * k, mainH = 108 * k, sideW = 74 * k, smallH = 56 * k
-  const main = s.gas === 'auto' ? 'brake' : 'gas'
-  put(main, drive, 0, 0, mainW, mainH)
+  const mainW = px(80), mainH = px(108), sideW = px(74), smallH = px(56)
+  put(s.gas === 'auto' ? 'brake' : 'gas', drive, 0, 0, mainW, mainH)
   put('boost', drive, 0, mainH + gap, mainW, smallH)
-  const brakeAcross = s.gas === 'pedals' && steer === 'tilt'
   if (s.gas === 'pedals' && !brakeAcross) {
-    put('brake', drive, mainW + gap, 0, sideW, 76 * k)
-    put('drift', drive, mainW + gap, 76 * k + gap, sideW, smallH)
+    const brakeH = px(76)
+    put('brake', drive, mainW + gap, 0, sideW, brakeH)
+    put('drift', drive, mainW + gap, brakeH + gap, sideW, smallH)
   } else {
-    put('drift', drive, mainW + gap, 0, sideW, smallH * 1.15)
+    put('drift', drive, mainW + gap, 0, sideW, px(64))
   }
   // The steering thumb's.
   if (steer === 'arrows') {
-    const a = 84 * k
-    put('left', steerSide, steerSide === 'left' ? 0 : a + gap * 1.4, 0, a, a)
-    put('right', steerSide, steerSide === 'left' ? a + gap * 1.4 : 0, 0, a, a)
-    if (tiltAsk) put('tilt-on', steerSide, 0, a + gap, a * 2 + gap * 1.4, 48)
+    const a = px(84), between = Math.round(gap * 1.4)
+    put('left', steerSide, steerSide === 'left' ? 0 : a + between, 0, a, a)
+    put('right', steerSide, steerSide === 'left' ? a + between : 0, 0, a, a)
+    if (tiltAsk) put('tilt-on', steerSide, 0, a + gap, a * 2 + between, 48)
   } else if (steer === 'wheel') {
-    const d = 150 * k
+    const d = px(150)
     put('wheel', steerSide, 0, 0, d, d)
-  } else if (steer === 'tilt') {
-    if (brakeAcross) put('brake', steerSide, 0, 0, 92 * k, mainH)
+  } else if (brakeAcross) {
+    put('brake', steerSide, 0, 0, px(92), mainH)
   }
   return out
 }
@@ -397,7 +407,7 @@ export function driveTouch(o: {
     const tiltAsk = settings.steer === 'tilt' && tilt === 'ask'
     const c = Object.assign(document.createElement('div'), { className: 'dt-cluster' })
     c.style.setProperty('--dt-alpha', String(settings.opacity))
-    for (const p of layout(settings, steer, portrait.matches, tiltAsk)) {
+    for (const p of layout(settings, steer, { width: innerWidth, portrait: portrait.matches }, tiltAsk)) {
       let el: HTMLElement
       if (p.act === 'wheel') {
         el = Object.assign(document.createElement('div'), { className: 'vx-recess dt-wheel' })
