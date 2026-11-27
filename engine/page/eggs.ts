@@ -547,8 +547,9 @@ export function eggs(page: EggsPage) {
     const GAP = 8
     if (p.top < v.top + v.height / 2) {
       // In the first view the banner's plane flies just over the top of a video with a sky (boards.ts `above`): a lane
-      // for it under the row, its 3% margin, its cloth and the room round its target.
-      const lane = document.documentElement.classList.contains('first') && running?.picture?.sky ? 0.03 * v.height + 56 : 0
+      // for it under the row, its 3% margin, its cloth (taller as it comes nearer on its round) and the room round its
+      // 44 px target.
+      const lane = document.documentElement.classList.contains('first') && running?.picture?.sky ? 0.03 * v.height + 72 : 0
       return { top: (p.bottom + GAP + lane - v.top) / v.height, bottom: 1 }
     }
     return { top: 0, bottom: (p.top - GAP - v.top) / v.height }
