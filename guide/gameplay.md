@@ -48,14 +48,14 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Drift (handbrake) | Hold Space | Hold Drift | A / Cross (analog) |
 | Boost | Hold Shift | Hold Boost | B / Circle |
 | Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Drift and the left half forward, then let go of Drift | RT and A, then let go of A |
-| Next camera | C | Cam | RB or D-pad down |
+| Next camera (the seat among them) | C | Cam | RB or D-pad down |
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
 | Horn | Hold H | Hold Horn | L3 |
 | Next FM station | N | Choose a station in Radio | - |
 | Open the radio picker | R | Radio, or tap the station name while it shows | - |
 | Repair car | F | Repair | D-pad right |
-| View from the seat | V | Seat (hover things); Cam while driving | R3 or D-pad up |
+| Straight into the seat, and back | V | Seat (hover things); while driving, Cam goes round to the seat | R3 or D-pad up |
 | Get out | E | Get off | Y / Triangle |
 | **Map** | | | |
 | Open and close | M (once in the city), Esc closes | Tap the minimap | View / Share |
@@ -131,6 +131,7 @@ The street's kept cars get their motors from `HANDLING` in `engine/sf/fleet.mjs`
 | `saloon` | grey saloon | 475 (171 km/h) | 112 | 1.38 | 0.58 | 210 |
 | `hatch` | blue saloon, taxi | 445 (160 km/h) | 100 | 1.42 | 0.60 | 200 |
 | `suv` | grey SUV | 420 (151 km/h) | 96 | 1.48 | 0.54 | 280 |
+| `robotaxi` | PayMo (Waymo Ojai) | 440 (158 km/h) | 108 | 1.52 | 0.58 | 270 |
 | `van` | delivery van | 345 (124 km/h) | 84 | 1.32 | 0.48 | 360 |
 | `truck` | box truck | 295 (106 km/h) | 76 | 1.28 | 0.42 | 500 |
 
@@ -146,19 +147,21 @@ In a shared world, both boost (on and off) and rain wetness are forwarded to the
 
 ### Cameras
 
-`engine/page/drive-cam.ts` has five modes, `DRIVE_CAM_MODES`: Close (the default), Far, Hood, Bumper and Cinema. C cycles them and a toast names the new one. The mode survives getting out and back in.
+`engine/page/drive-cam.ts` has six views, `DRIVE_CAM_MODES`: Close (the default), Far, Hood, Bumper, Seat and Cinema. C (the touch Cam key, a pad's RB) goes round them all and a toast names the new one. Getting out leaves the seat for the view before it; the other views survive getting out and back in.
 
 - **Look back** (hold X or LB) turns the view 180 degrees and eases back on release.
 - **Air cam**: after 0.35 s airborne at speed, the close, far and cinema views pull wider.
 - **Cinema** cuts between hero, fender, flyby and helicopter shots every 4.5 s, and cuts away early when a shot is blocked.
 - **Speed lens**: the field of view widens with speed, and a streak, colour fringe and vignette grow with it (`engine/page/glow.ts`).
-- **V** puts the eye in the driver's seat. C leaves the seat for the chosen camera.
+- **Seat** puts the eye in the driver's seat ([from the seat](#from-the-seat)). V goes straight into it from any view and back to that view; C goes on from it to Cinema.
 
 Reduced motion makes camera changes instant, turns off the lens effects and holds each cinema shot 6.5 s.
 
 ### From the seat
 
-In the seat (V), `engine/page/cockpit.ts` moves your head with the car. Springs push it back on a launch, forward under braking, against the turn in a corner and down over a bump, with a jolt for a hit, a landing or a gear change and a buzz that grows with speed and rough ground. Reduced motion holds the head still.
+Every car is seen out of from its seat. Its glass is seen through on every graphics preset: with mirrors off (Low and Medium) a car's glass is tinted and mirrors nothing, where it used to be an opaque face that turned a car's every window black from inside. Where a car's recorded eye has its own seat back, roof or dash within a head's room (35 cm) ahead of it, `living.ts` `clearEye` moves it, once, as its look is worn, to the nearest place that sees out: the street's blue saloon's eye sat 3 cm over its own seat's back and goes 20 cm forward. `node engine/test/seat-view.mjs` checks the camera's round and every car (the hand-written one, the street's kept cars and the realm's parked saloon as this checkout makes them), mirrors on and off.
+
+In the seat, `engine/page/cockpit.ts` moves your head with the car. Springs push it back on a launch, forward under braking, against the turn in a corner and down over a bump, with a jolt for a hit, a landing or a gear change and a buzz that grows with speed and rough ground. Reduced motion holds the head still.
 
 In a car it also draws on the glass, and only when there is something to draw:
 
@@ -196,6 +199,7 @@ They react to you:
 - **Crashes.** Hit a car and it wakes as a real drivable body with its interior, is knocked by the impact, and both vehicles dent immediately, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams bounce you off and dent your car. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
+- **PayMo robotaxis.** Open the map, select **PayMo Station** and choose **Visit** to reach the six charging bays on Stockton Street between Beach and North Point. More PayMos drive nearby as cars leave and return to the depot. Look for the short nose, white roof and wide sensor bar above the Ojai’s windshield. A PayMo occasionally stalls at an intersection or on a narrow street. Its amber hazards flash, drivers behind it honk, and pedestrians stop at the curb to yell or hold up phones to film. When the car clears, they resume their walk. Press **E** beside a stopped car to drive it.
 
 ### Stunts
 
@@ -361,10 +365,10 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Body, canopy | `engine/page/person.ts` | `engine/test/person.mjs` |
 | Driving, boost, grip | `engine/page/living.ts`, `engine/core/src/bodies/living.rs` | `engine/test/living.mjs`, `engine/test/fine-living.mjs`, the core's `cargo test` |
 | Car classes | `engine/sf/fleet.mjs`, `engine/sf/cars.mjs` | - |
-| Seat, wheels, summoning | `engine/page/cockpit.ts`, `engine/page/wheels.ts`, `engine/page/summon.ts` | - |
+| Seat, wheels, summoning | `engine/page/cockpit.ts`, `engine/page/wheels.ts`, `engine/page/summon.ts` | `engine/test/seat-view.mjs` (the seat) |
 | Radio, pass-by whooshes | `engine/page/sound/radio.ts` | `engine/test/radio.mjs` |
 | Stunts | `engine/page/stunts.ts` | `engine/test/stunts.mjs` |
-| Traffic | `engine/page/street.ts` | `engine/test/street.mjs` |
+| Traffic & robotaxis | `engine/page/street.ts`, `engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts` | `engine/test/street.mjs`, `engine/test/sf-robotaxi.mjs` |
 | HUD | `engine/page/hud.ts`, `engine/page/play-hud.ts`, `engine/page/radial.ts` | `engine/test/sf-hud.mjs` |
 | Map and GPS | `engine/page/minimap.ts`, `engine/page/gps.ts` | `engine/test/sf-map.mjs` |
 | Gamepad | `engine/page/gamepad.ts` | `engine/test/gamepad.mjs` |
@@ -375,7 +379,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 
-Camera modes, skidmarks, lamps, traffic's reactions, the seat, the drawn wheels and summoning have no check of their own yet.
+Camera modes other than the seat, skidmarks, lamps, traffic's reactions, the drawn wheels and summoning have no check of their own yet.
 
 Signs and eggs have their own tools:
 

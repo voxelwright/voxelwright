@@ -63,6 +63,17 @@ export const NAMED: Record<string, Move> = {
   climb: { keys: [{ t: 0.12, liftL: 2.7, liftR: 2.7, bendL: 0.5, bendR: 0.5, crouch: 0.35, lean: 0.2 }, { t: 0.36, liftL: 1.3, liftR: 1.3, bendL: 1.2, bendR: 1.2, swingR: 1.25, kneeR: 1.5, lean: 0.55, crouch: 0.2 }, { t: 0.62, liftL: 0.3, liftR: 0.3, bendL: 0.3, bendR: 0.3, swingR: 0.2, kneeR: 0.3, lean: 0.15, crouch: 0.1 }] },
   shrug: { keys: [{ t: 0.2, liftL: 0.5, outL: 0.5, bendL: 1.3, liftR: 0.5, outR: 0.5, bendR: 1.3, tilt: 0.06, nod: -0.1 }, { t: 0.7, liftL: 0.5, outL: 0.5, bendL: 1.3, liftR: 0.5, outR: 0.5, bendR: 1.3 }, { t: 1.0, liftL: 0, outL: 0, bendL: 0.12, liftR: 0, outR: 0, bendR: 0.12, tilt: 0, nod: 0 }] },
   'hands-up': { hold: true, keys: [{ t: 0.25, liftL: 2.9, liftR: 2.9, outL: 0.45, outR: 0.45, bendL: 0.25, bendR: 0.25 }] },
+  // Frustrated bystander heckling / waving at a blocked street: palms up, emphatic arm wave, shaking head.
+  yell: {
+    loop: true,
+    keys: [
+      { t: 0, liftL: 0.9, outL: 0.55, bendL: 1.15, liftR: 1.85, outR: 0.45, bendR: 0.55, lean: 0.14, nod: -0.08, turn: -0.12 },
+      { t: 0.28, liftL: 1.35, outL: 0.75, bendL: 0.85, liftR: 2.35, outR: 0.32, bendR: 0.25, lean: 0.2, nod: -0.14, turn: 0.14 },
+      { t: 0.56, liftL: 0.75, outL: 0.45, bendL: 1.25, liftR: 1.55, outR: 0.65, bendR: 0.95, lean: 0.1, nod: -0.04, turn: -0.1 },
+      { t: 0.86, liftL: 1.15, outL: 0.65, bendL: 1.0, liftR: 2.1, outR: 0.4, bendR: 0.35, lean: 0.18, nod: -0.12, turn: 0.08 },
+      { t: 1.12, liftL: 0.9, outL: 0.55, bendL: 1.15, liftR: 1.85, outR: 0.45, bendR: 0.55, lean: 0.14, nod: -0.08, turn: -0.12 },
+    ],
+  },
 }
 
 /** How long a move is: to its last key. */

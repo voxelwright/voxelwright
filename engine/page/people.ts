@@ -47,6 +47,10 @@ export interface Person {
   struck?: { t: number; way: readonly [number, number, number] }
   /** What they hold up before them and look at (a phone), 0 to 1. */
   reading?: number
+  /** Holding up a phone forward at eye/chest level to film something ahead, 0 to 1. */
+  filming?: number
+  /** The stopped taxi this pedestrian is watching or addressing. */
+  robotaxiId?: number
   /** Seconds, for what a body does while it stands: it shifts and breathes. */
   time?: number
   /** Their name, shown over their head, and what they are saying now, under it. Both are text someone typed: drawn as letters, nothing more. */
@@ -60,8 +64,8 @@ export interface Doing { move: Move; t: number; aim?: readonly [number, number, 
 /** Floats a box: where its middle is, a number of its own; half its size, how big its cells are; two of its three axes with the height of the feet and what it is made as; its colour. */
 export const EACH = 24
 const MOST = 24_000
-/** What a box is made as: cloth is knit, skin is smooth, leather shines a little. */
-const CLOTH = 0, SKIN = 1, LEATHER = 2, HAIR = 3
+/** What a box is made as: cloth is knit, skin is smooth, leather shines a little, screen glows cleanly at night. */
+const CLOTH = 0, SKIN = 1, LEATHER = 2, HAIR = 3, SCREEN = 4
 
 const CODE = /* wgsl */ `
 struct U {
@@ -230,7 +234,7 @@ struct Lit { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   // A body shades itself a little towards the feet and where it faces down.
   let open = clamp(0.62 + 0.03 * (seen.y + u.eye.y - in.more.z) + 0.2 * facing.y, 0.45, 1.0);
   let rough = select(0.95, 0.5, made == ${LEATHER}u);
-  var col = shade(albedo, facing, rd, g.sun, direct, open, rough, 0.0);
+  var col = shade(albedo, facing, rd, g.sun, direct, open, rough, select(0.0, 2.2, made == ${SCREEN}u));
   if (g.weather.z > 0.0 && u.lamps > 0.0) {
     let lampAt = seen + u.eye;
     col += albedo * vec3f(1.0, 0.78, 0.48) * min(lamplight(lampAt, facing, in.more.z), 1.3) * g.weather.z * 1.5;
@@ -307,8 +311,10 @@ const FAR = 100000.0;
   // Its foot is over the head; it stands up from there, as wide and tall as it is told.
   let world = at.xyz - u.eye + u.right * ((corner.x - 0.5) * size.x) + u.up * (corner.y * size.y);
   let d = dot(world, u.forward);
+  // Depth-bias speech/name pills forward by 2.8 m (28 cells) without altering screen position or scale so awnings & trees beside the speaker never slice text!
+  let dz = max(NEAR + 0.5, d - 28.0);
   var out: Out;
-  out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
+  out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (1.0 - NEAR / dz) * d, d);
   out.uv = mix(uv.xy, uv.zw, vec2f(corner.x, 1.0 - corner.y));
   out.show = at.w;
   return out;
@@ -414,7 +420,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   if (chosen?.extra) for (const b of chosen.extra) (extras === NO_EXTRAS ? (extras = []) : extras).push(b)
   // A hat of any kind goes over the hair, not through a knitted cap of the figure's own.
   if (hairstyle === 0 && extras.some((b) => b.on === 'head' && b.at[1] > 2.4)) hairstyle = 1
-  const walking = p.walking ?? 0, running = walking * (p.running ?? 0), flinch = p.flinch ?? 0, down = p.down ?? 0, reading = p.reading ?? 0, time = p.time ?? 0
+  const walking = p.walking ?? 0, running = walking * (p.running ?? 0), flinch = p.flinch ?? 0, down = p.down ?? 0, reading = p.reading ?? 0, filming = p.filming ?? 0, time = p.time ?? 0
   const stride = (p.stride ?? 0) * Math.PI * 2
   const feet = p.at[1]
   let n = at
@@ -498,12 +504,22 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   P[J.rise] = walking * flight * Math.min(2.2, 0.5 + pair * 0.03)
   P[J.lean] = walking * 0.06 + running * 0.24 + flinch * 0.55 + fold * 1.25
   P[J.twist] = walking * Math.sin(stride) * -0.1 * (1 + running * 1.4)
-  P[J.turn] = (p.glance ?? 0) + (1 - walking) * Math.sin(time * 0.23 + s * 1.7) * 0.25 * (1 - reading)
-  P[J.nod] = reading * 0.45 + flinch * 0.4
-  // One arm holds an umbrella up, or a phone before the face.
+  P[J.turn] = (p.glance ?? 0) + (1 - walking) * Math.sin(time * 0.23 + s * 1.7) * 0.25 * (1 - Math.max(reading, filming))
+  P[J.nod] = reading * 0.45 - filming * 0.06 + flinch * 0.4
+  // One arm holds an umbrella up, films ahead with a raised phone, or holds a phone down while reading.
   if (p.umbrella) { P[J.liftR] = 0.25 + flinch * 1.5; P[J.bendR] = 1.75 }
   // A hand that grips a thing picked up (held.ts) carries it up: the elbow bent, the forearm level, so the thing stands out of the fist where it is seen.
   else if (extras.some((b) => b.on === 'gripR')) { P[J.liftR] = 0.12 + P[J.liftR] * 0.25; P[J.bendR] = 1.45 + running * 0.2 + flinch * 0.4 }
+  else if (filming > 0) {
+    // Arm extended cleanly forward toward the street incident (not folded back into the face!), left arm relaxed.
+    const sway = Math.sin(time * 1.7 + s * 3.1) * 0.04
+    P[J.liftR] = P[J.liftR] * (1 - filming) + filming * (1.08 + sway)
+    P[J.bendR] = P[J.bendR] * (1 - filming) + filming * 0.48
+    P[J.outR] = P[J.outR] * (1 - filming) + filming * 0.06
+    P[J.liftL] = P[J.liftL] * (1 - filming) + filming * 0.10
+    P[J.bendL] = P[J.bendL] * (1 - filming) + filming * 0.24
+    P[J.outL] = P[J.outL] * (1 - filming) + filming * 0.04
+  }
   else if (reading > 0) { P[J.liftR] = P[J.liftR] * (1 - reading) + reading * 0.35; P[J.bendR] = P[J.bendR] * (1 - reading) + reading * 1.85 }
   // Struck, the body goes the way the blow pushed it: the chest over that way at once, the head a moment behind it,
   // the arms flung out, a knee giving; and upright again inside a second.
@@ -710,7 +726,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   // Arms: each lifts, goes out from the body and bends as the pose says; one that aims lies straight along the
   // line from its shoulder to what is aimed at.
   for (const side of [-1, 1]) {
-    const holds = side > 0 && (p.umbrella || reading > 0)
+    const holds = side > 0 && (p.umbrella || reading > 0 || filming > 0)
     let lift = P[side < 0 ? J.liftL : J.liftR], bend = P[side < 0 ? J.bendL : J.bendR], out = P[side < 0 ? J.outL : J.outR], round = 0
     const aims = P[side < 0 ? J.aimL : J.aimR]
     child(ARM, CHEST, side * (2.05 * broad * shoulders + 0.5), 4.4, 0)
@@ -745,6 +761,14 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
       box(HELD, 0, 4.2, 0, 0.3, 10, 0.3, SHOES[0], LEATHER)
       shape(HELD, 0, 9.1, 0, 11.5, 1.6, 11.5, canopy, CLOTH, 2, 0.35, 1, 0.5, 0)
       box(HELD, 0, 10.1, 0, 0.3, 0.8, 0.3, SHOES[0], LEATHER)
+    } else if (holds && filming > 0 && fine) {
+      // Upright smartphone held out in front of the extended hand: dark chassis, emissive bright screen facing the filmer (+z), glowing red REC lens facing the street (-z).
+      child(HELD, FORE, 0, -3.55, 0)
+      for (let a = 0; a < 3; a++) { HELD[a] = ROOT[a]; HELD[3 + a] = a === 1 ? 1 : 0; HELD[6 + a] = ROOT[6 + a] }
+      pitch(HELD, -0.10)
+      box(HELD, 0, 0.72, -0.20, 0.96, 1.82, 0.22, SHOES[0], LEATHER)
+      box(HELD, 0, 0.74, -0.06, 0.78, 1.54, 0.08, [0.72, 0.94, 1.0], SCREEN)
+      box(HELD, 0.22, 1.32, -0.34, 0.26, 0.26, 0.08, [1.0, 0.18, 0.10], SCREEN)
     } else if (holds && fine) {
       box(FORE, 0, -3.9, -0.5, 0.75, 1.5, 0.2, SHOES[0], LEATHER)
     }
@@ -825,30 +849,39 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
       }
       pen.clearRect(0, 0, SLOT[0], SLOT[1])
       pen.textBaseline = 'middle'; pen.textAlign = 'center'
-      // The words in at most two lines, cut with an ellipsis where they are longer.
-      pen.font = '500 30px -apple-system, system-ui, sans-serif'
+      // The words in at most two lines, cut with an ellipsis where they are longer (measured in the exact font used to draw).
+      const sayFont = name ? '500 30px -apple-system, system-ui, sans-serif' : '600 28px -apple-system, system-ui, sans-serif'
+      pen.font = sayFont
       const lines: string[] = []
       for (const word of says.split(/\s+/).filter(Boolean)) {
         const last = lines.length - 1
-        if (last >= 0 && pen.measureText(`${lines[last]} ${word}`).width <= SLOT[0] - 40) lines[last] += ` ${word}`
+        if (last >= 0 && pen.measureText(`${lines[last]} ${word}`).width <= SLOT[0] - 48) lines[last] += ` ${word}`
         else if (lines.length < 2) lines.push(word)
         else { lines[1] = `${lines[1].replace(/.{0,2}$/, '')}…`; break }
       }
-      for (let i = 0; i < lines.length; i++) while (lines[i].length > 4 && pen.measureText(lines[i]).width > SLOT[0] - 40) lines[i] = `${lines[i].slice(0, -3)}…`
+      for (let i = 0; i < lines.length; i++) while (lines[i].length > 4 && pen.measureText(lines[i]).width > SLOT[0] - 48) lines[i] = `${lines[i].slice(0, -3)}…`
       pen.font = '600 30px -apple-system, system-ui, sans-serif'
-      const nameWide = pen.measureText(name).width
-      pen.font = '500 30px -apple-system, system-ui, sans-serif'
-      const wide = Math.min(SLOT[0], Math.ceil(Math.max(nameWide, ...lines.map((l) => pen.measureText(l).width)) + 36)), tall = 44 + lines.length * 38
+      const nameWide = name ? pen.measureText(name).width : 0
+      pen.font = sayFont
+      const wide = Math.min(SLOT[0], Math.ceil(Math.max(nameWide, ...lines.map((l) => pen.measureText(l).width)) + 40))
+      const tall = name ? 44 + lines.length * 38 : Math.max(46, 18 + lines.length * 36)
       const left = (SLOT[0] - wide) / 2, top = SLOT[1] - tall
       // A dark plate with pale letters: a white one came out of the last pass as a lamp, and glowed at night.
-      pen.fillStyle = lines.length ? 'rgba(14, 18, 24, 0.84)' : 'rgba(14, 18, 24, 0.62)'
+      const shouted = !name && says.includes('!')
+      pen.fillStyle = lines.length ? 'rgba(14, 18, 24, 0.88)' : 'rgba(14, 18, 24, 0.62)'
       pen.beginPath(); pen.roundRect(left, top, wide, tall, 14); pen.fill()
-      pen.fillStyle = lines.length ? '#9aa6b4' : '#d9dee5'
-      pen.font = '600 30px -apple-system, system-ui, sans-serif'
-      pen.fillText(name, SLOT[0] / 2, top + 23)
-      pen.fillStyle = '#d9dee5'
-      pen.font = '500 30px -apple-system, system-ui, sans-serif'
-      lines.forEach((l, i) => pen.fillText(l, SLOT[0] / 2, top + 60 + i * 38))
+      if (name) {
+        pen.fillStyle = lines.length ? '#9aa6b4' : '#d9dee5'
+        pen.font = '600 30px -apple-system, system-ui, sans-serif'
+        pen.fillText(name, SLOT[0] / 2, top + 23)
+        pen.fillStyle = '#d9dee5'
+        pen.font = sayFont
+        lines.forEach((l, i) => pen.fillText(l, SLOT[0] / 2, top + 60 + i * 38))
+      } else {
+        pen.fillStyle = shouted ? '#f6d27a' : '#e5edf5'
+        pen.font = sayFont
+        lines.forEach((l, i) => pen.fillText(l, SLOT[0] / 2, top + 27 + i * 36))
+      }
       device.queue.copyExternalImageToTexture({ source: paper }, { texture: sheet, origin: [(slot % SLOTS[0]) * SLOT[0], Math.floor(slot / SLOTS[0]) * SLOT[1]], premultipliedAlpha: true }, SLOT)
       w = { slot, wide, tall, used: frames }
       written.set(key, w)
@@ -875,9 +908,9 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         if (ahead < -30 || off > 4000) continue
         n = figure(p, packed, n, anchor, off > 450 ? 3 : off > 220 ? 2 : off > 60 ? 1 : 0)
         count++
-        if (p.name && off < 900 && off > 6 && named < SLOTS[0] * SLOTS[1]) {
+        if ((p.name || p.says) && off < 900 && off > 6 && named < SLOTS[0] * SLOTS[1]) {
           // Over the head, the size letters should be on the screen: no smaller than can be read, no bigger than a hand.
-          const w = write(p.name, p.says ?? ''), o = named++ * 12
+          const w = write(p.name ?? '', p.says ?? ''), o = named++ * 12
           const high = to.size[1] / (2 * view.tanHalf * Math.max(ahead, 1)), tall = Math.max(to.size[1] * 0.034, Math.min(to.size[1] * 0.05, 2.4 * high)) * (w.tall / 44) / high
           const lift = (p.umbrella ? 29 : 19.5) * (1 - (p.down ?? 0) * 0.8), q = p.frame, ux = q ? 2 * (q[0] * q[1] - q[3] * q[2]) : 0, uy = q ? 1 - 2 * (q[0] * q[0] + q[2] * q[2]) : 1, uz = q ? 2 * (q[1] * q[2] + q[3] * q[0]) : 0
           board[o] = p.at[0] + ux * lift - anchor[0]; board[o + 1] = p.at[1] + uy * lift - anchor[1]; board[o + 2] = p.at[2] + uz * lift - anchor[2]

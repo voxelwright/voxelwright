@@ -1891,6 +1891,10 @@ async function main() {
         ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch, dur: info.annoyed ? 0.15 : 0.22, force: 0.65, reach: 18, travels: false })
         if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
       },
+      onShout: (info) => {
+        ears?.spoke({ name: info.name, text: info.text, at: info.at }, 'babble')
+        window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
+      },
     })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
