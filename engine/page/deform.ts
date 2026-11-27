@@ -207,25 +207,33 @@ export function deformPointCpu(
     let support = 1 - x * x - y * y - z * z
     if (support <= 0 || d.depth <= 0) continue
     const depth = d.depth, horizontal = 1 - dy * dy
-    // The skin compresses either side of an oblique crease. Its crest stays below the original hood.
-    const ax = 1.75 * dx + 1.65 * dz, az = 1.75 * dz - 1.65 * dx
-    const along = ax * x + 0.95 * y + az * z - 0.72
-    const tip = Math.sqrt(along * along + 0.008), ridge = Math.max(0, 1.08 - tip)
-    const compression = 1 - 0.44 * horizontal * ridge * ridge
-    const slope = -4 * support * depth * inv * compression
-    const crest = depth * inv * support * support * 0.88 * horizontal * ridge * along / tip
-    push(dx, dy, dz, depth * support * support * compression,
-      slope * x + crest * ax, slope * y + crest * 0.95, slope * z + crest * az)
+    // Two flanks meet along a line in the impact plane. The flank can be steep
+    // while the displacement along the blow stays monotonic (axis dot dir = 0).
+    const upX = -dy * dx, upY = horizontal, upZ = -dy * dz
+    const ax = 3.7 * dz + 1.85 * upX, ay = 1.85 * upY, az = -3.7 * dx + 1.85 * upZ
+    const along = ax * x + ay * y + az * z - 0.89
+    const t = clamp(Math.abs(along) / 0.89), rib = 1 - t * t * (3 - 2 * t)
+    const inward = depth * (1 - 0.10 * horizontal), compression = 1 - 0.66 * horizontal * rib
+    const slope = -4 * inward * inv * support * compression
+    const flank = inward * inv * support * support * 0.66 * horizontal * 6 * t * (1 - t) * Math.sign(along) / 0.89
+    push(dx, dy, dz, inward * support * support * compression,
+      slope * x + flank * ax, slope * y + flank * ay, slope * z + flank * az)
 
-    // The struck lower panel gives at the joint and drops. Material above the joint keeps its height.
+    // The end of the folded sheet tucks down under the adjoining panel.
+    // Its bottom edge stays level. The top and bottom of the grille pinch together.
     x = (px - d.center[0]) * inv; y = (py - d.center[1]) * inv; z = (pz - d.center[2]) * inv
     support = 1 - x * x - y * y - z * z
     if (support <= 0 || horizontal <= 0) continue
-    const t = clamp((0.20 - y) * 3.2), sag = t * t * (3 - 2 * t), shape = support * sag
-    const back = 0.59 * dy - 0.40 * horizontal
-    const g = 2 * depth * inv * shape
-    push(dx * back, dy * back - 0.59, dz * back, depth * shape * shape,
-      g * (-2 * sag * x), g * (-2 * sag * y - 19.2 * support * t * (1-t)), g * (-2 * sag * z))
+    const bx = 3.4 * dz + 2.25 * dx, by = 2.25 * dy, bz = -3.4 * dx + 2.25 * dz
+    const cut = bx * x + by * y + bz * z - 0.65
+    const f = clamp(Math.abs(cut)), seam = 1 - f * f * (3 - 2 * f)
+    const h = clamp((upX * x + upY * y + upZ * z + 0.45) / 0.72), top = h * h * (3 - 2 * h)
+    const drop = 0.42 * depth, base = drop * inv * support * support
+    const radial = -4 * drop * inv * support * seam * top
+    const edge = -base * top * 6 * f * (1 - f) * Math.sign(cut), height = base * seam * 6 * h * (1 - h) / 0.72
+    push(-upX, -upY, -upZ, drop * support * support * seam * top,
+      radial * x + edge * bx + height * upX, radial * y + edge * by + height * upY, radial * z + edge * bz + height * upZ)
+
   }
   const norm = Math.hypot(nx, ny, nz) || 1
   return { pos: [px, py, pz], norm: [nx / norm, ny / norm, nz / norm] }
@@ -280,31 +288,38 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
     let core = support * support;
     let dir = crush.xyz;
     let depth = crush.w;
-    // A crease keeps a narrow strip proud of the compressed metal on either side.
-    // Its crest stays at or below the undamaged hood. The derivative of the compression
-    // envelope is bounded by (1.54 + 0.88 * 2.60) / radius, so the map never folds at depth/radius <= 0.2.
+    // The sharp fold runs across the impact plane. Its slope has zero component
+    // along the blow, so only the compact radial envelope can reduce the Jacobian.
     let horizontal = 1.0 - dir.y * dir.y;
-    let axis = vec3f(1.75 * dir.x + 1.65 * dir.z, 0.95, 1.75 * dir.z - 1.65 * dir.x);
-    let along = dot(u, axis) - 0.72;
-    let tip = sqrt(along * along + 0.008);
-    let ridge = max(0.0, 1.08 - tip);
-    let compression = 1.0 - 0.44 * horizontal * ridge * ridge;
-    let grad = (depth / zone.w) * (-4.0 * support * compression * u + core * 0.88 * horizontal * ridge * along/tip * axis);
+    let up = vec3f(0, 1, 0) - dir.y * dir;
+    let side = vec3f(dir.z, 0, -dir.x);
+    let axis = 3.7 * side + 1.85 * up;
+    let along = dot(u, axis) - 0.89;
+    let t = clamp(abs(along) / 0.89, 0.0, 1.0);
+    let ridge = 1.0 - t * t * (3.0 - 2.0 * t);
+    let inward = depth * (1.0 - 0.10 * horizontal);
+    let compression = 1.0 - 0.66 * horizontal * ridge;
+    let flank = 0.66 * horizontal * 6.0 * t * (1.0 - t) * sign(along) / 0.89;
+    let grad = (inward / zone.w) * (-4.0 * support * compression * u + core * flank * axis);
     result.norm -= grad * (dot(dir, result.norm) / (1.0 + dot(dir, grad)));
-    result.pos += dir * (depth * core * compression);
+    result.pos += dir * (inward * core * compression);
 
-    // The lower fascia drops and rolls back at a horizontal joint. This downward step
-    // stretches the joint vertically. Only the compact radial envelope can reduce the Jacobian.
+    // Tuck the upper sheet down along one diagonal seam. Its axis is perpendicular
+    // to up; its depth and the inward displacement together fit within crush.w.
     if (horizontal > 0.0 && depth > 0.0) {
       let v = (result.pos - zone.xyz) / zone.w;
-      let edge = max(0.0, 1.0 - dot(v, v));
-      let t = clamp((0.20 - v.y) * 3.2, 0.0, 1.0);
-      let sag = t*t*(3.0 - 2.0*t);
-      let shape = edge * sag;
-      let lip = -0.59 * (vec3f(0,1,0) - dir.y * dir) - 0.40 * horizontal * dir;
-      let gradSag = (2.0 * depth * shape / zone.w) * (-2.0*sag*v - vec3f(0.0, 19.2*edge*t*(1.0-t), 0.0));
-      result.norm -= gradSag * (dot(lip,result.norm) / (1.0 + dot(lip,gradSag)));
-      result.pos += lip * (depth * shape * shape);
+      let support2 = max(0.0, 1.0 - dot(v, v));
+      let joint = 3.4 * side + 2.25 * dir;
+      let cut = dot(v, joint) - 0.65;
+      let f = min(abs(cut), 1.0);
+      let seam = 1.0 - f * f * (3.0 - 2.0 * f);
+      let h = clamp((dot(v, up) + 0.45) / 0.72, 0.0, 1.0);
+      let top = h * h * (3.0 - 2.0 * h);
+      let drop = 0.42 * depth;
+      let gradDrop = (drop / zone.w) * (-4.0 * support2 * seam * top * v + support2 * support2 *
+        (-top * 6.0 * f * (1.0 - f) * sign(cut) * joint + seam * 6.0 * h * (1.0 - h) * up / 0.72));
+      result.norm += gradDrop * (dot(up, result.norm) / (1.0 - dot(up, gradDrop)));
+      result.pos -= up * (drop * support2 * support2 * seam * top);
     }
 
     // A protected window can still be marked by a zero-depth impact.

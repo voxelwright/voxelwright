@@ -172,15 +172,20 @@ function position(p, s) {
     if (d.radius <= 0.0001 || r >= d.radius || d.depth <= 0) continue
     const [dx, dy, dz] = d.dir
     const envelope = (r) => Math.max(0, 1 - (r / d.radius) ** 2) ** 2
-    const h = 1 - dy*dy, rel = q.map((x,i)=>(x-d.center[i])/d.radius)
-    const a = (1.75*dx+1.65*dz)*rel[0] + 0.95*rel[1] + (1.75*dz-1.65*dx)*rel[2] - 0.72
-    const ridge = Math.max(0,1.08-Math.hypot(a,Math.sqrt(0.008)))
-    const inward = d.depth * envelope(r) * (1 - 0.44*h*ridge*ridge)
-    for (let i=0; i<3; i++) q[i] += d.dir[i]*inward
-    const v = q.map((x,i)=>x-d.center[i])
-    const t = Math.min(1,Math.max(0,3.2*(0.20-v[1]/d.radius)))
-    const drop = d.depth * envelope(Math.hypot(...v)) * (t*t*(3-2*t))**2
-    for (let i=0; i<3; i++) q[i] += (-0.59*((i===1?1:0)-dy*d.dir[i])-0.40*h*d.dir[i])*drop
+    const side = [dz, 0, -dx], up = [-dy*dx, 1-dy*dy, -dy*dz]
+    const relative = () => q.map((v,i) => (v-d.center[i])/d.radius)
+    const project = (v, axis) => v.reduce((sum, x, i) => sum + x*axis[i], 0)
+    const smooth = x => { const t = Math.max(0, Math.min(1, x)); return t*t*(3-2*t) }
+    let v = relative()
+    const ridge = 1 - smooth(Math.abs(3.7*project(v, side) + 1.85*project(v, up) - 0.89) / 0.89)
+    const inward = d.depth * (1-0.1*up[1]) * envelope(r) * (1-0.66*up[1]*ridge)
+    for (let i = 0; i < 3; i++) q[i] += d.dir[i]*inward
+    v = relative()
+    const seam = 1 - smooth(Math.abs(3.4*project(v, side) + 2.25*project(v, d.dir) - 0.65))
+    const top = smooth((project(v, up) + 0.45)/0.72)
+    const drop = 0.42 * d.depth * Math.max(0, 1-project(v,v))**2 * seam * top
+    for (let i = 0; i < 3; i++) q[i] -= up[i]*drop
+
   }
   return q
 }
@@ -213,7 +218,13 @@ for (let x = -6; x <= 6; x++) for (let y = -6; y <= 6; y++) for (let z = -6; z <
   })
   minVolume = Math.min(minVolume, a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
 }
-assert.ok(lowest < -0.32 * dent.depth && highest <= 1e-6 && minVolume > 0, 'the lower panel yields, the hood stays below the sightline, and the skin never folds')
+assert.ok(lowest < -0.32 * dent.depth && highest <= 1e-6 && minVolume > 0, 'the hood folds down below the sightline and the skin stays in order')
+// The grille used to stretch downward and open wider under a horizontal blow.
+const gapAt = (y) => {
+  const p = [dent.center[0], dent.center[1] + y*dent.radius, dent.center[2]]
+  return deformPointCpu(p, [1,0,0], side).pos[1] - p[1]
+}
+assert.ok(gapAt(0.16) < gapAt(-0.28) - 0.12*dent.depth, 'a struck grille pinches closed across its upper and lower edges')
 const states = [undefined, state, multi, protectedState, windshield, side]
 const uniforms = new Float32Array(52 * 64)
 for (let i = 0; i < 64; i++) packDeformUniforms(states[i % states.length], uniforms, i * 52)
