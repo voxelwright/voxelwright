@@ -819,9 +819,9 @@ export function street(o: {
   const faces = new Map<string, Born | 'asked'>()
   const maker = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
   let asking = 0
-  maker.onmessage = (e: MessageEvent<{ key: string; faces?: Uint32Array<ArrayBuffer>; filled?: number; cells?: Uint16Array }>) => {
+  maker.onmessage = (e: MessageEvent<{ key: string; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; filled?: number; cells?: Uint16Array }>) => {
     if (e.data.cells) { const k = e.data.key; if (fineKept.size >= 8) fineKept.delete(fineKept.keys().next().value!); fineKept.set(k, Promise.resolve(e.data.cells)); cellsAsked.get(k)?.(e.data.cells); cellsAsked.delete(k); return }
-    asking--; const look = lookOf(e.data.key); if (look) faces.set(e.data.key, { id: 0, cells: e.data.filled!, size: look.size, com: [0, 0, 0], low: [0, 0, 0], faces: e.data.faces! })
+    asking--; const look = lookOf(e.data.key); if (look) faces.set(e.data.key, { id: 0, cells: e.data.filled!, size: look.size, com: [0, 0, 0], low: [0, 0, 0], faces: e.data.faces!, smooth: e.data.smooth })
   }
   /**
    * A look's palette in a colour, with what the library says is the vehicle's paint (sf/cars.mjs `rolesOf`) marked
@@ -835,7 +835,8 @@ export function street(o: {
   const bornOf = (m: Model, paint: number, i: number): Born | null => {
     const key = `${m.id}/${paint}/${i}`, f = faces.get(key)
     if (f && f !== 'asked') return f
-    if (!f && asking < 2) { faces.set(key, 'asked'); asking++; const l = m.looks[i]; maker.postMessage({ key, runs: l.runs, kinds: paletteOf(m, paint, i), size: l.size }) }
+    // An outside look's faces come smooth (#38), measured over as much of the car whatever its cells' size: 12.5 cm.
+    if (!f && asking < 2) { faces.set(key, 'asked'); asking++; const l = m.looks[i], outside = lods(m).some((x) => x.i === i); maker.postMessage({ key, runs: l.runs, kinds: paletteOf(m, paint, i), size: l.size, reach: outside ? Math.max(2, Math.round((5 * l.per) / 4)) : 0 }) }
     return null
   }
 

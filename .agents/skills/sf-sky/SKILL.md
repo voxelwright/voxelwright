@@ -1,6 +1,6 @@
 ---
 name: sf-sky
-description: San Francisco's real sky for the realm's "SF now" (#524) — the National Weather Service's observations behind the Worker's /weather, and the sun and moon formulas in engine/page/almanac.ts. Load before changing /weather, the weather mapping, the almanac, the blog's SF_NIGHT, or adding another sky or weather source.
+description: San Francisco's real sky for the realm's "SF now" (#524): the National Weather Service's observations behind the Worker's /weather, and the sun and moon formulas in engine/page/almanac.ts. Load before changing /weather, the weather mapping, the almanac, the blog's SF_NIGHT, or adding another sky or weather source.
 ---
 
 # San Francisco's sky

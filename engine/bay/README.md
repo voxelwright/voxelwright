@@ -1,127 +1,128 @@
-# Baking the San Francisco realm
+# Baking San Francisco
 
-On the bake Mac, start or resume the detached city job from this branch.
+The Python here turns public data into San Francisco's tiles: it fetches each 1 km square, bakes it into a `BAY1` pack, builds its street graph and cuts the packs into tiles at three levels. `engine/sf/release.py` then stages the tiles as a release. The stages are explained in [the city pipeline](../../guide/city-pipeline.md), and the files they produce in [the San Francisco release](../../guide/sf-release.md).
+
+Everything this writes lives under `~/.village/engine/bay`, never in git. Run the commands from the repository root with the Bay's Python, `~/.village/engine/bay/venv/bin/python`. The scripts import numpy, Pillow, laspy (with lazrs), tifffile, pyproj and shapely, and `earth.py` also needs pmtiles and mapbox-vector-tile.
+
+## Bake one square
+
+To try a change on one square and look at it in the page server:
+
+```sh
+PY=~/.village/engine/bay/venv/bin/python
+$PY engine/bay/fetch.py 551.7_4183.5      # raw data into ~/.village/engine/bay/raw/<square>/
+$PY engine/bay/bake.py 551.7_4183.5       # the pack and names in ~/.village/engine/bay/packs/
+$PY engine/bay/tiles.py                   # cut every baked square into tiles
+cd engine && node serve.mjs --port 5920   # then open http://127.0.0.1:5920/city?bay=1
+```
+
+`VILLAGE_BAY_ROOT` points these scripts and the page server at another root than `~/.village/engine/bay`.
+
+## Run the city
+
+On the bake Mac, start or resume the detached city job, and check on it:
 
 ```sh
 engine/bay/run-city.sh start
 engine/bay/run-city.sh status
 ```
 
-`start` includes Public Works fixtures and resumes frozen recipes that used them. The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. The fixture rule is the exception: the manager cuts tiles from each square's fixtures as `street_furniture.standing` would draw them, and a state recorded under another `cutRule` cuts its level-0 square tiles again while its verified squares stay. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry. Once the tile inventory is complete, the job stages the local release under `sf/` for panel scoring and removes itself from launchd. After all 32 views pass, promote its pointer with the receipt described in `engine/sf/release.md`. On APFS the decoded objects are independent copy-on-write files.
+`start` snapshots the committed source and submits a launchd job under `caffeinate`. The job runs `full_run.py --compact` into `~/.village/engine/bay/sf-450-city/`, then `release.py` to stage the release under its `sf/` folder, and then removes itself from launchd. The log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. `status` counts the finished inputs, squares and tile groups in `state.json` and shows free disk.
 
-### Retained observations
+`full_run.py` runs each step as a checkpointed task. A finished task records SHA-256 checksums in `state.json`, and a restart checks them again. A changed recipe needs a new output directory. The one exception is the street fixture rule (`CUT_RULE`): a state recorded under another rule cuts its level-0 tiles again and keeps its verified squares. Before each task it checks free disk (`--free-gib`, 15 GiB by default and at least 18 with `--compact`): a plain run stops with its state saved, and a `--compact` run, as the city job is, waits for room.
 
-Each `inputs/<square>.zip` holds the six DataSF GeoJSON layers, NAIP RGB and NIR-first PNGs and Mapillary JPEGs with solved camera metadata. Frame coordinates are EPSG:26910. The north-west edge is in `frame.json`; columns run east and rows south. Each raster includes 16 m padding. Ground is a 1 m vertex grid in metres NAVD88. The quarter-metre pixel grids give absolute `top_mm` (int32, minimum for empty), `count`, `multi` (number of returns from multiple-return pulses), `intensity` (mean), and `footprint` (one-based source feature index, zero outside). Max-pool 2×2 tops for the cell bake. Keep fractional footprint coverage and missing returns when resampling for the face bake. The companion `<square>.json.gz` holds street and business observations. After verification, only the disposable raw staging square is removed.
-
-The six pilots total 0.781 GB. At their mean, 155 squares need 20.18 GB before packs, caches and tiles. Allow about 14 GB for those and additional room for the free-space reserve. The detailed measurements and initial time estimate are on #450.
-
-For a later square bake, supply the previous run's inputs to both seed options. The following rebuilds the six pilots and cuts their tiles. `--offline-inputs` requires retained square sources; planet tile generation uses its existing source cache.
+For a smaller run, `--pilot` bakes only the six pilot squares (`PILOT` in `full_run.py`), with no planet tiles around them. `--offline-inputs` requires every square's retained observations and fetches nothing:
 
 ```sh
 bay="$HOME/.village/engine/bay"
 "$bay/venv/bin/python" engine/bay/full_run.py --pilot --offline-inputs \
   --input-seed "$bay/sf-450-city/inputs" --street-seed "$bay/sf-450-city/inputs" \
-  --detail-seed "$bay/sf-450-city/inputs" \
-  --output "$bay/sf-six-rebake"
+  --detail-seed "$bay/sf-450-city/inputs" --output "$bay/sf-six-rebake"
 ```
 
-The six original pack and name pairs qualify as seeds only when they match the pilot checksums. The appearance pass runs on both seeded and newly built squares. For an offline rebuild from the archives alone, also pass `--seed /dev/null`. The full run writes a blended tile inventory, known sea keys, names and street graphs. See the [static release contract](../sf/release.md) and [street graph contract](../sf/streets.md).
+Once a city release is staged, score it and promote it as [release.md](../sf/release.md) describes.
 
-### Street-level publication
+## Squares
 
-The public bake reads three gzip JSON sidecars for each square. Each includes its `square` name. The quarter-metre ZIP remains the source of ground, surface, imagery and original footprint IDs.
+[sf-squares.json](sf-squares.json) lists every 1 km square touching DataSF's shoreline polygons: 155 with lidar and 11 made from planet data. Square corners end in 700 m east and 500 m north in EPSG:26910. A lidar square is one that intersects county land and a populated node of the USGS lidar index; a square without usable samples fails the bake. `coverage.py` regenerates the file and records a hash of each source response. Around every county square the run cuts planet tiles out to 500 m, 4 km and 16 km at the three levels.
+
+## Retained observations
+
+`fetch.py` downloads one square into `raw/<square>/`. `intermediate.py` keeps what the bakes need as `inputs/<square>.zip`, in EPSG:26910 with the north-west edge in `frame.json` and 16 m of padding:
+
+- the DataSF layers as GeoJSON (footprints, streets, curbs, addresses, trees, land use);
+- a 1 m ground grid in metres (NAVD88);
+- quarter-metre lidar grids: `top_mm`, `count`, `multi`, `intensity` and `footprint` (each pixel's building, counted from 1);
+- NAIP colour and near-infrared imagery.
+
+Beside each ZIP are gzip JSON sidecars, each naming its `square`:
 
 | Sidecar | Contents |
-|---|---|
-| `inputs/<square>.detail.json.gz`, version 1 | Additional DataSF outlines from a polygon intersection query (WGS84), OSM closed building ways, visible fixtures and wire paths, and 2025 Assessor year, units and storeys by parcel. OSM geometry is in global 10 cm engine cells. |
-| `inputs/<square>.stops.json.gz`, version 1 | Mapillary stop-sign points in global engine cells. The bake groups repeated sightings within 2.5 m and matches them to OSM control nodes within 11 m. |
-| `inputs/<square>.fixtures.json.gz`, version 2 | San Francisco Public Works map layers 36 and 48, respectively street-light points and trolley overhead polylines, plus Mapillary utility-pole points. All coordinates are global engine x,z cells. |
+| --- | --- |
+| `<square>.json.gz` | OSM ways, nodes and relations with the tags the street bake reads, and DataSF registered-business categories and coordinates (no names) |
+| `<square>.detail.json.gz` | Extra DataSF outlines, OSM building ways, visible fixtures and wires, and Assessor year, units and storeys by parcel |
+| `<square>.stops.json.gz` | Mapillary stop-sign points |
+| `<square>.fixtures.json.gz` | San Francisco Public Works street lights and trolley wires, and Mapillary utility poles |
 
-The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 25, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. Use a fresh output directory when changing the fixture setting. [Source checks](../../DATA-LICENSES.md)
+`full_run.py` collects them on its own. `street_detail_sources.py DESTINATION ARCHIVES...` collects the detail, fixture and stop sidecars separately. Public Works fixtures are included by default; `--no-public-works-fixtures` bakes lamps and wires from OSM alone, and needs a fresh output directory.
 
-To collect these sidecars separately, run `street_detail_sources.py DEST INPUTS/*.zip` with the Bay Python environment. The full run collects and checkpoints the sidecars automatically. Sources include the [Assessor roll](https://data.sf.gov/d/wv5m-vpq2), the [Public Works map](https://bsm.sfdpw.org/mapviewer/) and [Mapillary point features](https://help.mapillary.com/hc/en-us/articles/115002332165-Map-features).
+## What the bake infers
 
-The publication pass checks DataSF polygons against BAY1 outlines and above-ground roof samples. Each square's `audits/<square>.json` records the source IDs with under 80% stand coverage and the IDs remaining after repair. The sweep measures polygon parts covering at least four square metres inside the padded raster. New stands require independent mapped outlines and elevated, locally consistent lidar. Low coverage can reflect a demolished building or a clipped piece of a larger building. Shared margins can appear in two audits.
+- **Buildings.** Outlines come from DataSF, repaired where lidar shows a building the outlines miss. Each square's `audits/<square>.json` records source ids with low lidar coverage and what remained after repair.
+- **Facades.** Near packs carry facade cues in each outline vertex's flags: an eave height, and residential bays, cornice, garage, stoop, awning and fire escape. They are inferred from parcel use, building age, storeys, units, frontage and the ground-floor classifier.
+- **Streets.** Kerbs and flush crossings are class bits on pavement samples. At level 0 the road surface follows the ground in 2.5 cm steps.
+- **Trees.** Trunks are aligned to the DataSF tree inventory, crown heights reject isolated returns, and the leaf colour comes from NAIP colour and near-infrared.
+- **Fixtures.** Lamps, poles, signs and wires go in each pack's `SFST` trailer. Heights of masts, signs and hydrants are typical values, not measured. A utility span inferred from lidar needs narrow raised returns along it and photo-supported poles at both ends.
 
-Near packs carry facade cues in the existing signed 32-bit vertex flags. Bits 0–2 keep their original meanings. Bit 7 enables the signed 16-bit eave height in bits 8–23, in cells above engine zero. Bits 24–29 select residential bays, cornice, garage, stoop, awning and fire escape on that edge. Assignment uses parcel occupancy, building age, storeys, units, frontage direction and the ground-floor classifier. These are architectural inferences. On pavement, class bit 7 selects a two-cell surveyed kerb and bit 5 a flush crossing.
+## The recognition panel
 
-When a square or L0 tile contains fixtures, its last trunk is followed by ASCII `SFST`, a little-endian uint32 segment count and that many eight-int32 records. A record contains start x,y,z, end x,y,z in global cells, radius in centimetres and material kind. The section is optional. The tile cut carries crossing segments into both adjoining tiles. Elevations and dimensions of municipal masts, signs and hydrants are typologies. In the Public Works bake, a utility span inferred from lidar requires narrow, elevated returns along its path and photo-supported pole endpoints. Timber is the inferred material for untyped utility poles. Nearby overhead cables occupy quarter cells (2.5 cm) along their measured segments.
-
-## Coverage
-
-[sf-squares.json](sf-squares.json) lists every 1 km square touching the DataSF *SF Shoreline and Islands* polygons. The grid's southwest corners end in 700 m east and 500 m north in EPSG:26910. The 155 lidar candidates intersect both county land and a populated depth-six EPT node. The other 11 are planet-made, including the Farallones. The node intersection gives a candidate for acquisition. It cannot certify returns on every patch of land. A square without usable project samples fails the bake.
-
-`coverage.py` regenerates this inventory from DataSF and the USGS project hierarchy. The inventory records hashes of both source responses. The full run uses the checked-in inventory. Around every county square, including islands, it schedules the planet tiles for a 500 m near margin, 4 km middle margin and 16 km far margin. These cover the default desktop world's boxes as the visitor moves around county land. The job cuts overlapping lidar packs together where a tile crosses a seam. Each tile key has one output owner.
-
-## Frontages and pictures
-
-The four pilot locations used individual Mapillary panoramas. To sample another selected frontage, supply one square pack, the place in frame metres and a local observations file. For example, the Financial District sample is at x=52580 and z=66743. `frontage.py` gets the Mapillary image-point tile for that place, selects nearby panoramas and samples a low band of visible walls. The output keeps colour indices and source image IDs. Photos stay beside the local observations. Inspect the result against a matched view before incorporating new observations into a release. The full run samples geographically distributed panoramas, takes visible wall colours where two cameras agree or a near, road-facing panel has consistent paint, estimates material and ground-floor use, filters roof returns and draws surveyed crowns and mapped street detail.
-
-To open the measured six-square build on this Mac, from `engine/` run
+Every release with new tiles is judged at 16 fixed places (`neighbourhoods.json`), each at street level and from 100 m, against a solved Mapillary panorama and a NAIP crop. `panel-floors.json` holds the lowest score each view may have.
 
 ```sh
-VILLAGE_BAY_ROOT="$HOME/.village/engine/bay/pilot450/final-release" node serve.mjs --port 5938
+PY=~/.village/engine/bay/venv/bin/python
+$PY engine/bay/neighbourhood_panel.py stage --release DEST --places PLACE ...
+$PY engine/bay/neighbourhood_panel.py capture --release DEST --port PORT --phase baseline --places PLACE ...
+$PY engine/bay/neighbourhood_panel.py sheet --phase baseline --places PLACE ...
+$PY engine/bay/panel_gate.py --shots FOLDER     # the pixel gate on any folder of <place>-0.png and <place>-1.png
 ```
 
-Open `http://127.0.0.1:5938/city?bay=1`. The same `VILLAGE_BAY_ROOT` selects the ground pack for `bay/shot.mjs`. The shot tool gets its GPU turn through `test/kit.mjs`. Paired street views and the 100 m contact sheet are in `~/.village/engine/bay/pilot450/pairs/`. The original two-square installation is backed up in `~/.village/engine/bay/pilot450/backup/`.
+Start the engine's page server with `VILLAGE_BAY_ROOT=DEST` between `stage` and `capture`. `panel_gate.py` reads each picture before any score counts: thin uprights in the sky beyond the photograph's, shade on the street bluer than red by more than 22 (`SHADE_BLUE`), and a vision judge (`JUDGE_MODEL` in `render_checks.py`) that fails a defect two readings both name.
 
+## Facade paint and evidence
 
-To repeat the neighbourhood comparison, run the pilot and publication servers in turn with their respective releases as `VILLAGE_BAY_ROOT`. From the repository root use `engine/bay/recognition.py before --release PATH --port PORT` and `engine/bay/recognition.py final --release PATH --port PORT` with the Bay Python interpreter. The reference cameras are fixed. Run `recognition.py sheet` to compose the pictures. The street reference is the solved panorama at an estimated 2.5 m camera height. At 100 m the reference is a north-up NAIP orthophoto cropped to the ground-plane field of view. Roof displacement on tall buildings differs between that projection and a perspective camera.
-
-For the 16-place recognition panel, `neighbourhoods.json` pins each spherical image and street bearing. From the repository root, use the Bay Python interpreter to run `engine/bay/neighbourhood_panel.py stage --release DEST --places ...`, then start the engine page server with `VILLAGE_BAY_ROOT=DEST`. Run `neighbourhood_panel.py capture --release DEST --port PORT --phase baseline --places ...` against that server. The six original pilot squares share one staged release. Each additional panel square uses its own staged release with the regular planet fallback outside the square. Keep the same group at each pass. The camera height comes from the unchanged retained DEM or a pinned pilot elevation. Each camera captures a 70-degree vertical field of view at 960 × 540. The two references are the solved street panorama and its matching 100 m north-up NAIP crop. `neighbourhood_panel.py sheet --phase baseline ...` composes the comparisons under `~/.village/engine/bay/450-panel/`. A draft-in-progress city release may prioritize panel acquisition by listing its square names in `priority.json` beside `state.json`.
-
-Near tiles give surveyed geometry ownership of its whole covered area. At a genuine survey boundary the cutter clips fallback building polygons to the unmeasured side. For open road samples, class bit 7 enables the pavement grey stored in the tint byte. The bake estimates daylight reflectance in 16 m patches from neutral, low, unmarked NAIP and lidar samples. At the nearest level the road top follows the interpolated DEM in 2.5 cm increments.
-
-Crown heights reject isolated quarter-metre lidar returns. The foliage tint comes from NAIP RGB and near-infrared observations within the crown. Trunks are aligned to the DataSF tree inventory before measuring the crown radius, including when a pilot pack supplies the starting geometry. Where branches overhang a road, the engine uses the crown tint for the leaves and nearby surveyed asphalt for the ground below.
-
-### Candidate facade surveys
-
-Keep the city acquisition on its pinned recipe. A local paint survey takes a square pack, its retained camera data and a named 180 m × 180 m street window. The sixteen panel reference images are reserved for judging. The following commands run from the repository root in the Bay Python environment.
+Wall paint from street photographs is a separate, slower job:
 
 ```sh
-python engine/bay/paint_cameras.py "$work/cameras" "$panel/fixed-poses.json" Chinatown --requests 50
-python engine/bay/facade_paint.py "$source/packs/551.7_4182.5.bay" "$work/cameras/Chinatown/cameras.json" "$work/Chinatown.faces" 52249.2 66692
-cp -cR "$source" "$candidate"
-python engine/bay/frontage_tiles.py "$source" "$candidate" "$city/inputs" --paint "$work/Chinatown.faces" --towers 551.7_4182.5 --manifest "$base_manifest"
-python engine/sf/release.py "$candidate" "$work/sf"
+engine/bay/run-paint.sh start     # from the worktree root: installs the survey as a LaunchAgent
+engine/bay/run-paint.sh status
 ```
 
-Here `source` is a frozen staging directory containing only the source packs and their tiles, `candidate` is a new sibling directory on APFS, and `base_manifest` is the matching materialized pin. Supply `--platforms 553.7_4178.5` for the Dogpatch platform and track survey. The tile decorator verifies the source pin, includes unchanged objects and writes the derived checkpoint last. The manifest digest is ready for panel scoring and promotion as described in [the release format](../sf/release.md).
+It works under `~/.village/engine/bay/450-city-paint/`. Workers survey street windows from Mapillary panoramas within a shared request budget, and each batch is judged on the panel before it is accepted. While a `hold-acceptance` file exists there, no panel or publication runs. Accept a pending batch with `city_panel.py accept --batch HASH [--scores FILE]`. An accepted batch enters a release through `release.py --paint`, and `paint_publication.py` stages the combined city release.
 
-Acquisition is serial with a request budget, spacing between requests and a saved cooldown. Each solved image is cached by ID. Rerunning projection and tiling reads local files. Each supported wall texel carries a palette index and a zero marks an unseen texel. Ring endpoints identify faces across tile cuts. A new, overlapping survey of the same wall requires a joint projection before release.
+`facade_evidence.py` reads photographs as evidence for a building's wall colour, material, windows and awning, instead of painting pixels. Its models and environment are in the `facade-evidence` skill. A tile cut with `VILLAGE_FACADE_EVIDENCE=<records folder>` carries the records; without it the tiles are unchanged. Leave it unset for releases: the measured wall lightness is too dark to trust yet.
 
-For a larger run, finish one street window and check its pin before moving to the next. Use the current app quota and response headers to set a daily request allowance. Journal the solve IDs, pass version, block extent, input hashes and completed face bundle. Keep the original acquisition archives and budget new full-resolution panoramas in a separate cache. Roll the contiguous validated windows into each square's level-zero tiles and run the panel gate before advancing the release. The prototype measures four windows; the measurements and local contact sheet are on issue #450.
+## Files
 
-The named Transamerica survey uses the DataSF landmark address, the USGS description of its perimeter truss and the architect's account of the lobby glazing. [USGS structural survey](https://pubs.usgs.gov/of/1989/0568/report.pdf) · [Foster + Partners](https://www.fosterandpartners.com/news/the-column-transamerica-pyramid-center)
+| File | What it does |
+| --- | --- |
+| `coverage.py` | Rebuilds `sf-squares.json` |
+| `fetch.py`, `intermediate.py`, `dem.py` | Downloads a square and keeps its retained archive |
+| `street_sources.py`, `street_detail_sources.py`, `street_inputs.py` | The street sidecars and which of them a recipe reads |
+| `bake.py`, `appearance.py`, `surface_detail.py`, `street_detail.py`, `street_trees.py`, `street_furniture.py` | One square's pack: ground, buildings, facades, surfaces, trees and fixtures |
+| `street_graph.py`, `transport.py`, `transit_platforms.py` | The street graph, its road levels and controls, and measured boarding islands and rails |
+| `tiles.py`, `earth.py` | Cuts packs into tiles. `earth.py` makes tiles anywhere from Overture and Mapterhorn. |
+| `full_run.py`, `run-city.sh` | The checkpointed city run and its launchd job |
+| `compact_store.py` | zstd storage for tiles, and export of a compact release |
+| `neighbourhood_panel.py`, `recognition.py`, `panel_gate.py`, `render_checks.py` | The recognition panel and its pixel gate |
+| `run-paint.sh`, `paint_service.py`, `city_paint.py`, `city_panel.py`, `paint_*.py`, `facade_paint.py`, `frontage.py`, `frontage_tiles.py`, `panoramas.py` | The facade paint survey |
+| `lookaround.swift` | A probe of Apple Look Around coverage |
+| `facade_evidence.py`, `evidence_*.py` | Facade evidence from photographs |
+| `shot.mjs`, `quiet.mjs` | Pictures of the baked place, and running a command with GPU turns held |
 
-To acquire another window, pass a `--sites` JSON array with its `place` and `square` and add its metre-based `street` pose to the poses file. Keep one shared camera-cache root for the acquisition queue. The sixteen judging image IDs stay excluded even when a different site inventory is supplied.
+## Check a change
 
-## City facade survey (#450)
-
-`engine/bay/run-paint.sh start` installs a user LaunchAgent from the committed source, the built page Wasm and the local JavaScript dependencies. Run it from the worktree root. A restart reopens the same allowance and window checkpoints. `engine/bay/run-paint.sh status` reports the next permitted request, surveyed windows, wall coverage, accepted batches and free disk. The existing city acquisition has its own `run-city.sh status`.
-
-Under `~/.village/engine/bay/450-city-paint/`, follow `worker.log` for acquisition, `panel.log` for the regression gate, `graph.log` for transport and `publication.log` for the city release. Eight pool processes survey windows in parallel and share one Mapillary clock that charges every outbound attempt before dispatch, including image downloads: at most 1,000 requests a minute (one every 60 ms), against documented per-app limits of 60,000 entity requests a minute, and vector tiles at most 40,000 a day of the documented 50,000. A limit signal (HTTP 429, error code 4, "Application request limit reached", Retry-After or app usage of 75%) holds every worker for at least 10 minutes. Other failures back off from 15 s, doubling for repeats within ten minutes; workers failing together during one backoff count once. Cooldowns survive restart. A failed window writes no record and returns to the queue. JPEGs have a 512 MiB working cache that spares images touched in the last 3 minutes, and compact solves and verified faces survive eviction. Survey work holds at 18 GiB free and panel work at 17 GiB. While `hold-acceptance` exists the supervisor runs no panel or publication, and acquisition continues. The city release starts staging above 18 GiB.
-
-The queue considers finished squares, first the observed weak streets and then nearby unsampled blocks. Each directed facade belongs to the survey cell containing its midpoint. The four prototype surveys retain their existing walls. Each `windows/*.json` records the input pack, solved camera catalogue and face bundle SHA-256. Sparse windows stay identifiable by camera count. Receipts also record the preceding and resulting tile hashes and their contributing squares. If a neighbour remains unfinished the receipt names it. A final city release recalculates against the complete contributor set.
-
-Panel batches carry a visual grade forward only when their tested tile set and renderer match the preceding batch or all resulting shot hashes match. Changed pairs wait in `pending/shots/` beside `pending/evidence.json`. Run `city_panel.py accept --batch <evidence hash> [--scores <16-place JSON>]` with the Bay Python. Acceptance first reads every view's pixels, new or carried (`panel_gate.py`, `render_checks.py`): thin uprights in the sky beyond the photograph's count, shade on the street bluer than 22 (blue less red), and a vision judge (`claude -p`, Opus) that fails any defect two readings both clearly name (pillars, banding, narrow windows, battlements, chessboard, mosaic, light slits), or that cannot answer. Inspections are cached under `inspections/` by both pictures' bytes. Scores are optional; supplied ones may not drop below a floor that an earlier passing render earned, and without them the previous scores are carried and flagged. `panel_gate.py --shots <folder>` runs the same pixel gate on any folder of `<place>-0.png` and `<place>-1.png`. Any failure leaves the previous pin in place. Acquisition continues while a review is pending. The accepted batch is in `current.json`; its tile hashes and grades are under `accepted/`. Once the city finishes, `paint_publication.py` stages the combined cell, life, vehicle and available far objects locally and writes `city-release.json`. The new city pin requires the full release panel before promotion.
-
-## Facade evidence (#450)
-
-The photographs are evidence for each building's parameters, not pixels on its walls. `facade_evidence.py` picks up to four panoramas per building, cuts a perspective face aimed at it, segments the face (UperNet ConvNeXt on the Neural Engine) and keeps only wall pixels that are neither clipped nor dark. Each record holds a wall colour, a material class, a window share and shape, a storefront flag and an awning colour, each with a confidence. The models, venv, speeds and limits are in `.agents/skills/facade-evidence`. Photos, faces and labels stay under `~/.village/engine/bay/450-city-paint/evidence/`.
-
-```
-venv=~/.village/engine/bay/evidence-venv/bin/python
-$venv engine/bay/evidence_run.py panel            # buildings within 45 m of the 16 panel cameras
-$venv engine/bay/evidence_run.py sample           # 500 street buildings drawn with seed 450
-$venv engine/bay/evidence_run.py city --squares 550.7_4182.5
-$venv engine/bay/evidence_proof.py summary        # coverage, before and after, and confidence quartiles
-$venv engine/bay/evidence_proof.py stage          # the round-2 panel tiles with the records written in
-node engine/bay/quiet.mjs $venv engine/bay/evidence_proof.py render   # the 32 views before and after, every GPU turn held
-$venv engine/bay/evidence_proof.py compare        # colour, material and glass changes against each held-out panel photograph
-$venv engine/bay/evidence_proof.py spot           # 20 written sample buildings, one camera held out where three stood
+```sh
+~/.village/engine/bay/venv/bin/python -m unittest discover -s engine/bay -p 'test_*.py'
 ```
 
-The panel render of November 21 (sheets in `~/.village/engine/bay/450-city-paint/quality/evidence/`) showed the hue and material are evidence worth reading (brick in Dogpatch and SoMa, yellow boards on Nob Hill, a blue Victorian in the Mission), but the wall's lightness is not: walls read at a median sRGB of about 93, so sunlit cream and white fronts drew charcoal. The glass share drew narrow windows and is not written. Leave `VILLAGE_FACADE_EVIDENCE` unset for releases until the colour's lightness has its own reference.
-
-A tile cut with `VILLAGE_FACADE_EVIDENCE=<records folder>` set (`tiles.py`) carries the records in its building rows (`evidence_tile.py` lists which rule reads which field). The far bake reads the same folder (`landing/ina/looks.py` `walls`). Without the variable both are byte for byte as before.
+A change to `bake.py` or `tiles.py` changes tile bytes, so it needs a new release and a panel pass before the pin moves.

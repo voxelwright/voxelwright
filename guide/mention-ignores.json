@@ -106,8 +106,8 @@
     "inspections/": "Generated directory under the build, evidence or installation root described on this page.",
     "accepted/": "Generated directory under the build, evidence or installation root described on this page."
   },
-  "engine/kit/README.md": {
-    "../../blocks/renderer.ts": "Import specifier relative to kit/src/engine.js."
+  "engine/ears/README.md": {
+    ".venv/": "Python virtual environment created by uv sync, ignored by git."
   },
   "engine/landing/ina/README.md": {
     "engine/page/matte.ts": "Original renderer in the historical Ina checkout."
@@ -115,37 +115,10 @@
   "engine/sf/far/README.md": {
     "far.json": "Generated far release index."
   },
-  "home/README.md": {
-    "meta.json": "File written during the documented run.",
-    "perf-gate.json": "File written during the documented run.",
-    "persona.json": "File written during the documented run.",
-    "persona.prev.json": "File written during the documented run.",
-    "voice.json": "File written during the documented run.",
-    "notes/plants.md": "File written during the documented run.",
-    "generated/props/": "Local generator output.",
-    "generated/villagers/": "Local generator output.",
-    "persona-history/": "Generated directory under the build, evidence or installation root described on this page.",
-    "d-round-2/": "Generated directory under the build, evidence or installation root described on this page.",
-    "tmp/": "Generated directory under the build, evidence or installation root described on this page.",
-    "round2/rerun-lineup-sheet.jpg": "Generated comparison captures.",
-    "round3/readability-silhouettes.jpg": "Generated comparison captures."
-  },
   "host/README.md": {
-    "home/src/plugins/clock.ts": "Synthetic candidate plugin used in the example.",
-    "home/src/plugins/bell.ts": "Synthetic candidate plugin used in the example.",
-    "home/src/plugins/.gitignore": "Deliberately refused candidate filename.",
-    "preferences.json": "File written in the installed home or candidate.",
     "persona.json": "File written in the installed home or candidate.",
-    "persona.prev.json": "File written in the installed home or candidate.",
-    "result.json": "File written in the installed home or candidate.",
-    "server.json": "File written in the installed home or candidate.",
-    "stubbell.ts": "File written in the installed home or candidate.",
-    "villager.json": "File written in the installed home or candidate.",
     "voice.json": "File written in the installed home or candidate.",
-    "people/alex/visits/sam/": "Example install with synthetic people.",
-    "persona-history/": "Generated directory under the build, evidence or installation root described on this page.",
-    "../": "Deliberately invalid path in the notes containment test.",
-    "a/../../": "Deliberately invalid path in the notes containment test."
+    "../": "Deliberately invalid path in the notes containment test."
   },
   "site/README.md": {
     "photo.jpg": "Example attachment relative to a post.",
@@ -165,9 +138,6 @@
     "player/smooth.ts": "Historical renderer in the pinned checkout.",
     "shots/": "Original capture in the external Ina cache.",
     "shots/r12-full.png": "External Ina model capture."
-  },
-  "street/README.md": {
-    "src/sim.ts": "Historical benchmark for the removed bare solver."
   },
   "guide/engine.md": {
     "page/core.wasm": "Build output of npm run core in engine/."
@@ -206,5 +176,9 @@
     "world.realms/": "A file the server writes beside the host's world file.",
     "world.fine/": "A file the server writes beside the host's world file.",
     "world.releases/": "A file the server writes beside the host's world file."
+  },
+  "AGENTS.md": {
+    "feature/": "Branch-name prefix, not a path.",
+    ".agents/dispatch-log.jsonl": "Local untracked dispatch log."
   }
 }

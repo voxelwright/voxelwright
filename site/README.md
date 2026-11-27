@@ -1,26 +1,28 @@
 # site
 
-Personal site and blog. A small custom static generator in Node: no framework, no bundler.
-Every page is published twice, as HTML for people and as Markdown for agents.
+The owner's personal site: the front page at zahynailo.dev and the blog under `/blog/`. A small custom static generator in Node, with no framework. Every page is published twice, as HTML for people and as Markdown for agents, and every page is drawn with the Voxelmorphism kit from `../engine/kit`.
+
+[The site guide](../guide/site.md) explains what the build writes, the embeds, the `ai-session/1` format, feature flags, the kit and the landing. [The deploy guide](../guide/deploy.md) explains how `dist/` reaches zahynailo.dev.
 
 ## Commands
 
-Needs Node 24 or later (developed on Node 25). Run `npm install` once.
+Node 24 or later. Run `npm ci` once.
 
 | Command | What it does |
 | --- | --- |
-| `npm run new "Title"` | Creates `posts/<slug>/index.md` with front matter and `draft: true`. No body. |
-| `npm run dev` | Builds with drafts into `.dev/`, watches, serves at http://localhost:4321/ with live reload (personal front page at `/`, blog under `/blog/`). Uses `cf dev` (the Workers runtime, Markdown negotiation on); falls back to a Node server that mimics it. `npm run dev -- --node` forces the fallback. |
-| `npm run build` | Production build into `dist/` (personal front page at `/` and blog under `/blog/`). Drafts are left out. Set `SITE_PERSONAL_HOME=0` to omit `/`. |
-| `npm run check` | Builds, checks the output (production and a drafts-included build), and runs the tests. |
-| `npm run check-home` | Verifies the personal front page at `/` (switch behavior, links, share card, `village.ai` cleanup, no-JS/no-WebGPU, WebGPU break/mend, reduced motion, keyboard focus). |
-
-The main-branch workflow builds two Workers from `deploy/`. zahynailo.dev serves this site (the personal front page at `/` and the blog under `/blog/`) as static assets only. voxelwright.world serves the SF realm and links here for the blog. See [deployment](../deploy/README.md). This folder came in with `git subtree` (history kept). The realm, the site and the Voxelmorphism kit stay together in this one repository (#534).
+| `npm run new "Title"` | Creates `posts/<slug>/index.md` with front matter and `draft: true`. |
+| `npm run dev` | Builds with drafts into `.dev/`, watches, and serves http://localhost:4321/ with live reload. Uses `cf dev` (the Workers runtime, Markdown negotiation on) and falls back to a Node server that mimics it; `npm run dev -- --node` forces the fallback. |
+| `npm run build` | The production build into `dist/`: the front page at `/` and the blog under `/blog/`, drafts left out. `SITE_PERSONAL_HOME=0` leaves out `/`. |
+| `npm test` | The unit tests in `test/`. |
+| `npm run check` | Builds production and a drafts-included copy, checks both outputs, then runs the tests. |
+| `npm run check-home` | Checks the front page at `/` in a browser. |
+| `npm run session -- <command>` | Imports and trims an AI session (below). |
+| `npm run flag-proof -- <base>` | Proves a change behind a flag that is off leaves the build identical. See [features/README.md](features/README.md). |
+| `npm run cards` | Paints the share cards into `static/og/` (committed). Needs Chrome and Playwright (`PLAYWRIGHT=/path/to/node_modules/playwright`). |
 
 ## Writing a post
 
-A post is a folder: `posts/<slug>/index.md`, with its images, clips and models beside it.
-Relative links (`![…](photo.jpg)`) resolve to the post folder.
+A post is a folder, `posts/<slug>/index.md`, with its images, clips and models beside it. Relative links (`![…](photo.jpg)`) resolve to the post folder.
 
 ```yaml
 ---
@@ -32,12 +34,9 @@ draft: true
 ---
 ```
 
-Drafts appear in `npm run dev` only. Set `draft: false` to publish.
+Drafts appear only in `npm run dev`. Set `draft: false` to publish.
 
-### Embeds
-
-Write these custom elements straight into the Markdown, each as its own block (blank line
-before, no indentation). The build fails if a required attribute or file is missing.
+Write embeds straight into the Markdown, each as its own block (a blank line before, no indentation). The build fails when a required attribute or file is missing.
 
 ```html
 <engine-scene src="scene.json" poster="poster.png" alt="What the scene shows.">
@@ -47,89 +46,52 @@ before, no indentation). The build fails if a required attribute or file is miss
 <model-note model="Model name" maker="Maker">
 The model's words, in Markdown.
 </model-note>
-```
 
-- Scenes and comparisons need `alt` (the text equivalent), `poster` (a still), or both; give both when you can. A closing tag on the same line is optional. An optional `caption` replaces the default caption.
-- For now they render as the poster (or the alt text, if there is no poster) with a caption; the element is present but inert.
-- `model-note` renders as an attributed aside. In the Markdown version it becomes a blockquote starting `**Note from <model> (<maker>):**`.
-
-### AI sessions
-
-```html
 <ai-session src="founding.session.json" open="1">
 ```
 
-A session from Claude Code, Codex or ChatGPT, shown like a code block: numbered exchanges that
-are links, the person's prompts, each agent's replies with its model and maker, decisions, and
-tool calls and subagents folded into one line each. Import one with:
+Scenes and comparisons need `alt`, `poster` or both, and render as the poster (or the alt text) with a caption for now. An optional `caption` replaces the default one.
 
-```bash
+To import an AI session from Claude Code, Codex or ChatGPT:
+
+```sh
 npm run session -- find "words from the first prompt"
 npm run session -- import <transcript.jsonl> --post <slug> --name founding --prompts 1-3 --as "Name"
 npm run session -- review posts/<slug>/founding.session.json
 npm run session -- cut posts/<slug>/founding.session.json t4,t9-t12
 ```
 
-Redaction runs before anything is written, and the build checks every session again. The format
-and the import options are in `notes/ai-session-format.md`.
-
-## What the build writes
-
-`site.config.mjs` keeps `base: "/blog/"` so every blog route stays under `/blog/` on zahynailo.dev. `dist/` mirrors the origin, so a deploy copies it into the Worker's assets unchanged:
-
-- At `/`: the personal front page (`/index.html` and `/index.md`, with its minimal Voxelmorphism enhancement bundle at `/blog/front/front.js`), built on by default by `npm run build`, `npm run dev` and `npm run check`. Set `SITE_PERSONAL_HOME=0` to omit `/`; direct `generator/build.mjs` calls in unit tests keep it off by default unless `personalHome: true` or `SITE_PERSONAL_HOME=1` is passed.
-- `/blog/` (posts list), `/blog/<slug>/`, `/blog/tags/`, `/blog/tags/<tag>/`, `/blog/voxelmorphism/`, and every static file under `/blog/`
-- A Markdown twin for every page: `/blog/index.md`, `/blog/<slug>.md`, `/blog/tags/<tag>.md`, `/blog/voxelmorphism.md`, linked from each page's `<link rel="alternate" type="text/markdown">`
-- `/blog/llms.txt` ([llmstxt.org](https://llmstxt.org)), `/blog/feed.xml` (Atom), `/blog/sitemap.xml`
-- At the root: `/robots.txt` (AI crawlers allowed, Sitemap at `/blog/sitemap.xml`), `/404.html` (the host's not-found page), and `/_headers` (`static/_headers` with its patterns moved under `/blog/`)
-- The old 3D landing is built only with `base: "/"`, which writes the site as the whole origin (`/`, `/blog/`, `/tags/`, `/index.md`, `/blog.md`, ...). `npm run cards` builds that way.
-
-The base path rule lives in `lib/paths.mjs`.
+Redaction runs before anything is written, and the build checks every session again. The format and the import options are in [notes/ai-session-format.md](notes/ai-session-format.md).
 
 ## Settings
 
-`site.config.mjs` holds the title, description, canonical origin (`https://zahynailo.dev`),
-social links, and `negotiateMarkdown`.
+`site.config.mjs` holds the title, description, origin (`https://zahynailo.dev`), `base: "/blog/"`, social links, `flags` and `negotiateMarkdown`.
 
-### Voxelmorphism
+`negotiateMarkdown` turns on `src/worker.mjs`, which answers `Accept: text/markdown` on page routes with the page's `.md` twin. Only `npm run dev` runs that Worker (`cloudflare.config.ts`). The deployed zahynailo.dev is `deploy/`'s assets-only Worker, so the switch changes nothing there. The `.md` addresses and alternate links work either way.
 
-Every page is built from Voxelmorphism, Voxelwright's UI kit, installed from `../engine/kit` by npm
-(see `notes/voxelmorphism.md`). The page stands on the kit's ground and is fitted as the Signal
-Desk's instrument (walnut case, Ridgeline caps; at night the same case with its lights down). The
-bar is the kit's navbar, post lists are its list groups, an article is its prose, code sits in its
-code window, a model note is its callout. `static/site.css` places these and holds no colours or
-controls; `static/site.js` starts the kit. Pages work without script: the kit's stylesheet is the
-plain version. `?view=2d`, the footer's "Plain page" link, reduced motion, or no WebGPU keep a page
-plain; the Night key in the bar switches the time of day. Choosing a finish on the Signal Desk
-refits every page for the rest of the visit.
+## Rules
 
-A part the site needs and the kit lacks goes into the kit (Voxelwright `engine/kit`), not into
-`site.css`; `notes/voxelmorphism-dogfood.md` lists what building the site found. The rules the
-site is designed against are in `.claude/skills/site-craft/SKILL.md`.
-
-### Markdown by `Accept` header
-
-With `negotiateMarkdown: true`, a small Worker (`src/worker.mjs`) answers `Accept: text/markdown`
-on page routes (`/` and paths ending in `/`) with the page's `.md` twin. Files (images, scripts,
-models, engine files) never reach it.
-
-It is off because every page view would then invoke the Worker. On the Workers Free plan that
-counts against 100,000 requests a day, and over the limit those requests get an error instead of
-the static page. Turn it on after moving to Workers Paid. With it off the deploy is assets only
-and costs nothing; the `.md` URLs and alternate links work either way.
+- **The plain page is canonical.** Every page reads without script and without WebGPU, and every sign in 3D mirrors a real link. The design rules are in the [site-craft skill](../.agents/skills/site-craft/SKILL.md).
+- **A part the site needs and the kit lacks goes into the kit** (`engine/kit`), not into `static/site.css`. [notes/voxelmorphism-dogfood.md](notes/voxelmorphism-dogfood.md) lists what building the site found.
+- **No visitor spends the owner's model tokens.** Nothing on the site calls a model for a visitor. Model use at build time or by the owner is fine.
+- **Easter eggs are homages made from our own art and sound,** with short quoted lines at most. The two music videos are the exception: they come only from the private media in `VOXELWRIGHT_EGG_MEDIA` and are never in the repository.
 
 ## Layout
 
 ```
 posts/<slug>/index.md   posts and their files
 site.config.mjs         settings
-generator/              build: posts, Markdown and embeds, pages, feeds
-lib/paths.mjs           URL rules shared by build, Worker, checks and dev server
-src/worker.mjs          Markdown negotiation Worker
-static/site.css         layout of the kit's parts; static/site.js starts the kit
-static/fonts/           self-hosted fonts and their licences
-scripts/                new, build, dev, check, Node dev server
-test/                   Worker and build-failure tests
-cloudflare.config.ts    Worker config for the cf CLI
-wrangler.config.ts      assets directory (cf builds static sites through Wrangler)
+generator/              the build: posts, Markdown and embeds, pages, feeds, the kit, the front page, the landing
+lib/paths.mjs           the base path and page-to-Markdown rules, shared by build, Worker, checks and dev server
+lib/flags.mjs           feature flags (features/README.md)
+lib/session/            the ai-session/1 format, importers, redaction and rendering
+src/worker.mjs          the Markdown negotiation Worker (dev only)
+static/                 site.css and site.js, fonts, the landing, the 404 page, share cards, the support button
+features/               features behind flags
+scripts/                new, build, dev, check, session, cards, flag-proof, the Node dev server and browser checks
+scripts/landing/        the landing's refresh and checks (scripts/landing/README.md)
+designs/support-button/ the support button's notes and browser check
+notes/                  design notes: the session format, the kit on the site, the editor, easter eggs
+writing/                a spike for posting from the web: store, auth and the write path (its own package)
+test/                   unit and build tests
 ```

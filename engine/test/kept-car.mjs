@@ -26,7 +26,9 @@ if (out) mkdirSync(out, { recursive: true })
 
 // The build as the bench writes one (fast-voxels src/library.py `car`): its body, motor, seats, eye, look and figures.
 const car = fineCar([0, 0, 0]), look = car.fine[0]
-const build = { name: 'Toy Roadster', living: { body: { size: car.size, cells: [...car.cells] }, motor: car.motor, seats: car.seats, eye: car.eye }, parts: { whole: { size: look.size, per: look.per, low: look.low, cells: Buffer.from(look.cells.buffer).toString('base64') } }, asked: { top_kmh: 80, zero_to_100_s: 9.0 }, measured: { top_kmh: 72.4, zero_to_100_s: 9.94, mass_kg: 900 } }
+// The bench writes a material and a colour, never the polish a look's paint carries (spells.ts `POLISHED`).
+const bench = (cells) => cells.map((k) => k & ~0xf0)
+const build = { name: 'Toy Roadster', living: { body: { size: car.size, cells: [...car.cells] }, motor: car.motor, seats: car.seats, eye: car.eye }, parts: { whole: { size: look.size, per: look.per, low: look.low, cells: Buffer.from(bench(look.cells).buffer).toString('base64') } }, asked: { top_kmh: 80, zero_to_100_s: 9.0 }, measured: { top_kmh: 72.4, zero_to_100_s: 9.94, mass_kg: 900 } }
 writeFileSync(join(dir, 'roadster.json'), JSON.stringify(build))
 const shelf = join(dir, 'library'), journal = join(dir, 'made.jsonl')
 let refused = ''

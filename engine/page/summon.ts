@@ -2,6 +2,7 @@
 // within ~60 m at true street level (never on a building roof) and delivers a high-detail 2.5 cm drivable
 // sports coupe aligned with the road, capping to 1 unmounted summoned car so it never leaks bodies.
 import { POLISHED } from './spells.ts'
+import { coarser, GT_COUPE, sculptCoupe } from './car-sculpt.ts'
 import type { Foot, Living, Making, Thing } from './living.ts'
 import type { Hud } from './hud.ts'
 import type { Street } from './street.ts'
@@ -31,170 +32,32 @@ export interface CarSummon {
   readonly car: Thing | null
 }
 
-const STEEL = 12, GLASS = 11, ROOFING = 14, LAMP = 15
-const kindOf = (material: number, colour = 0) => material | (colour << 8)
-const hue = (h: number, tone: number) => 16 + (h % 24) * 10 + (tone % 10)
-const grey = (step: number) => 1 + step
+/** Its paint: red steel (a kind is a material and a colour, kinds.rs), hue 0 at tone 4. */
+const PAINT = 12 | ((16 + 0 * 10 + 4) << 8)
 
-/** Built-once high-detail 2.5 cm sports coupe voxel data (4.4 m x 1.26 m x 1.96 m) + 10 cm collision shell. */
+/** The GT coupe (car-sculpt.ts, the SF library's coupe too) at 2.5 cm, its paint polished, and its 10 cm body made from it; built once. */
 let cachedCoupe: Omit<Making, 'low'> | null = null
 
 function sportsCoupeData(): Omit<Making, 'low'> {
   if (cachedCoupe) return cachedCoupe
-  const per = 4, L = 4.4, Wd = 1.96, H = 1.26, s = per * 10
-  const W = Math.ceil(L * s), Ht = Math.ceil(H * s), D = Math.ceil(Wd * s)
-  const fineCells = new Uint16Array(W * Ht * D)
-  const c = (m: number) => Math.round(m * s)
-  const set = (x: number, y: number, z: number, v: number) => {
-    if (x >= 0 && x < W && y >= 0 && y < Ht && z >= 0 && z < D) fineCells[x + W * (z + D * y)] = v
-  }
-  const get = (x: number, y: number, z: number) =>
-    x >= 0 && x < W && y >= 0 && y < Ht && z >= 0 && z < D ? fineCells[x + W * (z + D * y)] : 0
-  const box = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, v: number) => {
-    for (let y = c(y0); y < c(y1); y++)
-      for (let z = c(z0); z < c(z1); z++)
-        for (let x = c(x0); x < c(x1); x++) set(x, y, z, v)
-  }
-  const rounded = (x0: number, x1: number, y0: number, y1: number, z0: number, z1: number, r: number, v: number) => {
-    const R = r * s
-    for (let y = c(y0); y < c(y1); y++)
-      for (let z = c(z0); z < c(z1); z++)
-        for (let x = c(x0); x < c(x1); x++) {
-          const dx = Math.max(c(x0) + R - x - 0.5, 0, x + 0.5 - (c(x1) - R))
-          const dz = Math.max(c(z0) + R - z - 0.5, 0, z + 0.5 - (c(z1) - R))
-          if (Math.hypot(dx, dz) <= R) set(x, y, z, v)
-        }
-  }
-  const wheel = (xm: number, ym: number, z0: number, z1: number, r: number, tyre: number, hub: number, cap: number) => {
-    const R = r * s
-    for (let y = c(ym - r); y <= c(ym + r); y++)
-      for (let x = c(xm - r); x <= c(xm + r); x++) {
-        const d = Math.hypot(x - c(xm), y - c(ym))
-        if (d > R) continue
-        const a = Math.atan2(y - c(ym), x - c(xm))
-        const spoke = Math.abs(Math.sin(a * 2.5)) < 0.22 && d > R * 0.16 && d < R * 0.52
-        const face = d < R * 0.55 && (d > R * 0.48 || d < R * 0.15 || spoke)
-        for (let z = c(z0); z < c(z1); z++) {
-          set(x, y, z, d >= R * 0.55 ? tyre : face && (z === c(z0) || z === c(z1) - 1) ? cap : hub)
-        }
-      }
-  }
-
-  const PAINT = kindOf(STEEL, hue(0, 4)) | POLISHED
-  const DARK = kindOf(ROOFING, grey(13))
-  const TRIM = kindOf(STEEL, grey(12))
-  const TYRE = kindOf(ROOFING, grey(14))
-  const RIM = kindOf(STEEL, grey(5))
-  const CAP = kindOf(STEEL, grey(10))
-  const GLASS_ = kindOf(GLASS, grey(12))
-  const HEAD = kindOf(LAMP, 1)
-  const TAIL = kindOf(LAMP, hue(0, 4))
-  const SEAT = kindOf(ROOFING, grey(11))
-
-  // Low sculpted wedge body, tapered nose, muscular haunches.
-  rounded(0.08, L - 0.06, 0.22, 0.72, 0.04, Wd - 0.04, 0.18, PAINT)
-  for (let i = 0; i < 14; i++) {
-    const t = i / 14
-    rounded(L - 1.35 + t * 1.25, L - 0.04, 0.56 - t * 0.16, 0.78 - t * 0.22, 0.08, Wd - 0.08, 0.16, PAINT)
-  }
-  rounded(0.12, 1.35, 0.64, 0.80, 0.06, Wd - 0.06, 0.16, PAINT)
-  // Fastback cabin greenhouse with sloped windscreen & pillars.
-  for (let i = 0; i < 16; i++) {
-    const t = i / 16
-    const y0 = 0.72 + t * 0.50, y1 = y0 + 0.04
-    const x0 = 0.85 + t * 0.58, x1 = 3.10 - t * 0.65
-    const inset = 0.14 + t * 0.16
-    rounded(x0, x1, y0, y1, inset, Wd - inset, 0.12, t > 0.84 ? PAINT : GLASS_)
-    box(x1 - 0.07, x1, y0, y1, inset, inset + 0.07, PAINT)
-    box(x1 - 0.07, x1, y0, y1, Wd - inset - 0.07, Wd - inset, PAINT)
-    box(x0, x0 + 0.09, y0, y1, inset, inset + 0.08, PAINT)
-    box(x0, x0 + 0.09, y0, y1, Wd - inset - 0.08, Wd - inset, PAINT)
-  }
-  rounded(1.42, 2.46, 1.18, H, 0.28, Wd - 0.28, 0.10, PAINT)
-  // Rear carbon-black wing spoiler, splitter, diffuser, side skirts & air intakes, twin exhausts, LED lamps.
-  for (const z of [0.36, Wd - 0.44]) box(0.14, 0.28, 0.78, 0.90, z, z + 0.08, DARK)
-  box(0.06, 0.26, 0.88, 0.94, 0.12, Wd - 0.12, DARK)
-  box(L - 0.18, L, 0.18, 0.28, 0.08, Wd - 0.08, DARK)
-  box(0.02, 0.20, 0.18, 0.34, 0.14, Wd - 0.14, DARK)
-  for (const [z0, z1] of [[0.04, 0.10], [Wd - 0.10, Wd - 0.04]]) {
-    box(0.95, L - 1.15, 0.18, 0.28, z0, z1, DARK)
-    box(1.30, 1.65, 0.34, 0.60, z0, z1, DARK)
-  }
-  for (const z of [0.44, Wd - 0.56]) box(0, 0.12, 0.22, 0.30, z, z + 0.12, RIM)
-  box(L - 0.04, L, 0.28, 0.46, 0.36, Wd - 0.36, DARK)
-  for (const z of [0.12, Wd - 0.44]) box(L - 0.05, L, 0.44, 0.54, z, z + 0.32, HEAD)
-  box(0.02, 0.08, 0.58, 0.66, 0.14, Wd - 0.14, TAIL)
-
-  // Hollow shell so interior shows cleanly through the cabin glass.
-  const hollowed = fineCells.slice()
-  for (let y = 1; y < Ht - 1; y++)
-    for (let z = 1; z < D - 1; z++)
-      for (let x = 1; x < W - 1; x++) {
-        const i = x + W * (z + D * y)
-        if (fineCells[i] && get(x + 1, y, z) && get(x - 1, y, z) && get(x, y + 1, z) && get(x, y - 1, z) && get(x, y, z + 1) && get(x, y, z - 1)) hollowed[i] = 0
-      }
-  fineCells.set(hollowed)
-
-  // Interior floor, twin bucket seats, dashboard, and steering wheel.
-  box(1.15, 2.95, 0.24, 0.30, 0.16, Wd - 0.16, DARK)
-  for (const z of [0.28, Wd - 0.82]) {
-    box(1.55, 2.15, 0.30, 0.48, z, z + 0.54, SEAT)
-    box(1.42, 1.62, 0.48, 0.96, z, z + 0.54, SEAT)
-  }
-  box(2.48, 2.86, 0.56, 0.78, 0.18, Wd - 0.18, TRIM)
-  box(2.34, 2.48, 0.66, 0.86, 0.44, 0.74, DARK)
-
-  // Carve arches & place wide performance tyres with bright alloy rims.
-  for (const xm of [0.92, L - 0.92]) {
-    for (let y = c(0.18); y <= c(0.76); y++)
-      for (let x = c(xm - 0.42); x <= c(xm + 0.42); x++) {
-        const d = Math.hypot(x - c(xm), y - c(0.34))
-        if (d < 0.37 * s) for (const z of [0, 1, 2, 3, D - 4, D - 3, D - 2, D - 1]) set(x, y, z, 0)
-        else if (d < 0.43 * s) for (const z of [0, 1, D - 2, D - 1]) if (get(x, y, z)) set(x, y, z, DARK)
-      }
-    for (const [z0, z1] of [[0, 0.24], [Wd - 0.24, Wd]]) wheel(xm, 0.34, z0, z1, 0.34, TYRE, RIM, CAP)
-  }
-
-  // Coarsen 2.5 cm look into the 10 cm solver collision body (exact same rule as sf/cars.mjs `coarser`).
-  const bw = Math.ceil(W / per), bh = Math.ceil(Ht / per), bd = Math.ceil(D / per)
-  const body = new Int32Array(bw * bh * bd)
-  const counts = new Map<number, number>()
-  for (let y = 0; y < bh; y++)
-    for (let z = 0; z < bd; z++)
-      for (let x = 0; x < bw; x++) {
-        counts.clear()
-        let filled = 0
-        for (let dy = 0; dy < per; dy++)
-          for (let dz = 0; dz < per; dz++)
-            for (let dx = 0; dx < per; dx++) {
-              const X = x * per + dx, Y = y * per + dy, Z = z * per + dz
-              if (X >= W || Y >= Ht || Z >= D) continue
-              const k = fineCells[X + W * (Z + D * Y)]
-              if (!k) continue
-              filled++
-              counts.set(k, (counts.get(k) ?? 0) + ((k & 15) === GLASS ? 0.6 : 1))
-            }
-        if (filled * 3 < per * per * per) continue
-        let best = 0, most = -1
-        for (const [k, n] of counts) if (n > most) { most = n; best = k }
-        body[x + bw * (z + bd * y)] = best & 0xffff
-      }
-
+  const { cells, size } = sculptCoupe({ ...GT_COUPE, paint: PAINT | POLISHED })
+  const body = coarser(cells, size, GT_COUPE.per), [, , bd] = body.size, [ex, ey, ez] = GT_COUPE.eye
   const foot = (x: number, z: number, front: boolean): Foot => ({ at: [x, 3.0, z], reach: 5.5, steers: front, drives: !front })
+  const [xr, xf] = GT_COUPE.wheels.map((x) => x * 10)
   cachedCoupe = {
     name: 'sports coupe',
-    cells: body,
-    size: [bw, bh, bd],
+    cells: Int32Array.from(body.kinds),
+    size: body.size,
     controls: 'drive',
     // Blistering & drift-happy sports coupe handling (212 km/h top, matches sf/fleet.mjs HANDLING.coupe).
     motor: {
       front: 0, grip: 1.24, power: 142, top: 590, steer: 0.62,
       hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 220,
-      feet: [foot(9, 1, false), foot(9, bd - 1, false), foot(35, 1, true), foot(35, bd - 1, true)],
+      feet: [foot(xr, 1, false), foot(xr, bd - 1, false), foot(xf, 1, true), foot(xf, bd - 1, true)],
     },
-    seats: [[20, -1.2, 5.5], [20, -1.2, 14.0]],
-    eye: [19.5, 9.8, 5.5],
-    fine: [{ size: [W, Ht, D], per, low: [0, 0, 0], cells: fineCells }],
+    seats: [[ex * 10 + 0.5, -1.2, ez * 10], [ex * 10 + 0.5, -1.2, bd - ez * 10]],
+    eye: [ex * 10, ey * 10, ez * 10],
+    fine: [{ size, per: GT_COUPE.per, low: [0, 0, 0], cells }],
   }
   return cachedCoupe
 }

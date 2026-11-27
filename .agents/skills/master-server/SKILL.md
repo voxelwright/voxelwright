@@ -6,7 +6,7 @@ description: The crates, versions and verified recipes behind master/ (village-m
 # Master server
 
 Pinned in `master/Cargo.lock`, built with Rust 1.96.1 (edition 2024), checked November 25,
-2026. The protocol and its numbers are in `master/README.md`; why WebRTC is in
+2026. The protocol and its numbers are in `guide/master.md`; why WebRTC is in
 `.agents/skills/lobby-transport/SKILL.md`.
 
 ## Crates and why each is there

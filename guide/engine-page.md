@@ -74,19 +74,35 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `world.ts` | Boxes, slots, the pool, asks to workers. |
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
-| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts`, `wheels.ts` | The other passes of a frame. |
+| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
+| `deform.ts` | Vehicle damage: dents, scuffs, cracked glass and engine damage recorded from crashes, packed for `pieces.ts` (see [vehicle damage](#vehicle-damage)). |
+| `fine.ts`, `streetfaces.ts` | Faces of things in cells finer than the world's (vehicles' looks). `facesWithSmooth` also gives each outside face smooth words at its four corners: a normal fitted to the shape round the corner and how open it is (#38). The street's cars get theirs in the `streetfaces.ts` worker. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
-| `living.ts`, `drive-cam.ts`, `cockpit.ts` | Driven vehicles, telemetry, the five-mode cinematic driving camera suite (`C` cycles, `X` looks back, `V` toggles the driver seat), and first-person cockpit immersion (head G-force inertia, windshield rain wipers, night dash glow, cabin acoustics). |
+| `living.ts`, `person.ts`, `people.ts`, `residents.ts` | Living things, a person's own body, figures and the town's residents ([living things and people](/living)). |
 | `street.ts`, `waitwhat.ts` | San Francisco street life (parked and moving traffic, pedestrians, cable cars), WaitWhat autonomous robotaxis (roof LiDAR, 4-way amber hazards, intersection/narrow-street freezes with bystander filming/yelling and blocked-car honking), and WaitWhat Station charging depot. |
 | `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
-| `gamepad.ts` | Standard W3C Gamepad API input (analog triggers, steering curves, right-stick orbit, dual-motor haptic rumble) and touch steering curve. Zero polling overhead until `gamepadconnected`. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
-| `stunts.ts` | Driving stunt and combo tracker (`engine.stunts`): drifts, hill jumps, 180/360 spins, traffic near-misses (`voxelwright:nearmiss`), speed runs, x1–x5 combos, banking chime, and `[data-panel="stunts"]`. |
-| `minimap.ts`, `map-gpu.ts` | Speed-reactive 3D WebGPU minimap, fullscreen 2D/3D map, and GPS navigation. |
-| `summon.ts` | Instant street-level sports coupe delivery (`G` key on foot). |
+| `ask.ts`, `making.ts`, `kept.ts`, `maker.ts`, `models.ts` | The ask bar's wishes: the helper, the ghost of what is kept, and making in the page with a visitor's own AI ([making](/making)). |
+| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car, the gamepad, stunts and the EXPLORE board ([gameplay](/gameplay)). |
+| `car-sculpt.ts` | The GT coupe sculpted from continuous shapes (`fineCar`, the `G` summon and the SF library coupe), plus `coarser` and the edge-leak sealer that keep vehicle shells closed across levels. |
+| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen map and GPS routes ([gameplay](/gameplay)). |
+| `realms.ts`, `portal.ts`, `wheel.ts` | Stepping between realms without a reload ([realms](/engine-plugins#realms)). |
+| `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
+
+## Vehicle damage
+
+A drivable thing that wears a fine look is dented where it is struck (#37). The core reports each crash as a `STRUCK` record with a place, a closing speed and a push, but no direction. `living.ts` keeps the hardest blow each vehicle took in one answer. For a blow at 1.8 m/s or more, it gives each part of the look a dent at that place, pushed in from the side of the part's box nearest the hit. `deform.ts` holds up to six dents a part. Each dent has a centre, a radius, a direction and a depth, all in the part's own cells. Nearby blows deepen an existing dent, and blows near the driver's eye and seats are kept out of it: no dent, however it is moved, reaches that room. The same record holds how scuffed the paint is, how damaged the engine is, and how cracked each window is.
+
+`pieces.ts` draws a struck piece bent, in its vertex shader, with no new meshing:
+
+- A struck piece draws from a copy of its faces cut into rows one cell long. Every corner then lies on the cell lattice, so faces that meet still meet once bent. Merged rows bent only at their ends opened gaps beside their neighbours. A piece never struck draws its merged faces, and the shader returns before any dent work.
+- Paint and lamps keep the unbent position, so a bent panel keeps its own paint.
+- In a dent, the outside paint is scraped to primer and bare steel and loses some of its clear coat. Inside the cabin, nothing is scraped. A blow that cracks a window marks the glass cell nearest it (`Piece.crackAt`). The glass breaks into a mosaic with a web of cracks spreading from that cell, wider for a harder blow, and the view still shows through.
+
+Crashes at 2.8 m/s or more throw sparks, dust, chips of the struck paint and, when a window cracked, glass. A damaged engine steams, then smokes and finally burns (`puffs.ts` `engine`). Where `prefers-reduced-motion` is set, the debris is left out and the smoke is lighter. `living.repair(thing)` makes a look as it was made. Dents go with the look when the thing breaks, is taken away, or the world is forgotten, so a new car never inherits them. `node engine/test/dents.mjs` crashes the fine car into a block and checks the dent, the driver's clear room, the picture of the struck corner against the same view repaired, and the repair.
 
 ## Invariants
 

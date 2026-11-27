@@ -5,16 +5,19 @@
 // them with the thing; nothing here is run.
 import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import { cockpit, type CockpitState } from './cockpit.ts'
+import { VehicleDeformation, type DeformState } from './deform.ts'
 import { createDriveCam, type DriveCamMode } from './drive-cam.ts'
 import { touchSteerCurve } from './gamepad.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
 import type { Piece } from './pieces.ts'
-import type { Struck, Told } from './told.ts'
+import type { Placed, Struck, Told } from './told.ts'
 import type { Link } from './link.ts'
 import type { Things } from './things.ts'
 import { carveWheelWells, type WheelProfile } from './wheels.ts'
+import { sculptCoupe } from './car-sculpt.ts'
+import { POLISHED } from './spells.ts'
 
 /** A foot: where its ray starts (cells from the thing's own low corner), how far down it reaches, whether it steers and drives. */
 export interface Foot { at: [number, number, number]; reach: number; steers?: boolean; drives?: boolean }
@@ -183,6 +186,10 @@ export interface Living {
   readonly telemetry: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number; boost: number; boosting: boolean; burnout: number; surface: 'paved' | 'wet' | 'offroad' } | null
   /** First-person cockpit immersion state (inertia, windshield rain/wipers, night dash glow). */
   readonly cockpit: CockpitState
+  /** How a vehicle's look is dented (#37, deform.ts): the dents of its first part, or null if it was never struck hard. */
+  damage(thing: Thing): DeformState | null
+  /** Makes a vehicle's look as it was made: no dents, scuffs or cracks, and its engine quiet. */
+  repair(thing: Thing): void
   /** Live wheel-animation inputs while driving a wheeled vehicle, or null (wheels.ts). */
   readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
 }
@@ -194,6 +201,12 @@ const AHEADS = [Math.PI / 2, -Math.PI / 2, Math.PI, 0]
 const SITTING_EYE = 12
 /** How far outside its thing's own box a driver's eye may be (cells). */
 const EYE_OUT = 6
+/** How fast a vehicle must close on what it strikes to be dented (cells a second: 1.8 m/s), and to throw sparks and chips (2.8 m/s). */
+const DENTS_FROM = 18, CRASH_FROM = 28
+/** How near the eye a damaged engine must be to steam or smoke (cells). */
+const ENGINE_SEEN = 900
+/** How far round a driver's eye and each seat the look is kept from being bent into (cells): the head as it turns and leans. */
+const HEAD_ROOM = 2
 const turned = (q: readonly number[], v: readonly number[]): [number, number, number] => {
   const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
   return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
@@ -235,6 +248,10 @@ export function living(o: {
     lift(wheel?: number): void
     light(at: readonly [number, number, number], dir: readonly [number, number], size: readonly [number, number], colour: readonly [number, number, number], alpha: number): void
     sparks(at: readonly [number, number, number], strength: number): void
+    /** A hard crash (#37): dust, chips of the paint it was struck on (`kind`), and shards of glass if a window cracked. */
+    crash?(at: readonly [number, number, number], strength: number, kind: number, glass: boolean): void
+    /** A damaged engine under the bonnet (#37), for one frame of `dt` seconds: steam, then dark smoke, then flames as `level` goes from 0.35 to 1. */
+    engine?(at: readonly [number, number, number], level: number, dt: number): void
     rain(): number
     day(): number
     surface(x: number, z: number): number
@@ -274,7 +291,7 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { rise: 0, boost: false }
+  const held = { rise: 0, boost: false, horn: false }
   const buttons = o.hud.panel('living')
   const cabin = cockpit(o.hud)
   // Sleek speed, gear, RPM bar, subtle boost bar, camera-mode toast and DRIFT indicator shown while driving a car.
@@ -325,6 +342,7 @@ export function living(o: {
     telemetryNow = null
     wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
+    held.horn = false
     cabin.reset()
     o.lens?.(0, 0, 0)
     o.audio?.drive(null)
@@ -341,14 +359,20 @@ export function living(o: {
   }
   let seat: HTMLButtonElement | null = null
   const showButtons = (scheme: Scheme | null) => {
-    held.rise = 0; held.boost = false
+    held.rise = 0; held.boost = false; held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
     if (!scheme) { buttons.replaceChildren(); seat = null; return }
-    // From the bottom up (the column stands on the corner under the right thumb): drift & boost (or down/up), what is done once, the
-    // seat, and getting off at the top, farthest from the thumb.
+    // From the bottom up (the column stands on the corner under the right thumb): drift, boost, horn (or down/up),
+    // what is done once, seat, camera & radio, and getting off at the top, farthest from the thumb.
+    const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
+    driftBtn.dataset.vxKind = 'main'
+    const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
+    boostBtn.setAttribute('aria-label', 'Nitrous boost')
+    const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
+    hornBtn.setAttribute('aria-label', 'Honk horn')
     const rises = scheme.name === 'drive'
-      ? [button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 }), button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })]
+      ? [driftBtn, boostBtn, hornBtn]
       : scheme.lines.some((l) => l.rise)
         ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
         : []
@@ -357,7 +381,18 @@ export function living(o: {
     seat = button('seat', 'Seat', () => view(!inside))
     seat.setAttribute('aria-label', 'Look from the seat')
     seat.setAttribute('aria-pressed', String(inside))
-    buttons.replaceChildren(...rises, ...onces, seat, ...leaves)
+    const driveExtras: HTMLButtonElement[] = []
+    if (scheme.name === 'drive') {
+      const camBtn = button('cam', 'Cam', () => { if (inside) view(false); cam.cycle(); showCamToast() })
+      camBtn.setAttribute('aria-label', 'Cycle camera view')
+      driveExtras.push(camBtn)
+      if (o.audio?.radio) {
+        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('next') })
+        radioBtn.setAttribute('aria-label', 'Next car radio station')
+        driveExtras.push(radioBtn)
+      }
+    }
+    buttons.replaceChildren(...rises, ...onces, seat, ...driveExtras, ...leaves)
   }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
@@ -381,7 +416,17 @@ export function living(o: {
   }
   // A thing's fine look (#245): a piece for each part, kept each frame where the body is, the body's own cells not drawn.
   // Its glass is seen through (pieces.ts), from the seat as from the street.
-  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number }
+  /** glass: where its glass cells are, three numbers a cell (#37: where a crack starts). */
+  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number; glass: Int16Array }
+  /** Where a look's glass cells are (kind 11), three numbers a cell. */
+  const glassOf = (kinds: Uint16Array, [w, , d]: readonly number[]) => {
+    const at: number[] = []
+    for (let i = 0; i < kinds.length; i++) if ((kinds[i] & 15) === 11) at.push(i % w, Math.floor(i / (w * d)), Math.floor(i / w) % d)
+    return Int16Array.from(at)
+  }
+  // Its dents (#37): one record a part, by the thing's body and the part's place in its look.
+  const dents = new VehicleDeformation()
+  const dentId = (thing: Thing, part: number) => thing.id * FINE_PARTS + part
   const looks = new Map<Thing, Worn[]>()
   const wear = (thing: Thing, parts: { kinds: Uint16Array; size: [number, number, number]; per: number; low: [number, number, number] }[]) => {
     if (!o.look || !thing.alive || !things.includes(thing) || looks.has(thing) || !parts.length) return
@@ -398,10 +443,53 @@ export function living(o: {
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
-      return { piece, kinds, size: f.size, low: f.low, per: f.per }
+      return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: glassOf(kinds, f.size) }
     }))
   }
-  const unwear = (thing: Thing) => { for (const w of looks.get(thing) ?? []) w.piece.destroy(); looks.delete(thing) }
+  const unwear = (thing: Thing) => {
+    // Its dents go with its look: a body's id may be given to another thing later.
+    looks.get(thing)?.forEach((w, i) => { w.piece.destroy(); dents.clearVehicle(dentId(thing, i)) })
+    looks.delete(thing)
+  }
+  /** Where a part of a thing's look is when its body is at `pos` turned `rot` (as `follow` places it). */
+  const partAt = (thing: Thing, body: Piece, w: Worn, pos: readonly number[], rot: readonly number[]): [number, number, number] => {
+    const b = body.born, v = turned(rot, [w.low[0] - (b.low[0] - thing.low[0]) - b.com[0], w.low[1] - (b.low[1] - thing.low[1]) - b.com[1], w.low[2] - (b.low[2] - thing.low[2]) - b.com[2]])
+    return [pos[0] + v[0], pos[1] + v[1], pos[2] + v[2]]
+  }
+  /**
+   * A vehicle struck hard (#37): each part of its look is dented where it was struck, pushed in from where it was
+   * struck. The core says where and how fast, not which way: the way out of the look's own box at that place, so
+   * a corner is struck from both its sides. The driver's eye and every seat are kept clear, with room for the head.
+   */
+  const dent = (thing: Thing, s: Struck, pose: Placed | undefined) => {
+    const worn = looks.get(thing), body = o.piece(thing.id)
+    if (!worn || !body) return
+    const pos = pose?.pos ?? body.pos, rot = pose?.rot ?? body.rot
+    const eye = eyeOf(thing), lo = [eye[0] - HEAD_ROOM, eye[1] - SITTING_EYE / 2, eye[2] - HEAD_ROOM], hi = [eye[0] + HEAD_ROOM, eye[1] + HEAD_ROOM, eye[2] + HEAD_ROOM]
+    for (const seat of thing.seats ?? []) for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], seat[a] - (a === 1 ? 0 : HEAD_ROOM))
+      hi[a] = Math.max(hi[a], seat[a] + (a === 1 ? SITTING_EYE + HEAD_ROOM : HEAD_ROOM))
+    }
+    worn.forEach((w, i) => {
+      const at = partAt(thing, body, w, pos, rot), cell = 1 / w.per
+      // Where it was struck in the part's own cells, and from there the way out of its box.
+      const local = turned([-rot[0], -rot[1], -rot[2], rot[3]], [s.at[0] - at[0], s.at[1] - at[1], s.at[2] - at[2]])
+      const out = local.map((v, a) => { const d = Math.max(-1, Math.min(1, (v / cell - w.size[a] / 2) / (w.size[a] / 2))); return d * d * d * (a === 1 ? 0.5 : 1) })
+      if (Math.hypot(out[0], out[1], out[2]) < 1e-6) out[0] = 1
+      const cabin = { min: lo.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number], max: hi.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number] }
+      const was = Math.max(0, ...(dents.get(dentId(thing, i))?.glassCrack ?? []))
+      const state = dents.recordImpact(dentId(thing, i), { pos: at, rot: [rot[0], rot[1], rot[2], rot[3]], cell, born: { com: [0, 0, 0], size: w.size }, front: thing.motor.front as 0 | 1 | 2 | 3 }, s.at, turned(rot, out), s.speed, s.push, cabin)
+      if (!state) return
+      w.piece.deform = state
+      // A blow that cracked its glass more: the cracks start at the glass nearest it.
+      if (Math.max(...state.glassCrack) > was && w.glass.length) {
+        let best = Infinity, near = 0
+        const x = local[0] / cell, y = local[1] / cell, z = local[2] / cell
+        for (let g = 0; g < w.glass.length; g += 3) { const far = (w.glass[g] - x) ** 2 + (w.glass[g + 1] - y) ** 2 + (w.glass[g + 2] - z) ** 2; if (far < best) { best = far; near = g } }
+        w.piece.crackAt = [w.glass[near] + 0.5, w.glass[near + 1] + 0.5, w.glass[near + 2] + 0.5]
+      }
+    })
+  }
   const setLamps = (thing: Thing | null, lamps?: [number, number, number, number]) => {
     if (!thing) return
     const body = o.piece(thing.id)
@@ -632,6 +720,9 @@ export function living(o: {
         if (riding === thing) mount(null)
       }
       for (const state of told.live) { const thing = things.find((t) => t.id === state.id); if (thing) thing.state = state }
+      // The hardest blow each vehicle wearing a look took in this answer (#37): the core tells a pair's meeting each
+      // step, and one crash is several of them.
+      let hardest: Map<Thing, Struck> | null = null
       for (const s of told.struck) {
         struck.push(s)
         if (struck.length > 64) struck.shift()
@@ -642,10 +733,41 @@ export function living(o: {
           o.fx?.sparks(s.at, hit)
           o.input.pulse?.('crash', hit)
         }
+        if (s.speed < DENTS_FROM) continue
+        for (const id of [s.a, s.b]) {
+          const thing = id ? things.find((t) => t.id === id) : undefined
+          if (!thing || !looks.has(thing) || (thing.controls ?? 'drive') !== 'drive') continue
+          hardest ??= new Map()
+          if ((hardest.get(thing)?.speed ?? 0) < s.speed) hardest.set(thing, s)
+        }
       }
+      if (hardest) for (const [thing, s] of hardest) {
+        const cracked = Math.max(...(dents.get(dentId(thing, 0))?.glassCrack ?? [0]))
+        dent(thing, s, told.moves.find((m) => m.id === thing.id))
+        if (s.speed >= CRASH_FROM && !reducedMotion.matches) {
+          const hit = Math.min(1, s.speed / 120)
+          // The ridden one already threw its sparks above.
+          if (thing !== riding) o.fx?.sparks(s.at, hit)
+          o.fx?.crash?.(s.at, hit, s.a === thing.id ? s.kindA : s.kindB, Math.max(...(dents.get(dentId(thing, 0))?.glassCrack ?? [0])) > cracked + 0.05)
+        }
+      }
+    },
+    damage: (thing) => dents.get(dentId(thing, 0)) ?? null,
+    repair(thing) {
+      looks.get(thing)?.forEach((w, i) => { dents.repairVehicle(dentId(thing, i)); w.piece.crackAt = undefined })
     },
     frame(dt) {
       follow()
+      // A struck engine steams, then smokes, then burns (#37), under the bonnet at its front: only near the eye, and
+      // gentler where motion is to be reduced.
+      if (o.fx?.engine) for (const [thing, worn] of looks) {
+        let level = 0
+        for (const w of worn) level = Math.max(level, w.piece.deform?.hoodDamage ?? 0)
+        if (level < 0.35) continue
+        const f = FRONTS[thing.motor.front], half = (thing.motor.front < 2 ? thing.size[0] : thing.size[2]) * 0.5
+        const at = placeOf(thing, [thing.size[0] / 2 + f[0] * half * 0.62, thing.size[1] * 0.8, thing.size[2] / 2 + f[2] * half * 0.62])
+        if (at && Math.hypot(at[0] - o.pose.x * M, at[1] - o.pose.y * M, at[2] - o.pose.z * M) < ENGINE_SEEN) o.fx.engine(at, level, reducedMotion.matches ? dt * 0.4 : dt)
+      }
       // Near is near the body when there is one (#367): by the eye, which rides three metres behind someone on foot, a kart
       // right beside them was out of reach and E did nothing until they had walked past it.
       const eye = o.body?.() ?? [o.pose.x * M, o.pose.y * M, o.pose.z * M]
@@ -706,7 +828,7 @@ export function living(o: {
       let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, onWheels = riding.motor.feet.length, rough = 0
       let boostFuel = 1, boosting = false, launching = false, burnoutCharge = 0
       if (isDrive && at && dt > 0) {
-        const wantHorn = o.input.held('KeyH')
+        const wantHorn = o.input.held('KeyH') || held.horn
         if (wantHorn !== hornOn) { hornOn = wantHorn; o.audio?.horn(hornOn) }
         if (prevAt) {
           const ivx = (at.at[0] - prevAt[0]) / dt, ivy = (at.at[1] - prevAt[1]) / dt, ivz = (at.at[2] - prevAt[2]) / dt
@@ -1006,55 +1128,14 @@ export function car(low: [number, number, number]): Making {
 }
 
 /**
- * The hand-written car with a look in cells of 2.5 cm (#245), written as a few lines of shapes: a body with rounded
- * ends and wheel arches, a cabin of glass on pillars under a roof, four wheels with hubs, lamps; and inside, a floor,
- * two seats in front and a bench behind, a dash and a steering wheel, so that the eye in the driver's seat sees
- * something. The body that moves is `car`'s; the look is 1.3 m high where the body is 1 m. About a megabyte of cells.
+ * The hand-written car with a look in cells of 2.5 cm (#245): `car`'s body wearing the sculpted coupe (car-sculpt.ts,
+ * #39) at its size, 4.2 m by 1.3 m by 1.8 m, its wheels on `car`'s feet. Its paint is polished (spells.ts `POLISHED`),
+ * so it is drawn as car paint (pieces.ts); inside, bucket seats, a dash and a wheel low enough that the eye in the
+ * driver's seat (V) sees over it. About 150,000 filled cells of 630,000.
  */
 export function fineCar(low: [number, number, number]): Making {
-  const body = car(low), P = 4, w = 168, h = 52, d = 72, cells = new Uint16Array(w * h * d)
-  const set = (x: number, y: number, z: number, k: number) => { if (x >= 0 && y >= 0 && z >= 0 && x < w && y < h && z < d) cells[(y * d + z) * w + x] = k }
-  const paint = kind(STEEL, hue(0, 4)), trim = kind(STEEL, 13), tyre = kind(STEEL, 14), hub = kind(STEEL, 6), glass = kind(GLASS), lamp = kind(LAMP), red = kind(LAMP, hue(0, 5)), seat = kind(10, hue(2, 9)), floor = kind(STEEL, 12)
-  const wheels = [[28, 12], [140, 12]]
-  // Where the glass of the cabin begins and ends along x at a height: the windscreen leans back, the rear window less.
-  const front = (y: number) => 118 - (y - 25) * 0.9, rear = (y: number) => 40 + (y - 25) * 0.6
-  for (let y = 6; y < h; y++) for (let z = 4; z < d - 4; z++) for (let x = 0; x < w; x++) {
-    const side = Math.min(z - 4, d - 5 - z), end = Math.min(x, w - 1 - x)
-    if (y < 25) {
-      // The lower body, its corners rounded, cut for the wheels; hollow where the cabin is, over a floor.
-      if (end < 6 && side < 6 && (6 - end) ** 2 + (6 - side) ** 2 > 36) continue
-      if (y > 20 && end < 3 && y - 20 > end + 1) continue
-      if (wheels.some(([cx, cy]) => (x - cx) ** 2 + (y - cy) ** 2 < 15 * 15) && side < 10) continue
-      const cabin = x > rear(25) - 2 && x < front(25) + 2 && side >= 2 && y > 8
-      if (cabin) continue
-      set(x, y, z, y < 8 && x > 36 && x < 124 && side >= 2 ? floor : paint)
-      continue
-    }
-    // The cabin: glass between pillars, a roof over it.
-    const x0 = rear(y), x1 = front(y), inset = (y - 25) * 0.15
-    if (x < x0 || x > x1 || side < inset) continue
-    const shell = x < x0 + 2 || x > x1 - 2 || side < inset + 2 || y >= 49
-    if (!shell) continue
-    // The roof and the sill are steel; the windscreen and the rear window are glass between pillars at the corners, and the sides glass but for those and one between the doors.
-    const ends = x < x0 + 2 || x > x1 - 2, pillar = y >= 49 || y < 27 || (ends ? side < inset + 4 : x < x0 + 4 || x > x1 - 4 || Math.abs(x - 80) < 2)
-    set(x, y, z, pillar ? paint : glass)
-  }
-  // Wheels: tyres with hubs, a little proud of the body.
-  for (const [cx, cy] of wheels) for (const [z0, z1] of [[0, 9], [d - 9, d]]) for (let z = z0; z < z1; z++) for (let y = 0; y < 25; y++) for (let x = cx - 13; x <= cx + 13; x++) {
-    const r = Math.hypot(x - cx, y - cy)
-    if (r < 12) set(x, y, z, r < 6 && (z === z0 || z === z1 - 1) ? hub : tyre)
-  }
-  // Lamps in front, red ones behind.
-  for (const z of [10, 11, 12, 13, 14, 15, 56, 57, 58, 59, 60, 61]) for (let y = 15; y < 20; y++) { set(w - 1, y, z, lamp); set(0, y, z, red) }
-  // Inside: two seats and a bench (a cushion and a back each), a dash, and the driver's wheel on its column.
-  for (const [x0, z0, z1] of [[70, 12, 32], [70, 40, 60], [44, 10, 62]]) for (let z = z0; z < z1; z++) {
-    for (let x = x0; x < x0 + 16; x++) for (let y = 9; y < 15; y++) set(x, y, z, seat)
-    for (let y = 15; y < 38; y++) for (let x = x0 - 4 + Math.floor((y - 15) / 6); x < x0 + Math.floor((y - 15) / 6); x++) set(x, y, z, seat)
-  }
-  for (let z = 6; z < d - 6; z++) for (let y = 22; y < 31; y++) for (let x = 104 + (y - 22); x < 120; x++) set(x, y, z, trim)
-  for (let a = 0; a < 64; a++) { const t = (a / 64) * Math.PI * 2; for (const r of [6, 7]) set(98, Math.round(32 + Math.sin(t) * r), Math.round(22 + Math.cos(t) * r), trim) }
-  for (let x = 98; x < 108; x++) set(x, 32 - Math.round((x - 98) * 0.4), 22, trim)
+  const body = car(low), { cells, size } = sculptCoupe({ L: 4.2, H: 1.3, W: 1.8, per: 4, wheels: [0.7, 3.5], wheelY: 0.3, wheelR: 0.3, tyreW: 0.22, eye: [1.9, 1.0, 0.55], paint: kind(STEEL, hue(0, 4)) | POLISHED })
   // The driver's eye over the left front seat, in the body's cells: 1 m over the ground, a little behind the wheel. A seat is where a
   // sitting rider's feet are drawn, their eye 1.2 m over them (`SITTING_EYE`): low, so that their head is under the roof.
-  return { ...body, name: 'car', fine: [{ size: [w, h, d], per: P, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
+  return { ...body, name: 'car', fine: [{ size, per: 4, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
 }

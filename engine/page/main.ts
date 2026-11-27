@@ -35,7 +35,7 @@ import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
-import { read } from './told.ts'
+import { read, type Born } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
 import { hands } from './hands.ts'
 import { before as beforeEye, block, inHand as carried } from './held.ts'
@@ -955,13 +955,45 @@ async function main() {
   // to make): a page fetches each part once (living.ts), so a second car of a kind shares them and makes nothing.
   // (By the cells and by their size: the same cells may be a part of another shape.)
   const lookFaces = new WeakMap<Uint16Array, Map<string, ReturnType<typeof thing>>>()
+  // A look made on the page's thread is made square (fine.ts `thing`), and its smooth faces (#38) off it, by a worker
+  // of the street's kind (streetfaces.ts): several times the cost, a hitch as someone gets in. Until they come, the
+  // pieces wearing it are drawn square; then they are given them (pieces.ts `refit`), and so is every later one.
+  const smoothing = new Map<Born, Piece[]>()
+  let smoother: Worker | null = null
+  const smoothen = (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => {
+    if (!smoother) {
+      smoother = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
+      smoother.onmessage = (e: MessageEvent<{ key: number; faces: Uint32Array<ArrayBuffer>; smooth: Uint32Array<ArrayBuffer> }>) => {
+        const born = smoothKeys.get(e.data.key)
+        smoothKeys.delete(e.data.key)
+        if (!born) return
+        born.faces = e.data.faces
+        born.smooth = e.data.smooth
+        for (const piece of smoothing.get(born) ?? []) falling.refit(piece, e.data.faces, e.data.smooth)
+        smoothing.delete(born)
+      }
+    }
+    smoothing.set(born, [])
+    const key = ++smoothAsked
+    smoothKeys.set(key, born)
+    smoother.postMessage({ key, raw: kinds.slice(), size: [size[0], size[1], size[2]], reach: 5 })
+  }
+  let smoothAsked = 0
+  const smoothKeys = new Map<number, Born>()
   const alive = living({
     body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null },
     kind: (x, y, z) => core.world_kind(x, y, z),
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },
     piece: (id) => moving.get(id),
-    look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) },
+    look: (kinds, size) => {
+      let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map())
+      let born = by.get(size.join())
+      if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
+      const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
+      smoothing.get(born)?.push(piece)
+      return piece
+    },
     input: controls, hud: over, pose,
     ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M,
     world: far, made: () => made,
@@ -975,6 +1007,14 @@ async function main() {
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
       sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
+      // A hard crash (#37): road dust, chips of the paint struck, and shards of a window that cracked.
+      crash: (at, strength, kind, glass) => {
+        const c = hue(kind)
+        smoke.crash(at, strength)
+        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.3, 8, 0.9 + strength * 0.4)
+        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.5, 0.58, 0.62], 0.16, 3, 1.1)
+      },
+      engine: (at, level, dt) => smoke.engine(at, level, dt),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,
@@ -2034,9 +2074,18 @@ async function main() {
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
   })
   own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  // Mobile touch trigger for Summon Car (G): sleek 44x44 slim voxel key beside ✦ Make at bottom-left (play-hud.ts).
+  const summonPanel = over.panel('summon')
+  const summonBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button' })
+  summonBtn.dataset.vxIcon = 'car'
+  summonBtn.setAttribute('data-vx-icon-only', '')
+  summonBtn.setAttribute('aria-label', 'Summon sports car')
+  summonBtn.title = 'Summon sports car (G)'
+  summonBtn.addEventListener('click', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  summonPanel.append(summonBtn)
   resetting.add(() => carSummon.clear())
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon(), wheels: carWheels })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon(), wheels: carWheels, smoothing: () => smoothing.size })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
