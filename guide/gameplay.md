@@ -43,20 +43,20 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Set what is ahead alight | F | - | - |
 | Take the wand | Q | Wand on the wheel | - |
 | **Driving** | | | |
-| Throttle, brake and reverse | W, S | Left half (forward and back) | RT, LT (analog) |
-| Steer | A, D | Left half (side to side) | Left stick |
-| Drift (handbrake) | Hold Space | Hold Drift | A / Cross (analog) |
-| Boost | Hold Shift | Hold Boost | B / Circle |
-| Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Drift and the left half forward, then let go of Drift | RT and A, then let go of A |
-| Next camera (the seat among them) | C | Cam | RB or D-pad down |
+| Throttle, brake and reverse | W, S | Gas & Brake pedals (bottom-right), or left half forward/back one-handed | RT, LT (analog) |
+| Steer | A, D | Left half (side to side; pure steering while pedals are held) | Left stick |
+| Drift (handbrake) | Hold Space | Hold Drift (above Gas) | A / Cross (analog) |
+| Boost | Hold Shift | Hold Boost (above Brake) | B / Circle |
+| Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Gas and Drift at a standstill, then let go of Drift | RT and A, then let go of A |
+| Next camera (the seat among them) | C | Cam (top-right utility rail) | RB or D-pad down |
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
-| Horn | Hold H | Hold Horn | L3 |
+| Horn | Hold H | Hold Horn (top-right utility rail) | L3 |
 | Next FM station | N | Choose a station in Radio | - |
-| Open the radio picker | R | Radio, or tap the station name while it shows | - |
-| Repair car | F | Repair | D-pad right |
+| Open the radio picker | R | Radio (top-right rail), or tap the station name while it shows | - |
+| Repair car | F | Repair (appears in top-right rail when damaged) | D-pad right |
 | Straight into the seat, and back | V | Seat (hover things); while driving, Cam goes round to the seat | R3 or D-pad up |
-| Get out | E | Get off | Y / Triangle |
+| Get out | E | Exit (top-right utility rail) | Y / Triangle |
 | **Map** | | | |
 | Open and close | M (once in the city), Esc closes | Tap the minimap | View / Share |
 | Route to a place | Click it, a pin or a chip | Tap it | - |
@@ -140,7 +140,7 @@ The street's kept cars get their motors from `HANDLING` in `engine/sf/fleet.mjs`
 
 ### Boost and launch
 
-Hold Shift (Boost on touch, B on a pad) with the throttle on for nitrous: 40% more thrust and 24% more top speed while it lasts. A full reserve burns in about 2.8 s and needs 8% to start again. It refills while you drift, when you land after a quarter second in the air, faster while you cruise cleanly above 45% of top speed, and slowly whenever you roll. The boost bar shows the reserve. Boosting fires blue flames from the exhaust, lights the road behind in cyan, widens the lens by 5.5 degrees (not with reduced motion), and adds a turbo whine to the engine.
+Hold Shift (Boost on touch, B on a pad) with the throttle on for nitrous: 40% more thrust and 24% more top speed while it lasts. A full reserve burns in about 2.8 s and needs 8% to start again. It refills while you drift, when you land after a quarter second in the air, faster while you cruise cleanly above 45% of top speed, and slowly whenever you roll. The boost bar shows the reserve. Boosting fires multi-stage blue-white and amber-tipped plasma jets from the rear tailpipes, lights the road behind in cyan, widens the lens by 5.5 degrees (not with reduced motion), and adds a turbo whine to the engine. Upshifts, launches, high-RPM throttle lift-offs and aggressive drift entries fire fiery orange-gold exhaust backfire flames with a brief warm asphalt light flash from dual rear diffuser tips on sports coupes or the lower-right tailpipe on sedans and SUVs.
 
 A **burnout** builds a launch. Below 6.5 km/h with the throttle and the handbrake both over half, the front brakes hold the car while the rear wheels spin and smoke. The charge fills in 1.15 s and the boost bar turns orange to show it. Let go of the handbrake with the throttle still on and the car launches with up to 45% more thrust, fading over 0.8 s.
 
@@ -150,13 +150,14 @@ In a shared world, both boost (on and off) and rain wetness are forwarded to the
 
 `engine/page/drive-cam.ts` has six views, `DRIVE_CAM_MODES`: Close (the default), Far, Hood, Bumper, Seat and Cinema. C (the touch Cam key, a pad's RB) goes round them all and a toast names the new one. Getting out leaves the seat for the view before it; the other views survive getting out and back in.
 
+- **Close chase**: rides low just above the roofline and tight behind the rear bumper with a nearly level sightline over the roof down the street, pulling back smoothly under hard acceleration and boost, leaning in on braking, and swinging toward the outside rear-quarter with a lateral shoulder offset during hard drifts so the car's flank, tire smoke and the turn ahead stay framed. Portrait phone viewports scale back and elevate cleanly to clear the bottom-right touch keypad.
 - **Look back** (hold X or LB) turns the view 180 degrees and eases back on release.
 - **Air cam**: after 0.35 s airborne at speed, the close, far and cinema views pull wider.
-- **Cinema** cuts between hero, fender, flyby and helicopter shots every 4.5 s, and cuts away early when a shot is blocked.
-- **Speed lens**: the field of view widens with speed, and a streak, colour fringe and vignette grow with it (`engine/page/glow.ts`).
+- **Cinema** cuts between low rear-quarter hero, fender, flyby and helicopter shots every 4.5 s, and cuts away early when a shot is blocked.
+- **Speed and drift lens**: the field of view widens with speed, while `engine/page/glow.ts` adds peripheral radial speed streaks from ~35 km/h (strongest along rushing roadside asphalt and side buildings) plus tangential rotational motion blur during hard drifts that streaks city buildings and streetlights while keeping the lower-center car silhouette and vanishing point sharp.
 - **Seat** puts the eye in the driver's seat ([from the seat](#from-the-seat)). V goes straight into it from any view and back to that view; C goes on from it to Cinema.
 
-Reduced motion makes camera changes instant, turns off the lens effects and holds each cinema shot 6.5 s.
+Reduced motion makes camera changes instant, turns off the speed/drift lens streaks and holds each cinema shot 6.5 s.
 
 ### From the seat
 
@@ -189,7 +190,7 @@ Only lamp cells (material 15) on the car you ride light up (`engine/page/pieces.
 | Reverse | The gear is R |
 | Headlights | They start on auto (on after dusk). L then cycles low, high and off (from auto after dusk it goes straight to high). |
 
-`engine/page/tracks.ts` draws onto the ground after the world's cells. Rear wheels that slide lay **skidmarks**, dark on asphalt and brown off-road. It keeps the last 1024 segments (`MAX_SEGS`), each fading out by 18 s (`LIFE`). It also draws up to 24 **light pools** a frame (`MAX_SPILLS`): the red splash of brake lamps, white reverse light and headlight cones.
+`engine/page/tracks.ts` draws onto the ground after the world's cells. Rear wheels that slide lay **skidmarks**, dark on asphalt and brown off-road. It keeps the last 1024 segments (`MAX_SEGS`), each fading out by 18 s (`LIFE`). It also draws up to 24 **light pools** a frame (`MAX_SPILLS`): vivid crimson taillight/brake road glow, brief fiery orange exhaust pop flashes, cyan nitrous splash, white reverse light, and two-stage near/far warm night headlight cones.
 
 ### Traffic
 
@@ -230,7 +231,7 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
-**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While riding, the foot keys step aside for the vehicle's own: Drift, Boost, Horn, Cam, Radio and Get off for a car (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for a two-zone icon-only layout: four pointer-captured driving controls sit under the right thumb (tall Gas pedal, Brake/Reverse pedal, Drift and Boost — dedicating the left stick to smooth horizontal steering while pedals are pressed), while quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 
@@ -334,6 +335,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `haze`, `clouds` | Realm | Scale the realm's haze and clouds |
 | `hud=wheel`, `context`, `quiet`, `classic` | Realm | The style of play controls |
 | `debug=1` | Realm | Show the line of numbers |
+| `studio=1`, `studio=0` | Server | Load (`1`) or suppress (`0`, under `serve.mjs --studio`) the native in-game T3 Studio IDE and Game-Use runtime ([Studio & Game-Use IDE](/studio)); ignored on public static builds |
 | `telemetry=1` | Realm | Enable posting `/api/feedback` and `/api/session` traces on a local realm build |
 | `status=1` | Both | Show the status line on a phone |
 | `boards=0`, `boards=edit` | Realm | No signs, or the sign editor |
@@ -384,6 +386,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Eggs, lockers | `engine/page/eggs.ts`, `engine/page/lockers.ts` | `engine/test/sf-eggs.mjs`, `engine/test/sf-lockers.mjs` |
 | Wand, spells | `engine/page/wand.ts`, `engine/page/spells.ts` | `engine/test/wand.mjs`, `engine/test/spells.mjs` |
 | Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
+| Native T3 Studio & Game-Use MCP | `engine/studio/*`, `engine/page/studio/*` | `engine/test/studio.mjs` |
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 

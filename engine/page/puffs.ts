@@ -183,11 +183,12 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   // as it goes out. Blue-white plasma flame for nitrous boost when colour encodes cool blue with zero smoke cover.
   let core = body * body;
   let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
-  let warm = mix(mix(vec3f(0.7, 0.06, 0.01), vec3f(1.0, 0.4, 0.05), smoothstep(0.06, 0.36, hot)), vec3f(1.0, 0.9, 0.55), smoothstep(0.42, 0.95, hot));
-  let coolFlame = mix(mix(vec3f(0.06, 0.36, 1.0), vec3f(0.32, 0.8, 1.0), smoothstep(0.06, 0.36, hot)), vec3f(0.9, 0.98, 1.0), smoothstep(0.42, 0.95, hot));
+  let warm = mix(mix(vec3f(0.82, 0.10, 0.01), vec3f(1.0, 0.48, 0.06), smoothstep(0.06, 0.38, hot)), vec3f(1.0, 0.94, 0.65), smoothstep(0.42, 0.92, hot));
+  let coolFlame = mix(mix(vec3f(0.06, 0.36, 1.0), vec3f(0.35, 0.84, 1.0), smoothstep(0.06, 0.36, hot)), vec3f(0.92, 0.99, 1.0), smoothstep(0.42, 0.92, hot));
   let isBlue = step(0.5, in.colour.b - in.colour.r) * step(in.colour.a, 0.05);
   let flame = mix(warm, coolFlame, isBlue);
-  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.3 + billow * 1.15) * body * fade * 0.9;
+  let pureJet = step(in.colour.a, 0.02) * smoothstep(0.5, 0.9, heat);
+  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.32 + billow * 1.15) * body * fade * (0.9 + pureJet * 0.85);
   return vec4f(smoke * cover + glow, cover);
 }
 `
@@ -328,54 +329,68 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       const k = Math.max(0, Math.min(1, intensity))
       if (k <= 0.02) return
       const i = KEPT + (next++ % (MOST - KEPT))
-      const dx = (Math.random() - 0.5) * 2.2, dy = Math.random() * 0.8, dz = (Math.random() - 0.5) * 2.2
-      p[i * 3] = at[0] + dx; p[i * 3 + 1] = at[1] + dy + 0.6; p[i * 3 + 2] = at[2] + dz
-      v[i * 3] = vel[0] * 0.22 + (Math.random() - 0.5) * 10
-      v[i * 3 + 1] = 4 + 8 * k + Math.random() * 5
-      v[i * 3 + 2] = vel[2] * 0.22 + (Math.random() - 0.5) * 10
-      size[i] = 2.4 + 2.4 * k + Math.random() * 1.4
-      grow[i] = 5.5 + 5.0 * k
-      life[i] = span[i] = 0.75 + 0.85 * k + Math.random() * 0.45
-      heat[i] = 0; cool[i] = 0; rise[i] = 6 + 4 * k; drag[i] = 2.2
-      tone.set([colour[0], colour[1], colour[2], 0.24 + 0.32 * k], i * 4)
+      const dx = (Math.random() - 0.5) * 1.8, dy = 0.25 + Math.random() * 0.55, dz = (Math.random() - 0.5) * 1.8
+      p[i * 3] = at[0] + dx; p[i * 3 + 1] = at[1] + dy; p[i * 3 + 2] = at[2] + dz
+      v[i * 3] = vel[0] * 0.28 + (Math.random() - 0.5) * 8.5
+      v[i * 3 + 1] = 2.6 + 5.2 * k + Math.random() * 3.2
+      v[i * 3 + 2] = vel[2] * 0.28 + (Math.random() - 0.5) * 8.5
+      size[i] = 2.1 + 2.5 * k + Math.random() * 1.2
+      grow[i] = 6.2 + 5.5 * k
+      life[i] = span[i] = 0.85 + 0.95 * k + Math.random() * 0.45
+      heat[i] = 0; cool[i] = 0; rise[i] = 3.4 + 2.8 * k; drag[i] = 2.4
+      tone.set([colour[0], colour[1], colour[2], 0.28 + 0.36 * k], i * 4)
       seed[i] = Math.floor(Math.random() * 65536)
       late[i] = 0
     },
     exhaust(at, dir, pop = false, boost = false) {
       if (boost) {
-        for (let k = 0; k < 2; k++) {
+        // Sleek 3-stage nitrous jet hugging the diffuser nozzle: tight white-cyan core, electric-blue plume,
+        // and fiery amber-gold shock diamond kiss trailing cleanly out the tailpipe.
+        for (let k = 0; k < 3; k++) {
           const i = KEPT + (next++ % (MOST - KEPT))
-          const step = k * 1.4
+          const step = k * 0.85
           p[i * 3] = at[0] + dir[0] * step; p[i * 3 + 1] = at[1] + dir[1] * step; p[i * 3 + 2] = at[2] + dir[2] * step
-          v[i * 3] = dir[0] * (44 + k * 16) + (Math.random() - 0.5) * 3
-          v[i * 3 + 1] = dir[1] * (44 + k * 16) + 1.5
-          v[i * 3 + 2] = dir[2] * (44 + k * 16) + (Math.random() - 0.5) * 3
-          size[i] = 1.5 + k * 0.45; grow[i] = 5.2; life[i] = span[i] = 0.11 + k * 0.03
-          heat[i] = 0.98; cool[i] = 6.2; rise[i] = 3; drag[i] = 4.5
-          tone.set([0.08, 0.65, 1.0, 0.0], i * 4)
+          v[i * 3] = dir[0] * (26 + k * 16) + (Math.random() - 0.5) * 1.2
+          v[i * 3 + 1] = dir[1] * (26 + k * 16) + 0.35
+          v[i * 3 + 2] = dir[2] * (26 + k * 16) + (Math.random() - 0.5) * 1.2
+          size[i] = k === 0 ? 1.0 : k === 1 ? 1.22 : 0.92
+          grow[i] = 1.6 + k * 0.75
+          life[i] = span[i] = 0.08 + k * 0.02
+          heat[i] = k === 0 ? 1.0 : k === 1 ? 0.90 : 0.78
+          cool[i] = 6.0; rise[i] = 1.2; drag[i] = 5.4
+          tone.set(k === 2 ? [1.0, 0.55, 0.08, 0.0] : [0.08, 0.68, 1.0, 0.0], i * 4)
           seed[i] = Math.floor(Math.random() * 65536)
           late[i] = 0
         }
         return
       }
       if (pop) {
-        const i = KEPT + (next++ % (MOST - KEPT))
-        p[i * 3] = at[0]; p[i * 3 + 1] = at[1]; p[i * 3 + 2] = at[2]
-        v[i * 3] = dir[0] * 26; v[i * 3 + 1] = dir[1] * 26 + 2; v[i * 3 + 2] = dir[2] * 26
-        size[i] = 1.4; grow[i] = 6.5; life[i] = span[i] = 0.13
-        heat[i] = 0.92; cool[i] = 5.5; rise[i] = 6; drag[i] = 5
-        tone.set([0.2, 0.18, 0.17, 0.28], i * 4)
-        seed[i] = Math.floor(Math.random() * 65536)
-        late[i] = 0
+        // Crisp 3-stage fiery orange-yellow-white exhaust flame tongue (upshift, launch, overrun pop).
+        for (let k = 0; k < 3; k++) {
+          const i = KEPT + (next++ % (MOST - KEPT))
+          const step = k * 0.9
+          p[i * 3] = at[0] + dir[0] * step; p[i * 3 + 1] = at[1] + dir[1] * step; p[i * 3 + 2] = at[2] + dir[2] * step
+          v[i * 3] = dir[0] * (24 + k * 12) + (Math.random() - 0.5) * 1.4
+          v[i * 3 + 1] = dir[1] * (24 + k * 12) + 0.5
+          v[i * 3 + 2] = dir[2] * (24 + k * 12) + (Math.random() - 0.5) * 1.4
+          size[i] = k === 0 ? 0.95 : k === 1 ? 1.18 : 0.90
+          grow[i] = 1.6 + k * 0.8
+          life[i] = span[i] = 0.11 + k * 0.024
+          heat[i] = k === 0 ? 1.0 : k === 1 ? 0.88 : 0.68
+          cool[i] = 5.0; rise[i] = 1.8; drag[i] = 5.6
+          tone.set([1.0, 0.5, 0.08, 0.0], i * 4)
+          seed[i] = Math.floor(Math.random() * 65536)
+          late[i] = 0
+        }
       }
       const j = KEPT + (next++ % (MOST - KEPT))
       p[j * 3] = at[0]; p[j * 3 + 1] = at[1]; p[j * 3 + 2] = at[2]
-      v[j * 3] = dir[0] * 18 + (Math.random() - 0.5) * 4; v[j * 3 + 1] = dir[1] * 18 + 4; v[j * 3 + 2] = dir[2] * 18 + (Math.random() - 0.5) * 4
-      size[j] = 1.6; grow[j] = 4.5; life[j] = span[j] = pop ? 0.55 : 0.42
-      heat[j] = 0; cool[j] = 0; rise[j] = 8; drag[j] = 3.0
-      tone.set([0.28, 0.29, 0.32, pop ? 0.36 : 0.22], j * 4)
+      v[j * 3] = dir[0] * 18 + (Math.random() - 0.5) * 3.5; v[j * 3 + 1] = dir[1] * 18 + 3.2; v[j * 3 + 2] = dir[2] * 18 + (Math.random() - 0.5) * 3.5
+      size[j] = 1.45; grow[j] = 4.2; life[j] = span[j] = pop ? 0.48 : 0.38
+      heat[j] = 0; cool[j] = 0; rise[j] = 6.5; drag[j] = 3.2
+      tone.set([0.28, 0.29, 0.32, pop ? 0.26 : 0.18], j * 4)
       seed[j] = Math.floor(Math.random() * 65536)
-      late[j] = 0
+      late[j] = pop ? 0.22 : 0
     },
     crash(at, strength) {
       for (let k = Math.round(3 + strength * 4); k > 0; k--) {

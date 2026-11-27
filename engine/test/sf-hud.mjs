@@ -123,7 +123,7 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
   // Controls against each other, by their visible bounds (including voxel overhang only where a voxel canvas is drawn).
   const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, cv = el.hasAttribute('data-vx-live') ? el.querySelector(':scope > .vx-canvas') : null, live = !!cv && cv.checkVisibility({ visibilityProperty: true, opacityProperty: true }), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, [data-panel="drive-hud"], #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -229,16 +229,69 @@ try {
         })
         check(shown.afoot.length === 0, `${scheme}: the keys of one on foot are not shown while riding${shown.afoot.length ? ` (${shown.afoot.join(', ')})` : ''}`)
         if (phone) {
-          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'boost', 'horn', 'cam', 'radio', 'leave'], acts = shown.keys.map((k) => k.act)
+          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['gas', 'brake', 'drift', 'boost', 'horn', 'cam', 'radio', 'leave'], acts = shown.keys.map((k) => k.act)
           check(want.every((a) => acts.includes(a)), `${scheme}: the thing's keys are shown (${acts.join(', ')})`)
-          // (Driving, Cam goes round the views, the seat among them, #74/#75: no Seat key of its own.)
-          if (scheme === 'drive') check(!acts.includes('seat'), `drive: no Seat key beside Cam (${acts.join(', ')})`)
+          // (Driving: no Seat key beside Cam (#74/#75), Repair stays hidden while undamaged, pedals bottom-right, utilities top-right, icon-only.)
+          if (scheme === 'drive') {
+            check(!acts.includes('seat'), `drive: no Seat key beside Cam (${acts.join(', ')})`)
+            check(!acts.includes('repair'), `drive: Repair stays hidden while car is undamaged (${acts.join(', ')})`)
+            const erg = await page.evaluate(() => {
+              const box = (act) => document.querySelector(`[data-panel="living"] [data-act="${act}"]`)?.getBoundingClientRect()
+              const gas = box('gas'), brake = box('brake'), drift = box('drift'), boost = box('boost')
+              const utilActs = ['horn', 'radio', 'cam', 'leave']
+              const utils = utilActs.map((a) => ({ a, r: box(a) }))
+              const visibleLabels = [...document.querySelectorAll('[data-panel="living"] .hud-lbl')].filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })).length
+              return {
+                pedalsLow: !!(gas && brake && drift && boost) && Math.min(gas.top, brake.top, drift.top, boost.top) > innerHeight * 0.5,
+                gasTall: !!(gas && brake) && gas.height > brake.height,
+                utilsHigh: utils.every((u) => u.r && u.r.bottom < innerHeight * 0.45),
+                visibleLabels,
+              }
+            })
+            check(erg.pedalsLow && erg.gasTall && erg.utilsHigh && erg.visibleLabels === 0, `drive: ergonomic two-zone icon-only layout (${JSON.stringify(erg)})`)
+          }
           const bad = shown.keys.filter((k) => !k.reached || k.w < 44 || k.h < 44)
           check(bad.length === 0, `${scheme}: each of its keys is 44 px a side or more, and a touch at its middle reaches it${bad.length ? `: not ${bad.map((k) => `${k.act} ${k.w}x${k.h}${k.reached ? '' : ' (under something)'}`).join(', ')}` : ''}`)
           check(shown.keys.every((k) => k.kit), `${scheme}: its keys are live Voxelmorphism controls`, gate)
           check(!shown.card, `${scheme}: the card of keyboard keys is not shown by touch`)
           const tap = async (act) => { const k = shown.keys.find((k) => k.act === act); if (k) { await page.touchscreen.tap(k.x, k.y); await page.waitForTimeout(500) } return !!k }
           if (scheme === 'drive') {
+            // Contextual Repair appears only after damage, is reachable and live slim voxel, and hides again once tapped.
+            await page.evaluate(() => {
+              const e = globalThis.engine, car = e.alive.riding, at = car && e.alive.where(car)
+              if (car && at) e.alive.hit(car, [at.at[0] + at.front[0] * 18, at.at[1], at.at[2] + at.front[2] * 18], [-at.front[0], 0, -at.front[2]], 55)
+            })
+            await page.waitForTimeout(350)
+            const rep = await page.evaluate(() => {
+              const el = document.querySelector('[data-panel="living"] [data-act="repair"]')
+              if (!el || !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return null
+              const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y)
+              return { w: Math.round(r.width), h: Math.round(r.height), x, y, reached: !!hit && el.contains(hit), kit: el.hasAttribute('data-vx-live') }
+            })
+            check(!!rep && rep.reached && rep.w >= 44 && rep.h >= 44 && rep.kit, `drive: Repair appears cleanly after damage (${JSON.stringify(rep)})`)
+            if (rep) {
+              await page.touchscreen.tap(rep.x, rep.y)
+              await page.waitForTimeout(350)
+              const hiddenAgain = await page.evaluate(() => document.querySelector('[data-panel="living"] [data-act="repair"]')?.hidden === true)
+              check(hiddenAgain, 'drive: tapping Repair clears damage and hides the Repair key again')
+            }
+            // Holding the Gas pedal with pointer capture accelerates cleanly and sets aria-pressed="true".
+            const gasKey = shown.keys.find((k) => k.act === 'gas')
+            if (gasKey) {
+              const gasRes = await page.evaluate(async () => {
+                const btn = document.querySelector('[data-panel="living"] [data-act="gas"]')
+                if (!btn) return null
+                const r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2
+                btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 11, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true }))
+                const pressed = btn.getAttribute('aria-pressed') === 'true'
+                await new Promise((res) => setTimeout(res, 700))
+                const kmh = globalThis.engine.alive.telemetry?.kmh ?? 0
+                btn.dispatchEvent(new PointerEvent('pointerup', { pointerId: 11, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true }))
+                const released = btn.getAttribute('aria-pressed') === 'false'
+                return { pressed, released, kmh: Math.round(kmh * 10) / 10 }
+              })
+              check(!!gasRes && gasRes.pressed && gasRes.released && gasRes.kmh > 3, `drive: holding Gas pedal accelerates cleanly (${JSON.stringify(gasRes)})`)
+            }
             await tap('radio')
             const opened = await until(page, () => document.querySelector('#radio-picker')?.open, 5000)
             check(opened, 'tapping Radio opens the media picker')

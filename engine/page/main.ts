@@ -324,7 +324,7 @@ async function main() {
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
   const roll = (Number(query.get('roll') ?? (directLL ? 0 : LOCAL?.roll) ?? 0) * Math.PI) / 180
   /** Dynamic driving camera offsets set each frame by living.ts (0 whenever not driving). */
-  let driveFov = 0, driveRoll = 0, driveEnergy = 0
+  let driveFov = 0, driveRoll = 0, driveEnergy = 0, driveDrift = 0
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
@@ -893,7 +893,7 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
     device.queue.submit([encoder.finish()])
     telemetry?.onPresented(canvas)
@@ -1182,10 +1182,24 @@ async function main() {
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },
     piece: (id) => moving.get(id),
-    look: (kinds, size) => {
+    look: (kinds, size, opts) => {
+      const key = size.join()
       let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map())
-      let born = by.get(size.join())
-      if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
+      let born = by.get(key)
+      if (!born) {
+        // When wheel-well carving creates a new array from a street car's uncarved cells, reuse the pre-built smooth
+        // Born immediately (avoiding a 20-100ms main-thread `thing()` stall on crash/wake) and refit once the worker finishes.
+        const pre = opts?.fallback ? lookFaces.get(opts.fallback)?.get(key) : undefined
+        if (pre) {
+          born = { ...pre, com: [...pre.com], low: [...pre.low] }
+          by.set(key, born)
+          if (opts?.smooth !== false) smoothen(kinds, size, born)
+        } else {
+          born = thing(kinds, size)
+          by.set(key, born)
+          if (!born.smooth && opts?.smooth !== false) smoothen(kinds, size, born)
+        }
+      }
       const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
       piece.skin = kinds
       smoothing.get(born)?.push(piece)
@@ -1196,14 +1210,14 @@ async function main() {
     world: far, made: () => made,
     ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } },
     dropped: (id) => moving.delete(id),
-    lens: (fovAdd, rollAdd, energy) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy },
+    lens: (fovAdd, rollAdd, energy, driftBlur = 0) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy; driveDrift = driftBlur },
     fx: {
       smoke: (at, vel, intensity, colour) => smoke.tireSmoke(at, vel, intensity, colour),
       exhaust: (at, dir, pop, boost) => smoke.exhaust(at, dir, pop, boost),
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
-      sparks: (at, strength) => { debris.burst(at, 1.5, Math.round(3 + strength * 6), [1.0, 0.57, 0.12], 0.13, 0.34, 0.5 + strength * 0.4, true); smoke.glint(at, 4 + strength * 5) },
+      sparks: (at, strength) => { debris.burst(at, 1.6, Math.round(5 + strength * 9), [1.0, 0.68, 0.16], 0.12, 0.42, 0.6 + strength * 0.45, true); smoke.glint(at, 4.5 + strength * 5.5) },
       // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)
@@ -1245,7 +1259,7 @@ async function main() {
       const st = !active && t.state ? t.state : null
       const stBrake = st && ((st.go < -0.1 && st.speed > 8) || (st.go > 0.1 && st.speed < -8)) ? Math.min(1, Math.abs(st.go)) : 0
       const deform = alive.damage(t)
-      const look0 = deform && deform.dentCount > 0 ? alive.look(t).parts[0] : undefined
+      const look0 = deform && deform.dentCount > 0 ? (t.fine?.[0] ?? t.kept?.[0]) : undefined
       out.push({
         id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
         bornLow: piece.born.low, bornCom: piece.born.com,
@@ -2393,6 +2407,14 @@ async function main() {
   feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })
   // Living things, on a line of their own: every lane adds to the line above.
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) { const reach = e.radius ?? 44, runs: number[] = []; for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) { const half = Math.floor(Math.sqrt(reach * reach - dz * dz)); runs.push(e.at[0] - half, e.at[0] + half + 1, e.at[1] + dy, e.at[2] + dz, 0) } make(rows(Int32Array.from(runs), [e.at[0] - reach, e.at[1], e.at[2] - reach, e.at[0] + reach + 1, e.at[1] + 2, e.at[2] + reach + 1]), e.at); cuts.push({ at: e.at, radius: reach }) } else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
+  // Native in-game T3 Studio & Game-Use runtime (#98): local dev only; computed URL keeps it out of static sf/build.mjs deploys.
+  const studioWanted = query.get('studio') !== '0' && (query.get('studio') === '1' || /(?:^|#|&)studio=/.test(location.hash) || (!navigator.webdriver && !!document.querySelector('meta[name="vw-studio"]')))
+  if (!LOCAL && studioWanted) {
+    const studioEntry = ['./studio', 'index.ts'].join('/')
+    void import(studioEntry).then((m: { bootStudio: (o: { engine: unknown; canvas: HTMLCanvasElement }) => Promise<unknown> }) =>
+      m.bootStudio({ engine: (globalThis as unknown as { engine: unknown }).engine, canvas }),
+    ).catch((e: unknown) => console.warn(`studio: ${e instanceof Error ? e.message : String(e)}`))
+  }
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({

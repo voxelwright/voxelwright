@@ -26,8 +26,8 @@ export interface DriveCamDeps {
   ground(x: number, z: number): number
   /** Whether a world cell (x, y, z) blocks the camera. */
   stands(x: number, y: number, z: number): boolean
-  /** Dynamic camera lens offsets: extra FOV (degrees), roll (radians), speed-energy (0..1). */
-  lens?(fovAdd: number, rollAdd: number, energy: number): void
+  /** Dynamic camera lens offsets: extra FOV (degrees), roll (radians), speed-energy (0..1), and signed drift/yaw lateral blur (-1..1). */
+  lens?(fovAdd: number, rollAdd: number, energy: number, driftBlur?: number): void
 }
 
 export interface DriveCamInput {
@@ -93,6 +93,7 @@ type CinemaKind = 'hero' | 'fender' | 'flyby' | 'heli'
 const CINEMA_ORDER: readonly CinemaKind[] = ['hero', 'fender', 'flyby', 'heli']
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+const smoothstep01 = (v: number, lo: number, hi: number) => { const t = clamp((v - lo) / (hi - lo), 0, 1); return t * t * (3 - 2 * t) }
 const wrap = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a }
 const turned = (q: readonly number[], v: readonly number[]): [number, number, number] => {
   const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
@@ -116,13 +117,14 @@ function localPoint(box: readonly [number, number, number, number, number, numbe
 export function createDriveCam(deps: DriveCamDeps): DriveCam {
   let mode: DriveCamMode = 'close'
   let chaseYaw = 0, orbitYaw = 0, orbitPitch = 0, lookIdle = 99
-  let camFov = 0, camRoll = 0, camPull = 0, camHill = 0, camEnergy = 0
+  let camFov = 0, camRoll = 0, camPull = 0, camHill = 0, camEnergy = 0, camSideOff = 0, camDriftBlur = 0
+  let prevFinalYaw: number | null = null
   let shakeAmp = 0, shakeT = 0, roadBuzzT = 0
   // Multi-ray anti-clipping state.
   let room = 1, wasHead: [number, number, number] | null = null
   // Smooth mode-switch blended parameters (metres & radians).
   let blendReady = false
-  let curFwdOff = -6.5, curUpOff = 1.6, curPitch = -0.135, curFovBias = 0, curMountMix = 0
+  let curFwdOff = -5.4, curUpOff = 1.25, curPitch = -0.072, curFovBias = 0, curMountMix = 0
   // Instant look-back (X) state: 1 while held, decays smoothly to 0 on release.
   let lookBackBlend = 0
   // SF hill stunt air-cam state.
@@ -270,16 +272,16 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       return { pos: [x, y, z], target: [ctx.at[0] + fx * len * 0.35, ctx.at[1] + tall * 0.2, ctx.at[2] + fz * len * 0.35], fovBias: -6, roll: 0.015 * side }
     }
 
-    // 'hero': Low rear-quarter sweeping chase framing exhaust, flank, and towers ahead.
-    const angle = side * (0.56 - sweep * 0.36)
-    const dist = len * 1.35 + 24
+    // 'hero': Low, tight rear-quarter sweeping chase framing exhaust, flank, and SF skyline ahead.
+    const angle = side * (0.58 - sweep * 0.34)
+    const dist = len * 1.12 + 16
     const backX = -fx * Math.cos(angle) + rx * Math.sin(angle)
     const backZ = -fz * Math.cos(angle) + rz * Math.sin(angle)
     const x = ctx.at[0] + backX * dist
     const z = ctx.at[2] + backZ * dist
     const g = deps.ground(x / M, z / M) * M
-    const y = Math.max(ctx.at[1] + tall * 0.45 + 4, g + 5.5)
-    return { pos: [x, y, z], target: [ctx.at[0] + fx * len * 0.2, ctx.at[1] + tall * 0.3, ctx.at[2] + fz * len * 0.2], fovBias: -1, roll: 0.018 * side }
+    const y = Math.max(ctx.at[1] + tall * 0.36 + 3.2, g + 4.8)
+    return { pos: [x, y, z], target: [ctx.at[0] + fx * len * 0.22, ctx.at[1] + tall * 0.32, ctx.at[2] + fz * len * 0.22], fovBias: 0, roll: 0.022 * side }
   }
 
   const startCinema = (fromPose: boolean) => {
@@ -317,7 +319,8 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       else if (prev === 'cinema') leaveCinema()
     },
     reset() {
-      camFov = 0; camRoll = 0; camPull = 0; camHill = 0; camEnergy = 0
+      camFov = 0; camRoll = 0; camPull = 0; camHill = 0; camEnergy = 0; camSideOff = 0; camDriftBlur = 0
+      prevFinalYaw = null
       shakeAmp = 0; shakeT = 0; roadBuzzT = 0
       room = 1; wasHead = null
       lookBackBlend = 0
@@ -333,6 +336,9 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       lookIdle = orbitOffset ? 0 : 99
       room = 1
       wasHead = null
+      camSideOff = 0
+      camDriftBlur = 0
+      prevFinalYaw = null
       lookBackBlend = 0
       exitTransition = 0; exitFromPos = null; wasCineLookBack = false
       if (snapBlend) blendReady = false
@@ -346,8 +352,9 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       const top = Math.max(120, topSpeed), speedFrac = Math.min(1.2, Math.abs(fwdSpeed) / Math.max(160, top))
       const targetFov = motion * Math.min(10, speedFrac * speedFrac * 8 + speedFrac * 2)
       camFov += (targetFov - camFov) * Math.min(1, dt * 6)
-      camEnergy += (motion * Math.max(0, Math.min(0.7, (Math.abs(fwdSpeed) * 0.36 - 65) / 130)) - camEnergy) * Math.min(1, dt * 5)
-      deps.lens?.(camFov, 0, camEnergy)
+      camEnergy += (motion * Math.max(0, Math.min(0.75, (Math.abs(fwdSpeed) * 0.36 - 42) / 120)) - camEnergy) * Math.min(1, dt * 5)
+      camDriftBlur *= Math.exp(-dt * 8)
+      deps.lens?.(camFov, 0, camEnergy, 0)
     },
     frame(ctx) {
       const { dt, at, rot, front, size, visualBox, frontAxis, topSpeed, vel, fwdSpeed, latSpeed, horizSpeed, longAcc, steer, drifting, feet, turn, lookBack, reducedMotion } = ctx
@@ -395,16 +402,17 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       airBlend += (wantAir - airBlend) * (reducedMotion ? 1 : 1 - Math.exp(-dt * airRate))
       if (airBlend < 0.001) airBlend = 0
 
-      // Velocity-blended spring-damped chase yaw.
+      // Velocity-blended spring-damped chase yaw: swings smoothly toward the outside rear-quarter during drifts.
       const top = Math.max(120, topSpeed)
       const speedFrac = Math.min(1.25, Math.abs(fwdSpeed) / Math.max(160, top))
       let targetYaw = carYaw
-      if (fwdSpeed > 22 && horizSpeed > 24 && mode !== 'hood' && mode !== 'bumper') {
+      let slipRad = 0
+      if (fwdSpeed > 18 && horizSpeed > 20 && mode !== 'hood' && mode !== 'bumper') {
         const velYaw = Math.atan2(vel[0], -vel[2])
-        const driftDiff = wrap(velYaw - carYaw)
-        targetYaw = wrap(carYaw + driftDiff * (drifting ? 0.58 : 0.42))
+        slipRad = wrap(velYaw - carYaw)
+        targetYaw = wrap(carYaw + slipRad * (drifting ? 0.72 : 0.38))
       }
-      const yawStiff = mode === 'hood' || mode === 'bumper' ? 18 : drifting ? 2.8 : 4.6 + speedFrac * 3.8
+      const yawStiff = mode === 'hood' || mode === 'bumper' ? 18 : drifting ? 2.4 : 5.2 + speedFrac * 3.8
       chaseYaw = wrap(chaseYaw + wrap(targetYaw - chaseYaw) * Math.min(1, dt * yawStiff))
 
       // Impact / landing shake + subtle bumper road micro-vibration.
@@ -425,11 +433,16 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
         shakeRoll += Math.cos(roadBuzzT * 1.91) * buzz * 0.8
       }
 
-      // Dynamic elastic pull-back, hill pitch tracking, cornering roll, and speed energy.
-      const targetPull = motion * clamp(longAcc * 0.0038 + (drifting ? 0.22 : 0), -0.38, 0.58)
-      camPull += (targetPull - camPull) * Math.min(1, dt * 5)
-      const targetHill = clamp(front3d[1] * 0.55, -0.15, 0.15)
-      camHill += (targetHill - camHill) * Math.min(1, dt * 4.5)
+      // Dynamic elastic pull-back under hard accel/boost, subtle lean-in on braking, hill pitch tracking, and drift shoulder swing.
+      const speedPull = Math.max(0, speedFrac - 0.35) * 0.52
+      const targetPull = motion * clamp(longAcc * 0.0046 + speedPull + (drifting ? 0.36 : 0), -0.38, 0.92)
+      camPull += (targetPull - camPull) * Math.min(1, dt * 4.8)
+      const targetHill = clamp(front3d[1] * 0.65, -0.18, 0.18)
+      camHill += (targetHill - camHill) * Math.min(1, dt * 5.0)
+      // Lateral rear-quarter offset during hard drifts & cornering so the car's flank & turn ahead frame dramatically.
+      const driftSlide = clamp(-latSpeed / 75, -1, 1)
+      const wantSide = motion * (mode === 'far' ? 0.85 : 0.68) * (drifting ? clamp(driftSlide * 1.15 - steer * 0.25, -1, 1) : clamp(driftSlide * 0.35, -0.35, 0.35)) * (1 - lookBackBlend)
+      camSideOff += (wantSide - camSideOff) * Math.min(1, dt * (drifting ? 4.2 : 5.5))
 
       // ── Mode 5: Dynamic GTA Cinematic Mode (unless Look-Back X is held) ──
       if (mode === 'cinema' && lookBackBlend < 0.01) {
@@ -490,8 +503,10 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
         camFov += (targetFov - camFov) * Math.min(1, dt * 6)
         const targetRoll = motion * active.roll
         camRoll += (targetRoll - camRoll) * Math.min(1, dt * 6)
-        const targetEnergy = motion * clamp((Math.abs(fwdSpeed) * 0.36 - 75) / 130, 0, 0.75)
+        const targetEnergy = motion * clamp((Math.abs(fwdSpeed) * 0.36 - 48) / 120, 0, 0.8)
         camEnergy += (targetEnergy - camEnergy) * Math.min(1, dt * 5)
+        const cineDrift = motion * (drifting ? clamp(-latSpeed / 70, -0.85, 0.85) : 0)
+        camDriftBlur += (cineDrift - camDriftBlur) * Math.min(1, dt * 5)
 
         deps.pose.tilt = undefined
         deps.pose.x = pos[0] / M
@@ -499,21 +514,26 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
         deps.pose.z = pos[2] / M
         deps.pose.yaw = wrap(yaw + shakeYaw * 0.5)
         deps.pose.pitch = clamp(pitch + shakePitch * 0.5, -1.2, 0.85)
-        deps.lens?.(camFov, camRoll + shakeRoll * 0.5, camEnergy)
+        deps.lens?.(camFov, camRoll + shakeRoll * 0.5, camEnergy, camDriftBlur)
         return
       }
 
       // ── Modes 1–4: Close, Far, Hood, Bumper (plus Look-Back override for Cinema) ──
-      const closeBack = ((len * 1.15 + 17) / M) * (tallScreen ? 1.48 : 1)
-      const farBack = ((len * 1.62 + 27) / M) * (tallScreen ? 1.35 : 1)
-      const closeHigh = ((size[1] * 0.88 + 6.4) / M) * (tallScreen ? 1.15 : 1)
-      const farHigh = ((size[1] * 1.08 + 9.0) / M) * (tallScreen ? 1.15 : 1)
+      // Measure vehicle bounds in metres so every car from low GT coupe to tall SUV sits heroically
+      // right above the roofline without pitch-compounded drone elevation.
+      const halfLenM = Math.max(visLen, len) * 0.5 / M
+      const visTallM = Math.max(visTall, size[1]) / M
+      const roofAboveComM = Math.max(size[1] * 0.5, visualBox[4] - size[1] * 0.5) / M
+      const closeBack = (halfLenM + 2.55 + visTallM * 0.55) * (tallScreen ? 1.28 : 1)
+      const farBack = (halfLenM + 4.35 + visTallM * 0.72) * (tallScreen ? 1.28 : 1)
+      const closeHigh = roofAboveComM + (tallScreen ? 0.72 : 0.50)
+      const farHigh = roofAboveComM + (tallScreen ? 1.28 : 1.08)
 
       // Air-cam framing adjustments for chase cameras: widen back, tilt slightly lower/wider over SF skyline.
       const airScale = (mode === 'close' || mode === 'far' || mode === 'cinema') ? airBlend * (1 - lookBackBlend) : 0
       const airBack = airScale * 2.4
-      const airDrop = airScale * 0.52 * (motion ? 1 : 0.4)
-      const airPitch = airScale * 0.11
+      const airDrop = airScale * 0.45 * (motion ? 1 : 0.4)
+      const airPitch = airScale * 0.09
       const airFov = airScale * 5.5
 
       // Target mode parameters in car-relative metres: fwdOff < 0 behind car, fwdOff > 0 forward of car center.
@@ -521,26 +541,26 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       if (mode === 'far') {
         targetFwdOff = -(farBack + camPull + airBack)
         targetUpOff = farHigh - airDrop
-        targetBasePitch = -0.19 + camHill + airPitch
-        targetFovBias = 3.5 + airFov
+        targetBasePitch = (tallScreen ? -0.165 : -0.115) + camHill + airPitch
+        targetFovBias = 4.0 + airFov
         targetMountMix = 0
       } else if (mode === 'hood') {
-        targetFwdOff = (visLen * 0.25) / M
-        targetUpOff = (visTall * 0.78 - size[1] * 0.5) / M
-        targetBasePitch = (lookBackBlend > 0.5 ? -carPitch : carPitch) - 0.065
-        targetFovBias = 4.5
+        targetFwdOff = (visLen * 0.22) / M
+        targetUpOff = (visTall * 0.74 - size[1] * 0.5) / M
+        targetBasePitch = (lookBackBlend > 0.5 ? -carPitch : carPitch) - 0.045
+        targetFovBias = 5.5
         targetMountMix = 1
       } else if (mode === 'bumper') {
-        targetFwdOff = (visLen * 0.54) / M
-        targetUpOff = (visTall * 0.34 - size[1] * 0.5) / M
-        targetBasePitch = (lookBackBlend > 0.5 ? -carPitch : carPitch) - 0.02
-        targetFovBias = 9.0
+        targetFwdOff = (visLen * 0.55) / M
+        targetUpOff = (visTall * 0.30 - size[1] * 0.5) / M
+        targetBasePitch = (lookBackBlend > 0.5 ? -carPitch : carPitch) - 0.012
+        targetFovBias = 10.5
         targetMountMix = 1
       } else {
         // 'close' (and cinema look-back fallback, and a seat that cannot be placed)
         targetFwdOff = -(closeBack + camPull + airBack)
         targetUpOff = closeHigh - airDrop
-        targetBasePitch = -0.135 + camHill + airPitch
+        targetBasePitch = (tallScreen ? -0.115 : -0.072) + camHill + airPitch
         targetFovBias = airFov
         targetMountMix = 0
       }
@@ -554,21 +574,21 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       curFovBias += (targetFovBias - curFovBias) * blendK
       curMountMix += (targetMountMix - curMountMix) * blendK
 
-      // Dynamic speed FOV, corner roll, and radial speed-energy.
-      const speedFovBoost = mode === 'bumper' ? 1.25 : mode === 'hood' ? 1.1 : 1
-      const dynFov = motion * (Math.min(14, speedFrac * speedFrac * 12 + speedFrac * 2.5) * speedFovBoost + clamp(longAcc * 0.015, -2.4, 2.2))
+      // Dynamic speed FOV, corner roll, radial speed-energy, and rotational/lateral drift blur.
+      const speedFovBoost = mode === 'bumper' ? 1.25 : mode === 'hood' ? 1.12 : 1
+      const dynFov = motion * (Math.min(15, speedFrac * speedFrac * 12.5 + speedFrac * 2.8) * speedFovBoost + clamp(longAcc * 0.016, -2.2, 2.5))
       const targetFov = curFovBias + dynFov
       camFov += (targetFov - camFov) * Math.min(1, dt * 6.5)
 
       const chassisRoll = (mode === 'hood' || mode === 'bumper') ? (lookBackBlend > 0.5 ? -carRoll : carRoll) * (mode === 'bumper' ? 0.85 : 0.72) : 0
-      const cornerRoll = motion * clamp(-latSpeed * 0.00055 - steer * speedFrac * 0.012, -0.028, 0.028) * (1 - lookBackBlend)
+      const cornerRoll = motion * clamp(-latSpeed * 0.0006 - steer * speedFrac * 0.014, -0.032, 0.032) * (1 - lookBackBlend)
       const targetRoll = motion * (chassisRoll + cornerRoll)
       camRoll += (targetRoll - camRoll) * Math.min(1, dt * 7)
 
-      const energyThresh = mode === 'bumper' ? 35 : mode === 'hood' ? 45 : 55
-      const energyBoost = mode === 'bumper' ? 1.25 : mode === 'hood' ? 1.1 : 1
-      const targetEnergy = motion * clamp(((Math.abs(fwdSpeed) * 0.36 - energyThresh) / 115) * energyBoost, 0, 1)
-      camEnergy += (targetEnergy - camEnergy) * Math.min(1, dt * 5)
+      const energyThresh = mode === 'bumper' ? 22 : mode === 'hood' ? 30 : 35
+      const energyBoost = mode === 'bumper' ? 1.3 : mode === 'hood' ? 1.15 : 1.05
+      const targetEnergy = motion * clamp(((Math.abs(fwdSpeed) * 0.36 - energyThresh) / 110) * energyBoost, 0, 1)
+      camEnergy += (targetEnergy - camEnergy) * Math.min(1, dt * 5.5)
 
       if (mode === 'cinema') {
         wasCineLookBack = true
@@ -583,26 +603,40 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       let finalYaw = wrap(baseYaw + orbitClamped * (1 - lookBackBlend) + lookBackYaw + shakeYaw)
       let finalPitch = clamp(curPitch + orbitPitchClamped * (1 - lookBackBlend) + shakePitch, -1.2, 0.85)
 
+      // Signed lateral/rotational drift motion blur from camera yaw swing + slide angle (zero under reduced-motion).
+      const yawRate = prevFinalYaw !== null && dt > 1e-4 ? wrap(finalYaw - prevFinalYaw) / dt : 0
+      prevFinalYaw = finalYaw
+      const slipDrive = drifting ? clamp(-latSpeed / 58, -1, 1) : clamp(-latSpeed / 120, -0.35, 0.35) * smoothstep01(horizSpeed, 40, 90)
+      const yawDrive = clamp(yawRate * 0.55, -1, 1) * smoothstep01(horizSpeed, 25, 70)
+      const targetDriftBlur = motion * (1 - lookBackBlend) * (1 - curMountMix * 0.5) * clamp(slipDrive * 0.72 + yawDrive * 0.58, -1, 1)
+      camDriftBlur += (targetDriftBlur - camDriftBlur) * Math.min(1, dt * (Math.abs(targetDriftBlur) > Math.abs(camDriftBlur) ? 7.5 : 5.0))
+      if (Math.abs(camDriftBlur) < 0.002) camDriftBlur = 0
+
       deps.pose.tilt = undefined
       deps.pose.yaw = finalYaw
       deps.pose.pitch = finalPitch
-      deps.lens?.(camFov, camRoll + shakeRoll, camEnergy)
+      deps.lens?.(camFov, camRoll + shakeRoll, camEnergy, camDriftBlur)
 
-      // Compute chase camera position (when behind the car).
+      // Compute chase camera position (when behind the car): direct eye height above car center with
+      // no -look[1]*backM pitch compounding; only user free-look orbitPitch pivots vertically.
       const cp = Math.cos(finalPitch)
       const look = [Math.sin(finalYaw) * cp, Math.sin(finalPitch), -Math.cos(finalYaw) * cp] as const
+      const sideX = Math.cos(finalYaw), sideZ = Math.sin(finalYaw)
       const backM = Math.max(0.1, -curFwdOff)
       // Smooth roof-clearance arc while transitioning between chase and hood/bumper so the lens glides over the roof.
-      const halfLenM = (visLen * 0.5) / M
       const roofClear = Math.abs(curFwdOff) < halfLenM * 1.15 && curMountMix > 0.02 && curMountMix < 0.98
         ? Math.sin(clamp((curFwdOff + halfLenM * 1.15) / (halfLenM * 2.3), 0, 1) * Math.PI) * ((visTall * 0.72) / M)
         : 0
+      const orbitVertM = -Math.sin(orbitPitchClamped * (1 - lookBackBlend)) * backM
+      const chaseSideM = camSideOff * (1 - curMountMix)
       const headPos: [number, number, number] = [at[0], at[1] + size[1] / 2 + 5, at[2]]
+      const eyeWantX = at[0] - look[0] * backM * M + sideX * chaseSideM * M
+      const eyeWantZ = at[2] - look[2] * backM * M + sideZ * chaseSideM * M
       const chaseWantY = Math.max(
-        at[1] + (curUpOff + roofClear - look[1] * backM) * M,
-        deps.ground(at[0] / M - look[0] * backM, at[2] / M - look[2] * backM) * M + 4,
+        at[1] + (curUpOff + roofClear + orbitVertM) * M,
+        deps.ground(eyeWantX / M, eyeWantZ / M) * M + 4.5,
       )
-      const chaseOff: [number, number, number] = [-look[0] * backM * M, chaseWantY - headPos[1], -look[2] * backM * M]
+      const chaseOff: [number, number, number] = [eyeWantX - headPos[0], chaseWantY - headPos[1], eyeWantZ - headPos[2]]
       const chaseRoom = curMountMix < 0.99 ? clearMulti(headPos, chaseOff, dt) : 1
       const chasePos: [number, number, number] = [
         headPos[0] + chaseOff[0] * chaseRoom,
@@ -614,8 +648,8 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       let finalPos = chasePos
       if (curMountMix > 0.005) {
         const isHood = mode === 'hood'
-        const fwdF = lookBackBlend > 0.5 ? (isHood ? -0.34 : -0.55) : (isHood ? 0.25 : 0.54)
-        const upF = lookBackBlend > 0.5 ? (isHood ? 0.88 : 0.40) : (isHood ? 0.78 : 0.34)
+        const fwdF = lookBackBlend > 0.5 ? (isHood ? -0.34 : -0.55) : (isHood ? 0.22 : 0.55)
+        const upF = lookBackBlend > 0.5 ? (isHood ? 0.88 : 0.40) : (isHood ? 0.74 : 0.30)
         const local = localPoint(visualBox, frontAxis, fwdF, upF, 0)
         const mounted = ctx.place(local)
         if (mounted) {

@@ -1,4 +1,5 @@
 {
+  "enabledMcpjsonServers": ["voxelwright-game"],
   "hooks": {
     "PostToolUse": [
       {

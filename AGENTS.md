@@ -53,6 +53,7 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - Prefer shipping to main and fixing forward over long-lived branches. Keep
   main's checks green and a change easy to undo.
 - Tilt is optional. Use the shortest repeatable local proof.
+- For interactive local dev, run `npm run dev` (`engine/serve.mjs --studio` + Studio Bridge). Agents have the `voxelwright-game` MCP server enabled by default (`.mcp.json`, `.claude/settings.json`, `.agents/plugins/voxelwright-game/`, `.codex/config.toml`); load `.agents/skills/game-studio` and prefer `game_session_spawn`, `game_snapshot`, `game_frame`, `game_pick`, `game_camera`, `game_act`, `game_assert`, and `game_worktree_verify` over ad-hoc browser scripts.
 - Keep evidence short: the command, the result and the measurements that matter.
   Routine changes need no receipt archives.
 - Keep README commands current. Maintain the public guide in `guide/` alongside its source.

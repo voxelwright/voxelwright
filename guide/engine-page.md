@@ -93,6 +93,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `recorder.ts`, `feedback.ts` | 30 s black-box gameplay flight recorder, passive anomaly watchers (stuck player, vehicle overlap, falls, stalls, GPU/worker faults), synchronous WebGPU canvas capture, and the F8 / `/bug` feedback dialog (`engine.recorder`, `engine.feedback`). |
+| `studio/*` | Lazy-loaded local-dev T3 Code Studio IDE (`F2`), `F9`/`F10` bug-to-thread capture, Game-Use control runtime, and `StudioExtension` registry ([Studio & Game-Use IDE](/studio)). Excluded from static public builds. |
 | `pwa.ts` | Progressive Web App runtime (`engine.pwa`): manifest-gated `/sw.js` registration, `navigator.storage.persist()` when installed, dynamic sky `<meta name="theme-color">` sync, Screen Wake Lock while playing, Car Radio `navigator.mediaSession` bridge, and the Settings `Install app` prompt (`beforeinstallprompt` and iOS Safari guidance). |
 | `bay.ts` | Loading the core (`open`), San Francisco tiles from a release, and cell-to-WGS84/tile helpers (`latLon`, `tileOf`) ([worlds as cells](/cells)). |
 
@@ -117,7 +118,7 @@ Every drivable car and kart wears a 2.5 cm fine look (`car()`, `KEPT.car`, `KEPT
 
 `pieces.ts` bends the vertices of a struck piece as it draws them.
 
-- A struck piece draws from a copy of its faces cut into rows one cell long. Every corner then lies on the cell lattice, so faces that meet still meet once bent. Merged rows bent only at their ends opened gaps beside their neighbours. A piece never struck draws its merged faces, and the shader returns before any dent work.
+- A struck piece splits only merged rows whose bounding box overlaps an active dent sphere or torn opening into 1-cell unit faces; undamaged regions stay merged. Every corner in the bent zone lies on the cell lattice, so faces that meet still meet once bent. High-resolution interior cabin parts (`per > 4`) are not deformed, and `pieces.ts` frustum- and backface-culls pieces so off-screen and back-facing quads pay nothing. A piece never struck draws its merged faces, and the shader returns before any dent work.
 - Paint and lamps keep the unbent position, so a bent panel keeps its own paint.
 - The hit pushes the panel inward. Two flanks meet at an oblique crease. The upper sheet tucks into a diagonal joint, pinching the struck side of the grille. A low lip turns back toward the windshield behind the tuck. A broadside hit presses in the door between the creases. The painted shoulder folds above the contact. A hard strike against a wheel opening renders a smooth, anti-aliased torn sheet-metal split and bare-steel lip along the buckled arch shoulder without carving a stepped voxel staircase (#92). The body and wheel mounts share the same depth allowance and deformation. The clear coat dulls on the flanks. A small patch of primer and a few bare chips show along the fold. A directly struck lamp goes dark.
 - Each window keeps its own crack origin in `Piece.cracks[0..3]`. Fine radial cracks and short connecting fractures wrap around the glass from that point. From the seat the cracks scatter less light near the forward sightline.
