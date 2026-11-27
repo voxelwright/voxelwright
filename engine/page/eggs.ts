@@ -113,7 +113,7 @@ If you managed to find this, you can send your resume… oh wait I'm not hiring,
 export { words } from './eggs-said.ts'
 
 type Pane = readonly [number, number, number, number]
-interface Video { file: string; title: string; outside: Pane; contrast: number; start: string; end: string }
+interface Video { file: string; title: string; outside: Pane; contrast: number; start: string; end: string; /** Whether sky-gap drones + fog display this egg over open sky (default true for videos). */ sky?: boolean }
 type Egg = string
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA']
 /** The moon's sizes against its own (the site's three radii, 0.017, 0.028 and 0.044 of the view). */
@@ -333,7 +333,7 @@ export function eggs(page: EggsPage) {
     try {
       const [{ videoPicture }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
       if (running !== current || started !== clock) return
-      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast })
+      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true })
       m.src = url
       // It plays once the windows are its screen (every frame below): a 5 s clip started as the screen comes up was
       // half over before it could be seen. Until then its first frame stands on the windows. (The play started in the
@@ -840,9 +840,16 @@ export function eggs(page: EggsPage) {
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)
     else if (up < march.screen.up) march.screen.up = Math.max(0, march.screen.up - dt * 1.5)
     if (running?.waiting && march.screen.up >= 0.9) { running.waiting = false; if (!running.paused) run(running) }
-    // A picture going down keeps its last frame.
-    if (running?.picture) running.picture.draw(device, march.screen.texture, (performance.now() - running.started) / 1000)
-    if (march.screen.up === 0 && fading) { fading.dispose(); fading = null }
+    // A picture going down keeps its last frame and sky setting until screen.up reaches 0.
+    if (running?.picture) {
+      running.picture.draw(device, march.screen.texture, (performance.now() - running.started) / 1000)
+      march.screen.sky = running.picture.sky
+      march.screen.rect[0] = running.picture.rect[0]
+      march.screen.rect[1] = running.picture.rect[1]
+      march.screen.rect[2] = running.picture.rect[2]
+      march.screen.rect[3] = running.picture.rect[3]
+    }
+    if (march.screen.up === 0 && fading) { fading.dispose(); fading = null; march.screen.sky = false }
     if (pending !== null) { page.sky.glide(pending); pending = null }
     // The hour goes home once the fog an egg left has thinned, or after four seconds of waiting for it.
     if (leaving && (march.fog < 0.12 || performance.now() - leaving.since > 4000)) { const hour = leaving.hour; leaving = null; home(hour) }
