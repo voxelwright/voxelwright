@@ -267,7 +267,7 @@ export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && n
 export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } : { keep: [28, 12, 8], bytes: 96 << 20 }
 
 /** The tiles the page holds for its cores: each fetched once, the last wanted kept up to `HOLD.bytes`. */
-const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number }>()
+const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number; hits: number }>()
 let heldTotal = 0, heldClock = 0
 /** What the page has done for its tiles, for the checks: requests, failures, retries, and how many asks were answered from what it held. */
 export const tally = { fetched: 0, failed: 0, retried: 0, shared: 0, water: 0, held: 0, bytes: 0 }
@@ -287,19 +287,22 @@ export async function tile(level: number, key: string): Promise<ArrayBuffer | nu
   const source = await where()
   // Publish the in-flight request in the same turn as the lookup, even when several workers arrive together.
   const name = `${level}/${key}`, had = bytesHeld.get(name)
-  if (had) { had.used = ++heldClock; tally.shared++; return had.body }
+  if (had) { had.used = ++heldClock; had.hits++; tally.shared++; return had.body }
   const found = source.find(level, key)
   if (!found) { tally.water++; return null }
-  const entry = { body: fetchTile(found), size: 0, used: ++heldClock }
+  const entry = { body: fetchTile(found), size: 0, used: ++heldClock, hits: 1 }
   bytesHeld.set(name, entry)
   try {
     const body = await entry.body
     entry.size = body?.byteLength ?? 0; heldTotal += entry.size; tally.held = heldTotal
-    // Let go of the longest unwanted, never the one just come.
-    if (heldTotal > HOLD.bytes) for (const [k, e] of [...bytesHeld].sort((a, b) => a[1].used - b[1].used)) {
-      if (heldTotal <= HOLD.bytes) break
-      if (e === entry || !e.size) continue
-      bytesHeld.delete(k); heldTotal -= e.size
+    // Let go of cold outer coarse tiles before hot neighborhood tiles while keeping actively shared inner coarse tiles.
+    if (heldTotal > HOLD.bytes) {
+      const score = (k: string, e: { used: number; hits: number }) => e.used + (k.startsWith('2/') ? Math.min(e.hits, 12) * 32 - 600 : Math.min(e.hits, 8) * 20)
+      for (const [k, e] of [...bytesHeld].sort((a, b) => score(a[0], a[1]) - score(b[0], b[1]))) {
+        if (heldTotal <= HOLD.bytes) break
+        if (e === entry || !e.size) continue
+        bytesHeld.delete(k); heldTotal -= e.size
+      }
     }
     tally.held = heldTotal
     return body

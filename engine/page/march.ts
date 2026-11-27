@@ -886,7 +886,6 @@ fn farHeld(p: vec3f) -> bool {
   let word = bit >> 5u;
   return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
 }
-
 // Entering a protected box ends a run through far-owned land, even if the coarse node spans the box.
 fn beforeBox(next: f32, lo: vec4f, hi: vec4f, ro: vec3f, inv: vec3f, t: f32) -> f32 {
   if (hi.w <= 0.0) { return next; }
@@ -894,7 +893,6 @@ fn beforeBox(next: f32, lo: vec4f, hi: vec4f, ro: vec3f, inv: vec3f, t: f32) -> 
   let enter = max(m.near.x, max(m.near.y, m.near.z));
   return select(next, enter, enter > t && enter < min(next, m.leave));
 }
-
 // A held tile can precede an unheld ridge on the same look. Skip to the next ownership boundary.
 fn farExit(ro: vec3f, rd: vec3f, inv: vec3f, p: vec3f, t: f32) -> f32 {
   let tile = floor((p.xz - looks.far.xy) / looks.far.z);
@@ -960,6 +958,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   var leaveAt = 0.0;
   var last = vec3i(0);
   var fresh = true;
+  var skipping = false;
   for (var i = 0u; i < most; i++) {
     work++;
     if (fresh) {
@@ -994,6 +993,11 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       if (rd.y < 0.0 && ro.y + rd.y * t > roof && !plain) { t = min((roof - ro.y) * inv.y, leaveAt) + eps; }
     }
     if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
+    var size = 0;
+    var low = vec3i(0);
+    var kind = 0u;
+    var cell = vec3i(0);
+    if (!skipping) {
     let q = q0 + rd * (t * lv.scale);
     let c = clamp(vec3i(floor(q)), vec3i(0), last);
     // Which of the kept nodes still hold this cell: the highest bit in which it differs from the last one says.
@@ -1002,9 +1006,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     if (apart >= 64u) { have = 0u; } else if (apart >= 16u) { have = min(have, 1u); } else if (apart >= 4u) { have = min(have, 2u); }
     held = c;
     let width = (wide + spread * t) * lv.scale;
-    var size = 0;
-    var low = c;
-    var kind = 0u;
+    low = c;
     // A node's contents are met further on: the ray skips to them and looks again.
     var skip = -1.0;
     var face = vec3f(0.0);
@@ -1133,7 +1135,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       t = skip + eps;
       continue;
     }
-    var cell = c;
+    cell = c;
     if (have == 3u && size == 0 && kind == 0u) {
       // Inside a leaf: from cell to cell across whichever side comes first, until one is solid or the ray is out.
       let leaf = c >> vec3u(2u);
@@ -1167,17 +1169,22 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       }
       if (kind == 0u) { t += eps; continue; }
     }
-    if (kind != 0u && !through) {
+    }
+    if ((skipping || kind != 0u) && !through) {
       if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
         let p = ro + rd * (t + 0.25 * eps);
         let reach = select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u);
         if (t > reach && farHeld(p) && !edited(p)) {
-          t = min(max(t, farExit(ro, rd, inv, p, t)), leaveAt) + eps;
-          // A leaf traversal may have advanced cell past the saved c.
+          // One shared farExit site: skip consecutive far-owned tiles without adding a nested loop or re-descending the octree.
+          let next = farExit(ro, rd, inv, p, t);
+          if (next <= t) { hit.t = -1.0; hit.left = true; return hit; }
+          t = next + eps;
+          skipping = true;
           have = 0u;
           continue;
         }
       }
+      if (skipping) { skipping = false; continue; }
       hit.t = t;
       hit.kind = kind & 0xffffu;
       hit.n = n;
