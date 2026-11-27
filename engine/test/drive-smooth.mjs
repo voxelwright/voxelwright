@@ -61,6 +61,13 @@ const overlay = async (dist, code) => {
   return plain(dist, '127.0.0.1', 0, {
     extra: (req, res) => {
       const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '')
+      if (rel === 'sf/index.html') {
+        const html = readFileSync(join(dist, rel), 'utf8').replace(/\.\.\/assets\/main-[^"]+\.js/g, '../page/main.js')
+        const body = Buffer.from(html)
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': body.length })
+        res.end(body)
+        return true
+      }
       if (rel.includes('..') || !/^(page|make|kit\/src|blocks|probe)\//.test(rel)) return false
       const s = source(rel)
       if (!s) return false

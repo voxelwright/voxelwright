@@ -4,6 +4,7 @@
 // before it is asked anything, so each opens its core through `open`.
 import { releaseCredits } from './release-credits.ts'
 import { LOCAL } from './local.ts'
+import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
 
 /** The squares baked first, whole: what `?bay=551.7_4183.5,550.7_4183.5` names, as the first slice was measured. */
 const query = new URLSearchParams(globalThis.location?.search ?? '')
@@ -384,6 +385,7 @@ type Said = { id: number; body?: ArrayBuffer | null; error?: string }
 let port: MessagePort | null = null, portCame: (p: MessagePort) => void = () => {}
 const portReady = new Promise<MessagePort>((r) => (portCame = r))
 let toldLevels: Level[] = LEVELS, toldKeep = HOLD.keep
+let toldHeroes: Landmark[] | undefined, toldSquares: ArrayBuffer | null | undefined
 const waiting = new Map<number, (s: Said) => void>()
 let asks = 0
 /** The cores this context opened: what they hold is reported to the page (`memory`). */
@@ -392,10 +394,11 @@ if (typeof document === 'undefined' && typeof self !== 'undefined') {
   // The page's first message to a worker that streams the Bay. It is this module's alone: the worker's own handler
   // (worker.ts, mover.ts) never sees it, since this listener was added first, when this module was evaluated.
   self.addEventListener('message', (e: MessageEvent) => {
-    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[] } | null
+    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[]; heroes?: Landmark[]; squares?: ArrayBuffer | null } | null
     if (!told?.tiles) return
     e.stopImmediatePropagation()
     port = told.tiles; toldLevels = told.levels ?? LEVELS; toldKeep = told.keep ?? HOLD.keep
+    toldHeroes = told.heroes; toldSquares = told.squares
     port.onmessage = (m: MessageEvent<Said | { memory: true } | { ping: number }>) => {
       // Answered at once, whatever this worker is waiting on: the page knows it is there (`silent`).
       if ('ping' in m.data) return port!.postMessage({ pong: m.data.ping })
@@ -427,9 +430,14 @@ export function share(worker: Worker): Worker {
     const { id, level, key } = m.data
     try { const body = await tile(level, key); port1.postMessage({ id, body } satisfies Said) } catch (e) { port1.postMessage({ id, error: String((e as Error).message ?? e) } satisfies Said) }
   }
-  const give = (levels: Level[]) => worker.postMessage({ tiles: port2, levels, keep: HOLD.keep }, [port2])
-  if (STREAM) void where().then((s) => give(s.levels), () => give(LEVELS))
-  else give(LEVELS)
+  const give = (levels: Level[], h: Landmark[], sq: ArrayBuffer | null) =>
+    worker.postMessage({ tiles: port2, levels, keep: HOLD.keep, heroes: h, squares: sq }, [port2])
+  // Hand levels, landmarks and marked squares once from the page so workers never duplicate /bay/ fetches (#82).
+  void Promise.all([
+    STREAM ? where().then((s) => s.levels, () => LEVELS) : Promise.resolve(LEVELS),
+    ON ? heroes() : Promise.resolve([]),
+    ON && FRAME === '10n4250' ? markedSquares() : Promise.resolve(null),
+  ]).then(([levels, h, sq]) => give(levels, h, sq))
   // Silence is counted in pings gone unanswered, a second apart, not in time: a page whose timers slept (a tab in the
   // background) or whose own thread stalled sends none meanwhile, so it does not take its workers for gone.
   const ping = setInterval(() => { if (entry.owed) entry.missed++; entry.owed = true; port1.postMessage({ ping: 1 }) }, 1000)
@@ -475,10 +483,20 @@ export async function prepare<T>(instance: object): Promise<T> {
   return core as unknown as T
 }
 
-/** The landmarks a Bay world has (sf/heroes.json, copied beside the tiles as heroes.json): where each stands. */
+const fromBase64 = (b64: string): ArrayBuffer => {
+  const bin = atob(b64), out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out.buffer
+}
+/** The landmarks a Bay world has (sf/heroes.json, embedded in LOCAL.bay or copied beside the tiles as heroes.json): where each stands. */
 export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number; /** `night`: only its light by night is by rule (heroes.rs `night`); its shape is the map's building. */ only?: 'night' }
 let landmarks: Promise<Landmark[]> | null = null
-export const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
+export const heroes = () => (landmarks ??= (
+  !ON ? Promise.resolve([])
+    : Array.isArray(LOCAL?.bay?.heroes) ? Promise.resolve(LOCAL.bay.heroes as Landmark[])
+      : !owns ? portReady.then(() => toldHeroes ?? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []))
+        : fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => [])
+))
 
 /**
  * A file of the road's marks a Bay world has beside its tiles (sf/marks.mjs), or null: San Francisco's alone (its cells
@@ -494,13 +512,18 @@ const markFile = (name: string, without: string) => (ON && FRAME === '10n4250' ?
 let squaring: Promise<ArrayBuffer | null> | null = null
 // Asked three times, a second apart, before a core goes on without them: a core that missed them keeps the bake's paint
 // under the page's lines in its own sectors.
-const markedSquares = () => (squaring ??= (async () => {
-  for (let tries = 3; ; tries--) {
-    const bytes = await markFile('marks-squares.bin', tries > 1 ? 'asking again' : "this core keeps the bake's 50 cm paint")
-    if (bytes || tries <= 1 || !(ON && FRAME === '10n4250')) return bytes
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-})())
+const markedSquares = () => (squaring ??= (
+  !(ON && FRAME === '10n4250') ? Promise.resolve(null)
+    : typeof LOCAL?.bay?.marksSquares === 'string' ? Promise.resolve(fromBase64(LOCAL.bay.marksSquares))
+      : !owns ? portReady.then(() => (toldSquares !== undefined ? toldSquares : markFile('marks-squares.bin', "this core keeps the bake's 50 cm paint")))
+        : (async () => {
+          for (let tries = 3; ; tries--) {
+            const bytes = await markFile('marks-squares.bin', tries > 1 ? 'asking again' : "this core keeps the bake's 50 cm paint")
+            if (bytes || tries <= 1 || !(ON && FRAME === '10n4250')) return bytes
+            await new Promise((r) => setTimeout(r, 1000))
+          }
+        })()
+))
 /**
  * The marks themselves (marks.bin, 1.5 MB, 0.4 MB as Brotli), for the march (marks.ts): asked for once the place is
  * shown round the eye (main.ts), not before, so they cost the first picture nothing. The cores have stopped drawing
@@ -714,15 +737,23 @@ const squareBox = (square: string): [number, number, number, number] | null => {
 const nearBox = (box: readonly [number, number, number, number] | null, x: number, z: number, margin: number): boolean =>
   !box || (x >= box[0] - margin && x <= box[2] + margin && z >= box[1] - margin && z <= box[3] + margin)
 const namedCache = new Map<string, Promise<Names | null>>()
-const loadNames = (url: string): Promise<Names | null> => {
+const loadNames = (url: string, square?: string, manifestUrl?: string | null): Promise<Names | null> => {
   let p = namedCache.get(url)
-  if (!p) namedCache.set(url, (p = fetch(url).then((r) => (r.ok ? (r.json() as Promise<Names>) : null), () => null)))
+  if (!p) {
+    const packKm = PACKS_ENABLED && manifestUrl ? LOCAL?.packs?.names : undefined
+    const packName = packKm && square ? squarePackName('names', square, packKm) : null
+    const packUrl = packName && manifestUrl ? new URL(`${LOCAL!.packs!.dir ?? 'packs/'}${packName}`, manifestUrl).href : null
+    p = (packUrl ? readPackedJson<Names>(packUrl, `names/${square}.json`) : Promise.resolve(null))
+      .then((packed) => packed ?? fetch(url).then((r) => (r.ok ? (r.json() as Promise<Names>) : null), () => null))
+    namedCache.set(url, p)
+  }
   return p
 }
 export const names = async (nearAt?: readonly [number, number], margin = 1200): Promise<Names[]> => {
-  const entries = STREAM ? (await where()).names : SQUARES.map((square) => ({ square, url: `${BASE}${square}.json` }))
+  const src = STREAM ? await where() : null
+  const entries = src ? src.names : SQUARES.map((square) => ({ square, url: `${BASE}${square}.json` }))
   const wanted = nearAt ? entries.filter((e) => nearBox(squareBox(e.square), nearAt[0], nearAt[1], margin)) : entries
-  return (await Promise.all(wanted.map((e) => loadNames(e.url)))).filter((n): n is Names => !!n)
+  return (await Promise.all(wanted.map((e) => loadNames(e.url, e.square, src?.manifest)))).filter((n): n is Names => !!n)
 }
 
 /** How many squares' names `whereabouts` keeps (#81): the nearest; a drive across the city does not hold all 155. */
@@ -765,7 +796,7 @@ export async function whereabouts(at: () => [number, number], /** Whose else the
     for (const e of entries) {
       if (asked.has(e.square) || !nearBox(e.box, x, z, 600)) continue
       asked.add(e.square)
-      coming.push(loadNames(e.url).then((data) => {
+      coming.push(loadNames(e.url, e.square, src?.manifest).then((data) => {
         if (!data) { asked.delete(e.square); return }
         const near = new Map<string, Names['addresses']>()
         for (const a of data.addresses) { const key = `${a[0] >> 8},${a[1] >> 8}`; const list = near.get(key); if (list) list.push(a); else near.set(key, [a]) }

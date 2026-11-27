@@ -419,7 +419,7 @@ async function main() {
     const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
     const curRoll = roll + driveRoll
-    // A photographic lens can be narrower than the driving camera's range.
+    // A photographic lens (such as SF's 25.05° landing cut) can be narrower than the driving camera's 40° floor.
     const curFov = driveFov === 0 && fov > 0 && fov < 180 ? fov
       : Math.min(115, Math.max(40, (Number.isFinite(fov) ? fov : 70) + driveFov))
     const cr = Math.cos(curRoll), sr = Math.sin(curRoll)

@@ -83,5 +83,7 @@ To put new far tiles or a new first-view cut into a release, restock it ([releas
 | `?farfaces=` | 12000000 (6M tablet, 3M phone) | The most faces held (clamped to 100,000–20,000,000) |
 | `?farlanding=URL` | | A first-view cut's listing, for a release without one |
 | `?farcutfit=` | 1.6 | How much taller than its tallest picture the first-view cut is still trusted |
+| `?farthest=` | 16000 (6000 on `saveData` / `2g` / `3g`) | Metres from the eye out to which far tiles are drawn and streamed (clamped to 100–50,000) |
+| `?packs=0` | enabled | Disables reading `VXPK` release packs (landing cut pack and 2 km band-0 packs under the built release) and falls back to individual `.far` objects |
 
 The two-metre ground cells use the same inland shorelines as the near bake. A mapped island keeps its own ground colour. The source signature includes the water geometry and any measured pond levels. The packaged water check reads the elevation of actual FAR1 faces and all four near-ground samples at two points in each levelled pond.

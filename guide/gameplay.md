@@ -360,7 +360,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale (0.25 to 1.5), march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
 | `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring (`fine` 0 to 2, `workers` 1 to 8, `pool` 16 to 2048 MiB) |
 | `panes`, `through`, `tries`, `fog`, `walk=loop` | Both | Glass, finer-cell and sea-fog settings, and a march variant, for measuring |
-| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring. `far` and `farlanding` must be paths on this site; `farfaces` is 100,000 to 20,000,000 |
+| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding`, `farpacks`, `packs=0` | Both | The far model's source, packs and limits, for measuring. `far`, `farlanding` and `farpacks` must be paths on this site; `farfaces` is 100,000 to 20,000,000; `farthest` defaults to 16,000 m (6,000 m on `saveData` / `2g` / `3g`); `packs=0` disables reading `VXPK` release packs |
 | `portalworkers`, `portalkeeps` | Server | Workers and keep time for a portal's world |
 
 ## Where it lives and how it is checked

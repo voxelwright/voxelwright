@@ -32,7 +32,9 @@
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
 import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, bounded, type Marcher, type View } from './march.ts'
 import { BUDGET as HELD } from './bay.ts'
+import { LOCAL } from './local.ts'
 import { LOCKERS, SLOTS } from './lockers.ts'
+import { PACKS_ENABLED, readPackedBytes } from './pack.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -578,14 +580,44 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     })
   }
 
+  // Release packs (#82): landing cut in one pack and band 0 in 2 km square packs (sf/build.mjs), or an explicit
+  // `?farpacks=<index.json>` override. Falls back cleanly to fetching individual .far objects if a pack is absent.
+  const packs = PACKS_ENABLED && !query.has('far') ? LOCAL?.packs ?? null : null
+  const packsAt = PACKS_ENABLED ? samePath(query.get('farpacks')) : null
+  const packOf: Record<string, string> | null = packsAt
+    ? await fetch(packsAt).then((r) => (r.ok ? (r.json() as Promise<Record<string, string>>) : null)).catch(() => null)
+    : null
+  const releaseBaseUrl = new URL(base, location.href)
+  const packed = (t: Tile, band: number, rec: Rec): Promise<Uint8Array<ArrayBuffer> | null> | null => {
+    if (!PACKS_ENABLED) return null
+    const relPath = band === C ? landing?.tiles[t.key]?.path : rec.path
+    if (!relPath) return null
+    let packUrl: string | null = null
+    if (packOf?.[relPath] && packsAt) {
+      packUrl = new URL(packOf[relPath], new URL(packsAt, location.href)).href
+    } else if (packs) {
+      if (band === C && !landingAt && packs.landing) {
+        packUrl = new URL(packs.landing, releaseBaseUrl).href
+      } else if (band === 0 && packs.far0) {
+        const k = packs.far0
+        const dir = packs.dir ?? 'packs/'
+        packUrl = new URL(`${dir}far0-${Math.floor(t.x / k)}_${Math.floor(t.z / k)}.pack`, releaseBaseUrl).href
+      }
+    }
+    if (!packUrl) return null
+    return readPackedBytes(packUrl, relPath).then((bytes) => (bytes && (rec.bytes === undefined || bytes.byteLength === rec.bytes) ? bytes : null))
+  }
+
   const load = async (t: Tile, band: number) => {
     const rec = t.recs[band]!
     t.held[band] = 'coming'
     stats.coming++
     try {
-      const answer = await fetch(new URL(rec.path, new URL(base, location.href)))
-      if (!answer.ok) throw new Error(`${answer.status}`)
-      const raw = await answer.arrayBuffer()
+      const inPack = await packed(t, band, rec)
+      const answer = inPack ? null : await fetch(new URL(rec.path, releaseBaseUrl))
+      if (answer && !answer.ok) throw new Error(`${answer.status}`)
+      // Copy packed slices before transferring to the unpack worker so the cached VXPK pack buffer is never detached.
+      const raw = inPack ? inPack.slice().buffer : await answer!.arrayBuffer()
       const wireBytes = raw.byteLength
       const { head, faces } = await unpack(raw)
       // The windows' styles from the first object that has them (a cut's are its bands').
@@ -684,8 +716,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const cutLook = landing?.yaw !== undefined && landing.pitch !== undefined ? [Math.sin(landing.yaw) * Math.cos(landing.pitch), Math.sin(landing.pitch), -Math.cos(landing.yaw) * Math.cos(landing.pitch)] : null
   /** The tallest picture the cut is trusted for, pixels: its own tallest (sf/far/landing.mjs `--heights`) and some, `?farcutfit` times (a 1350 px picture of the cut was the bands' but for slivers at the edges, #523); a taller one draws finer faces than it kept. */
   const cutTall = landing?.heights?.length ? Math.max(...landing.heights) * Number(query.get('farcutfit') ?? 1.6) : 0
+  /** Connection hint (#82): trim far radius to 6 km on Data Saver or slow cellular links; keep full 16 km skyline on fast links. */
+  const conn = (globalThis.navigator as (Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }) | undefined)?.connection
+  const defaultFarthest = conn?.saveData || conn?.effectiveType === 'slow-2g' || conn?.effectiveType === '2g' || conn?.effectiveType === '3g' ? 6_000 : 16_000
   /** How far past the reach a tile is still drawn, metres. */
-  const FURTHEST = bounded(query.get('farthest'), 16_000, 100, 50_000)
+  const FURTHEST = bounded(query.get('farthest'), defaultFarthest, 100, 50_000)
   let frame = 0
   let whole = true
   /** Until `shown` only the landing's cut of the view is fetched (`ready` says when it is here); then what the view needs; after `left`, the rest. */
@@ -792,9 +827,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     for (const t of tiles) {
       const d = away(eye, t.lo, t.hi)
       const seen = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? coverage(view, aspect, t.lo, t.hi) : 0
-      // Out of sight and over a kilometre off, a tile holds only its biggest faces, until the eye turns to it (the
-      // march's cells stand in meanwhile): the park's narrow lens had fetched the whole circle round it.
-      const need = d >= FURTHEST * 10 ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
+      // Out of sight: past 3 km fetch nothing until the eye turns toward the tile (the march's cells stand in
+      // meanwhile); between 1 km and 3 km keep only band 0 ready so nearby turns stay instant.
+      const need = d >= FURTHEST * 10 || (!seen && d > 30_000) ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
       let all = true, bandHeld = false
       for (const [k, h] of t.held.entries()) {
         if (k === C || !t.listed[k]) continue
@@ -826,8 +861,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // (Through the cut's own view, the cut is a tile's whole, and a tile it has nothing of shows nothing.)
       const hidden = exact && !t.listed[C]
       if (!all && !(exact && cutHeld) && !hidden && seen) whole = false
-      // A cut taken from another angle, a missing band, or a tile touched only by the edge of
-      // the survey can add visible faces without replacing the coarse terrain behind them.
+      // A cut taken from another angle, a missing band, an unfetched out-of-view tile past 3 km (`bandHeld === false`),
+      // or a tile touched only by the edge of the survey can add visible faces without replacing the coarse terrain behind them.
       const replaces = (all && bandHeld) || (exact && (cutHeld || hidden))
       if (replaces && d < FURTHEST * 10 && !changed.has(t.key) && owned.has(t.key)) {
         const bx = t.x - map[0], bz = t.z - map[1]
