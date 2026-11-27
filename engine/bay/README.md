@@ -31,7 +31,7 @@ engine/bay/run-city.sh status
 
 `full_run.py` runs each step as a checkpointed task. A finished task records SHA-256 checksums in `state.json`, and a restart checks them again. A changed recipe needs a new output directory. The one exception is the street fixture rule (`CUT_RULE`): a state recorded under another rule cuts its level-0 tiles again and keeps its verified squares. Before each task it checks free disk (`--free-gib`, 15 GiB by default and at least 18 with `--compact`): a plain run stops with its state saved, and a `--compact` run, as the city job is, waits for room.
 
-For a smaller run, `--pilot` bakes only the six pilot squares (`PILOT` in `full_run.py`), with no planet tiles around them. `--offline-inputs` requires every square's retained observations and fetches nothing:
+For a smaller run, `--pilot` bakes the six squares in `PILOT`. With `--offline-inputs`, the square bake reads its retained observations from the seed directories. The tile cutter can still request Overture and terrain data where a tile extends beyond a survey.
 
 ```sh
 bay="$HOME/.village/engine/bay"
@@ -45,6 +45,8 @@ Once a city release is staged, score it and promote it as [release.md](../sf/rel
 ## Squares
 
 [sf-squares.json](sf-squares.json) lists every 1 km square touching DataSF's shoreline polygons: 155 with lidar and 11 made from planet data. Square corners end in 700 m east and 500 m north in EPSG:26910. A lidar square is one that intersects county land and a populated node of the USGS lidar index; a square without usable samples fails the bake. `coverage.py` regenerates the file and records a hash of each source response. Around every county square the run cuts planet tiles out to 500 m, 4 km and 16 km at the three levels.
+
+During inventory generation, `coverage.py` calls `node engine/sf/landmark-tiles.mjs --json` to find landmark approaches beyond the county coverage. The full bake includes those tile addresses from `landmarkExtras`. After staging, run `node engine/sf/landmark-audit.mjs --manifest PATH` against the candidate's manifest to check coverage.
 
 ## Retained observations
 
