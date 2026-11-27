@@ -13,6 +13,11 @@ UTM = Transformer.from_crs(26910, 4326, always_xy=True)
 KEEP = set(
     "name ref tunnel bridge layer highway footway cycleway crossing crossing:markings railway gauge operator electrified route type restriction oneway junction lanes lanes:forward lanes:backward access motor_vehicle service surface sidewalk parking:both parking:left parking:right parking:lane:both parking:lane:left parking:lane:right".split()
 )
+KEEP_POI = set(
+    "name brand operator shop amenity cuisine leisure place area outdoor_seating addr:housenumber addr:street".split()
+)
+FURNITURE_AMENITIES = {"bench", "public_bookcase", "drinking_water", "fountain", "marketplace"}
+POI_AMENITIES = {"restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "bank", "cinema", "theatre", "marketplace"}
 
 
 def osm(w, s, e, n):
@@ -51,6 +56,9 @@ def acquire(name, path):
     ways = {}
     relations = []
     nodes = set()
+    pois = []
+    plazas = []
+    furniture = []
     for (kind, id_), item in items.items():
         tags = item.get("tags", {})
         if kind == "way" and ("highway" in tags or "railway" in tags):
@@ -59,6 +67,50 @@ def acquire(name, path):
                 "tags": {k: v for k, v in tags.items() if k in KEEP},
             }
             nodes.update(item["nodes"])
+        if kind == "way" and (
+            tags.get("place") == "square"
+            or (tags.get("highway") == "pedestrian" and tags.get("area") == "yes")
+            or (tags.get("leisure") in ("park", "garden", "common") and tags.get("name"))
+        ):
+            pts = [
+                [items["node", nid]["lon"], items["node", nid]["lat"]]
+                for nid in item.get("nodes", [])
+                if ("node", nid) in items
+            ]
+            if len(pts) >= 3:
+                plazas.append({
+                    "id": id_,
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                    "points": pts,
+                })
+        if kind == "node":
+            if tags.get("amenity") in FURNITURE_AMENITIES:
+                furniture.append({
+                    "id": id_,
+                    "amenity": tags["amenity"],
+                    "lon": item["lon"],
+                    "lat": item["lat"],
+                })
+            if tags.get("name") and (tags.get("shop") or tags.get("amenity") in POI_AMENITIES):
+                pois.append({
+                    "id": id_,
+                    "lon": item["lon"],
+                    "lat": item["lat"],
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                })
+        if kind == "way" and tags.get("name") and (tags.get("shop") or tags.get("amenity") in POI_AMENITIES):
+            pts = [
+                [items["node", nid]["lon"], items["node", nid]["lat"]]
+                for nid in item.get("nodes", [])
+                if ("node", nid) in items
+            ]
+            if pts:
+                pois.append({
+                    "id": id_,
+                    "lon": sum(p[0] for p in pts) / len(pts),
+                    "lat": sum(p[1] for p in pts) / len(pts),
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                })
         if kind == "relation" and (
             tags.get("type") == "restriction" or tags.get("route") == "tram"
         ):
@@ -97,6 +149,9 @@ def acquire(name, path):
                 "nodes": coords,
                 "relations": relations,
                 "businesses": businesses,
+                "pois": pois,
+                "plazas": plazas,
+                "furniture": furniture,
             },
             stream,
             separators=(",", ":"),

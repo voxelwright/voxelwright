@@ -35,6 +35,8 @@ The shipped city includes public street lamp positions and trolley wire paths fr
 | DataSF Curbs and Islands `emxt-b6yg` | Kerb lines: where carriageway ends and pavement begins | Same pattern | PDDL. **read** (catalog entry) |
 | DataSF Street Tree Inventory `tkzw-k3nq` | Street trees: species, position, trunk size | Filter on `latitude`, `longitude` (its `point` is text) | PDDL. **read** |
 | DataSF Land Use `c5ge-t6pj` | Per parcel: its outline, uses, dwelling units | Same pattern | CC0 1.0. **read** (catalog entry) |
+| DataSF Recreation & Parks Properties `gtr9-ntp6` | Parks, civic plazas, mini-parks, and town-square polygons with neighborhood labels (`engine/bay/places_sources.py`) | `https://data.sfgov.org/resource/gtr9-ntp6.json?$limit=1000`. **fetched** | PDDL 1.0 (public domain dedication). **read** |
+| Overture Maps Places (release `2026-11-18.0`, `places.pmtiles`) | Business locations, names, brands, categories, addresses, confidence, operating status (`engine/bay/places_sources.py`) | PMTiles byte-range `https://tiles.overturemaps.org/2026-11-18.0/places.pmtiles` (zoom 14, 72 tiles for SF). **fetched** | CDLA-Permissive-2.0 (Meta, Overture) and Apache-2.0 (Foursquare). Credit Overture Maps Foundation (`overturemaps.org`). **read** |
 | NAIP aerial imagery (USDA, served by USGS) | 0.6 m colour, flown May 2022 over the city | `https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage?bbox=...&bboxSR=4326&imageSR=...&size=W,H&format=png&f=image`; a 502 now and then, ask again. **fetched** | See the verified terms and attribution in [Data licences](../../../DATA-LICENSES.md). **read** |
 
 Credit line for a world built from these: "U.S. Geological Survey 3DEP; USDA NAIP; City and
