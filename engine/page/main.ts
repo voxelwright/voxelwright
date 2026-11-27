@@ -9,7 +9,7 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
-import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, marcher, materials, palette, type Moon, type View } from './march.ts'
+import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
 import type { Heavens } from './almanac.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
@@ -43,9 +43,9 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
-import { far as farOf } from './far.ts'
+import { far as farOf, samePath } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, BUDGET, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -83,6 +83,8 @@ const laid = { w: canvas.clientWidth, h: canvas.clientHeight }
 new ResizeObserver(() => { laid.w = canvas.clientWidth; laid.h = canvas.clientHeight }).observe(canvas)
 // One device class for the whole page (bay.ts `DEVICE`): what it draws and what it holds.
 const phone = DEVICE === 'phone'
+/** The world's pool of cells on the GPU (MiB) and its makers of sectors, by device class (bay.ts `BUDGETS`): a tablet has less than a laptop (#81). */
+const POOL_MB = BUDGET.pool, WORKERS = phone ? BUDGET.workers : Math.max(2, Math.min(BUDGET.workers, (navigator.hardwareConcurrency || 4) - 2))
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
 const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
 const over = hud(controls)
@@ -90,7 +92,7 @@ const over = hud(controls)
 /** Cells in a metre. */
 const M = 10
 /** `?fine=1` or `2` (#259, an experiment): the world's finest cells are 5 or 2.5 cm, in one or two more boxes round the eye that hold the core's cells written out finer. Only the march knows: nothing else drawn or done is scaled. */
-const FINE = 1 << Number(query.get('fine') ?? 0)
+const FINE = 1 << FINE_ASKED
 const { report, post: send } = reporter('city-4')
 /** A realm this page runs alone (local.ts) has no page server to send what was measured to. */
 const post: typeof send = LOCAL ? async () => false : send
@@ -158,7 +160,7 @@ async function main() {
   let inner = await open<Core>(new URL('./core.wasm', import.meta.url).href)
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
-  const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
+  const poolMb = Math.min(bounded(query.get('pool'), POOL_MB, 16, 2048, true), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
   /** Edits, one after another, as one edit of rows a column of sectors reads the same after their balls and blasts (the core's `merge_rows`). */
   const merge = (edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit => {
@@ -173,9 +175,9 @@ async function main() {
     merge,
     surveyedWalls: BAY_ON,
     grid,
-    levels: Number(query.get('levels') ?? (phone ? 8 : 9) + Number(query.get('fine') ?? 0)),
+    levels: bounded(query.get('levels'), (phone ? 8 : 9) + FINE_ASKED, 1, MAX_LEVELS, true),
     poolWords: (poolMb << 20) / 4,
-    fine: Number(query.get('fine') ?? 0),
+    fine: FINE_ASKED,
     // Cells may hold finer cells (#259): a made thing may be of cells of 2.5 or 1.25 cm (#372). `?bricks=1` from the
     // start, `?bricks=0` never; otherwise from the moment this world first holds such a thing, so that a world
     // without one pays nothing (world.ts `bricksLater`).
@@ -184,7 +186,7 @@ async function main() {
     // Shadows at the thing's own grain are dear where a fine thing fills the view (#372: 47% of the frame against 30% without, a car 5 m off and a house front), so they are for `?finesun=1`; without, a fine thing shades as its cells of 10 cm.
     bricksLater: !BAY_ON && query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
     // Each maker holds its own core and the tiles round what it makes (bay.ts `HOLD`): a phone has two (#450).
-    workers: Number(query.get('workers') ?? (phone ? 2 : Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)))),
+    workers: bounded(query.get('workers'), WORKERS, 1, 8, true),
   })
   const march = await marcher(device, gpu.format, world)
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
@@ -206,7 +208,10 @@ async function main() {
   // `far`, a folder beside the page) or the address names one (`?far=/path/`).
   // The far model: a realm's pinned release holds it where it has one (bay.ts `where`), else beside the page.
   const released = LOCAL?.release ? await where().catch(() => null) : null
-  const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
+  // (A path the address names is this site's own or nothing, #81: `samePath`. The realm's own and its release's are as they say.)
+  const farAsked = query.get('far') === '' ? '' : query.has('far') ? samePath(query.get('far')) : null
+  if (query.has('far') && farAsked === null) console.warn('?far= names no path of this site: the realm\'s own far model is drawn')
+  const farModel = await farOf(device, gpu.format, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
   // Boxes covering the cells up to the far model's handover: on a full city with a far model, coarser boxes beyond
   // reach stream after the place is shown so cold load never waits on citywide coarse tiles hidden behind far faces.
   const nearLevels = farModel.listing && farModel.reach > 0
@@ -378,7 +383,7 @@ async function main() {
   // How many pixels are marched for each pixel shown, each way. Unless the address fixes it, it follows the
   // GPU: fewer pixels when a view is dear, so the frame rate holds, and all of them when it is cheap.
   const fixed = query.has('scale')
-  let scale = Number(query.get('scale') ?? (phone ? 0.5 : 0.75))
+  let scale = bounded(query.get('scale'), phone ? 0.5 : 0.75, 0.25, 1.5)
   let held = 0
   // A phone's GPU clock is not to be believed: the iPhone's read 0.01 to 10 ms for the same work from one second to the next.
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
@@ -2253,7 +2258,7 @@ async function main() {
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
     gpu, far, realms: realm, world, march, pose, began,
-    make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }),
+    make: () => new World(device, { ...world.options, workers: bounded(query.get('portalworkers'), world.options.workers, 1, 8, true) }),
     // The other world's own marcher: made again, as this one's is, when that world comes to hold finer cells (#372).
     marcher: async (w) => { const m = await marcher(device, gpu.format, w, true); w.onFine = () => void m.reshade((wgsl) => wgsl); return m },
     people: (m) => people(device, gpu.format, m),
