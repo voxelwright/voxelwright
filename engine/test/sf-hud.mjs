@@ -318,6 +318,14 @@ try {
               })
               check(!!gasRes && gasRes.pressed && gasRes.released && gasRes.kmh > 3, `drive: holding Gas pedal accelerates cleanly (${JSON.stringify(gasRes)})`)
             }
+            // (#140, the owner's fault: with #75's keys a drag up the left half of the picture drove the car as well as steering
+            // it. Now it turns the head and never drives.)
+            const lx = Math.round(vw * 0.25), ly = Math.round(vh * 0.35)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: lx, y: ly, id: 21 }] })
+            for (let i = 1; i <= 6; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: lx, y: ly - i * 12, id: 21 }] }); await page.waitForTimeout(40) }
+            const dragged = await page.evaluate(() => globalThis.engine.alive.wheelDrive?.throttle ?? null)
+            await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+            check(dragged === 0, `drive: a drag up the left half of the picture does not drive the car (throttle ${dragged})`)
             await tap('radio')
             const opened = await until(page, () => document.querySelector('#radio-picker')?.open, 5000)
             check(opened, 'tapping Radio opens the media picker')

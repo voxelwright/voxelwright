@@ -92,7 +92,11 @@ export function upOnScreen(up: readonly number[], angle: number): [number, numbe
  * screen), and how upright it is (0 lying flat, where the turn means nothing, to 1 held up facing the player).
  */
 export function tiltOf(beta: number, gamma: number, angle: number): { turn: number; upright: number } {
-  const [x, y] = upOnScreen(upOfPhone(beta, gamma), angle)
+  // The screen is upright to whoever holds the phone (the system turns it so), so up on it points up: of the angle and
+  // its opposite, the one that has it so is the screen's. This keeps a browser that gives the angle's sign the other
+  // way round from steering at full lock; lying flat, where the two cannot be told apart, the steering lets go anyway.
+  const up = upOfPhone(beta, gamma), a = upOnScreen(up, angle), b = upOnScreen(up, -angle)
+  const [x, y] = b[1] > a[1] ? b : a
   // Turned clockwise by t, the world's up is seen turned the other way on the screen: (-sin t, cos t).
   return { turn: Math.atan2(-x, y), upright: Math.hypot(x, y) }
 }
@@ -143,7 +147,7 @@ export interface Placed { act: string; x: number; y: number; w: number; h: numbe
  * on any screen they shrink until the two thumbs' clusters are 24 px apart or more (allowing an iPhone's 59 px safe area
  * at each side when it is on its side) and the driving cluster is in the lower half, and no key is under 44 px a side.
  */
-export function layout(s: DriveTouchSettings, steer: Steer, view: { width: number; height: number; portrait: boolean }, tiltAsk = false): Placed[] {
+export function layout(s: DriveTouchSettings, steer: Steer, view: { width: number; height: number; portrait: boolean; below?: number }, tiltAsk = false): Placed[] {
   const brakeAcross = s.gas === 'pedals' && steer === 'tilt'
   const widths = (k: number) => {
     const gap = 10 * k, pedals = 80 * k + gap + 74 * k
@@ -178,17 +182,19 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
     put('drift', drive, mainW + gap, 0, sideW, mainH)
     put('boost', drive, 0, mainH + gap, mainW + gap + sideW, smallH)
   }
-  // The steering thumb's.
+  // The steering thumb's, under `below` (px from the top) where something stands over that corner (the YouTube player).
+  const under = view.below ? Math.max(44, view.height - view.below - 35 - 8) : Infinity
   if (steer === 'arrows') {
-    const a = px(84), between = Math.round(gap * 1.4)
+    const a = Math.min(px(84), under), between = Math.round(gap * 1.4)
     put('left', steerSide, steerSide === 'left' ? 0 : a + between, 0, a, a)
     put('right', steerSide, steerSide === 'left' ? a + between : 0, 0, a, a)
-    if (tiltAsk) put('tilt-on', steerSide, 0, a + gap, a * 2 + between, 48)
+    // (Where there is no room for it, the first touch anywhere asks for tilt, and the driving panel says so.)
+    if (tiltAsk && a + gap + 48 <= under) put('tilt-on', steerSide, 0, a + gap, a * 2 + between, 48)
   } else if (steer === 'wheel') {
-    const d = px(150)
+    const d = Math.min(px(150), under)
     put('wheel', steerSide, 0, 0, d, d)
   } else if (brakeAcross) {
-    put('brake', steerSide, 0, 0, mainW, mainH)
+    put('brake', steerSide, 0, 0, mainW, Math.min(mainH, under))
   }
   return out
 }
@@ -292,6 +298,8 @@ export function driveTouch(o: {
   const by = new Map<number, string>()
   let wheelTurnNow = 0, wheelBack = false, wheelPointer: number | null = null, wheelFrom = 0, wheelWas = 0
   let autoGo = false
+  // Where the YouTube player stands over the steering corner (its foot, px from the top), or 0.
+  let ytBelow = 0
   let cluster: HTMLElement | null = null
   const keyEl = new Map<string, HTMLElement>()
 
@@ -356,7 +364,7 @@ export function driveTouch(o: {
   // iOS asks for the sensor only from a touch's end (a press does not count as the hand's own): the first touch after
   // the car is got into, if tilt is the scheme. A touch on the picture while auto gas waits starts it.
   addEventListener('pointerup', () => { if (wantTilt() && tilt === 'ask' && !tiltAsked) syncTilt(true) }, true)
-  addEventListener('pointerdown', (e) => { if (shown && e.pointerType === 'touch' && e.target instanceof HTMLCanvasElement && !e.target.closest('.vx-button, .vx-recess, dialog')) autoGo = true }, true)
+  addEventListener('pointerdown', (e) => { if (shown && e.pointerType === 'touch' && e.target instanceof HTMLCanvasElement && !e.target.closest('.vx-button, .vx-recess, dialog, #minimap')) autoGo = true }, true)
 
   const steerNow = (): Steer => settings.steer === 'tilt' && tilt !== 'live' ? 'arrows' : settings.steer
 
@@ -416,7 +424,7 @@ export function driveTouch(o: {
     const tiltAsk = settings.steer === 'tilt' && tilt === 'ask'
     const c = Object.assign(document.createElement('div'), { className: 'dt-cluster' })
     c.style.setProperty('--dt-alpha', String(settings.opacity))
-    for (const p of layout(settings, steer, { width: innerWidth, height: innerHeight, portrait: portrait.matches }, tiltAsk)) {
+    for (const p of layout(settings, steer, { width: innerWidth, height: innerHeight, portrait: portrait.matches, below: ytBelow }, tiltAsk)) {
       let el: HTMLElement
       if (p.act === 'wheel') {
         el = Object.assign(document.createElement('div'), { className: 'vx-recess dt-wheel' })
@@ -607,6 +615,8 @@ ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']]
   const applyStick = () => {
     o.input.stickSide = shown ? (steerNow() === 'slide' ? (settings.hand === 'right' ? 'left' : 'right') : null) : 'left'
     html.classList.toggle('steer-slide', shown && steerNow() === 'slide')
+    // (The YouTube player stands over the steering thumb's corner, index.html.)
+    if (shown) html.dataset.driveHand = settings.hand; else delete html.dataset.driveHand
   }
 
   let lastFrame = 0
@@ -636,6 +646,10 @@ ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']]
         if (wheelTurnNow === 0) wheelBack = false
       }
       if (!shown || !cluster) return zero
+      // The YouTube player come or gone, or moved: the steering keys go under it.
+      const yt = document.querySelector<HTMLElement>('[data-panel="radio-yt"]')
+      const ytNow = yt && yt.checkVisibility() ? Math.round(yt.getBoundingClientRect().bottom / 8) * 8 : 0
+      if (ytNow !== ytBelow) { ytBelow = ytNow; relay() }
       // Nothing under the thumbs while something is over the keys, or the page is away: auto gas stops too, until touched again.
       const over = document.hidden || !!sheet?.open || !cluster.isConnected || html.matches('.map-open, .drawer, .choosing')
         || !!document.querySelector('#ask.open, #radio-picker[open], #realm.open') || !cluster.checkVisibility()

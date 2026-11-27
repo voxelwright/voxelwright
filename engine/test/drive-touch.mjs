@@ -37,6 +37,8 @@ for (const [what, b, g, a, turn, upright] of cases) {
   const p = pose(b, g, a)
   check(near(p.turn, turn, 0.5) && near(p.upright, upright, 0.02), `${what}: turn ${p.turn.toFixed(1)} (want ${turn}), upright ${p.upright.toFixed(2)}`)
 }
+const flipped = pose(20, -90, -90)
+check(near(flipped.turn, 20, 0.5), `a browser giving the screen's angle with the other sign still steers right for a clockwise turn (${flipped.turn.toFixed(1)})`)
 const flat = pose(2, 1, 90)
 check(flat.upright < 0.1, `lying flat it is not upright (${flat.upright.toFixed(2)}): its turn means nothing, and the steering lets go`)
 const up = upOfPhone(37, -61), [sx, sy] = upOnScreen(up, 90), [px, py] = upOnScreen(up, 0)
@@ -87,6 +89,13 @@ for (const [name, s] of Object.entries(screens)) {
   }
 }
 check(bad === 0, `${laid} layouts (4 steerings, 2 gases, 2 hands, 3 sizes, 4 screens, and tilt waiting): keys 44 px or more, in the safe area, none on another, the two thumbs 24 px or more apart, the driving thumb's in the lower half`)
+
+// Under the YouTube player (its foot 244 px down a phone on its side): the steering keys stay below it, 44 px or more.
+for (const steer of ['arrows', 'wheel', 'tilt']) for (const hand of ['right', 'left']) for (const ask of [false, true]) {
+  const ks = layout({ ...DEFAULTS, steer, hand, gas: 'pedals' }, steer, { width: 844, height: 390, portrait: false, below: 244 }, ask && steer === 'arrows').filter((k) => k.side !== hand)
+  const tops = ks.map((k) => 390 - 21 - 14 - k.y - k.h)
+  check(ks.length > 0 && tops.every((t) => t >= 244) && ks.every((k) => k.w >= 44 && k.h >= 44), `${steer}${ask ? ' asking for tilt' : ''}, ${hand}-handed: the steering keys stand under the YouTube player (${ks.map((k, i) => `${k.act} top ${tops[i]}`).join(', ')})`)
+}
 
 // Each size is its own size on every screen (on a phone on its side the height once made Large the same as Medium).
 const gasOf = (size, sc) => layout({ ...DEFAULTS, size }, 'arrows', { width: sc.w, height: sc.h, portrait: sc.h > sc.w }).find((k) => k.act === 'gas').h

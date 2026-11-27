@@ -175,10 +175,12 @@
   [data-panel="radio-yt"] .ryt-frame { width: 216px; height: 200px; background: #090c11; }
   [data-panel="radio-yt"] .ryt-frame iframe { display: block; width: 216px; height: 200px; border: 0; }
   @media (pointer: coarse) {
-    /* By touch the bottom corners are the thumbs' (drive-touch.ts): the player stands at the top left, over the minimap on
-       a phone on its side (there is no other room 216 x 232 clear of the thumbs), under it upright. */
+    /* By touch the bottom corners are the thumbs' (drive-touch.ts): the player stands at the top of the steering thumb's
+       side, over the minimap (or the rail, left-handed) on a phone on its side, under them upright; the steering keys
+       go under it (drive-touch.ts `below`). */
     [data-panel="radio-yt"] { right: auto; left: max(12px, env(safe-area-inset-left)); bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 12px); z-index: 2; }
     @media (orientation: portrait) { [data-panel="radio-yt"] { top: calc(env(safe-area-inset-top, 0px) + 150px); } }
+    html[data-drive-hand="left"] [data-panel="radio-yt"] { left: auto; right: max(12px, env(safe-area-inset-right)); }
     html.yt-mini [data-panel="radio-toast"] { bottom: auto; }
   }
   [data-panel="radio-toast"].has-track { border-radius: 14px; padding: 7px 12px 7px 9px; }

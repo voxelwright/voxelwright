@@ -13,8 +13,9 @@
 //   - tilt: refused, the arrows steer and the sheet says why; given, the phone turned clockwise steers right, Center
 //     tilt makes how it is held straight ahead, and the brake is under the left thumb; with no sensor, the arrows;
 //   - getting off puts every key away and gives the stick back to the feet.
-// Every scheme's keys are kit keys 44 px or more that a touch at their middle reaches, clear of the safe area and of
-// each other, and a picture of each is kept.
+// Every scheme's keys are kit keys 44 px or more that a touch at their middle reaches, clear of the safe area, of each
+// other, of the car and of the YouTube player shown over them (either hand), on its side and upright, and a picture
+// of each is kept.
 //
 //   node test/sf-drive-touch.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/drive-touch]
 import { mkdirSync } from 'node:fs'
@@ -37,11 +38,13 @@ const site = await plain(dist, '127.0.0.1', 0)
 const back = await turn()
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { back(); process.exit(1) })
 const browser = await chromium.launch(CHROME)
-const SAFE = { top: 0, bottom: 21, left: 59, right: 59 }
+// (On its side, and upright for the last pass.)
+const SIDE = { width: 844, height: 390, safe: { top: 0, bottom: 21, left: 59, right: 59 } }, UPRIGHT = { width: 390, height: 844, safe: { top: 59, bottom: 34, left: 0, right: 0 } }
+let SAFE = SIDE.safe, VW = SIDE.width, VH = SIDE.height
 const until = (page, what, arg, ms = 5000) => page.waitForFunction(what, arg, { timeout: ms }).then(() => true, () => false)
 
 try {
-  const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+  let context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
   // (Once: a kept value that is not a record, as a broken write would leave.)
   await context.addInitScript(() => { if (!localStorage.getItem('seeded')) { localStorage.setItem('seeded', '1'); localStorage.setItem('vw.drive-touch.v1', '{not json') } })
   const errors = []
@@ -74,11 +77,13 @@ try {
     await settle(600)
     await page.screenshot({ path: join(shots, `${name}.png`) })
     const ks = await keys()
-    const rail = await page.evaluate(() => [...document.querySelectorAll('[data-panel="living"] .drive-util .vx-button, [data-panel="drive-hud"], #minimap, #realm .fold')].filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, id: el.dataset.act || el.id || el.className } }))
+    // (Over the picture besides: the rail, the driving panel, the minimap, Settings, the YouTube player where shown, and the car's box.)
+    const rail = await page.evaluate(() => [...[...document.querySelectorAll('[data-panel="living"] .drive-util .vx-button, [data-panel="drive-hud"], [data-panel="radio-yt"], #minimap, #realm .fold')].filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, id: el.dataset.act || el.dataset.panel || el.id || el.className } }),
+      ...[globalThis.engine.playHud?.body?.()].filter(Boolean).map((b) => ({ left: b.left, right: b.right, top: b.top, bottom: b.bottom, id: 'the car' }))])
     const meet = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
     const clash = []
     for (let i = 0; i < ks.length; i++) { for (let j = i + 1; j < ks.length; j++) if (meet(ks[i], ks[j])) clash.push(`${ks[i].act}/${ks[j].act}`); for (const r of rail) if (meet(ks[i], r)) clash.push(`${ks[i].act}/${r.id}`) }
-    const bad = ks.filter((k) => k.w < 44 || k.h < 44 || !k.reached || !k.kit || k.left < SAFE.left || k.right > 844 - SAFE.right || k.bottom > 390 - SAFE.bottom)
+    const bad = ks.filter((k) => k.w < 44 || k.h < 44 || !k.reached || !k.kit || k.left < SAFE.left || k.right > VW - SAFE.right || k.bottom > VH - SAFE.bottom)
     check(ks.length > 0 && !bad.length && !clash.length, `${name}: ${ks.map((k) => k.act).join(', ')} are kit keys 44 px or more, reached at their middles, in the safe area, none on another${bad.length ? `; not: ${bad.map((k) => `${k.act} ${Math.round(k.w)}x${Math.round(k.h)}${k.reached ? '' : ' unreached'}${k.kit ? '' : ' plain'}`).join(', ')}` : ''}${clash.length ? `; meeting: ${clash.join(', ')}` : ''}`)
     return ks
   }
@@ -203,8 +208,17 @@ try {
   await touch('touchStart', 11, 650, 250); for (let i = 1; i <= 5; i++) await touch('touchMove', 11, 650 - i * 10, 250); await settle()
   const slidLeft = await told()
   await touch('touchEnd', 11)
-  check(gasLeft && gasLeft.right < 422 && slidLeft?.steer < -0.2, `left-handed: the pedals are on the left and the slide on the right half steers (${slidLeft?.steer?.toFixed(2)})`)
+  check(gasLeft && gasLeft.right < VW / 2 && slidLeft?.steer < -0.2, `left-handed: the pedals are on the left and the slide on the right half steers (${slidLeft?.steer?.toFixed(2)})`)
   await set({ hand: 'right' })
+
+  // The YouTube player, shown over the steering thumb's corner: the keys go under it, either hand.
+  const yt = (on) => page.evaluate((on) => { document.querySelector('[data-panel="radio-yt"]').hidden = !on }, on)
+  for (const [steer, hand] of [['arrows', 'right'], ['wheel', 'right'], ['arrows', 'left'], ['wheel', 'left']]) {
+    await set({ steer, hand }); await yt(true); await settle(400)
+    await laid(`youtube-${steer}-${hand}-handed`)
+    await yt(false)
+  }
+  await set({ steer: 'arrows', hand: 'right' }); await settle(300)
 
   // Tilt: refused, given, no sensor.
   const orient = (beta, gamma) => page.evaluate(([b, g]) => dispatchEvent(Object.assign(new Event('deviceorientation'), { beta: b, gamma: g, alpha: 0 })), [beta, gamma])
@@ -228,7 +242,7 @@ try {
   const tiltLeft = await told()
   k = await laid('tilt-pedals')
   const brakeAt = k.find((x) => x.act === 'brake')
-  check(given.tilt === 'live' && given.steer === 'tilt' && tiltRight?.steer > 0.5 && tiltLeft?.steer < -0.5 && brakeAt && brakeAt.right < 422, `tilt given (screen at ${angle}): turned 20 degrees clockwise steers right (${tiltRight?.steer?.toFixed(2)}), anticlockwise left (${tiltLeft?.steer?.toFixed(2)}), the brake under the left thumb`)
+  check(given.tilt === 'live' && given.steer === 'tilt' && tiltRight?.steer > 0.5 && tiltLeft?.steer < -0.5 && brakeAt && brakeAt.right < VW / 2, `tilt given (screen at ${angle}): turned 20 degrees clockwise steers right (${tiltRight?.steer?.toFixed(2)}), anticlockwise left (${tiltLeft?.steer?.toFixed(2)}), the brake under the left thumb`)
   for (let i = 0; i < 6; i++) { await orient(...poseFor(10)); await settle(50) }
   await page.evaluate(() => globalThis.engine.alive.touch.open()); await settle(200)
   await page.evaluate(() => document.querySelector('#drive-controls .dc-center').click())
@@ -262,6 +276,28 @@ try {
   const thumb = await page.evaluate(() => !!document.documentElement.classList.contains('thumb-down'))
   await touch('touchEnd', 13)
   check(off && afoot.keys === 0 && !afoot.slide && thumb, `Get off puts the keys away and the left half is the feet's stick again (${JSON.stringify({ off, ...afoot, thumb })})`)
+
+  // Upright: the default, the wheel, tilt with the brake across, the slide left-handed, and Large, each clear of the car.
+  await context.close()
+  ;({ safe: SAFE, width: VW, height: VH } = UPRIGHT)
+  context = await browser.newContext({ viewport: { width: VW, height: VH }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+  await open()
+  await enter()
+  await set({ steer: 'arrows', gas: 'pedals', hand: 'right', size: 1 })
+  await laid('upright-arrows-pedals')
+  await set({ steer: 'wheel' }); await laid('upright-wheel-pedals')
+  await page.evaluate(() => { DeviceOrientationEvent.requestPermission = async () => 'granted' })
+  await set({ steer: 'tilt' })
+  await page.evaluate(() => globalThis.engine.alive.touch.open()); await settle(200)
+  await page.evaluate(() => { const r = document.querySelector('#drive-controls input[name="dc-steer"][value="arrows"]').closest('label'); r.click() }); await settle(100)
+  await page.evaluate(() => { const r = document.querySelector('#drive-controls input[name="dc-steer"][value="tilt"]').closest('label'); r.click() }); await settle(200)
+  await page.evaluate(() => document.querySelector('#drive-controls .dc-done').click())
+  for (let i = 0; i < 6; i++) { await page.evaluate(() => dispatchEvent(Object.assign(new Event('deviceorientation'), { beta: 70, gamma: 90, alpha: 0 }))); await settle(50) }
+  const upTilt = await told()
+  check(upTilt?.steer > 0.5, `upright, the phone turned 20 degrees clockwise steers right (${upTilt?.steer?.toFixed(2)})`)
+  await laid('upright-tilt-pedals')
+  await set({ steer: 'slide', hand: 'left' }); await laid('upright-slide-left-handed')
+  await set({ steer: 'arrows', hand: 'right', size: 1.2 }); await laid('upright-arrows-large')
   check(errors.length === 0, `no errors on the page${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`)
   await context.close()
 } catch (e) {
