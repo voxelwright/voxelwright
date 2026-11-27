@@ -144,7 +144,9 @@
       if (list?.length) {
         const c = list[0].c, lo = Math.min(...list.map((p) => p.i)), hi = Math.max(...list.map((p) => p.i))
         const read = c.spare.pop() ?? buffer.call(of.get(this), { size: MOST * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
-        this.resolveQuerySet(c.set, lo * 2, (hi - lo + 1) * 2, c.resolved, lo * 16)
+        // (Resolved from the first query: where a resolve is written must be a multiple of 256 bytes, so one that began
+        // at this encoder's own first pass made the whole encoder invalid, and the frame with it.)
+        this.resolveQuerySet(c.set, 0, (hi + 1) * 2, c.resolved, 0)
         this.copyBufferToBuffer(c.resolved, lo * 16, read, lo * 16, (hi - lo + 1) * 16)
         const done = finish.call(this, d)
         reads.set(done, { read, list, c })

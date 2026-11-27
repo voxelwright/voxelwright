@@ -9,7 +9,8 @@
 //        [--explore]                    then into the city by the EXPLORE board, timed
 //        [--walk 40]                    then walk that many seconds (after --explore), frame gaps and what stalls
 //        [--glide 4000]                 or carry the eye that many metres through the city at 15 m/s, memory as it goes
-//        [--passes]                     each render pass's GPU time, every eighth frame, with every turn on the GPU held
+//        [--cost]                       what each part of the picture costs the GPU at full size where the visitor stands (the page's `paced`), and how busy the GPU is
+//        [--passes]                     each render pass's GPU time, every eighth frame, by the GPU's own clock
 //        [--alone]                      with every turn on the GPU held (kit.mjs `quiet`): no other lane's check draws beside it
 //        [--out file.json] [--headed] [--bare]   (`--bare`: no probe in the workers)
 //
@@ -212,10 +213,23 @@ async function visit(query) {
       await page.waitForTimeout(2500)
       result.heldIn = await holding(page, browser)
     }
+    if (has('cost')) {
+      // What the picture costs the GPU where the visitor now stands, by the page's own measure (main.ts `paced`: frames
+      // drawn at the canvas's full size into a texture nobody shows, at the device's own pace), each part by what it adds;
+      // and a fixed piece of work that is none of the engine's (`quiet`: 1.44 ms on this machine when nothing else draws).
+      const cost = await page.evaluate(async () => {
+        const e = globalThis.engine, middle = (l) => l.slice().sort((a, b) => a - b)[l.length >> 1], ways = { rays: [0], shadows: [1], mirrors: [3], people: [3, true], wand: [3, true, true], pieces: [3, true, true, true], passes: [3, true, true, true, true], under: [3, true, true, true, true, true] }
+        const fixed = [await e.quiet()], took = Object.fromEntries(Object.keys(ways).map((k) => [k, []]))
+        for (let round = 0; round < 3; round++) { for (const [k, a] of Object.entries(ways)) took[k].push(await e.paced(...a)); fixed.push(await e.quiet()) }
+        return { canvas: [document.querySelector('canvas').width, document.querySelector('canvas').height], fixed: fixed.map((v) => Math.round(v * 100) / 100), ...Object.fromEntries(Object.entries(took).map(([k, l]) => [k, Math.round(middle(l) * 100) / 100])) }
+      })
+      result.cost = cost
+      console.log(`  cost at ${cost.canvas.join('x')}: ${JSON.stringify(cost)}`)
+    }
     if (arg('walk', null)) {
       const seconds = Number(arg('walk'))
       let give = null
-      if (has('passes')) { give = await quiet(); await page.evaluate(() => { globalThis.__launch.passesOn = true }) }
+      if (has('passes')) { if (has('alone')) give = await quiet(); await page.evaluate(() => { globalThis.__launch.passesOn = true }) }
       const from = await page.evaluate(() => performance.timeOrigin + performance.now())
       const start = await page.evaluate(() => { const e = globalThis.engine; return { feet: e.me.feet?.at ? [...e.me.feet.at] : null, pose: { ...e.pose } } })
       const scales = [], clocks = []
@@ -233,12 +247,17 @@ async function visit(query) {
       const passes = await page.evaluate(() => { const L = globalThis.__launch; L.passesOn = false; return { frames: L.passFrames, passes: [...L.passes].map(([name, e]) => { const s = e.all.slice().sort((a, b) => a - b); return { name, n: e.n, perFrame: e.n / Math.max(1, L.passFrames), mean: e.ms / e.n, p50: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)], worst: e.worst, msPerFrame: e.ms / Math.max(1, L.passFrames) } }).sort((a, b) => b.msPerFrame - a.msPerFrame) } })
       give?.()
       const metres = start.feet && end.feet ? Math.hypot(end.feet[0] - start.feet[0], end.feet[2] - start.feet[2]) / 10 : Math.hypot(end.pose.x - start.pose.x, end.pose.z - start.pose.z)
-      result.walk = { seconds, metres: round(metres, 1), frames: pacedLine(p), scale: { low: Math.min(...scales), high: Math.max(...scales), changes: scales.filter((s, i) => i && s !== scales[i - 1]).length }, marchMs: round(median(clocks.map((c) => c.gpuMs)), 2), cpuMs: round(median(clocks.map((c) => c.cpuMs)), 2), laps: Object.fromEntries(Object.keys(clocks[0].laps).map((k) => [k, round(median(clocks.map((c) => c.laps[k])), 2)])), scripts: p.scripts.map((s) => ({ ...s, ms: round(s.ms), worst: round(s.worst) })), bigJson: p.json.map((j) => ({ ms: round(j.ms, 1), kb: round(j.chars / 1024), by: j.by })), bigMessages: p.messages.map((m) => ({ ms: round(m.ms, 1), url: m.url.split('?')[0] })).sort((a, b) => b.ms - a.ms).slice(0, 12), passes: has('passes') ? passes : undefined }
+      result.walk = { fixedWork: await page.evaluate(() => globalThis.engine.quiet()).catch(() => null), seconds, metres: round(metres, 1), frames: pacedLine(p), scale: { low: Math.min(...scales), high: Math.max(...scales), changes: scales.filter((s, i) => i && s !== scales[i - 1]).length }, marchMs: round(median(clocks.map((c) => c.gpuMs)), 2), cpuMs: round(median(clocks.map((c) => c.cpuMs)), 2), laps: Object.fromEntries(Object.keys(clocks[0].laps).map((k) => [k, round(median(clocks.map((c) => c.laps[k])), 2)])), scripts: p.scripts.map((s) => ({ ...s, ms: round(s.ms), worst: round(s.worst) })), bigJson: p.json.map((j) => ({ ms: round(j.ms, 1), kb: round(j.chars / 1024), by: j.by })), bigMessages: p.messages.map((m) => ({ ms: round(m.ms, 1), url: m.url.split('?')[0] })).sort((a, b) => b.ms - a.ms).slice(0, 12), passes: has('passes') ? passes : undefined }
       console.log(`  walk ${seconds} s, ${result.walk.metres} m: ${JSON.stringify(result.walk.frames)}; scale ${result.walk.scale.low} to ${result.walk.scale.high} (${result.walk.scale.changes} changes), march ${result.walk.marchMs} ms, page ${result.walk.cpuMs} ms`)
       result.heldWalked = await holding(page, browser)
     }
     if (arg('glide', null)) {
       const metres = Number(arg('glide')), speed = Number(arg('speed', '15')), up = Number(arg('up', '1.7'))
+      // Into the city first where `--explore` did not (the street's life is still until the visitor is in), then off the feet: an eye the page may carry.
+      if (!has('explore')) { await page.evaluate(() => globalThis.engine.explore.go()); await page.waitForFunction(() => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, null, { timeout: 120_000 }) }
+      await page.evaluate(() => globalThis.engine.me.walk(false))
+      await page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 120_000, polling: 250 }).catch(() => {})
+      await page.waitForTimeout(3000)
       const from = await page.evaluate(() => performance.timeOrigin + performance.now())
       const startPose = await page.evaluate(() => ({ ...globalThis.engine.pose }))
       const trail = [{ m: 0, ...(await holding(page, browser)) }]
@@ -257,7 +276,7 @@ async function visit(query) {
         step()
       }, { metres, speed, up })
       for (;;) {
-        await page.waitForTimeout(15_000)
+        await page.waitForTimeout(Math.min(15_000, ((metres / speed) * 1000) / 4))
         const g = await page.evaluate(() => globalThis.__glide)
         const h = await holding(page, browser)
         trail.push({ m: round(g.m), ...h })
@@ -265,7 +284,9 @@ async function visit(query) {
         if (g.done) break
       }
       const to = await page.evaluate(() => performance.timeOrigin + performance.now())
-      result.glide = { metres, speed, frames: pacedLine(await paced(page, from, to)) }
+      const glided = await paced(page, from, to)
+      result.glide = { metres, speed, frames: pacedLine(glided), scripts: glided.scripts.map((x) => ({ ...x, ms: round(x.ms), worst: round(x.worst) })), bigJson: glided.json.map((j) => ({ ms: round(j.ms, 1), kb: round(j.chars / 1024), by: j.by })), bigMessages: glided.messages.map((m) => ({ ms: round(m.ms, 1), url: m.url.split('?')[0] })).sort((a, b) => b.ms - a.ms).slice(0, 12), scale: await page.evaluate(() => globalThis.engine.scale) }
+      console.log(`  glide ${metres} m at ${speed} m/s: ${JSON.stringify(result.glide.frames)}`)
       await page.waitForTimeout(20_000)
       trail.push({ m: metres, rested: true, ...(await holding(page, browser)) })
       // Back where it began: what was taken on the way should be let go.
