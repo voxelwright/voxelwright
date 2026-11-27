@@ -96,7 +96,7 @@
     "toward": [37.770194, -122.469198],
     "foot": 75.5,
     "step": 4,
-    "from": "Golden Gate Park Japanese Tea Garden (1894): 5-story vermilion pagoda, arched wooden Drum Bridge over koi ponds, overhanging Tea House, Main Gate, Zen rock garden, stone lanterns, cherry blossoms and Japanese maples. Park footprint from Overture Maps. Rule in engine/core/src/heroes.rs."
+    "from": "Golden Gate Park Japanese Tea Garden (1894). Fence, pond, Pagoda, Tea House, Main Gate, Drum Bridge, footbridge and Peace Lantern placed from OpenStreetMap (© OpenStreetMap contributors, ODbL; ways 30900516, 409163924, 34221099, 34220947, 494967002, 136898969, 34218824; read 2026-11-26); the Gift Shop and Temple Gate are left to the map. Zen garden, trees and other lanterns are unchecked. Rule in engine/core/src/heroes.rs."
   },
   {
     "name": "San Francisco Botanical Garden",
@@ -105,7 +105,7 @@
     "toward": [37.7672, -122.4669],
     "foot": 75.0,
     "step": 4,
-    "from": "Golden Gate Park San Francisco Botanical Garden: waterfowl and lily pond with Moon Viewing Pavilion, Fountain Plaza, glazed Botanical Pavilion, winding gravel paths, curated botanical flowerbeds, Magnolias and Redwoods. Footprint from Overture Maps. Rule in engine/core/src/heroes.rs."
+    "from": "San Francisco Botanical Garden, Golden Gate Park, round its Great Meadow and main gate. Fountain court and flowerbeds placed from OpenStreetMap (© OpenStreetMap contributors, ODbL; ways 476290501, 1036243321, 1064976638, 1072073350, 1063385914, 1072073345; read 2026-11-26). OSM maps no pond, pavilion or glasshouse in this box, so none is drawn; the County Fair Building, toilets, bookstore and ticket kiosk are left to the map. Trees and the meadow walk are unchecked. Rule in engine/core/src/heroes.rs."
   },
   {
     "name": "Conservatory of Flowers",

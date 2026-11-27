@@ -89,8 +89,9 @@ pub fn owns(sort: u32, u: f32, y: f32, w: f32) -> bool {
                 || ((r - PF_ARC).abs() < 12.0 && pf_on_arc(u, w))
                 || (u >= 20.0 && u <= 94.0 && w.abs() <= 78.0)
         }
-        JAPANESE_TEA_GARDEN => u.abs() <= 62.0 && w.abs() <= 62.0,
-        BOTANICAL_GARDEN => u.abs() <= 76.0 && w.abs() <= 56.0,
+        // Inside the mapped fence, less the mapped buildings each leaves to the map (heroes.rs `TEA_KEPT`, `BOTANICAL_KEPT`).
+        JAPANESE_TEA_GARDEN => tea_garden_place(u, w),
+        BOTANICAL_GARDEN => botanical_place(u, w),
         CONSERVATORY => {
             (u.abs() <= 42.0 && (-20.0..=21.0).contains(&w))
                 || (u.abs() <= 48.0 && (21.0..=90.0).contains(&w))
@@ -1646,61 +1647,133 @@ fn academy_sciences(u: f32, y: f32, w: f32, s: f32) -> Kind {
     0
 }
 
-// ── Japanese Tea Garden, Golden Gate Park (1894, Makoto Hagiwara). Terrain-following garden hero (#60):
-// 5-story vermilion-red Pagoda, arched wooden Drum/Moon Bridge spanning reflective koi ponds, overhanging Tea House
-// with warm shoji screens, ornate wooden Main Entrance Gate, Zen raked-gravel rock garden, carved stone lanterns,
-// stepping-stone paths, pink Sakura cherry blossoms and crimson Japanese maples.
-fn tea_pond_sdf(u: f32, w: f32) -> f32 {
-    // Organic two-lobed central/south koi pond curving beneath the Drum Bridge and Tea House.
-    let a = ((u - 2.0) / 21.0).powi(2) + ((w - 13.0) / 14.5).powi(2) - 1.0;
-    let b = ((u + 12.0) / 15.0).powi(2) + ((w - 23.0) / 11.5).powi(2) - 1.0;
-    let c = ((u - 16.0) / 12.0).powi(2) + ((w - 2.0) / 11.0).powi(2) - 1.0;
-    a.min(b).min(c) + 0.08 * (u * 0.17).sin() * (w * 0.19).cos()
+// ── The two Golden Gate Park gardens (#60) are sited from OpenStreetMap (© OpenStreetMap contributors, ODbL), read
+// 2026-11-26 with api.openstreetmap.org/api/0.6/map.json?bbox=-122.4725,37.7660,-122.4640,37.7715. Each point below
+// is an OSM way's vertex in the landmark's own frame (u east, w south, metres from its `at` in sf/heroes.json); the
+// way id is beside it, so a point can be checked against https://www.openstreetmap.org/way/<id>. A mapped building
+// the rule does not draw itself is kept: the rule neither owns nor adds to its cells, so the map's own stays.
+
+/// Whether (u, w) is inside a closed outline of points (even-odd rule).
+fn inside(outline: &[(f32, f32)], u: f32, w: f32) -> bool {
+    let mut odd = false;
+    let mut j = outline.len() - 1;
+    for i in 0..outline.len() {
+        let ((ui, wi), (uj, wj)) = (outline[i], outline[j]);
+        if (wi > w) != (wj > w) && u < (uj - ui) * (w - wi) / (wj - wi) + ui {
+            odd = !odd;
+        }
+        j = i;
+    }
+    odd
+}
+
+/// How far (u, w) is from the nearest edge of an outline.
+fn edge_distance(outline: &[(f32, f32)], u: f32, w: f32) -> f32 {
+    let mut best = f32::MAX;
+    for i in 0..outline.len() {
+        let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+        best = best.min(segment_distance(a, b, u, w));
+    }
+    best
+}
+
+fn segment_distance(a: (f32, f32), b: (f32, f32), u: f32, w: f32) -> f32 {
+    let (du, dw) = (b.0 - a.0, b.1 - a.1);
+    let t = (((u - a.0) * du + (w - a.1) * dw) / (du * du + dw * dw).max(1e-6)).clamp(0.0, 1.0);
+    ((u - a.0 - t * du).powi(2) + (w - a.1 - t * dw).powi(2)).sqrt()
+}
+
+/// (u, w) turned into a mapped footprint's own axes: about its middle (cu, cw), by `degrees` from the frame's u.
+fn turned(u: f32, w: f32, cu: f32, cw: f32, degrees: f32) -> (f32, f32) {
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    let (du, dw) = (u - cu, w - cw);
+    (du * cos + dw * sin, -du * sin + dw * cos)
+}
+
+// ── Japanese Tea Garden (1894, Makoto Hagiwara). Frame from sf/heroes.json: `at` 37.770194, -122.470198, u east.
+/// The garden's fence, way 30900516: a rotated quadrilateral, not a square. Only inside it is the place the rule's.
+pub(crate) const TEA_OUTLINE: [(f32, f32); 10] = [
+    (86.7, -35.2), (30.2, 53.9), (-9.5, 57.1), (-25.4, 56.6), (-30.0, 54.0),
+    (-56.8, 17.6), (-61.0, 4.4), (-55.5, -26.4), (6.5, -75.5), (26.3, -90.2),
+];
+/// The pond, way 409163924 (natural=water), south of the middle.
+pub(crate) const TEA_POND: [(f32, f32); 24] = [
+    (10.1, 17.2), (14.2, 9.3), (16.4, 12.2), (19.8, 18.0), (20.6, 21.6), (23.4, 24.9), (27.5, 27.8), (30.8, 31.1),
+    (29.0, 34.7), (25.0, 39.8), (24.3, 43.1), (21.5, 46.6), (18.2, 43.4), (13.1, 41.0), (8.1, 40.3), (4.5, 40.8),
+    (-1.3, 42.3), (-1.6, 39.1), (2.1, 35.8), (6.3, 34.8), (13.6, 34.9), (15.8, 32.6), (14.8, 28.3), (11.2, 22.3),
+];
+/// The Japanese Pagoda, way 34221099: an 8.2 m square turned 21.5 degrees, its middle at (-17.8, 9.2).
+pub(crate) const TEA_PAGODA: (f32, f32, f32, f32) = (-17.8, 9.2, 21.5, 4.1);
+/// The Tea House, way 34220947: an 8.1 m square turned 45 degrees, its middle at (33.2, -21.9).
+pub(crate) const TEA_HOUSE: (f32, f32, f32, f32) = (33.2, -21.9, 45.0, 4.05);
+/// The Main Gate, way 494967002 and node 392430963 (barrier=toll_booth, "Main Gate"), on the east side.
+pub(crate) const TEA_GATE: (f32, f32, f32) = (57.5, -3.9, 45.0);
+/// The Drum Bridge, way 136898969: a 6.4 m footway from (29.9, 6.1) to (31.6, -0.1), running north and south.
+pub(crate) const TEA_DRUM_BRIDGE: ((f32, f32), (f32, f32)) = ((29.9, 6.1), (31.6, -0.1));
+/// The wooden footbridge, way 34218824 (bridge=yes, surface=wood), 19 m from (10.2, -13.3) to (-2.6, 1.2).
+pub(crate) const TEA_FOOTBRIDGE: ((f32, f32), (f32, f32)) = ((10.2, -13.3), (-2.6, 1.2));
+/// Mapped buildings the rule does not draw, so the map keeps them: the Gift Shop (way 34220963), the Temple Gate
+/// (way 136888944) and an unnamed building (way 931569317).
+const TEA_KEPT: [&[(f32, f32)]; 3] = [
+    &[(31.1, -37.1), (35.8, -41.1), (39.1, -37.1), (34.3, -33.2)],
+    &[(-13.2, 26.3), (-10.2, 27.6), (-7.1, 28.9), (-5.0, 24.2), (-8.2, 22.8), (-11.1, 21.5)],
+    &[(-50.1, -18.1), (-46.0, -15.5), (-42.5, -20.9), (-46.7, -23.6)],
+];
+
+/// Whether (u, w) is the Tea Garden's to say: inside its fence and not a building the map keeps.
+pub(crate) fn tea_garden_place(u: f32, w: f32) -> bool {
+    u.abs() <= 64.0 && w.abs() <= 64.0 && inside(&TEA_OUTLINE, u, w) && !TEA_KEPT.iter().any(|k| inside(k, u, w))
+}
+
+/// Water under a bridge. OSM maps no water under either bridge, but a bridge=yes footway crosses something: the
+/// water here is inferred, kept to a pool 3.5 m round under the Drum Bridge and a channel 2.5 m either side of the
+/// footbridge's middle two thirds.
+fn tea_bridge_water(u: f32, w: f32) -> bool {
+    let (a, b) = TEA_DRUM_BRIDGE;
+    let drum = ((u - (a.0 + b.0) / 2.0).powi(2) + (w - (a.1 + b.1) / 2.0).powi(2)).sqrt() < 3.5;
+    let (a, b) = TEA_FOOTBRIDGE;
+    let (du, dw) = (b.0 - a.0, b.1 - a.1);
+    let t = ((u - a.0) * du + (w - a.1) * dw) / (du * du + dw * dw);
+    drum || ((0.17..=0.83).contains(&t) && segment_distance(a, b, u, w) < 2.5)
 }
 
 fn tea_garden_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
-    if u.abs() > 62.0 || w.abs() > 62.0 {
+    if !tea_garden_place(u, w) {
         return None;
     }
-    let pond = tea_pond_sdf(u, w);
-    if pond < 0.0 {
+    if inside(&TEA_POND, u, w) || tea_bridge_water(u, w) {
         // Floating emerald lily pads & bright orange/white koi flecks on shimmering water!
         let h = hash3((u * 1.8) as i32, 0, (w * 1.8) as i32, 53);
-        if pond < -0.18 && h % 29 == 0 {
+        if h % 29 == 0 {
             return Some(kind(LEAVES, colour(8, 5)));
         }
-        if pond < -0.25 && h % 97 == 0 {
+        if h % 97 == 1 {
             return Some(kind(PLASTER, colour(1, 4))); // bright orange koi carp
         }
         return Some(kind(WATER, colour(12, 5)));
     }
-    if pond < 0.14 {
+    if edge_distance(&TEA_POND, u, w) < 0.9 {
         return Some(kind(ROCK, grey(8))); // natural moss-stone pond rim
     }
-    // Zen Dry Rock Garden (Karesansui) in the southwest terrace: pale raked concentric gravel ripples.
+    // Zen Dry Rock Garden (Karesansui): pale raked concentric gravel ripples. Not in OSM: its place is unchecked.
     if (-44.0..=-18.0).contains(&u) && (18.0..=40.0).contains(&w) {
         let r = ((u + 31.0).powi(2) + (w - 29.0).powi(2)).sqrt();
         let ripple = ((r * 2.2) as i32) % 2 == 0;
         return Some(kind(SAND, if ripple { grey(2) } else { grey(4) }));
     }
-    // Winding warm gravel & flagstone paths linking Main Gate -> Drum Bridge -> Pagoda -> Tea House.
-    let main_path = (w + 2.0 + 7.0 * (u * 0.055).sin()).abs() < 2.2 && (-36.0..=54.0).contains(&u);
+    // Winding warm gravel & flagstone paths from the Main Gate west past the Drum Bridge and Pagoda.
+    let main_path = (w + 2.0 + 7.0 * (u * 0.055).sin()).abs() < 2.2 && (-36.0..=56.0).contains(&u);
     let cross_path = (u - 4.0 - 5.0 * (w * 0.06).cos()).abs() < 2.1 && (-32.0..=42.0).contains(&w);
     if main_path || cross_path {
         let paver = hash3((u * 1.5) as i32, 1, (w * 1.5) as i32, 17) % 5 == 0;
         return Some(if paver { kind(ROCK, grey(6)) } else { kind(SAND, colour(3, 1)) });
-    }
-    // Deep lush mossy Japanese garden lawn with organic feathered perimeter melting into Golden Gate Park.
-    let edge = (u / 54.0).powi(2) + (w / 54.0).powi(2) + 0.08 * (u * 0.11).sin() * (w * 0.13).cos();
-    if edge > 1.0 {
-        return None;
     }
     let h = hash3((u * 2.6).floor() as i32, 2, (w * 2.6).floor() as i32, 91);
     Some(kind(GRASS, if h % 5 == 0 { colour(8, 5) } else { colour(8, 6) }))
 }
 
 fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if !(0.0..25.0).contains(&y) || u.abs() > 62.0 || w.abs() > 62.0 {
+    if !(0.0..25.0).contains(&y) || !tea_garden_place(u, w) {
         return 0;
     }
     let vermilion = kind(WOOD, colour(0, 4));
@@ -1711,8 +1784,12 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
     let gold = kind(STEEL, colour(3, 3));
     let stone = kind(ROCK, grey(7));
 
-    // 1. Iconic 5-Story Vermilion Japanese Pagoda at (-16, -12), ~18 m tall.
-    let (pu, pw) = (u + 16.0, w + 12.0);
+    // 1. The five-storey vermilion Pagoda, on its mapped 8.2 m footprint (eaves included), turned as mapped. Its tiers
+    // were drawn for a 5.6 m half-width; they are drawn in a frame scaled to the mapped 4.1 m.
+    let (cu, cw, turn, half) = TEA_PAGODA;
+    let scale = 5.6 / half;
+    let (pu, pw) = turned(u, w, cu, cw, turn);
+    let (pu, pw) = (pu * scale, pw * scale);
     if pu.abs() <= 7.0 && pw.abs() <= 7.0 && y < 22.0 {
         if y < 1.1 && pu.abs() <= 4.8 && pw.abs() <= 4.8 {
             return stone;
@@ -1727,42 +1804,59 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         for &(base_y, half, wall_h, eave_out) in &tiers {
             let roof_h = 1.65;
             if y >= base_y && y < base_y + wall_h + roof_h + 0.4 {
-                let k = pagoda_tier(pu, pw, y - base_y, half, wall_h, eave_out, roof_h, s, shoji, vermilion, dark_tile, gold);
+                let k = pagoda_tier(pu, pw, y - base_y, half, wall_h, eave_out, roof_h, s * scale, shoji, vermilion, dark_tile, gold);
                 if k != 0 {
                     return k;
                 }
             }
         }
         // Tall bronze sorin spire crowning the 5th tier.
-        if (16.8..21.2).contains(&y) && (pu * pu + pw * pw).sqrt() <= (0.42 - (y - 16.8) * 0.06).max(0.14).max(s * 0.5) {
+        if (16.8..21.2).contains(&y) && (pu * pu + pw * pw).sqrt() / scale <= (0.42 - (y - 16.8) * 0.06).max(0.14).max(s * 0.5) {
             return gold;
         }
     }
 
-    // 2. Steeply Arched Wooden Drum (Moon) Bridge prominently spanning the open central koi pond channel at (+9, +8)!
-    let k_bridge = arched_bridge(u - 9.0, y, w - 8.0, 6.2, 1.85, 4.2, s, kind(WOOD, colour(1, 4)), dark_timber);
+    // 2. The arched wooden Drum Bridge on its mapped line, its span running north and south.
+    let (a, b) = TEA_DRUM_BRIDGE;
+    let (bu, bw) = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+    let k_bridge = arched_bridge(w - bw, y, u - bu, 3.4, 1.0, 2.4, s, kind(WOOD, colour(1, 4)), dark_timber);
     if k_bridge != 0 {
         return k_bridge;
     }
+    // The flat wooden footbridge (way 34218824): a deck 0.5 m over the water with low rails.
+    let (a, b) = TEA_FOOTBRIDGE;
+    let (du, dw) = (b.0 - a.0, b.1 - a.1);
+    let t = ((u - a.0) * du + (w - a.1) * dw) / (du * du + dw * dw);
+    let off = segment_distance(a, b, u, w);
+    if (0.0..=1.0).contains(&t) && off <= 1.0f32.max(s * 0.5) && y < 1.5 {
+        if y < 0.6 {
+            return kind(WOOD, colour(2, 6));
+        }
+        if (off - 0.9).abs() <= 0.15f32.max(s * 0.5) && y < 1.4 {
+            return dark_timber;
+        }
+    }
 
-    // 3. Traditional Japanese Tea House overhanging the southwest koi pond edge at (-14, +24).
-    let (tu, tw) = (u + 14.0, w - 24.0);
-    if tu.abs() <= 9.5 && tw.abs() <= 8.0 && y < 8.5 {
-        // Stilts & timber veranda deck over pond edge.
-        if y < 0.85 {
-            if tu.abs() <= 6.8 && tw.abs() <= 5.2 && (y > 0.55 || (line(tu, 2.2, 0.0, 0.35, s) && line(tw, 2.2, 0.0, 0.35, s))) {
-                return dark_timber;
+    // 3. The Tea House on its mapped 8.1 m footprint, turned 45 degrees: a low timber room under one wide roof.
+    let (cu, cw, turn, half) = TEA_HOUSE;
+    let (tu, tw) = turned(u, w, cu, cw, turn);
+    if tu.abs() <= half + 0.2 && tw.abs() <= half + 0.2 && y < 6.5 {
+        if y < 0.6 {
+            if tu.abs() <= half - 0.4 && tw.abs() <= half - 0.4 {
+                return dark_timber; // timber veranda deck
             }
         } else {
-            let k = pagoda_tier(tu, tw, y - 0.85, 5.4, 3.1, 2.4, 2.4, s, warm_shoji, dark_timber, dark_tile, gold);
+            let k = pagoda_tier(tu, tw, y - 0.6, half - 1.3, 2.6, 1.3, 2.2, s, warm_shoji, dark_timber, dark_tile, gold);
             if k != 0 {
                 return k;
             }
         }
     }
 
-    // 4. Ornate Wooden Main Entrance Gate (East side at +42, -2).
-    let (gu, gw) = (u - 42.0, w + 2.0);
+    // 4. The Main Gate on the east side, turned as its mapped building; drawn 0.7 of its first size to fit it.
+    let (cu, cw, turn) = TEA_GATE;
+    let (gu, gw) = turned(u, w, cu, cw, turn);
+    let (gu, gw) = (gu / 0.7, gw / 0.7);
     if gu.abs() <= 7.0 && gw.abs() <= 10.5 && y < 9.5 {
         // Open arched/trabeated central portal between massive carved timber gateposts.
         if y < 4.2 {
@@ -1789,7 +1883,7 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     }
 
-    // 5. Sculpted Zen Rock Garden boulders in the southwest terrace (-44..-18, +18..+40).
+    // 5. Sculpted Zen Rock Garden boulders in the southwest terrace (-44..-18, +18..+40). Place unchecked (not in OSM).
     for &(bu, bw, br, bh) in &[(-31.0f32, 29.0f32, 2.6f32, 2.2f32), (-25.0, 34.0, 1.7, 1.3), (-37.0, 24.0, 1.9, 1.5)] {
         let d = ((u - bu) / br).powi(2) + ((w - bw) / (br * 0.85)).powi(2) + (y / bh).powi(2);
         if d <= 1.0 {
@@ -1797,22 +1891,23 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     }
 
-    // 6. Carved Granite Stone Lanterns (`toro`) along the pond & pagoda paths.
-    for &(lu, lw) in &[(13.0f32, 10.0f32), (-4.0, 4.0), (26.0, -5.0), (-26.0, -2.0), (2.0, 28.0)] {
+    // 6. Carved granite stone lanterns; the first is the mapped Peace Lantern (node 4110675669), the rest unchecked.
+    for &(lu, lw) in &[(-33.0f32, 9.0f32), (13.0, 7.0), (-4.0, 4.0), (26.0, -5.0), (2.0, 28.0)] {
         let kl = stone_lantern(u - lu, y, w - lw, s);
         if kl != 0 {
             return kl;
         }
     }
 
-    // 7. Blossoming Pink Sakura Cherry Trees, Crimson Japanese Maples & Sculpted Black Pines!
+    // 7. Blossoming Pink Sakura Cherry Trees, Crimson Japanese Maples & Sculpted Black Pines (places unchecked; the
+    // two that stood in the Tea House and the Gift Shop are gone).
     let sakura_a = kind(LEAVES, colour(22, 1));
     let sakura_b = kind(LEAVES, WHITE);
     let maple_a = kind(LEAVES, colour(0, 5));
     let maple_b = kind(LEAVES, colour(23, 4));
     let pine_a = kind(LEAVES, colour(9, 6));
     let pine_b = kind(LEAVES, colour(8, 5));
-    let trees: [(f32, f32, f32, f32, f32, u32, u8); 18] = [
+    let trees: [(f32, f32, f32, f32, f32, u32, u8); 16] = [
         // (u, w, trunk_h, crown_r, crown_h, seed, species: 0=sakura, 1=maple, 2=pine)
         (-3.0, -20.0, 3.2, 5.4, 4.5, 11, 0),
         (22.0, -16.0, 3.0, 5.2, 4.4, 17, 0),
@@ -1822,7 +1917,6 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         (-28.0, 4.0, 2.4, 4.2, 3.6, 37, 1),
         (12.0, -4.0, 2.2, 3.8, 3.4, 41, 1),
         (-4.0, 36.0, 2.6, 4.5, 3.8, 43, 1),
-        (28.0, -26.0, 2.5, 4.2, 3.6, 47, 1),
         (-44.0, -34.0, 5.0, 5.8, 6.2, 53, 2),
         (46.0, -30.0, 4.8, 5.5, 6.0, 59, 2),
         (46.0, 32.0, 5.2, 6.0, 6.5, 61, 2),
@@ -1831,7 +1925,6 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         (-22.0, -44.0, 4.5, 5.5, 5.5, 73, 0),
         (24.0, 44.0, 4.2, 5.2, 5.0, 79, 1),
         (-48.0, -4.0, 4.5, 5.4, 5.4, 83, 2),
-        (34.0, -42.0, 3.6, 5.0, 4.6, 89, 0),
     ];
     for &(tu, tw, th, cr, ch, seed, sp) in &trees {
         let (ca, cb) = match sp {
@@ -1847,56 +1940,59 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
     0
 }
 
-// ── San Francisco Botanical Garden (Golden Gate Park). Terrain-following garden hero (#60):
-// Naturalistic waterfowl & lily pond with wooden Moon Viewing Pavilion, circular Fountain Plaza, glazed Botanical
-// Pavilion & redwood pergola entrance, curving decomposed-granite paths, vibrant multi-zone botanical flowerbeds,
-// blooming pink Magnolias, coastal Redwoods, and sculptural palms.
-fn botanical_pond_sdf(u: f32, w: f32) -> f32 {
-    let a = ((u + 26.0) / 21.0).powi(2) + ((w + 4.0) / 17.5).powi(2) - 1.0;
-    let b = ((u + 38.0) / 14.0).powi(2) + ((w - 11.0) / 13.0).powi(2) - 1.0;
-    a.min(b) + 0.07 * (u * 0.14).cos() * (w * 0.15).sin()
+// ── San Francisco Botanical Garden. Frame from sf/heroes.json: `at` 37.7672, -122.4679 (the Great Meadow, way
+// 476290501, landuse=grass), u east. OSM maps no pond, no pavilion and no glasshouse within this box: the garden's
+// ponds (Anelli, Dwarf Conifer, Bamboo; ways 1062189335, 388991375, 388991378) and its Moon Viewing Garden lie south
+// of w = 58, outside it. What it does map here: the main entrance off Martin Luther King Jr Drive, the round
+// fountain in the gravel court beside the library, and flowerbeds by the gate.
+/// The fountain, way 1036243321, in the fine-gravel court of way 1064976638 (about 7.5 m round its middle).
+pub(crate) const BOTANICAL_FOUNTAIN: (f32, f32) = (26.2, 21.3);
+/// Flowerbeds, as (middle u, middle w, half u, half w): ways 1072073350, 1063385914 (Rock Garden Circle), 1072073345.
+const BOTANICAL_BEDS: [(f32, f32, f32, f32, u8, u8); 3] = [
+    (53.1, -10.6, 4.3, 5.2, colour(21, 4), colour(22, 2)),
+    (35.6, 2.3, 3.4, 3.4, colour(3, 4), colour(1, 4)),
+    (65.1, -34.2, 9.9, 8.8, colour(16, 3), colour(18, 2)),
+];
+/// Mapped buildings the rule leaves to the map: the County Fair Building (way 25822470, which holds the Helen
+/// Crocker Russell Library), the toilets (way 402054690), the bookstore (way 941355659) and the ticket kiosk at the
+/// main gate (way 839987588).
+pub(crate) const BOTANICAL_KEPT: [&[(f32, f32)]; 4] = [
+    &[
+        (61.4, 105.8), (60.1, 109.5), (94.1, 121.1), (99.3, 106.0), (100.3, 103.2), (82.1, 96.9), (79.7, 96.1),
+        (85.0, 80.6), (77.5, 78.1), (66.1, 74.1), (70.8, 60.4), (81.2, 30.4), (73.8, 27.8), (72.9, 30.5),
+        (62.9, 27.0), (64.1, 23.3), (57.3, 21.0), (51.2, 38.6), (41.5, 35.3), (41.9, 34.4), (42.2, 33.5),
+        (43.8, 34.0), (49.3, 17.8), (36.8, 13.6), (34.2, 21.1), (33.3, 20.8), (31.5, 26.0), (32.4, 26.3),
+        (31.2, 29.7), (32.6, 30.2), (29.3, 40.0), (39.1, 43.3), (39.5, 42.2), (48.8, 45.4), (35.7, 83.5),
+        (41.7, 85.6), (42.9, 82.3), (49.9, 84.7), (44.7, 100.1),
+    ],
+    &[(-45.0, 40.3), (-37.0, 41.2), (-37.3, 44.4), (-45.4, 43.5)],
+    &[(73.2, 5.3), (74.8, 0.6), (81.8, 2.8), (80.3, 7.6)],
+    &[(42.5, -6.2), (41.3, -2.1), (44.4, -1.2), (45.6, -5.3)],
+];
+
+/// Whether (u, w) is the Botanical Garden's to say: in its box and not a building the map keeps.
+pub(crate) fn botanical_place(u: f32, w: f32) -> bool {
+    u.abs() <= 76.0 && w.abs() <= 56.0 && !BOTANICAL_KEPT.iter().any(|k| inside(k, u, w))
 }
 
 fn botanical_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
-    if u.abs() > 76.0 || w.abs() > 56.0 {
+    if !botanical_place(u, w) {
         return None;
     }
-    let pond = botanical_pond_sdf(u, w);
-    if pond < 0.0 {
-        let h = hash3((u * 1.5) as i32, 0, (w * 1.5) as i32, 61);
-        if pond < -0.15 && h % 23 == 0 {
-            return Some(kind(LEAVES, colour(8, 4))); // floating water lily pads
-        }
-        return Some(kind(WATER, colour(13, 5)));
+    let (fu, fw) = BOTANICAL_FOUNTAIN;
+    let fp_r = ((u - fu).powi(2) + (w - fw).powi(2)).sqrt();
+    if fp_r < 1.1 {
+        return Some(kind(WATER, colour(13, 3))); // the fountain's pool
     }
-    if pond < 0.12 {
-        return Some(kind(ROCK, grey(7)));
+    if fp_r < 7.5 {
+        return Some(kind(SAND, colour(3, 1))); // the fine-gravel court round it
     }
-    // Circular Fountain Plaza at (+10, -2), radius 11.5 m.
-    let fp_r = ((u - 10.0).powi(2) + (w + 2.0).powi(2)).sqrt();
-    if fp_r < 4.2 {
-        return Some(kind(WATER, colour(13, 3))); // sparkling fountain pool
-    }
-    if fp_r < 11.5 {
-        return Some(kind(CONCRETE, colour(3, 0))); // sandstone plaza pavers
-    }
-    // Curving decomposed-granite garden promenades connecting Pavilion -> Fountain Plaza -> Pond -> Flower Walks.
-    let walk_ew = (w + 2.0 - 8.0 * (u * 0.045).sin()).abs() < 2.6;
-    let walk_ns = (u - 10.0 - 9.0 * (w * 0.05).sin()).abs() < 2.4;
-    let ring_walk = ((fp_r - 28.0).abs() < 2.2) && u > -20.0;
-    if walk_ew || walk_ns || ring_walk {
+    // A decomposed-granite walk west from the main gate (node 7838519208) across the meadow. Its line is unchecked.
+    let walk_ew = (w + 2.0 - 8.0 * (u * 0.045).sin()).abs() < 2.6 && u < 46.0;
+    if walk_ew {
         return Some(kind(SAND, colour(3, 1)));
     }
-    // Vibrant curated botanical flowerbeds flanking Fountain Plaza & Pavilion!
-    let beds: [(f32, f32, f32, f32, u8, u8); 6] = [
-        (24.0, -20.0, 12.0, 7.0, colour(21, 4), colour(22, 2)), // magenta & pink rhododendron bed
-        (24.0, 18.0, 12.0, 7.5, colour(3, 4), colour(1, 4)),   // California golden poppy & coral bed
-        (-2.0, 26.0, 14.0, 7.0, colour(18, 3), colour(19, 2)), // purple lavender & salvia garden
-        (-4.0, -28.0, 13.0, 7.0, colour(4, 4), colour(2, 3)),  // daffodil gold & warm amber blooms
-        (48.0, -24.0, 11.0, 6.5, colour(0, 4), colour(22, 1)), // crimson camellia & blush blossoms
-        (48.0, 24.0, 11.0, 6.5, colour(16, 3), colour(18, 2)), // blue ceanothus & iris bed
-    ];
-    for &(bu, bw, ru, rw, c1, c2) in &beds {
+    for &(bu, bw, ru, rw, c1, c2) in &BOTANICAL_BEDS {
         let d = ((u - bu) / ru).powi(2) + ((w - bw) / rw).powi(2);
         if d < 1.0 {
             let h = hash3((u * 2.5) as i32, 3, (w * 2.5) as i32, 47);
@@ -1908,7 +2004,7 @@ fn botanical_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
             });
         }
     }
-    // Great Meadow natural muted botanical turf (feathered cleanly into Golden Gate Park's own grass at the perimeter).
+    // Great Meadow turf (feathered into Golden Gate Park's own grass at the perimeter).
     if u.abs() > 62.0 || w.abs() > 44.0 {
         return None;
     }
@@ -1917,85 +2013,30 @@ fn botanical_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
 }
 
 fn botanical_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if !(0.0..25.0).contains(&y) || u.abs() > 76.0 || w.abs() > 56.0 {
+    if !(0.0..25.0).contains(&y) || !botanical_place(u, w) {
         return 0;
     }
-    let redwood = kind(WOOD, colour(1, 5));
     let dark_wood = kind(WOOD, colour(2, 9));
-    let white = kind(STEEL, WHITE);
-    let glass = kind(GLASS, colour(13, 1));
     let stone = kind(CONCRETE, colour(3, 0));
 
-    // 1. Sculpted Tiered Stone Fountain in Fountain Plaza (+10, -2).
-    let fp_r = ((u - 10.0).powi(2) + (w + 2.0).powi(2)).sqrt();
-    if fp_r <= 4.5 && y < 4.5 {
-        if (fp_r - 4.1).abs() < 0.35 && y < 0.85 {
-            return stone; // circular stone fountain basin rim
-        }
-        if fp_r < 1.6 && y < 1.8 || fp_r < 1.0 && y < 2.9 {
+    // 1. The fountain: a low stone basin round its pool, a column and a jet.
+    let (fu, fw) = BOTANICAL_FOUNTAIN;
+    let fp_r = ((u - fu).powi(2) + (w - fw).powi(2)).sqrt();
+    if fp_r <= 1.6 && y < 2.6 {
+        if (fp_r - 1.25).abs() < 0.3f32.max(s * 0.5) && y < 0.6 {
             return stone;
         }
-        if fp_r < 0.35 && y < 4.0 {
-            return kind(WATER, colour(13, 0)); // rising sparkling water jet
+        if fp_r < 0.4f32.max(s * 0.5) && y < 1.4 {
+            return stone;
+        }
+        if fp_r < 0.2f32.max(s * 0.5) && y < 2.4 {
+            return kind(WATER, colour(13, 0));
         }
     }
 
-    // 2. Wooden Moon Viewing Pavilion & Boardwalk jutting over the pond (-10, -4).
-    let (mu, mw) = (u + 10.0, w + 4.0);
-    if mu.abs() <= 6.5 && mw.abs() <= 6.5 && y < 6.0 {
-        if y < 0.65 && mu.abs() <= 5.5 && mw.abs() <= 5.5 {
-            return redwood; // cedar deck over the pond bank
-        }
-        if (0.65..3.5).contains(&y) && (mu.abs() - 4.2).abs() < 0.35 && (mw.abs() - 4.2).abs() < 0.35 {
-            return dark_wood; // corner redwood posts
-        }
-        if (3.4..5.4).contains(&y) {
-            let t = ((y - 3.4) / 2.0).clamp(0.0, 1.0);
-            if mu.abs() <= 6.0 * (1.0 - t * 0.72) && mw.abs() <= 6.0 * (1.0 - t * 0.72) {
-                return kind(ROOFING, colour(2, 8)); // warm cedar-shingle hip roof
-            }
-        }
-    }
-
-    // 3. Airy Glazed Botanical Pavilion & Redwood Entrance Arbor (+46, -2).
-    let (gu, gw) = (u - 46.0, w + 2.0);
-    if gu.abs() <= 14.5 && gw.abs() <= 10.5 && y < 9.5 {
-        // Low sandstone knee wall & redwood pergola frame.
-        if y < 1.3 && (gu.abs() > 13.0 || gw.abs() > 9.0) {
-            return if gw.abs() < 3.0 { 0 } else { stone };
-        }
-        // Glazed pitched steel-and-glass conservatory hall.
-        if y < 4.6 {
-            let on_wall = (13.8 - gu.abs()).min(9.8 - gw.abs());
-            if on_wall >= 0.0 && on_wall < 0.75f32.max(s) {
-                if gw.abs() < 2.6 && gu < 0.0 {
-                    return 0; // open grand archway facing Fountain Plaza
-                }
-                let post = line(gu, 3.4, 0.0, 0.28, s) || line(gw, 3.4, 0.0, 0.28, s);
-                return if post { white } else { glass };
-            }
-        } else {
-            let ridge = 8.4 - gw.abs() * 0.38;
-            if y <= ridge && gu.abs() <= 14.2 && gw.abs() <= 10.2 {
-                let shell = (ridge - y) < 0.55f32.max(s) || gu.abs() > 13.5;
-                if shell {
-                    return if line(gu, 3.4, 0.0, 0.26, s) || (ridge - y) < 0.25 && gw.abs() < 0.4 { white } else { glass };
-                }
-            }
-        }
-    }
-
-    // 4. Low blooming botanical shrubs & flowering hedges rising 0.2..1.0 m above the curated flowerbeds!
+    // 2. Low blooming shrubs rising 0.2..1.0 m over the mapped flowerbeds.
     if y < 1.15 {
-        let beds: [(f32, f32, f32, f32, u8, u8); 6] = [
-            (24.0, -20.0, 11.0, 6.0, colour(21, 4), colour(22, 2)),
-            (24.0, 18.0, 11.0, 6.5, colour(3, 4), colour(1, 4)),
-            (-2.0, 26.0, 13.0, 6.0, colour(18, 3), colour(19, 2)),
-            (-4.0, -28.0, 12.0, 6.0, colour(4, 4), colour(2, 3)),
-            (48.0, -24.0, 10.0, 5.5, colour(0, 4), colour(22, 1)),
-            (48.0, 24.0, 10.0, 5.5, colour(16, 3), colour(18, 2)),
-        ];
-        for &(bu, bw, ru, rw, c1, c2) in &beds {
+        for &(bu, bw, ru, rw, c1, c2) in &BOTANICAL_BEDS {
             let d = ((u - bu) / ru).powi(2) + ((w - bw) / rw).powi(2);
             if d < 0.92 {
                 let mound = 0.85 * (1.0 - d).sqrt() + 0.25 * (u * 0.9).sin().abs();
@@ -2011,32 +2052,27 @@ fn botanical_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     }
 
-    // 5. Specimen Botanical Trees: iconic SF Botanical Garden Pink Magnolias, Towering Redwoods & Golden Acacias!
+    // 3. Specimen trees: magnolias, redwoods and acacias round the meadow (places unchecked; those that stood in the
+    // County Fair Building are gone).
     let mag_a = kind(LEAVES, colour(22, 1));
     let mag_b = kind(LEAVES, colour(21, 2));
     let red_a = kind(LEAVES, colour(9, 6));
     let red_b = kind(LEAVES, colour(8, 6));
     let gold_a = kind(LEAVES, colour(4, 3));
     let gold_b = kind(LEAVES, colour(5, 4));
-    let trees: [(f32, f32, f32, f32, f32, u32, u8); 18] = [
-        // Magnolias flanking Fountain Plaza & Pond
+    let trees: [(f32, f32, f32, f32, f32, u32, u8); 15] = [
         (-10.0, 16.0, 3.0, 5.2, 4.4, 101, 0),
         (16.0, -34.0, 3.2, 5.5, 4.6, 103, 0),
         (36.0, -34.0, 3.0, 5.0, 4.2, 107, 0),
-        (34.0, 34.0, 3.1, 5.2, 4.5, 109, 0),
         (-24.0, -30.0, 3.0, 5.0, 4.4, 113, 0),
-        // Coastal Redwood Grove (tall conical dark evergreens on perimeter)
         (-62.0, -34.0, 7.5, 6.2, 13.5, 127, 1),
         (-64.0, 14.0, 8.0, 6.4, 14.0, 131, 1),
         (-56.0, 38.0, 7.0, 5.8, 12.5, 137, 1),
         (-28.0, 42.0, 7.5, 6.0, 13.0, 139, 1),
         (64.0, -36.0, 7.2, 5.8, 12.8, 149, 1),
-        (66.0, 32.0, 7.6, 6.0, 13.2, 151, 1),
         (4.0, -44.0, 7.0, 5.8, 12.2, 157, 1),
         (6.0, 44.0, 7.4, 6.0, 12.8, 163, 1),
-        // Sunlit Golden Acacias & Australian/Mediterranean specimen trees
         (-46.0, -24.0, 3.4, 5.4, 4.8, 167, 2),
-        (26.0, 40.0, 3.2, 5.0, 4.4, 173, 2),
         (-42.0, 30.0, 3.6, 5.2, 4.6, 179, 2),
         (64.0, 4.0, 3.5, 5.0, 4.6, 181, 0),
         (-66.0, -8.0, 6.5, 5.6, 11.0, 191, 1),
@@ -2862,13 +2898,6 @@ mod tests {
         assert_eq!(material(surface(0.0, -19.0)), GLASS);
         assert_eq!(material(surface(19.0, -19.0)), GRASS);
         assert_eq!(material(academy_sciences(1.3, 6.0, -55.8, 0.2)), GLASS);
-        // Japanese Tea Garden: koi pond water surface, 5-story pagoda, and arched Drum Bridge.
-        assert_eq!(surface_at(JAPANESE_TEA_GARDEN, 2.0, 13.0, 75.0, 0.2).map(material), Some(WATER));
-        assert_ne!(japanese_tea_garden(-16.0, 14.0, -12.0, 0.2), 0);
-        assert_eq!(material(japanese_tea_garden(9.0, 4.0, 8.0, 0.2)), WOOD);
-        // SF Botanical Garden: reflective pond, flowerbeds, and glass pavilion.
-        assert_eq!(surface_at(BOTANICAL_GARDEN, -26.0, -4.0, 74.0, 0.2).map(material), Some(WATER));
-        assert_eq!(material(botanical_garden(47.7, 3.0, 7.6, 0.2)), GLASS);
         // Conservatory of Flowers: glazed white-ribbed dome (r ~= 8.45 m at y=16) + floral Valley parterres.
         assert_ne!(conservatory(0.0, 16.0, 16.0, 8.2, 0.2), 0);
         assert_eq!(surface_at(CONSERVATORY, 0.0, 56.0, 71.0, 0.2).map(material), Some(LEAVES));
@@ -2894,5 +2923,65 @@ mod tests {
         assert_ne!(kind_at(ACADEMY_SCIENCES, 30.0, 21.5, -18.0, 0.2), 0);
         assert!(!owns(ACADEMY_SCIENCES, 40.0, 12.0, 52.0));
         assert_eq!(kind_at(ACADEMY_SCIENCES, 40.0, 12.0, 52.0, 0.4), 0);
+    }
+
+
+    /// The gardens' parts stand where OpenStreetMap maps them (#60). Each place is an OSM way's middle in the
+    /// landmark's frame (u east, w south of its `at`); the ways are named at the constants in this file.
+    #[test]
+    fn tea_garden_parts_stand_on_their_mapped_footprints() {
+        let g = |u: f32, y: f32, w: f32| japanese_tea_garden(u, y, w, 0.2);
+        // The Pagoda (way 34221099) at (-17.8, 9.2), 8.2 m across: a storey at its middle, and nothing 22 m north
+        // of it where it was drawn before (-16, -12).
+        assert_ne!(g(-17.8, 3.0, 9.2), 0);
+        assert!(!matches!(material(g(-17.8, 3.0, 9.2)), LEAVES));
+        assert_eq!(g(-16.0, 3.0, -12.0), 0);
+        assert_eq!(g(-17.8, 3.0, 9.2 + 6.5), 0, "the pagoda keeps to its 8.2 m footprint");
+        // The Tea House (way 34220947) at (33.2, -21.9) in the north-east, not across the garden at (-14, 24).
+        assert_ne!(g(33.2, 2.0, -21.9), 0);
+        assert_eq!(g(-14.0, 2.0, 24.0), 0);
+        // The Drum Bridge (way 136898969) crosses at (30.75, 3.0), running north and south.
+        assert_eq!(material(g(30.75, 2.1, 3.0)), WOOD);
+        assert_eq!(g(9.0, 4.0, 8.0), 0);
+        // The Main Gate (way 494967002, node 392430963) at (57.5, -3.9).
+        assert_ne!(g(57.5, 6.0, -3.9), 0);
+        assert_eq!(g(42.0, 6.0, -2.0), 0);
+        // The pond (way 409163924) is water inside its outline, and the old invented lobe at (2, 13) is not.
+        assert_eq!(surface_at(JAPANESE_TEA_GARDEN, 20.0, 38.0, 75.0, 0.2).map(material), Some(WATER));
+        assert_ne!(surface_at(JAPANESE_TEA_GARDEN, 2.0, 13.0, 75.0, 0.2).map(material), Some(WATER));
+        // Outside the mapped fence (way 30900516) the park is the map's own: the old square's corner, the drive.
+        assert!(!owns(JAPANESE_TEA_GARDEN, 58.0, 2.0, 55.0));
+        assert!(!owns(JAPANESE_TEA_GARDEN, -58.0, 2.0, -58.0));
+        assert_eq!(surface_at(JAPANESE_TEA_GARDEN, 58.0, 55.0, 75.0, 0.2), None);
+        assert!(owns(JAPANESE_TEA_GARDEN, 0.0, 2.0, 0.0));
+        // Mapped buildings the rule does not draw stay the map's: the Gift Shop and the Temple Gate.
+        assert!(!owns(JAPANESE_TEA_GARDEN, 35.1, 2.0, -37.1));
+        assert!(!owns(JAPANESE_TEA_GARDEN, -9.1, 2.0, 25.2));
+        assert_eq!(g(35.1, 2.0, -37.1), 0);
+    }
+
+    #[test]
+    fn botanical_garden_draws_only_what_is_mapped_in_its_box() {
+        let g = |u: f32, y: f32, w: f32| botanical_garden(u, y, w, 0.2);
+        // The Great Meadow (way 476290501) is grass: no invented pond or Moon Viewing Pavilion on it.
+        assert_eq!(surface_at(BOTANICAL_GARDEN, -26.0, -4.0, 74.0, 0.2).map(material), Some(GRASS));
+        assert_eq!(g(-10.0, 1.5, -4.0), 0);
+        // No glasshouse at the gate: nothing of the rule's is glass anywhere in its box.
+        for u in (-76..=76).step_by(2) {
+            for w in (-56..=56).step_by(2) {
+                for y in [1.0, 3.0, 6.0] {
+                    assert_ne!(material(g(u as f32, y, w as f32)), GLASS, "glass at ({u}, {y}, {w})");
+                }
+            }
+        }
+        // The fountain (way 1036243321) at (26.2, 21.3), its pool water and its court gravel.
+        assert_eq!(surface_at(BOTANICAL_GARDEN, 26.2, 21.3 + 0.6, 74.0, 0.2).map(material), Some(WATER));
+        assert_eq!(surface_at(BOTANICAL_GARDEN, 26.2 - 5.0, 21.3, 74.0, 0.2).map(material), Some(SAND));
+        // The County Fair Building (way 25822470) and the ticket kiosk (way 839987588) are the map's, not erased.
+        assert!(!owns(BOTANICAL_GARDEN, 45.0, 3.0, 25.0));
+        assert_eq!(g(45.0, 3.0, 25.0), 0);
+        assert_eq!(surface_at(BOTANICAL_GARDEN, 45.0, 25.0, 74.0, 0.2), None);
+        assert!(!owns(BOTANICAL_GARDEN, 43.5, 2.0, -3.7));
+        assert!(owns(BOTANICAL_GARDEN, 0.0, 2.0, 0.0));
     }
 }
