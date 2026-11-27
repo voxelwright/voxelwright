@@ -187,39 +187,40 @@ export function deformPointCpu(
   let px = p[0], py = p[1], pz = p[2]
   let nx = n[0], ny = n[1], nz = n[2]
   if (!state || state.dentCount < 1) return { pos: [px, py, pz], norm: [nx, ny, nz] }
+  // Each map pushes in a single direction. Its inverse-transpose updates the wheel normal too.
+  const push = (ax: number, ay: number, az: number, amount: number, gx: number, gy: number, gz: number) => {
+    const k = (ax * nx + ay * ny + az * nz) / (1 + ax * gx + ay * gy + az * gz)
+    nx -= k * gx; ny -= k * gy; nz -= k * gz
+    px += ax * amount; py += ay * amount; pz += az * amount
+  }
   const count = Math.min(state.dentCount, MAX_DENTS)
   for (let i = 0; i < count; i++) {
     const d = state.dents[i]
     if (d.radius <= 0.0001) continue
     const [dx, dy, dz] = d.dir, inv = 1 / d.radius
     let x = (px - d.center[0]) * inv, y = (py - d.center[1]) * inv, z = (pz - d.center[2]) * inv
-    let support = 1 - x*x - y*y - z*z
+    let support = 1 - x * x - y * y - z * z
     if (support <= 0 || d.depth <= 0) continue
-    // Each map pushes in a single direction. Its inverse-transpose updates the wheel normal too.
-    const push = (ax: number, ay: number, az: number, amount: number, gx: number, gy: number, gz: number) => {
-      const k = (ax*nx + ay*ny + az*nz) / (1 + ax*gx + ay*gy + az*gz)
-      nx -= k*gx; ny -= k*gy; nz -= k*gz
-      px += ax*amount; py += ay*amount; pz += az*amount
-    }
     const depth = d.depth
     const slope = -4 * support * depth * inv
-    push(dx, dy, dz, depth * support*support, slope*x, slope*y, slope*z)
+    push(dx, dy, dz, depth * support * support, slope * x, slope * y, slope * z)
 
     // The compressed metal gathers into a diagonal ridge just behind the contact.
     x = (px - d.center[0]) * inv; y = (py - d.center[1]) * inv; z = (pz - d.center[2]) * inv
-    support = 1 - x*x - y*y - z*z
+    support = 1 - x * x - y * y - z * z
     const ax = 1.75 * dx + 1.65 * dz, az = 1.75 * dz - 1.65 * dx
-    const along = ax*x + az*z + 0.95*y - 0.9, ridge = 1 - along*along
+    const along = ax * x + az * z + 0.95 * y - 0.9, ridge = 1 - along * along
     if (support <= 0 || ridge <= 0 || Math.abs(dy) === 1) continue
     const shape = support * ridge
-    const returned = 0.49 * (1 - dy*dy) + 0.60 * dy
+    // The lip turns back out as it rises. This is the CPU form of the shader's lip vector.
+    const returned = 0.49 * (1 - dy * dy) + 0.60 * dy
     const g = -4 * shape * depth * inv
-    push(-dx*returned, 0.60-dy*returned, -dz*returned, depth*shape*shape,
-      g*(ridge*x + support*along*ax), g*(ridge*y + support*along*0.95), g*(ridge*z + support*along*az))
+    push(-dx * returned, 0.60 - dy * returned, -dz * returned, depth * shape * shape,
+      g * (ridge * x + support * along * ax), g * (ridge * y + support * along * 0.95), g * (ridge * z + support * along * az))
 
   }
   const norm = Math.hypot(nx, ny, nz) || 1
-  return { pos: [px, py, pz], norm: [nx/norm, ny/norm, nz/norm] }
+  return { pos: [px, py, pz], norm: [nx / norm, ny / norm, nz / norm] }
 }
 
 /** Offset in floats, 16-byte aligned within out. Exactly 52 floats: meta, six posR,

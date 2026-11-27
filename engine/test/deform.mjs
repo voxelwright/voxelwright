@@ -225,6 +225,13 @@ for (const vehicle of [0,1,2,3,5]) {
 for (let y = 8; y <= 32; y += 2) for (let z = 8; z <= 32; z += 2) for (const x of [19.999, 20, 30, 45, 45.001]) {
   const p = [x, y, z]; vertices.push(...p, 3); expected.push({ p, s: protectedState })
 }
+// Sample a 1.2 m painted patch across a single hit, finely enough to resolve its gouges.
+const swatchStart = expected.length
+for (let j = -10; j <= 10; j++) for (let i = -30; i <= 30; i++) {
+  const p = [hood[0]+i*0.2, hood[1], hood[2]+j*0.15]
+  vertices.push(...p, 1); expected.push({p,s:state})
+}
+const swatchEnd = expected.length
 const benchStates = new Float32Array(64 * 52)
 for (let i = 0; i < 64; i++) packDeformUniforms(multi, benchStates, i * 52)
 vertices.push(108,35,36,4); expected.push({ p: [108,35,36], s: windshield })
@@ -275,7 +282,7 @@ struct Answer { pos: vec4f, norm: vec4f, damage: vec4f, paint: vec4f }
   let i = gid.x; if (i >= arrayLength(&points)) { return; }
   let p = points[i]; let def = fleet.cars[u32(p.w)];
   let d = deformPoint(p.xyz, vec3f(0.0, 1.0, 0.0), def);
-  let paint = deformPaint(vec3f(0.7, 0.12, 0.04), d.scuff, d.crease, p.xyz);
+  let paint = deformPaint(vec3f(0.7, 0.12, 0.04), d.scuff, d.crease, (p.xyz-def.posR[0].xyz).xzy);
   answers[i] = Answer(vec4f(d.pos, 1.0), vec4f(d.norm, 0.0), vec4f(d.scuff, d.crease, paint.roughBoost, paint.clearcoatKeep), vec4f(paint.albedo, deformGlass(def.status.w, d.scuff, p.xyz - def.posR[0].xyz)));
 }
 @compute @workgroup_size(64) fn base(@builtin(global_invocation_id) gid: vec3u) {
@@ -377,6 +384,16 @@ struct ViewOut { @builtin(position) clip: vec4f, @location(0) p: vec3f, @locatio
     }
     for (const j of [8,9,10,11,15]) assert.ok(row[j] >= 0 && row[j] <= 1)
   }
+  let marked = 0, outsideContact = 0
+  for (let i = swatchStart; i < swatchEnd; i++) {
+    if (Math.abs(gpu.values[i*16+12]-0.7) < 0.05) continue
+    marked++
+    const p = expected[i].p
+    if (Math.abs(p[0]-hood[0]) > 4.0 || Math.abs(p[2]-hood[2]) > 1) outsideContact++
+  }
+  const coverage = marked / (swatchEnd-swatchStart)
+  console.log(`Paint swatch: ${(coverage*100).toFixed(1)}% marked, ${outsideContact} marks outside the contact strip`)
+  assert.ok(coverage > 0.015 && coverage < 0.25 && outsideContact === 0, 'a scrape has a visible core and finite tips')
   const windowRow = gpu.values.slice(-16)
   vector(windowRow.slice(0,3), [108,35,36], 0); assert.ok(windowRow[8] > 0 && windowRow[15] > 0, 'protected windshield still scuffs/cracks')
   assert.ok(changed > 300 && tilted > 100 && scuffed > 300 && cracked > 100)
