@@ -45,7 +45,14 @@ const PLACES = [
   ['Lombard Street', 37.80214, -122.41874, 'landmark'],
   ['Pier 39', 37.80867, -122.40982, 'landmark'],
   ['Golden Gate Bridge', 37.8078, -122.4748, 'landmark'],
-  ['Painted Ladies', 37.7763, -122.4328, 'landmark'],
+  ['Fort Point', 37.8101, -122.4765, 'landmark'],
+  ['Palace of Fine Arts', 37.8029, -122.4484, 'landmark'],
+  ['California Academy of Sciences', 37.7704, -122.4666, 'landmark'],
+  ['de Young Museum', 37.7709, -122.4682, 'landmark'],
+  ['Japanese Tea Garden', 37.7702, -122.4695, 'landmark'],
+  ['San Francisco Botanical Garden', 37.7672, -122.4670, 'landmark'],
+  ['Conservatory of Flowers', 37.7719, -122.4602, 'landmark'],
+  ['Painted Ladies', 37.7763, -122.4335, 'landmark'],
   ['Twin Peaks', 37.7544, -122.4477, 'landmark'],
   ['Sutro Tower', 37.7552, -122.4528, 'landmark'],
   ['Oracle Park', 37.7786, -122.3893, 'landmark'],
@@ -456,6 +463,13 @@ export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-t
   const HERO_SHORE = {
     'Golden Gate Bridge': [37.8078, -122.4748],
     'Bay Bridge, western span': [37.7913, -122.3889],
+    'Fort Point': [37.8101, -122.4765],
+    'California Academy of Sciences': [37.7704, -122.4666],
+    'de Young Museum': [37.7709, -122.4682],
+    'Japanese Tea Garden': [37.7702, -122.4695],
+    'San Francisco Botanical Garden': [37.7672, -122.4670],
+    'Conservatory of Flowers': [37.7719, -122.4602],
+    'Painted Ladies': [37.7763, -122.4335],
   }
   const heroes = existsSync(heroesPath) ? JSON.parse(readFileSync(heroesPath, 'utf8')) : []
   const landmarks = []

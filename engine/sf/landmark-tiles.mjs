@@ -16,10 +16,16 @@ const SIZES = [2500, 10000, 40000]
 export const FRAME = '10n4250'
 export const EARTH = join(homedir(), '.village', 'engine', 'bay', 'earth', 'tiles', FRAME)
 
-/** Every tile round the landmarks: [level, x, z]. The Golden Gate's south end too, where one walks onto it. */
+/** Every tile round the landmarks: [level, x, z]. Include BOTH ends of bridges so no bridge ever ends in open water (#60). */
 export function landmarkTiles() {
   const listed = JSON.parse(readFileSync(join(root, 'sf', 'heroes.json'), 'utf8'))
-  const at = [...listed.filter((h) => h.only !== 'night').map((h) => h.at), [37.8107, -122.4776]]
+  const bridgeEnds = [
+    [37.8107, -122.4776], // Golden Gate Bridge south end (Fort Point / Presidio)
+    [37.8325, -122.4798], // Golden Gate Bridge north end (Marin Headlands)
+    [37.7897, -122.3882], // Bay Bridge west anchorage (Rincon Hill)
+    [37.8105, -122.3655], // Bay Bridge east end (Yerba Buena Island)
+  ]
+  const at = [...listed.filter((h) => h.only !== 'night').map((h) => h.at), ...bridgeEnds]
   const out = new Map()
   for (const [lat, lon] of at) {
     const p = place(lat, lon)

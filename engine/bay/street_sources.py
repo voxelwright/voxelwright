@@ -13,6 +13,30 @@ UTM = Transformer.from_crs(26910, 4326, always_xy=True)
 KEEP = set(
     "name ref tunnel bridge layer highway footway cycleway crossing crossing:markings railway gauge operator electrified route type restriction oneway junction lanes lanes:forward lanes:backward access motor_vehicle service surface sidewalk parking:both parking:left parking:right parking:lane:both parking:lane:left parking:lane:right".split()
 )
+SEMANTIC_BUILDING_TAGS = (
+    "name", "building", "building:colour", "building:material", "roof:shape", "roof:colour",
+    "roof:material", "height", "building:levels", "historic", "tourism", "amenity", "wikidata",
+)
+SEMANTIC_PLACE_TAGS = ("name", "natural", "water", "leisure", "landuse", "amenity", "garden:type", "surface", "wikidata")
+
+
+def extract_semantics(items):
+    """Extract architectural building tags, inland water bodies, and botanical/park gardens from an OSM tile
+    without any extra network requests (#60)."""
+    buildings, water, gardens = {}, [], []
+    for (kind, id_), item in items.items():
+        if kind != "way":
+            continue
+        tags = item.get("tags", {})
+        if tags.get("building") not in (None, "no"):
+            kept = {k: tags[k] for k in SEMANTIC_BUILDING_TAGS if k in tags}
+            if len(kept) > 1 or kept.get("building") not in (None, "yes"):
+                buildings[str(id_)] = kept
+        if tags.get("natural") == "water" or "water" in tags or tags.get("amenity") == "fountain":
+            water.append({"id": id_, "nodes": item.get("nodes", []), "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
+        elif tags.get("leisure") in ("garden", "park") or tags.get("landuse") in ("flowerbed", "meadow", "orchard"):
+            gardens.append({"id": id_, "nodes": item.get("nodes", []), "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
+    return {"buildings": buildings, "water": water, "gardens": gardens}
 
 
 def osm(w, s, e, n):
@@ -68,6 +92,9 @@ def acquire(name, path):
                     "tags": {k: v for k, v in tags.items() if k in KEEP},
                 }
             )
+    semantics = extract_semantics(items)
+    for feat in semantics["water"] + semantics["gardens"]:
+        nodes.update(feat["nodes"])
     coords = {
         id_: [
             items["node", id_]["lon"],
@@ -97,6 +124,7 @@ def acquire(name, path):
                 "nodes": coords,
                 "relations": relations,
                 "businesses": businesses,
+                "semantics": semantics,
             },
             stream,
             separators=(",", ":"),

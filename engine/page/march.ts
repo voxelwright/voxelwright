@@ -587,17 +587,15 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
       over = vec4f(0.56, 0.54, 0.5, max(step(fu, 0.17), select(0.0, step(fa, 0.11), starts)) * lines * 0.85);
     }
   } else if (stuff == 9u) {
-    // A painted wall of boards two cells high, each lapped over the one below: the lower cell is in its shade.
+    // Painted stucco & fine architectural siding: smooth troweled plaster finish with subtle horizontal course
+    // modulation so residential stucco walls stay crisp rather than ribbed barn clapboard (#60).
     if (wall) {
-      // Far off the lower cell of a board is in the shade of the one above; near, it is a line of shadow under the lap.
       let lower = (up & 1) == 0;
-      let lap = select(0.0, 1.0, !lower && fu > 0.7);
-      // Where a board's two cells are under three pixels, its shade alternates faster than pixels and beats with
-      // them into ribs: take the mean shade.
-      let boards = clamp((sharp - 1.5) / 1.5, 0.0, 1.0);
-      v -= mix(mix(0.085, select(0.0, 0.17, lower), boards) * fine, lap * 0.42 + ((f32(up & 1) + fu) * 0.5 - 0.5) * 0.07, lines);
+      let course = select(0.0, 1.0, !lower && fu > 0.78);
+      let fine_band = clamp((sharp - 2.0) / 2.0, 0.0, 1.0);
+      v -= mix(mix(0.025, select(0.0, 0.055, lower), fine_band) * fine, course * 0.13 + ((f32(up & 1) + fu) * 0.5 - 0.5) * 0.03, lines);
     }
-    v += worn * 0.14 + speck * 0.03 * grain;
+    v += worn * 0.11 + speck * 0.055 * grain;
   } else if (stuff == 10u) {
     // Wood: planks two cells wide, upright on a wall and along a floor, each its own shade, with a grain along it.
     var plank = vec3i(along >> 1u, across, 0);

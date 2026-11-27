@@ -71,6 +71,11 @@ def acquire(archive, dest):
         if kind == "node"
     }
     buildings, fixtures, wires = [], [], []
+    osm_bldg_tags, osm_water, osm_gardens = {}, [], []
+    KEEP_BLDG = (
+        "name", "building", "building:colour", "building:material",
+        "roof:shape", "roof:colour", "roof:material", "height", "building:levels", "historic", "tourism",
+    )
     trolley_ways = {
         m["ref"]
         for (kind, _), e in elements.items()
@@ -103,6 +108,21 @@ def acquire(archive, dest):
             and line[0] == line[-1]
         ):
             buildings.append([i, line[:-1]])
+            kept_t = {k: tags[k] for k in KEEP_BLDG if k in tags}
+            if len(kept_t) > 1 or kept_t.get("building") not in (None, "yes"):
+                osm_bldg_tags[str(i)] = kept_t
+        if (
+            (tags.get("natural") == "water" or "water" in tags or tags.get("amenity") == "fountain")
+            and len(line) >= 4
+            and line[0] == line[-1]
+        ):
+            osm_water.append([i, line[:-1], tags.get("water") or tags.get("amenity") or "water"])
+        if (
+            (tags.get("leisure") == "garden" or tags.get("landuse") == "flowerbed")
+            and len(line) >= 4
+            and line[0] == line[-1]
+        ):
+            osm_gardens.append([i, line[:-1], tags.get("garden:type") or tags.get("leisure") or tags.get("landuse")])
         wire = None
         if (
             tags.get("power") in ("minor_line", "line")
@@ -118,6 +138,9 @@ def acquire(archive, dest):
         version=1,
         extraDataSF=missing,
         osmBuildings=buildings,
+        osmBuildingTags=osm_bldg_tags,
+        osmWater=osm_water,
+        osmGardens=osm_gardens,
         assessor2025=assessor,
         fixtures=fixtures,
         wires=wires,

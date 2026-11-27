@@ -291,7 +291,8 @@ def facades(sq, src, detail, stats):
         mid = (pts + next_) / 2
         near = np.zeros(len(pts), bool)
         clear = np.ones(len(pts), bool)
-        for dist in (15, 30, 55, 80, 110, 145):
+        # Search up to 23 m outward so hillside/setback houses with front yards are still classified as street-facing (#60).
+        for dist in (15, 30, 55, 80, 110, 145, 185, 230):
             ij = np.floor((mid + outward * dist - sq.h[10:12]) / 5).astype(int)
             x, z = ij.clip(0, sq.h[9] - 1).T
             clear &= (ij == ij.clip(0, sq.h[9] - 1)).all(1)
@@ -305,15 +306,18 @@ def facades(sq, src, detail, stats):
         ]
         if not fronts:
             continue
+        # Do not attach synthetic bay extrusion (`features |= 1`) when the surveyed footprint already traces faceted bays (#60).
+        faceted_bays = len(pts) >= 7 and sum(1 for i in fronts if 5 <= length[i] <= 45) >= 3
         main = max(fronts, key=lambda i: length[i])
         for i in fronts:
             # Flags describe this wall, not every elevation of the parcel.
             features = 0
-            if home and (not year or year < 1960) and length[i] >= 35:
+            if home and not faceted_bays and (not year or year < 1960) and length[i] >= 35:
                 features |= 1
-            if (year and year < 1960) or (
-                stories >= 2 and sq.verts[row[0] + i][2] & 128
-            ):
+            # Only emit protruding flat-parapet cornices where lidar confirmed a level eave (bit 128) and the edge is
+            # not an isolated short corner stub, avoiding floating white turrets on pitched gables (#60).
+            has_flat_eave = bool(sq.verts[row[0] + i][2] & 128)
+            if has_flat_eave and length[i] >= 14 and ((year and year < 1960) or stories >= 2):
                 features |= 2
             if (
                 i == main
@@ -449,6 +453,20 @@ def streets(sq, network, stats):
     sq.cls[stripes] |= 32
 
 
+def inland_water(sq, detail, stats):
+    """Stamp retained OSM inland water polygons (park ponds, lagoons, fountains) onto the surface class grid
+    so elevated water bodies are rendered as reflective WATER rather than concrete YARD (#60)."""
+    for _id, ring, _kind in detail.get("osmWater") or ():
+        part = sq.window([ring])
+        if not part:
+            continue
+        w, mask = part
+        # Keep roads/bridges intact; turn ground/yard/grass inside mapped water basins into WATER (5).
+        paint = mask & ((sq.cls[w] & 7) != 0)
+        sq.cls[w][paint] = (sq.cls[w][paint] & 240) | 5
+        stats["inlandWaterSamples"] += int(paint.sum())
+
+
 def apply(path, archive, sidecar, graph, stage=5, *, public_works_fixtures):
     sq = Square(path)
     stats = Counter()
@@ -457,6 +475,7 @@ def apply(path, archive, sidecar, graph, stage=5, *, public_works_fixtures):
         if detail["version"] != 1 or detail["square"] != path.stem:
             raise ValueError("incorrect street detail input")
         audit = buildings(sq, src, detail, stats)
+        inland_water(sq, detail, stats)
         if stage >= 2:
             walls(sq, stats)
         if stage >= 3:

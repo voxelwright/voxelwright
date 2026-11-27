@@ -69,6 +69,69 @@
     "toward": [37.802927, -122.447414],
     "foot": 1.7,
     "step": 4,
-    "from": "The rotunda's place and its height of 49 m (162 feet) as published; the exhibition hall behind is the map's (Overture Maps 2026-10-21.0, © OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 2.68 m NAVD88. Piers, arches, colonnade and planter boxes by eye. The rule is engine/core/src/heroes.rs."
+    "from": "The rotunda's place and its height of 49 m (162 feet) as published; the exhibition hall behind is the map's (Overture Maps 2026-10-21.0, © OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 2.68 m NAVD88. Piers, arches, colonnade, planter boxes and swan lagoon by rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Fort Point",
+    "sort": 10,
+    "at": [37.810606, -122.477123],
+    "toward": [37.810106, -122.478069],
+    "foot": 1.8,
+    "step": 4,
+    "from": "Third System brick coastal fort (1861) directly beneath the Golden Gate Bridge's south arch: footprint and elevation from DataSF/Overture Maps (© OpenStreetMap contributors, Overture Maps Foundation) and USGS 3DEP. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "California Academy of Sciences",
+    "sort": 11,
+    "at": [37.769726, -122.465976],
+    "toward": [37.770327, -122.46513],
+    "foot": 73.0,
+    "step": 4,
+    "from": "Renzo Piano (2008): 158 by 126 m footprint, cantilevered photovoltaic glass canopy, 11 m glass curtain walls and 7-hill rolling living green roof. Outline and datum from DataSF/Overture Maps and USGS 3DEP. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Japanese Tea Garden",
+    "sort": 12,
+    "at": [37.770194, -122.470198],
+    "toward": [37.770194, -122.469198],
+    "foot": 75.5,
+    "step": 4,
+    "from": "Golden Gate Park Japanese Tea Garden (1894): 5-story vermilion pagoda, arched wooden Drum Bridge over koi ponds, overhanging Tea House, Main Gate, Zen rock garden, stone lanterns, cherry blossoms and Japanese maples. Park footprint from Overture Maps. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "San Francisco Botanical Garden",
+    "sort": 13,
+    "at": [37.7672, -122.4679],
+    "toward": [37.7672, -122.4669],
+    "foot": 75.0,
+    "step": 4,
+    "from": "Golden Gate Park San Francisco Botanical Garden: waterfowl and lily pond with Moon Viewing Pavilion, Fountain Plaza, glazed Botanical Pavilion, winding gravel paths, curated botanical flowerbeds, Magnolias and Redwoods. Footprint from Overture Maps. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Conservatory of Flowers",
+    "sort": 14,
+    "at": [37.772627, -122.460235],
+    "toward": [37.772726, -122.459107],
+    "foot": 74.4,
+    "step": 4,
+    "from": "Victorian white-framed glazed glasshouse (1879) and Conservatory Valley geometric floral carpet parterres. Outline and terrace elevation from DataSF/Overture Maps and USGS 3DEP. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Painted Ladies",
+    "sort": 15,
+    "at": [37.776274, -122.432753],
+    "toward": [37.775829, -122.432667],
+    "foot": 60.6,
+    "step": 4,
+    "from": "710-722 Steiner Street (1892-1896): seven stepped Queen Anne Victorian rowhouses facing Alamo Square. Lot positions and hillside elevations surveyed from DataSF footprints and USGS 3DEP; colours from Alamo Square reference photography. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "de Young Museum",
+    "sort": 16,
+    "at": [37.771496, -122.468691],
+    "toward": [37.770898, -122.46954],
+    "foot": 74.5,
+    "step": 4,
+    "from": "Herzog & de Meuron (2005): 150 by 74 m oxidized copper-clad museum with cantilevered Music Concourse overhang and 44 m twisting Hamon Observation Tower. Footprint and tower position from DataSF/Overture Maps and USGS 3DEP. Rule in engine/core/src/heroes.rs."
   }
 ]

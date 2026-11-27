@@ -12,6 +12,7 @@
 //! A rule must say how it meets cells coarser than its detail: a member thinner than a cell is still there where
 //! the cell holds its middle line (a cable must not come and go), a pattern finer than a cell becomes its shade.
 
+use crate::hash::hash3;
 use crate::kinds::*;
 use crate::tree::Kind;
 use std::cell::RefCell;
@@ -24,6 +25,13 @@ pub const FERRY_BUILDING: u32 = 5;
 pub const SUTRO_TOWER: u32 = 7;
 pub const CITY_HALL: u32 = 8;
 pub const FINE_ARTS: u32 = 9;
+pub const FORT_POINT: u32 = 10;
+pub const ACADEMY_SCIENCES: u32 = 11;
+pub const JAPANESE_TEA_GARDEN: u32 = 12;
+pub const BOTANICAL_GARDEN: u32 = 13;
+pub const CONSERVATORY: u32 = 14;
+pub const PAINTED_LADIES: u32 = 15;
+pub const DE_YOUNG: u32 = 16;
 
 /// The coarsest cells of the world a landmark is made in, in cells of 10 cm: 0.8 m, which are the far model's
 /// finest, so that where the two meet they are cells of one size. (At 1.6 m the pyramid from 880 m was half the
@@ -38,13 +46,20 @@ pub const REALM_MOST: i32 = 16;
 pub fn reach(sort: u32) -> Option<[f32; 6]> {
     match sort {
         SALESFORCE => Some([-34.0, 0.0, -34.0, 34.0, 327.0, 34.0]),
-        GOLDEN_GATE => Some([GG_SOUTH - 4.0, -30.0, -48.0, GG_NORTH + 4.0, GG_TOP + 1.0, 48.0]),
+        GOLDEN_GATE => Some([GG_SOUTH - 10.0, -30.0, -54.0, GG_NORTH + 140.0, GG_TOP + 1.0, 54.0]),
         TRANSAMERICA => Some([-29.0, 0.0, -29.0, 29.0, TA_TOP + 1.0, 29.0]),
         BAY_BRIDGE => Some([BB_WEST - 16.0, -30.0, -30.0, BB_EAST + 16.0, 162.0, 30.0]),
         FERRY_BUILDING => Some([-FB_HALF - 1.0, 0.0, -FB_DEEP - 1.0, FB_HALF + 1.0, FB_TOP + 1.0, FB_DEEP + 1.0]),
         SUTRO_TOWER => Some([-40.0, 0.0, -40.0, 40.0, ST_TOP + 1.0, 40.0]),
-        CITY_HALL => Some([-CH_LONG - 1.0, 0.0, -CH_WIDE - 1.0, CH_LONG + 1.0, CH_TOP + 1.0, CH_WIDE + 1.0]),
-        FINE_ARTS => Some([-PF_ARC - 8.0, 0.0, -PF_ARC - 8.0, PF_ARC * 0.5, PF_TOP + 1.0, PF_ARC + 8.0]),
+        CITY_HALL => Some([-CH_LONG - 2.0, -2.0, -CH_WIDE - 8.0, CH_LONG + 2.0, CH_TOP + 1.0, CH_WIDE + 8.0]),
+        FINE_ARTS => Some([-PF_ARC - 8.0, -2.0, -86.0, 98.0, PF_TOP + 2.0, 86.0]),
+        FORT_POINT => Some([-54.0, -5.0, -34.0, 54.0, 25.0, 34.0]),
+        ACADEMY_SCIENCES => Some([-82.0, -7.0, -66.0, 82.0, 24.0, 66.0]),
+        JAPANESE_TEA_GARDEN => Some([-66.0, -10.0, -66.0, 66.0, 26.0, 66.0]),
+        BOTANICAL_GARDEN => Some([-80.0, -10.0, -60.0, 80.0, 26.0, 60.0]),
+        CONSERVATORY => Some([-50.0, -10.0, -22.0, 50.0, 24.0, 94.0]),
+        PAINTED_LADIES => Some([-28.5, -5.0, -11.0, 27.0, 21.0, 13.0]),
+        DE_YOUNG => Some([-80.0, -8.0, -40.0, 78.0, 47.0, 44.0]),
         _ => None,
     }
 }
@@ -53,17 +68,72 @@ pub fn reach(sort: u32) -> Option<[f32; 6]> {
 /// say an arch or a lattice, are not), or only adds to what the map has there (a bridge over the water).
 pub fn owns(sort: u32, u: f32, y: f32, w: f32) -> bool {
     match sort {
-        SALESFORCE | TRANSAMERICA | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL => true,
+        SALESFORCE | TRANSAMERICA | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FORT_POINT | ACADEMY_SCIENCES
+        | PAINTED_LADIES | DE_YOUNG => true,
         // Suspension spans over land or shore carry lidar cable/deck returns that otherwise extrude to ground as solid
-        // curtains in the far model (y == 0) and high cells; below 22-24 m in cells, shore structures like Fort Point stay.
-        GOLDEN_GATE => (-1095.0..=1095.0).contains(&u) && w.abs() <= 30.0 && (y <= 0.0 || y >= 22.0),
+        // curtains; below 22 m under the arch, Fort Point stays. Also claim the south anchorage block (eliminating the
+        // embedded DataSF building at u=-1149 m), the south tower pier fender ring (eliminating the lidar spike beside
+        // the pier), and the north Marin Headlands abutment (#60).
+        GOLDEN_GATE => {
+            ((-1095.0..=1095.0).contains(&u) && w.abs() <= 30.0 && (y <= 0.0 || y >= 22.0))
+                || ((u + GG_TOWER).abs() <= 42.0 && w.abs() <= 52.0 && y >= 0.0)
+                || ((-1265.0..-1090.0).contains(&u) && w.abs() <= 34.0 && y >= 0.0)
+                || ((1050.0..=GG_NORTH + 135.0).contains(&u) && w.abs() <= 52.0 && y >= 0.0)
+        }
         BAY_BRIDGE => (BB_WEST..=BB_EAST).contains(&u) && w.abs() <= 26.0 && (y <= 0.0 || y >= 24.0),
-        // The rotunda and the colonnade's band, not the exhibition hall behind it.
+        // The rotunda, the colonnade's arc, and the open lagoon basin east of the rotunda (not the exhibition hall behind).
         FINE_ARTS => {
             let r = (u * u + w * w).sqrt();
-            r < PF_ROTUNDA + 16.0 || ((r - PF_ARC).abs() < 12.0 && pf_on_arc(u, w))
+            r < PF_ROTUNDA + 23.0
+                || ((r - PF_ARC).abs() < 12.0 && pf_on_arc(u, w))
+                || (u >= 20.0 && u <= 94.0 && w.abs() <= 78.0)
+        }
+        JAPANESE_TEA_GARDEN => u.abs() <= 62.0 && w.abs() <= 62.0,
+        BOTANICAL_GARDEN => u.abs() <= 76.0 && w.abs() <= 56.0,
+        CONSERVATORY => {
+            (u.abs() <= 42.0 && (-20.0..=21.0).contains(&w))
+                || (u.abs() <= 48.0 && (21.0..=90.0).contains(&w))
         }
         _ => false,
+    }
+}
+
+/// Optional ground-surface override at `(u, w)` where a landmark turns dry/concrete tile cells into reflective ponds,
+/// lagoons, raked Zen gravel, garden walkways, or Conservatory Valley's floral carpet parterres (#60).
+pub fn surface_at(sort: u32, u: f32, w: f32, ground_m: f32, s: f32) -> Option<Kind> {
+    match sort {
+        FINE_ARTS => fine_arts_surface(u, w, ground_m),
+        JAPANESE_TEA_GARDEN => tea_garden_surface(u, w, s),
+        BOTANICAL_GARDEN => botanical_surface(u, w, s),
+        CONSERVATORY => conservatory_surface(u, w, s),
+        _ => None,
+    }
+}
+
+/// World-aware landmark cell query receiving both `up` (metres above `h.foot`) and `over_g` (metres above local
+/// ground `c.g`), allowing gardens and sloped valley parterres to hug hills while buildings stay level (#60).
+pub fn kind_at_world(sort: u32, u: f32, up: f32, over_g: f32, w: f32, s: f32) -> Kind {
+    match sort {
+        JAPANESE_TEA_GARDEN => japanese_tea_garden(u, over_g, w, s),
+        BOTANICAL_GARDEN => botanical_garden(u, over_g, w, s),
+        CONSERVATORY => conservatory(u, up, over_g, w, s),
+        _ => kind_at(sort, u, up, w, s),
+    }
+}
+
+/// World-aware ownership check (terrain-following gardens clear raw lidar clutter above local ground `over_g`).
+pub fn owns_world(sort: u32, u: f32, up: f32, over_g: f32, w: f32) -> bool {
+    match sort {
+        JAPANESE_TEA_GARDEN | BOTANICAL_GARDEN => over_g >= 0.0 && owns(sort, u, over_g, w),
+        CONSERVATORY => {
+            if w > 21.0 {
+                over_g >= 0.0 && owns(sort, u, over_g, w)
+            } else {
+                up >= -2.5 && owns(sort, u, up, w)
+            }
+        }
+        ACADEMY_SCIENCES | DE_YOUNG | PAINTED_LADIES | FORT_POINT => over_g >= 0.0 && owns(sort, u, up, w),
+        _ => up >= 0.0 && owns(sort, u, up, w),
     }
 }
 
@@ -78,6 +148,13 @@ pub fn kind_at(sort: u32, u: f32, y: f32, w: f32, s: f32) -> Kind {
         SUTRO_TOWER => sutro_tower(u, y, w, s),
         CITY_HALL => city_hall(u, y, w, s),
         FINE_ARTS => fine_arts(u, y, w, s),
+        FORT_POINT => fort_point(u, y, w, s),
+        ACADEMY_SCIENCES => academy_sciences(u, y, w, s),
+        JAPANESE_TEA_GARDEN => japanese_tea_garden(u, y, w, s),
+        BOTANICAL_GARDEN => botanical_garden(u, y, w, s),
+        CONSERVATORY => conservatory(u, y, y, w, s),
+        PAINTED_LADIES => painted_ladies(u, y, w, s),
+        DE_YOUNG => de_young(u, y, w, s),
         _ => 0,
     }
 }
@@ -116,7 +193,8 @@ pub fn night(sort: u32) -> Option<[f32; 12]> {
         // The spire: its louvres lit white from within, and the beacon at its point.
         TRANSAMERICA => Some([TA_SPIRE, TA_TOP, 23.1 * (TA_TOP - TA_SPIRE) / (TA_TOP - TA_SKIRT), 0.0, 1.0, 0.95, 0.86, 0.9, 0.0, 4.0, 0.0, 0.0]),
         // No light of their own, and what glass they have is their windows already: lit a room at a time, as any.
-        GOLDEN_GATE | BAY_BRIDGE | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FINE_ARTS => Some([0.0; 12]),
+        GOLDEN_GATE | BAY_BRIDGE | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FINE_ARTS | FORT_POINT
+        | ACADEMY_SCIENCES | JAPANESE_TEA_GARDEN | BOTANICAL_GARDEN | CONSERVATORY | PAINTED_LADIES | DE_YOUNG => Some([0.0; 12]),
         _ => None,
     }
 }
@@ -420,32 +498,42 @@ const CH_WIDE: f32 = 49.0;
 const CH_TOP: f32 = 93.6;
 
 fn city_hall(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if y < 0.0 || y >= CH_TOP {
+    if y < -2.0 || y >= CH_TOP {
         return 0;
     }
     let granite = kind(CONCRETE, grey(2));
+    let granite_trim = kind(PLASTER, WHITE);
     let dark = kind(GLASS, colour(14, 9));
-    let lead = kind(ROOFING, grey(10));
+    let lead = kind(ROOFING, colour(13, 8));
     let gold = kind(STEEL, colour(3, 3));
+    if y < 0.0 {
+        return if u.abs() <= CH_LONG + 1.0 && w.abs() <= CH_WIDE + 6.0 { granite } else { 0 };
+    }
     let r = (u * u + w * w).sqrt();
     // The dome over the drum: a little taller than round, ribbed in gold, under a lantern of columns and a cupola.
     if y >= 32.0 {
         let half = if y < 40.0 { 20.0 } else if y < 46.0 { 17.0 } else if y < 56.0 { 15.5 } else { 14.5 };
         if y < 60.0 {
             if y < 40.0 {
-                // The square base of the drum, cut at its corners.
+                // The square base of the drum, cut at its corners, with gold frieze accents.
                 if u.abs().max(w.abs()) <= half && u.abs() + w.abs() <= half * 1.4 {
-                    return if y > 39.0 { gold } else { granite };
+                    return if y > 38.8 || (32.0..33.0).contains(&y) { gold } else { granite };
                 }
                 return 0;
             }
             if r > half {
                 return 0;
             }
-            // The drum's colonnade: a column every 2.6 m round it, tall windows between.
-            if (46.0..55.0).contains(&y) && r > half - 1.2f32.max(s) && s <= 0.8 {
+            // The drum's colonnade: fluted Corinthian columns every 2.4 m round it, tall arched windows between.
+            if (46.0..55.5).contains(&y) && r > half - 1.6f32.max(s) && s <= 1.2 {
                 let round = r * w.atan2(u);
-                return if line(round, 2.6, 0.0, 0.9, s) { granite } else { dark };
+                if y > 54.6 || y < 47.0 {
+                    return granite_trim;
+                }
+                return if line(round, 2.4, 0.0, 0.85, s) { granite } else if r > half - 0.8 { 0 } else { dark };
+            }
+            if (58.8..60.0).contains(&y) && r > half - 1.2 {
+                return gold;
             }
             return granite;
         }
@@ -456,20 +544,48 @@ fn city_hall(u: f32, y: f32, w: f32, s: f32) -> Kind {
                 return 0;
             }
             let round = 13.5 * w.atan2(u);
-            return if line(round, 13.5 * std::f32::consts::PI / 12.0, 0.0, 0.5, s) && s <= 1.6 { gold } else { lead };
+            let rib = line(round, 13.5 * std::f32::consts::PI / 12.0, 0.0, 0.55, s) && s <= 1.6;
+            let band = (y - 60.5).abs() < 0.6 || (y - 74.2).abs() < 0.6;
+            return if rib || band { gold } else { lead };
         }
         // The lantern, its cupola and the finial.
         if y < 84.0 {
             if r > 4.5 {
                 return 0;
             }
-            return if r > 3.5 && s <= 0.4 && !line(4.0 * w.atan2(u), 1.6, 0.0, 0.5, s) { 0 } else { gold };
+            return if r > 3.4 && s <= 0.6 && !line(4.0 * w.atan2(u), 1.6, 0.0, 0.5, s) { 0 } else { gold };
         }
         if y < 89.0 {
             let rd = 4.5 * (1.0 - ((y - 84.0) / 5.0).powi(2)).max(0.0).sqrt();
             return if r <= rd.max(s * 0.5) { gold } else { 0 };
         }
         return if r <= 0.6f32.max(s * 0.55) { gold } else { 0 };
+    }
+    // Monumental Beaux-Arts East & West entrance porticos (grand triangular pediment, Corinthian columns, entry stairs).
+    if u.abs() <= 17.5 && w.abs() > CH_WIDE && w.abs() <= CH_WIDE + 6.5 {
+        let out = w.abs() - CH_WIDE;
+        // Grand granite steps climbing to the main portal (0..3.6 m).
+        if y < 3.6 && out <= 6.5 - y * 1.1 {
+            return granite;
+        }
+        // Projecting colonnade pediment portico (out <= 4.0 m).
+        if out <= 4.0 {
+            if (26.5..33.0).contains(&y) {
+                let slope = 32.8 - u.abs() * 0.36;
+                if y <= slope {
+                    let edge = (slope - y) < 0.7 || y < 27.4;
+                    return if edge { granite_trim } else { granite };
+                }
+                return 0;
+            }
+            if (24.5..26.5).contains(&y) {
+                return if y > 25.9 { granite_trim } else { granite };
+            }
+            if (3.6..24.5).contains(&y) && out > 2.2 {
+                return if line(u, 4.4, 0.0, 1.15, s) { granite } else { 0 };
+            }
+        }
+        return 0;
     }
     if u.abs() > CH_LONG || w.abs() > CH_WIDE {
         return 0;
@@ -479,10 +595,18 @@ fn city_hall(u: f32, y: f32, w: f32, s: f32) -> Kind {
     if court && y > 9.0 {
         return 0;
     }
-    // The wing across the middle stands higher, to a pitched roof.
-    if y >= 30.0 {
-        if u.abs() <= 14.0 && y < 35.0 + 3.0 * (1.0 - w.abs() / CH_WIDE) {
-            return if y >= 35.0 { lead } else { granite };
+    // Mansard slate roof over the perimeter wings and pitched cross wing.
+    if y >= 28.5 {
+        if u.abs() <= 15.0 && y < 35.0 + 3.2 * (1.0 - w.abs() / CH_WIDE) {
+            return if y >= 34.5 { lead } else { granite };
+        }
+        let inset = (y - 28.5) * 0.85;
+        if y < 32.5 && u.abs() <= CH_LONG - inset && w.abs() <= CH_WIDE - inset {
+            return if s <= 0.8 && (CH_LONG - inset - u.abs()).min(CH_WIDE - inset - w.abs()) < 0.6 && line(u + w, 6.0, 0.0, 1.4, s) && y < 31.0 {
+                granite_trim
+            } else {
+                lead
+            };
         }
         return 0;
     }
@@ -491,27 +615,35 @@ fn city_hall(u: f32, y: f32, w: f32, s: f32) -> Kind {
         return granite;
     }
     let along = if CH_LONG - u.abs() < CH_WIDE - w.abs() { w } else { u };
-    // A rusticated base, a colonnade two storeys tall over it with the wall 2.5 m behind, and an attic.
-    if y >= 27.0 || y < 1.0 {
-        return granite;
+    // A rusticated base, a colonnade two storeys tall over it with the wall 2.5 m behind, and an attic cornice.
+    if y >= 26.8 || y < 1.2 {
+        return if y >= 27.6 { granite_trim } else { granite };
     }
     if (9.0..25.0).contains(&y) && s <= 1.6 {
         if face < 2.5 {
-            // In the colonnade: a column every 4.6 m; the central pavilion on each long side stands proud.
-            return if line(along, 4.6, 0.0, 1.2, s) || (along.abs() < 18.0 && CH_WIDE - w.abs() < 2.5) { granite } else { 0 };
+            // In the colonnade: paired/rhythmic columns every 4.6 m, with deeply shadowed recessed portico behind.
+            return if line(along, 4.6, 0.0, 1.15, s) { granite } else { 0 };
         }
         return if (along + 2.3).rem_euclid(4.6) < 2.2 && (y - 10.5).rem_euclid(7.5) < 4.5 { dark } else { granite };
     }
-    if y < 9.0 && s <= 0.8 && (along + 2.3).rem_euclid(4.6) < 1.8 && (2.0..6.5).contains(&y) {
-        return dark;
+    if y < 9.0 && s <= 0.8 {
+        // Grand arched Beaux-Arts portals on the East & West central pavilions behind the portico columns.
+        if CH_WIDE - w.abs() < 3.0 && u.abs() < 14.0 {
+            let portal = (u + 4.4).rem_euclid(8.8) - 4.4;
+            if round_arch(portal, y, 2.2, 5.2, 2.1) && y >= 1.2 {
+                return if face < 1.2 { 0 } else { dark };
+            }
+        }
+        if (along + 2.3).rem_euclid(4.6) < 1.8 && (2.0..6.8).contains(&y) {
+            return dark;
+        }
     }
     granite
 }
 
 // ── The Palace of Fine Arts (Maybeck, 1915, rebuilt 1965). Its frame: u towards the east (the lagoon), w towards the
-// south, y up from the ground. A rotunda of eight arches on piers with a dome, 49 m (162 feet) to its top, and round it
-// to the west a colonnade on an arc, its columns in pairs under an entablature, with tall planter boxes at intervals.
-// The exhibition hall behind is the map's. Sizes as published (the dome's height) and by eye.
+// south, y up from the ground. A rotunda of eight arches on piers with a dome, 49 m (162 feet) to its top, round it
+// to the west a colonnade on an arc, and directly east its reflective swan lagoon (#60).
 const PF_ROTUNDA: f32 = 17.0;
 const PF_TOP: f32 = 49.0;
 const PF_ARC: f32 = 62.0;
@@ -522,74 +654,133 @@ fn pf_on_arc(u: f32, w: f32) -> bool {
     w.atan2(u).abs() > 55f32.to_radians()
 }
 
+/// Reflective Palace of Fine Arts swan lagoon directly east of the rotunda (strictly on the flat <= 0.95 m basin
+/// so shoreline banks never stair-step into water, framed by warm travertine walkways and lakeside lawn).
+fn fine_arts_surface(u: f32, w: f32, ground_m: f32) -> Option<Kind> {
+    if u > 20.0 && u <= 94.0 && w.abs() <= 78.0 && ground_m <= 0.95 {
+        return Some(kind(WATER, colour(13, 5)));
+    }
+    let r = (u * u + w * w).sqrt();
+    if r <= PF_ROTUNDA + 5.5 || ((r - PF_ARC).abs() <= 5.0 && pf_on_arc(u, w)) {
+        return Some(kind(CONCRETE, colour(2, 0)));
+    }
+    if u > 18.0 && u <= 94.0 && w.abs() <= 78.0 && ground_m <= 1.35 {
+        return Some(kind(CONCRETE, colour(3, 0))); // crisp lakeside promenade coping
+    }
+    None
+}
+
 fn fine_arts(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if y < 0.0 || y >= PF_TOP {
+    if y < -1.5 || y >= PF_TOP + 1.0 {
         return 0;
     }
     let stone = kind(PLASTER, colour(2, 1));
+    let stone_light = kind(PLASTER, colour(2, 0));
+    let frieze = kind(PLASTER, colour(1, 3));
     let dome = kind(PLASTER, colour(1, 2));
     let r = (u * u + w * w).sqrt();
     let round = w.atan2(u);
-    // ── The rotunda: an octagon of piers carrying arches, an entablature, a drum and the dome with its lantern.
+    if y < 0.0 {
+        return if r < PF_ROTUNDA + 3.0 || ((r - PF_ARC).abs() <= 3.2 && pf_on_arc(u, w)) { stone } else { 0 };
+    }
+    // ── The rotunda: stepped podium, octagon of paired piers carrying arches, sculpted frieze, drum & ribbed dome.
     let oct = {
         let a = (round.rem_euclid(std::f32::consts::FRAC_PI_4)) - std::f32::consts::FRAC_PI_8;
         r * a.cos()
     };
-    if r < PF_ROTUNDA + 2.0 {
+    if r < PF_ROTUNDA + 3.2 {
+        if y < 1.2 && oct <= PF_ROTUNDA + 2.2 - y * 0.8 {
+            return stone_light;
+        }
         if y < 25.0 {
-            if oct > PF_ROTUNDA || oct < PF_ROTUNDA - 3.5f32.max(s) {
+            if oct > PF_ROTUNDA || oct < PF_ROTUNDA - 3.6f32.max(s) {
                 return 0;
             }
-            // Between two piers an arch: open below its crown.
+            // Between two piers an arch: open below its crown, with classical impost mouldings & archivolt trim.
             let a = (round + std::f32::consts::FRAC_PI_8).rem_euclid(std::f32::consts::FRAC_PI_4) - std::f32::consts::FRAC_PI_8;
             let half = PF_ROTUNDA * (std::f32::consts::FRAC_PI_8).tan();
             let x = (a.tan() * oct).abs();
             let pier = 2.6;
             if x < half - pier {
                 let span = half - pier;
-                let crown = 13.0 + span * (1.0 - (x / span).powi(2)).max(0.0).sqrt();
+                let crown = 13.2 + span * (1.0 - (x / span).powi(2)).max(0.0).sqrt();
                 if y < crown {
                     return 0;
                 }
+                if y < crown + 0.7 && s <= 0.6 {
+                    return stone_light;
+                }
+            }
+            if (12.8..13.5).contains(&y) || y < 2.2 {
+                return stone_light;
             }
             return stone;
         }
-        if y < 29.0 {
-            return if oct <= PF_ROTUNDA + 1.0 { stone } else { 0 };
+        if y < 29.2 {
+            // Classical entablature & terracotta-toned carved attic frieze.
+            let out = if y > 28.2 || y < 25.7 { PF_ROTUNDA + 1.3 } else { PF_ROTUNDA + 0.6 };
+            return if oct <= out {
+                if (26.2..27.8).contains(&y) { frieze } else { stone_light }
+            } else {
+                0
+            };
         }
-        if y < 31.0 {
-            return if r <= PF_ROTUNDA - 2.0 { stone } else { 0 };
+        if y < 31.4 {
+            return if r <= PF_ROTUNDA - 1.8 { stone } else { 0 };
         }
-        let rd = (PF_ROTUNDA - 3.0) * (1.0 - ((y - 31.0) / 14.0).powi(2)).max(0.0).sqrt();
-        if y < 45.0 {
-            return if r <= rd.max(s * 0.5) { dome } else { 0 };
+        if y < 45.5 {
+            let h = (y - 31.4) / 14.1;
+            let rd = (PF_ROTUNDA - 2.8) * (1.0 - h * h).max(0.0).sqrt();
+            if r > rd.max(s * 0.5) {
+                return 0;
+            }
+            // 16 classical raised ribs converging on the cupola.
+            let rib = s <= 1.2 && line(round * (PF_ROTUNDA - 2.8), (PF_ROTUNDA - 2.8) * std::f32::consts::PI / 8.0, 0.0, 0.55, s);
+            return if rib || y < 32.3 { stone_light } else { dome };
         }
-        return if r <= 1.6f32.max(s * 0.55) { stone } else { 0 };
+        // Classical open cupola crown and finial urn.
+        if y < 48.2 {
+            return if r <= 2.1f32.max(s * 0.55) { stone_light } else { 0 };
+        }
+        return if r <= 0.9f32.max(s * 0.55) { frieze } else { 0 };
     }
-    // ── The colonnade: paired columns every 7 m along the arc, 15 m tall, under an entablature 3 m deep; every
-    // fifth pair a planter box, a block 5 m square standing to 21 m.
+    // ── The colonnade: paired Corinthian columns every 7 m along the arc, 15 m tall, entablature & weeping planter boxes.
     let off = r - PF_ARC;
-    if off.abs() > 4.5 || !pf_on_arc(u, w) || y > 21.5 {
+    if off.abs() > 5.2 || !pf_on_arc(u, w) || y > 24.5 {
         return 0;
     }
     let along = PF_ARC * round;
     let pair = (along + 3.5).rem_euclid(7.0) - 3.5;
     let box_at = (along + 17.5).rem_euclid(35.0) - 17.5;
-    if box_at.abs() < 2.5 && off.abs() < 2.5 {
-        return if y > 20.0 { kind(PLASTER, colour(1, 3)) } else { stone };
+    if box_at.abs() < 2.7 && off.abs() < 2.7 {
+        if y <= 20.5 {
+            return if y > 19.3 || (14.8..15.8).contains(&y) { frieze } else { stone };
+        }
+        // Lush weeping evergreens spilling from Maybeck's famous weeping-woman planter boxes!
+        if y < 23.6 && box_at.abs() < 2.2 && off.abs() < 2.2 {
+            let h = hash3((u * 2.0) as i32, (y * 2.0) as i32, (w * 2.0) as i32, 19);
+            if h % 5 != 0 {
+                return kind(LEAVES, if h % 3 == 0 { colour(8, 5) } else { colour(7, 6) });
+            }
+        }
+        return 0;
     }
     if y >= 15.0 {
-        return if y < 17.5 && off.abs() <= 2.0 { stone } else { 0 };
+        if y < 18.0 && off.abs() <= if y > 17.2 { 2.6 } else { 2.0 } {
+            return if (15.8..17.0).contains(&y) { frieze } else { stone_light };
+        }
+        return 0;
     }
-    // Two columns side by side across the arc, round, 1.6 m thick.
-    for c in [-1.3f32, 1.3] {
+    // Two columns side by side across the arc with stepped bases and flaring Corinthian capitals.
+    for c in [-1.4f32, 1.4] {
         let (dx, dy) = (pair, off - c);
-        if dx * dx + dy * dy <= (0.8f32).max(s * 0.55).powi(2) {
-            return stone;
+        let rad: f32 = if y < 1.8 || y > 13.6 { 1.05 } else { 0.78 };
+        if dx * dx + dy * dy <= rad.max(s * 0.55).powi(2) {
+            return if y > 13.6 || y < 1.8 { stone_light } else { stone };
         }
     }
-    if y < 1.0 && off.abs() <= 2.5 {
-        return stone;
+    if y < 1.1 && off.abs() <= 2.7 {
+        return stone_light;
     }
     0
 }
@@ -638,7 +829,32 @@ fn golden_gate(u: f32, y: f32, w: f32, s: f32) -> Kind {
     let orange = kind(STEEL, colour(0, 4));
     let concrete = kind(CONCRETE, grey(5));
     let (a, aw) = (u.abs(), w.abs());
-    if !(-30.0..GG_TOP).contains(&y) || !(GG_SOUTH..GG_NORTH).contains(&u) {
+    if !(-30.0..GG_TOP).contains(&y) || !(GG_SOUTH - 6.0..GG_NORTH + 135.0).contains(&u) {
+        return 0;
+    }
+    // ── Marin Headlands coastal bluff & abutment at the north end (u > 1065 m) so the bridge anchors into Marin
+    // terrain rather than ending over empty ocean even when Marin county tiles are absent (#60).
+    if u > 1065.0 {
+        let road = gg_road(u.min(GG_NORTH));
+        let t = ((u - 1065.0) / 160.0).clamp(0.0, 1.0);
+        // Coastal rocky headland rising steeply out of the strait on both sides of the highway cut.
+        let side_lift = ((aw - 15.0).max(0.0) * 0.52).min(24.0) * t;
+        let roll = 3.2 * (u * 0.045).sin() + 2.4 * (w * 0.07).cos();
+        let bluff = (-2.0 + (road - 1.5) * t.powf(0.65) + side_lift + roll).min(road + 22.0);
+        // Carve clean highway cut along the roadway grade above the abutment.
+        let cut = if aw <= 14.5 { road - 0.8 } else { bluff };
+        if y <= cut && aw <= 52.0 && u <= GG_NORTH + 132.0 {
+            if aw <= 13.8 && y > road - 1.2 && y <= road {
+                return if aw > 10.4 { concrete } else if aw <= 0.35 && y > road - 0.3 { kind(PLASTER, colour(3, 4)) } else { kind(ASPHALT, OWN) };
+            }
+            if y > cut - 2.0 && side_lift > 1.5 && aw > 15.5 {
+                let h = hash3((u * 0.5) as i32, (y * 0.5) as i32, (w * 0.5) as i32, 11);
+                return kind(GRASS, if h % 3 == 0 { colour(5, 5) } else { colour(6, 8) });
+            }
+            return kind(ROCK, if (y as i32) % 3 == 0 { grey(9) } else { colour(2, 9) });
+        }
+    }
+    if u >= GG_NORTH {
         return 0;
     }
     // ── A tower: its pier, its two legs, the struts between them.
@@ -711,25 +927,60 @@ fn golden_gate(u: f32, y: f32, w: f32, s: f32) -> Kind {
             if member((y - high) / (1.0 + steep * steep).sqrt(), 0.46, s) {
                 return orange;
             }
-            // (A hanger is four ropes 7 cm thick. In cells over 0.8 m it would be drawn many times its width, a comb
-            // across the span from 2 km where the eye sees hairs: from there it is left out.)
-            if s <= 0.8 && member(aw - GG_PLANE, 0.15, s) && a < GG_PYLON - 4.0 && du.abs() > 6.0 && y < high && dy > -1.0 && line(u, 15.24, 0.0, 0.3, s) {
+            // Keep iconic vertical hangers visible through 1.6 m cells (up to ~800 m) instead of vanishing at 0.8 m;
+            // drop past 1.6 m so distant silhouettes stay clean (#60).
+            let hanger_step = if s <= 0.8 { 15.24 } else { 30.48 };
+            if s <= 1.6 && member(aw - GG_PLANE, 0.16, s) && a < GG_PYLON - 4.0 && du.abs() > 6.0 && y < high && dy > -1.0 && line(u, hanger_step, 0.0, 0.3, s) {
                 return orange;
             }
+        }
+    }
+    // Art Deco light standards along both sidewalks every 45.72 m (3 hanger bays).
+    if s <= 0.8 && dy > 0.0 && dy <= 8.6 && a < GG_NORTH - 12.0 && du.abs() > 10.0 && line(u, 45.72, 22.86, 0.45, s) {
+        if (aw - (GG_PLANE - 0.3)).abs() <= 0.25f32.max(s * 0.5) && dy <= 8.2 {
+            return orange;
+        }
+        if dy >= 7.6 && dy <= 8.5 && aw >= GG_PLANE - 2.0 && aw <= GG_PLANE - 0.1 {
+            return if dy <= 8.0 && aw < GG_PLANE - 1.0 { kind(LAMP, colour(3, 0)) } else { orange };
         }
     }
     if dy > 1.4 || dy < -40.0 && a < 1080.0 {
         return 0;
     }
-    // ── The roadway and its truss.
+    // ── The roadway, 6-lane striping, movable yellow/concrete median barrier, sidewalks and truss.
     if dy <= 0.0 && dy > -(1.0f32.max(s)) && aw <= GG_PLANE + 0.5 {
         let top = dy > -(0.3f32.max(s));
-        return if !top { orange } else if aw > 10.4 { kind(CONCRETE, grey(5)) } else { kind(ASPHALT, OWN) };
+        if !top {
+            return orange;
+        }
+        if aw > 10.4 {
+            return concrete;
+        }
+        if s <= 0.4 {
+            // Double yellow center line beside the movable barrier, dashed white 6-lane dividers & solid white shoulders.
+            if (aw - 0.55).abs() < 0.14 {
+                return kind(PLASTER, colour(3, 4));
+            }
+            if ((aw - 3.45).abs() < 0.12 || (aw - 6.75).abs() < 0.12) && u.rem_euclid(10.0) < 3.6 {
+                return kind(PLASTER, WHITE);
+            }
+            if (aw - 10.0).abs() < 0.14 {
+                return kind(PLASTER, WHITE);
+            }
+        }
+        return kind(ASPHALT, OWN);
     }
     if dy > 0.0 {
-        // The rail at each edge: pickets under a top rail near, a low wall from further, nothing from far.
-        let rail = (aw - GG_PLANE).abs() <= 0.15f32.max(s * 0.5) && dy <= 1.2f32.max(s);
-        return if rail && s <= 1.0 && (s > 0.25 || dy > 1.0 || line(u, 0.6, 0.0, 0.1, s)) { orange } else { 0 };
+        // Movable concrete/yellow zipper median barrier along the center of the 6-lane deck.
+        if aw <= 0.32f32.max(s * 0.5) && dy <= 0.78 && s <= 0.8 {
+            return if dy > 0.55 { kind(PLASTER, colour(3, 4)) } else { kind(CONCRETE, grey(3)) };
+        }
+        // Pedestrian/roadway curb barrier & Art Deco rail at each edge.
+        if (aw - 10.55).abs() <= 0.22 && dy <= 0.85 && s <= 0.4 {
+            return orange;
+        }
+        let rail = (aw - GG_PLANE).abs() <= 0.15f32.max(s * 0.5) && dy <= 1.3f32.max(s);
+        return if rail && s <= 1.0 && (s > 0.25 || dy > 1.05 || line(u, 0.6, 0.0, 0.1, s)) { orange } else { 0 };
     }
     if dy > -8.2 - s * 0.5 {
         let within = dy <= -1.0 && dy >= -7.6;
@@ -978,6 +1229,1338 @@ fn bay_bridge(u: f32, y: f32, w: f32, s: f32) -> Kind {
     0
 }
 
+// ── Reusable multi-city architectural & landscape primitives (#60) ─────────────────────────────────────────
+
+/// Semicircular/elliptical arch test: true inside the opening below the crown.
+fn round_arch(x: f32, y: f32, half_span: f32, spring_y: f32, rise: f32) -> bool {
+    if x.abs() >= half_span {
+        return false;
+    }
+    let crown = spring_y + rise * (1.0 - (x / half_span).powi(2)).max(0.0).sqrt();
+    y < crown
+}
+
+/// Traditional curved upturned pagoda roof tier (reusable for Asian pavilions, tea houses & pagodas).
+#[allow(clippy::too_many_arguments)]
+fn pagoda_tier(
+    du: f32,
+    dw: f32,
+    dy: f32,
+    half: f32,
+    wall_h: f32,
+    eave_out: f32,
+    roof_h: f32,
+    s: f32,
+    wall: Kind,
+    pillar: Kind,
+    roof: Kind,
+    trim: Kind,
+) -> Kind {
+    if dy < 0.0 || dy >= wall_h + roof_h + 0.5 {
+        return 0;
+    }
+    let (au, aw) = (du.abs(), dw.abs());
+    let m = au.max(aw);
+    // Story body: corner vermilion pillars, inset pale shoji/plaster panels & subtle balustrade.
+    if dy < wall_h {
+        if m <= half {
+            if (au > half - 0.55 || aw > half - 0.55) && (au > half - 0.85 && aw > half - 0.85 || dy < 0.35 || dy > wall_h - 0.45) {
+                return pillar;
+            }
+            if m > half - 0.45f32.max(s) {
+                return wall;
+            }
+            return pillar;
+        }
+        // Subtle perimeter gallery railing at floor level.
+        if dy < 0.9 && m <= half + 0.7 && m >= half + 0.45 && (dy > 0.65 || line(du + dw, 0.8, 0.0, 0.2, s)) {
+            return pillar;
+        }
+        return 0;
+    }
+    // Flared upturned hipped pagoda roof with sweeping concave eaves and upturned corner tips.
+    let ry = dy - wall_h;
+    let t = (ry / roof_h).clamp(0.0, 1.0);
+    // Concave sweep: eaves flare sharply outward near the bottom and curl upward at the 4 diagonal corners.
+    let corner_flare = ((au.min(aw) / (m + 0.01)).powi(2)) * 0.45 * (1.0 - t);
+    let eave_half = half + eave_out * (1.0 - t).powf(1.35) + corner_flare;
+    let curl = ((m - half).max(0.0) / eave_out.max(0.1)).powi(2) * 0.55 + corner_flare * 0.55;
+    if m <= eave_half && ry >= curl - 0.45f32.max(s) && ry <= roof_h + 0.1 {
+        let on_ridge = (au - aw).abs() < 0.38f32.max(s * 0.6) && m > half * 0.4;
+        if on_ridge && ry > curl + 0.1 {
+            return trim;
+        }
+        if ry < curl + 0.25 && m > half + 0.3 {
+            return pillar; // red/timber underside eave brackets
+        }
+        return roof;
+    }
+    0
+}
+
+/// Naturalistic multi-cluster ornamental tree: cloud-pruned multi-pad crowns with visible forked branches & organic
+/// airy openings (deciduous cherry blossom / Japanese maple / magnolia) or tiered conical conifer boughs (redwood/pine).
+#[allow(clippy::too_many_arguments)]
+fn ornamental_tree(
+    du: f32,
+    dy: f32,
+    dw: f32,
+    trunk_h: f32,
+    crown_r: f32,
+    crown_h: f32,
+    seed: u32,
+    s: f32,
+    bark: Kind,
+    canopy: Kind,
+    accent: Kind,
+) -> Kind {
+    let r2 = du * du + dw * dw;
+    if r2 > (crown_r + 2.2).powi(2) || dy < 0.0 || dy > trunk_h + crown_h + 1.5 {
+        return 0;
+    }
+    let conifer = crown_h > crown_r * 1.65;
+    let lean_u = (dy / trunk_h.max(1.0)) * (((seed % 5) as f32 - 2.0) * 0.14);
+    let lean_w = (dy / trunk_h.max(1.0)) * ((((seed >> 3) % 5) as f32 - 2.0) * 0.14);
+    let tr = (0.42 - 0.16 * (dy / (trunk_h + crown_h * 0.6).max(1.0))).max(0.18).max(s * 0.5);
+    if dy < trunk_h + crown_h * (if conifer { 0.72 } else { 0.35 }) && (du - lean_u).powi(2) + (dw - lean_w).powi(2) <= tr * tr {
+        return bark;
+    }
+    if conifer {
+        // Tiered conical coastal redwood / Japanese black pine boughs tapering cleanly to a spire tip.
+        let cy = dy - trunk_h * 0.65;
+        let span = crown_h + trunk_h * 0.35;
+        if cy < 0.0 || cy > span {
+            return 0;
+        }
+        let t = (cy / span).clamp(0.0, 1.0);
+        let tier = 0.76 + 0.34 * ((cy * 1.45).sin() * 0.5 + 0.5);
+        let ang = dw.atan2(du);
+        let bough = 0.82 + 0.24 * (ang * 5.0 + (cy * 0.8).floor() * 1.7 + seed as f32).sin();
+        let rad = crown_r * (1.0 - t.powf(0.85)) * tier * bough;
+        if r2 <= rad * rad {
+            let h = hash3((du * 2.5) as i32, (dy * 2.5) as i32, (dw * 2.5) as i32, seed);
+            let edge = r2 > (rad * 0.72).powi(2);
+            if s <= 0.6 && (edge && h % 3 == 0 || h % 7 == 0) {
+                return 0;
+            }
+            return if h % 3 == 0 { accent } else { canopy };
+        }
+        return 0;
+    }
+    // Layered cloud-pruned / spreading deciduous canopy: 4 organic offset horizontal clusters + airy openings!
+    let clusters: [(f32, f32, f32, f32, f32); 4] = [
+        (0.0, trunk_h + crown_h * 0.66, 0.0, crown_r * 0.76, crown_h * 0.36),
+        (crown_r * 0.44, trunk_h + crown_h * 0.38, crown_r * 0.28, crown_r * 0.62, crown_h * 0.30),
+        (-crown_r * 0.46, trunk_h + crown_h * 0.44, crown_r * 0.22, crown_r * 0.60, crown_h * 0.30),
+        (crown_r * 0.06, trunk_h + crown_h * 0.32, -crown_r * 0.46, crown_r * 0.58, crown_h * 0.28),
+    ];
+    let rot = (seed as f32) * 1.13;
+    let (cr, sr) = (rot.cos(), rot.sin());
+    let ru = du * cr + dw * sr;
+    let rw = -du * sr + dw * cr;
+    // Forked main boughs reaching out toward the canopy pads.
+    if dy >= trunk_h * 0.75 && dy <= trunk_h + crown_h * 0.42 {
+        let bt = ((dy - trunk_h * 0.75) / (crown_h * 0.42 + trunk_h * 0.25)).clamp(0.0, 1.0);
+        for &(cu, _, cw, _, _) in &clusters[1..] {
+            if (ru - cu * bt).powi(2) + (rw - cw * bt).powi(2) <= (0.22f32.max(s * 0.5)).powi(2) {
+                return bark;
+            }
+        }
+    }
+    let mut best = 2.0f32;
+    for &(cu, cy, cw, rx, ry) in &clusters {
+        let d = ((ru - cu) / rx).powi(2) + ((rw - cw) / rx).powi(2) + ((dy - cy) / ry).powi(2);
+        if d < best {
+            best = d;
+        }
+    }
+    if best <= 1.05 {
+        let h = hash3((du * 2.5) as i32, (dy * 2.5) as i32, (dw * 2.5) as i32, seed);
+        let lump = hash3((du * 1.1) as i32, (dy * 1.4) as i32, (dw * 1.1) as i32, seed ^ 17);
+        if s <= 0.6 && ((best > 0.62 && h % 3 == 0) || (best > 0.78 && lump % 2 == 0) || h % 8 == 0) {
+            return 0;
+        }
+        return if h % 3 == 0 { accent } else { canopy };
+    }
+    0
+}
+
+/// Traditional carved granite Japanese stone lantern (`toro`) with glowing amber firebox.
+fn stone_lantern(du: f32, dy: f32, dw: f32, s: f32) -> Kind {
+    let m = du.abs().max(dw.abs());
+    if m > 0.85 || !(0.0..=2.3).contains(&dy) {
+        return 0;
+    }
+    let stone = kind(ROCK, grey(5));
+    if dy < 0.35 && m <= 0.52 {
+        return stone;
+    }
+    if (0.35..1.25).contains(&dy) && m <= 0.24f32.max(s * 0.5) {
+        return stone;
+    }
+    if (1.25..1.72).contains(&dy) && m <= 0.36 {
+        return if (1.35..1.62).contains(&dy) && (du.abs() < 0.2 || dw.abs() < 0.2) { kind(LAMP, colour(3, 0)) } else { stone };
+    }
+    let cap = 0.78 * (1.0 - ((dy - 1.72) / 0.58).clamp(0.0, 1.0)) + 0.12;
+    if dy >= 1.72 && m <= cap {
+        return stone;
+    }
+    0
+}
+
+/// Stepped arched wooden Moon/Drum footbridge spanning a koi pond or stream.
+fn arched_bridge(u: f32, dy: f32, w: f32, half_span: f32, half_w: f32, arch_rise: f32, s: f32, deck: Kind, rail: Kind) -> Kind {
+    if u.abs() > half_span + 0.6 || w.abs() > half_w + 0.4 || dy < -0.5 || dy > arch_rise + 1.6 {
+        return 0;
+    }
+    let t = (u / half_span).clamp(-1.0, 1.0);
+    let arch_y = arch_rise * (1.0 - t * t).max(0.0).sqrt();
+    // Timber arch deck & wooden steps.
+    if w.abs() <= half_w && dy <= arch_y && dy >= arch_y - 0.55f32.max(s) {
+        return deck;
+    }
+    // Curved handrails & vertical balustrade posts along both sides of the bridge.
+    if (w.abs() - (half_w - 0.14)).abs() <= 0.16f32.max(s * 0.5) && dy > arch_y && dy <= arch_y + 1.05 {
+        if dy >= arch_y + 0.82 || (dy >= arch_y + 0.42 && dy <= arch_y + 0.54) || line(u, 1.1, 0.0, 0.18, s) {
+            return rail;
+        }
+    }
+    0
+}
+
+// ── Fort Point National Historic Site (1861, Third System brick coastal fort directly beneath the Golden Gate
+// Bridge's south steel arch). Frame: u along the long seawall axis, w across, y up from base 1.8 m.
+fn fort_point(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(-4.5..24.5).contains(&y) || u.abs() > 53.0 || w.abs() > 33.0 {
+        return 0;
+    }
+    let granite = kind(ROCK, grey(7));
+    let granite_trim = kind(CONCRETE, grey(4));
+    let brick = kind(BRICK, colour(0, 4));
+    let brick_dark = kind(BRICK, colour(1, 5));
+    let white = kind(PLASTER, WHITE);
+    // Granite seawall apron & foundation base (covers full historic footprint including bastion point).
+    let in_bastion = u > 30.0 && ((u - 30.0) / 17.5).powi(2) + (w / 18.5).powi(2) <= 1.0;
+    if y < 2.2 {
+        return if (u.abs() <= 46.0 && w.abs() <= 27.5) || (u > 30.0 && ((u - 30.0) / 21.5).powi(2) + (w / 22.5).powi(2) <= 1.0) {
+            granite
+        } else {
+            0
+        };
+    }
+    // Iconic small white cast-iron Fort Point Lighthouse perched on the northwest barbette parapet.
+    if y >= 15.8 && (u + 24.0).abs() <= 3.2 && (w + 15.0).abs() <= 3.2 {
+        let lr = ((u + 24.0).powi(2) + (w + 15.0).powi(2)).sqrt();
+        if y < 21.6 && lr <= 1.8 - (y - 15.8) * 0.08 {
+            return white;
+        }
+        if (21.6..23.2).contains(&y) && lr <= 1.4 {
+            return if lr > 0.9 { kind(GLASS, colour(14, 2)) } else { kind(LAMP, colour(3, 0)) };
+        }
+        if (23.2..24.4).contains(&y) && lr <= (1.6 - (y - 23.2) * 1.2).max(0.2) {
+            return kind(STEEL, grey(12));
+        }
+        return 0;
+    }
+    // Main 3-tier red-brick masonry fort enclosure (74 x 44 m + rounded seaward bastion) around open parade courtyard.
+    let in_rect = u >= -38.0 && u <= 34.0 && w.abs() <= 22.0;
+    if (!in_rect && !in_bastion) || y > 17.5 {
+        return 0;
+    }
+    let in_court = u >= -28.0 && u <= 24.0 && w.abs() < 12.5;
+    if in_court {
+        return if y < 2.8 { granite_trim } else { 0 };
+    }
+    // Rooftop barbette parapet wall & granite coping (15.8..17.5 m).
+    if y >= 15.8 {
+        let outer = if in_bastion {
+            ((u - 30.0) / 17.5).powi(2) + (w / 18.5).powi(2) > 0.78
+        } else {
+            (u + 38.0).min(34.0 - u).min(22.0 - w.abs()) < 1.8
+        };
+        let inner = in_rect && (u.abs() - 25.0).min(w.abs() - 12.5).max(0.0) < 1.2;
+        if outer || (inner && y < 16.9) {
+            return if y > 17.0 { granite_trim } else { brick };
+        }
+        return if y < 16.2 { granite_trim } else { 0 };
+    }
+    // Granite stringcourse bands separating the 3 tiers of casemates.
+    let tier_y = (y - 2.2).rem_euclid(4.5);
+    if tier_y < 0.45 {
+        return granite_trim;
+    }
+    let outer_face = if in_bastion {
+        (1.0 - (((u - 30.0) / 17.5).powi(2) + (w / 18.5).powi(2)).sqrt()) * 17.5
+    } else {
+        (u + 38.0).min(34.0 - u).min(22.0 - w.abs())
+    };
+    let inner_u = (u + 28.0).min(24.0 - u);
+    let inner_w = w.abs() - 12.5;
+    let inner_face = if u >= -28.0 && u <= 24.0 {
+        inner_w
+    } else if w.abs() < 12.5 {
+        (-28.0 - u).max(u - 24.0)
+    } else {
+        inner_u.abs().min(inner_w)
+    };
+    // Interior 3-tier arched brick casemate arcades facing the parade ground.
+    if in_rect && inner_face >= 0.0 && inner_face < 2.2 && s <= 0.8 {
+        let along = if w.abs() < 12.5 { w } else { u };
+        let bay = (along + 2.4).rem_euclid(4.8) - 2.4;
+        if round_arch(bay, tier_y, 1.55, 2.3, 1.4) && tier_y >= 0.45 {
+            return if inner_face < 1.4 { 0 } else { brick_dark };
+        }
+    }
+    // Exterior seaward gun-embrasure loopholes in rhythmic rows across all 3 tiers.
+    if outer_face < 1.8 && s <= 0.8 {
+        let along = if in_bastion { w.atan2(u - 30.0) * 18.0 } else if (u + 38.0).min(34.0 - u) < 22.0 - w.abs() { w } else { u };
+        let bay = (along + 2.4).rem_euclid(4.8) - 2.4;
+        if bay.abs() < 0.72 && (1.2..3.2).contains(&tier_y) {
+            return if outer_face < 0.9 { 0 } else { kind(PLASTER, grey(13)) };
+        }
+    }
+    if hash3((u * 1.4).floor() as i32, (y * 2.4).floor() as i32, (w * 1.4).floor() as i32, 41) % 7 == 0 { brick_dark } else { brick }
+}
+
+// ── California Academy of Sciences (Renzo Piano, 2008). Frame: u along the long building axis (158 m), w across
+// (126 m, -w facing Music Concourse), y up from plaza datum 73.0 m. Signature cantilevered solar-glass canopy,
+// 11 m sheer glass curtain walls, board-formed concrete corner piers, central open glass piazza, and 7 lush green
+// rolling living-roof hills punctuated by circular glazed porthole skylights (#60).
+fn academy_sciences(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(-6.5..23.5).contains(&y) || u.abs() > 80.5 || w.abs() > 64.5 {
+        return 0;
+    }
+    let concrete = kind(CONCRETE, grey(3));
+    let white_steel = kind(STEEL, WHITE);
+    let dark_steel = kind(STEEL, grey(12));
+    let solar_glass = kind(GLASS, colour(15, 6));
+    let clear_glass = kind(GLASS, colour(13, 1));
+    let skylight_glass = kind(GLASS, colour(14, 9));
+    let (au, aw) = (u.abs(), w.abs());
+    if y < 0.0 {
+        return if au <= 75.0 && aw <= 58.0 { concrete } else { 0 };
+    }
+    // Boldly sculpted 7-hill rolling living roof over the main roof slab (y = 11.4 m):
+    // Morrison Planetarium dome (-28, +5, +9.6 m), Osher Rainforest dome (+28, -5, +9.2 m) + 5 native meadow hills!
+    let hills: [(f32, f32, f32, f32); 7] = [
+        (-28.0, 5.0, 23.0, 9.6),
+        (28.0, -5.0, 22.0, 9.2),
+        (-52.0, -20.0, 15.0, 5.4),
+        (-50.0, 25.0, 15.0, 5.2),
+        (52.0, 22.0, 15.0, 5.5),
+        (50.0, -24.0, 14.0, 5.0),
+        (0.0, 35.0, 16.0, 5.8),
+    ];
+    let mut hill_h = 0.0f32;
+    let mut skylight = 0u8; // 0=none, 1=glass, 2=white frame ring
+    for &(hu, hw, hr, hh) in &hills {
+        let d2 = (u - hu).powi(2) + (w - hw).powi(2);
+        if d2 < hr * hr {
+            let k = (1.0 - d2 / (hr * hr)).powf(1.15);
+            hill_h = hill_h.max(hh * k);
+            // Iconic circular porthole skylights with crisp white steel rings across the Planetarium & Rainforest domes!
+            if hh > 8.0 && d2 < (hr * 0.72).powi(2) {
+                let lu = (u - hu + 3.2).rem_euclid(6.4) - 3.2;
+                let lw = (w - hw + 3.2).rem_euclid(6.4) - 3.2;
+                let pr = (lu * lu + lw * lw).sqrt();
+                if pr < 1.35 {
+                    skylight = 1;
+                } else if pr < 1.75 {
+                    skylight = skylight.max(2);
+                }
+            }
+        }
+    }
+    let in_piazza = au < 16.0 && aw < 16.0;
+    let roof_base = 11.4;
+    if y >= roof_base - 0.2 {
+        let over_edge = au > 72.5 || aw > 55.5;
+        if over_edge {
+            if y <= roof_base + 0.65 {
+                let outer_rim = au > 79.0 || aw > 63.0;
+                let truss_bar = s <= 0.8 && (line(u, 4.8, 0.0, 0.28, s) || line(w, 4.8, 0.0, 0.28, s));
+                return if outer_rim || truss_bar { white_steel } else { solar_glass };
+            }
+            return 0;
+        }
+        if in_piazza {
+            if y <= roof_base + 0.55 {
+                return if line(u, 3.2, 0.0, 0.25, s) || line(w, 3.2, 0.0, 0.25, s) { white_steel } else { clear_glass };
+            }
+            return 0;
+        }
+        if au < 21.0 && aw < 21.0 && y <= roof_base + 0.9 {
+            return if y > roof_base + 0.35 && (au > 20.2 || aw > 20.2 || au < 16.4 || aw < 16.4) { clear_glass } else { kind(WOOD, colour(3, 7)) };
+        }
+        let top_y = roof_base + 0.55 + hill_h;
+        if y <= top_y {
+            if y >= top_y - 0.7f32.max(s) {
+                if skylight == 1 {
+                    return skylight_glass;
+                }
+                if skylight == 2 {
+                    return white_steel;
+                }
+                // Lush natural velvety California meadow greens (deep emerald, olive-sage & subtle golden-poppy flecks).
+                let h = hash3((u * 2.0) as i32, (y * 2.0) as i32, (w * 2.0) as i32, 37);
+                return match h % 29 {
+                    0 => kind(LEAVES, colour(3, 4)),  // California golden poppy accent
+                    1 => kind(LEAVES, colour(19, 2)), // native lupine fleck
+                    2..=11 => kind(GRASS, colour(8, 5)),
+                    12..=20 => kind(GRASS, colour(7, 5)),
+                    _ => kind(GRASS, colour(7, 8)),
+                };
+            }
+            return concrete;
+        }
+        return 0;
+    }
+    // ── Slender white perimeter canopy support columns along the Music Concourse & garden porticos.
+    if au > 72.5 || aw > 55.5 {
+        if ((aw - 61.5).abs() < 0.45 && au <= 75.0 && line(u, 10.0, 0.0, 0.55, s))
+            || ((au - 77.5).abs() < 0.45 && aw <= 58.0 && line(w, 10.0, 0.0, 0.55, s))
+        {
+            return white_steel;
+        }
+        return 0;
+    }
+    // ── Main museum volume (145 x 111 m): board-formed concrete corner pavilions + 11.4 m sheer glazed halls.
+    if in_piazza {
+        return if y < 0.4 { kind(CONCRETE, colour(3, 0)) } else { 0 };
+    }
+    let face = (72.5 - au).min(55.5 - aw);
+    // Board-formed architectural concrete corner anchor blocks.
+    let corner_mass = au > 54.0 && aw > 38.0;
+    if corner_mass {
+        if face < 1.2 && (y - 5.8).abs() < 0.3 {
+            return dark_steel;
+        }
+        return concrete;
+    }
+    // Sheer floor-to-ceiling clear glass curtain wall with slim vertical steel mullions & subtle interior floors.
+    if face <= 0.9f32.max(s) {
+        let along = if 72.5 - au < 55.5 - aw { w } else { u };
+        let mullion = s <= 0.6 && (line(along, 2.6, 0.0, 0.18, s) || line(y, 3.8, 0.0, 0.2, s));
+        return if mullion { dark_steel } else { clear_glass };
+    }
+    // Warm interior exhibit floors & planetarium/rainforest drums glimpsed through the glass walls.
+    let floor_slab = (y - 0.2).rem_euclid(5.4) < 0.45;
+    if floor_slab || ((u + 26.0).powi(2) + (w - 4.0).powi(2) < 18.0 * 18.0) {
+        return concrete;
+    }
+    if (u - 26.0).powi(2) + (w + 4.0).powi(2) < 16.5 * 16.5 && y > 1.0 && y < 10.0 {
+        let h = hash3((u * 1.5) as i32, (y * 1.5) as i32, (w * 1.5) as i32, 71);
+        if h % 3 == 0 {
+            return kind(LEAVES, colour(8, 5)); // rainforest dome greenery visible inside glass!
+        }
+    }
+    0
+}
+
+// ── Japanese Tea Garden, Golden Gate Park (1894, Makoto Hagiwara). Terrain-following garden hero (#60):
+// 5-story vermilion-red Pagoda, arched wooden Drum/Moon Bridge spanning reflective koi ponds, overhanging Tea House
+// with warm shoji screens, ornate wooden Main Entrance Gate, Zen raked-gravel rock garden, carved stone lanterns,
+// stepping-stone paths, pink Sakura cherry blossoms and crimson Japanese maples.
+fn tea_pond_sdf(u: f32, w: f32) -> f32 {
+    // Organic two-lobed central/south koi pond curving beneath the Drum Bridge and Tea House.
+    let a = ((u - 2.0) / 21.0).powi(2) + ((w - 13.0) / 14.5).powi(2) - 1.0;
+    let b = ((u + 12.0) / 15.0).powi(2) + ((w - 23.0) / 11.5).powi(2) - 1.0;
+    let c = ((u - 16.0) / 12.0).powi(2) + ((w - 2.0) / 11.0).powi(2) - 1.0;
+    a.min(b).min(c) + 0.08 * (u * 0.17).sin() * (w * 0.19).cos()
+}
+
+fn tea_garden_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
+    if u.abs() > 62.0 || w.abs() > 62.0 {
+        return None;
+    }
+    let pond = tea_pond_sdf(u, w);
+    if pond < 0.0 {
+        // Floating emerald lily pads & bright orange/white koi flecks on shimmering water!
+        let h = hash3((u * 1.8) as i32, 0, (w * 1.8) as i32, 53);
+        if pond < -0.18 && h % 29 == 0 {
+            return Some(kind(LEAVES, colour(8, 5)));
+        }
+        if pond < -0.25 && h % 97 == 0 {
+            return Some(kind(PLASTER, colour(1, 4))); // bright orange koi carp
+        }
+        return Some(kind(WATER, colour(12, 5)));
+    }
+    if pond < 0.14 {
+        return Some(kind(ROCK, grey(8))); // natural moss-stone pond rim
+    }
+    // Zen Dry Rock Garden (Karesansui) in the southwest terrace: pale raked concentric gravel ripples.
+    if (-44.0..=-18.0).contains(&u) && (18.0..=40.0).contains(&w) {
+        let r = ((u + 31.0).powi(2) + (w - 29.0).powi(2)).sqrt();
+        let ripple = ((r * 2.2) as i32) % 2 == 0;
+        return Some(kind(SAND, if ripple { grey(2) } else { grey(4) }));
+    }
+    // Winding warm gravel & flagstone paths linking Main Gate -> Drum Bridge -> Pagoda -> Tea House.
+    let main_path = (w + 2.0 + 7.0 * (u * 0.055).sin()).abs() < 2.2 && (-36.0..=54.0).contains(&u);
+    let cross_path = (u - 4.0 - 5.0 * (w * 0.06).cos()).abs() < 2.1 && (-32.0..=42.0).contains(&w);
+    if main_path || cross_path {
+        let paver = hash3((u * 1.5) as i32, 1, (w * 1.5) as i32, 17) % 5 == 0;
+        return Some(if paver { kind(ROCK, grey(6)) } else { kind(SAND, colour(3, 1)) });
+    }
+    // Deep lush mossy Japanese garden lawn with organic feathered perimeter melting into Golden Gate Park.
+    let edge = (u / 54.0).powi(2) + (w / 54.0).powi(2) + 0.08 * (u * 0.11).sin() * (w * 0.13).cos();
+    if edge > 1.0 {
+        return None;
+    }
+    let h = hash3((u * 2.6).floor() as i32, 2, (w * 2.6).floor() as i32, 91);
+    Some(kind(GRASS, if h % 5 == 0 { colour(8, 5) } else { colour(8, 6) }))
+}
+
+fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(0.0..25.0).contains(&y) || u.abs() > 62.0 || w.abs() > 62.0 {
+        return 0;
+    }
+    let vermilion = kind(WOOD, colour(0, 4));
+    let dark_timber = kind(WOOD, colour(2, 9));
+    let dark_tile = kind(ROOFING, grey(12));
+    let shoji = kind(PLASTER, colour(3, 0));
+    let warm_shoji = kind(LAMP, colour(3, 0));
+    let gold = kind(STEEL, colour(3, 3));
+    let stone = kind(ROCK, grey(7));
+
+    // 1. Iconic 5-Story Vermilion Japanese Pagoda at (-16, -12), ~18 m tall.
+    let (pu, pw) = (u + 16.0, w + 12.0);
+    if pu.abs() <= 7.0 && pw.abs() <= 7.0 && y < 22.0 {
+        if y < 1.1 && pu.abs() <= 4.8 && pw.abs() <= 4.8 {
+            return stone;
+        }
+        let tiers: [(f32, f32, f32, f32); 5] = [
+            (1.1, 3.6, 2.4, 2.0),
+            (4.7, 3.1, 2.2, 1.8),
+            (8.0, 2.6, 2.0, 1.6),
+            (11.0, 2.2, 1.8, 1.4),
+            (13.7, 1.8, 1.7, 1.5),
+        ];
+        for &(base_y, half, wall_h, eave_out) in &tiers {
+            let roof_h = 1.65;
+            if y >= base_y && y < base_y + wall_h + roof_h + 0.4 {
+                let k = pagoda_tier(pu, pw, y - base_y, half, wall_h, eave_out, roof_h, s, shoji, vermilion, dark_tile, gold);
+                if k != 0 {
+                    return k;
+                }
+            }
+        }
+        // Tall bronze sorin spire crowning the 5th tier.
+        if (16.8..21.2).contains(&y) && (pu * pu + pw * pw).sqrt() <= (0.42 - (y - 16.8) * 0.06).max(0.14).max(s * 0.5) {
+            return gold;
+        }
+    }
+
+    // 2. Steeply Arched Wooden Drum (Moon) Bridge prominently spanning the open central koi pond channel at (+9, +8)!
+    let k_bridge = arched_bridge(u - 9.0, y, w - 8.0, 6.2, 1.85, 4.2, s, kind(WOOD, colour(1, 4)), dark_timber);
+    if k_bridge != 0 {
+        return k_bridge;
+    }
+
+    // 3. Traditional Japanese Tea House overhanging the southwest koi pond edge at (-14, +24).
+    let (tu, tw) = (u + 14.0, w - 24.0);
+    if tu.abs() <= 9.5 && tw.abs() <= 8.0 && y < 8.5 {
+        // Stilts & timber veranda deck over pond edge.
+        if y < 0.85 {
+            if tu.abs() <= 6.8 && tw.abs() <= 5.2 && (y > 0.55 || (line(tu, 2.2, 0.0, 0.35, s) && line(tw, 2.2, 0.0, 0.35, s))) {
+                return dark_timber;
+            }
+        } else {
+            let k = pagoda_tier(tu, tw, y - 0.85, 5.4, 3.1, 2.4, 2.4, s, warm_shoji, dark_timber, dark_tile, gold);
+            if k != 0 {
+                return k;
+            }
+        }
+    }
+
+    // 4. Ornate Wooden Main Entrance Gate (East side at +42, -2).
+    let (gu, gw) = (u - 42.0, w + 2.0);
+    if gu.abs() <= 7.0 && gw.abs() <= 10.5 && y < 9.5 {
+        // Open arched/trabeated central portal between massive carved timber gateposts.
+        if y < 4.2 {
+            let post = (gu.abs() - 2.4).abs() < 0.55 && ((gw.abs() - 3.6).abs() < 0.55 || (gw.abs() - 6.8).abs() < 0.55);
+            let wing_wall = gu.abs() <= 2.4 && gw.abs() >= 3.8 && gw.abs() <= 6.8 && y < 3.4;
+            if post {
+                return vermilion;
+            }
+            if wing_wall {
+                return if y > 2.8 { dark_timber } else { shoji };
+            }
+        } else {
+            // Sweeping dark tiled double-eave gate roof.
+            let ry = y - 4.2;
+            let roof_h = 3.8;
+            if ry <= roof_h {
+                let t = (ry / roof_h).clamp(0.0, 1.0);
+                let hu = 4.6 * (1.0 - t * 0.88);
+                let hw = 8.8 * (1.0 - t * 0.25);
+                if gu.abs() <= hu && gw.abs() <= hw {
+                    return if ry > roof_h - 0.45 { gold } else if ry < 0.4 { vermilion } else { dark_tile };
+                }
+            }
+        }
+    }
+
+    // 5. Sculpted Zen Rock Garden boulders in the southwest terrace (-44..-18, +18..+40).
+    for &(bu, bw, br, bh) in &[(-31.0f32, 29.0f32, 2.6f32, 2.2f32), (-25.0, 34.0, 1.7, 1.3), (-37.0, 24.0, 1.9, 1.5)] {
+        let d = ((u - bu) / br).powi(2) + ((w - bw) / (br * 0.85)).powi(2) + (y / bh).powi(2);
+        if d <= 1.0 {
+            return if y < 0.45 { kind(GRASS, colour(8, 6)) } else { stone };
+        }
+    }
+
+    // 6. Carved Granite Stone Lanterns (`toro`) along the pond & pagoda paths.
+    for &(lu, lw) in &[(13.0f32, 10.0f32), (-4.0, 4.0), (26.0, -5.0), (-26.0, -2.0), (2.0, 28.0)] {
+        let kl = stone_lantern(u - lu, y, w - lw, s);
+        if kl != 0 {
+            return kl;
+        }
+    }
+
+    // 7. Blossoming Pink Sakura Cherry Trees, Crimson Japanese Maples & Sculpted Black Pines!
+    let sakura_a = kind(LEAVES, colour(22, 1));
+    let sakura_b = kind(LEAVES, WHITE);
+    let maple_a = kind(LEAVES, colour(0, 5));
+    let maple_b = kind(LEAVES, colour(23, 4));
+    let pine_a = kind(LEAVES, colour(9, 6));
+    let pine_b = kind(LEAVES, colour(8, 5));
+    let trees: [(f32, f32, f32, f32, f32, u32, u8); 18] = [
+        // (u, w, trunk_h, crown_r, crown_h, seed, species: 0=sakura, 1=maple, 2=pine)
+        (-3.0, -20.0, 3.2, 5.4, 4.5, 11, 0),
+        (22.0, -16.0, 3.0, 5.2, 4.4, 17, 0),
+        (19.0, 24.0, 2.8, 5.0, 4.2, 23, 0),
+        (-34.0, -18.0, 3.4, 5.6, 4.8, 29, 0),
+        (36.0, 14.0, 3.0, 4.8, 4.2, 31, 0),
+        (-28.0, 4.0, 2.4, 4.2, 3.6, 37, 1),
+        (12.0, -4.0, 2.2, 3.8, 3.4, 41, 1),
+        (-4.0, 36.0, 2.6, 4.5, 3.8, 43, 1),
+        (28.0, -26.0, 2.5, 4.2, 3.6, 47, 1),
+        (-44.0, -34.0, 5.0, 5.8, 6.2, 53, 2),
+        (46.0, -30.0, 4.8, 5.5, 6.0, 59, 2),
+        (46.0, 32.0, 5.2, 6.0, 6.5, 61, 2),
+        (-48.0, 44.0, 4.6, 5.4, 5.8, 67, 2),
+        (10.0, -42.0, 5.0, 6.2, 6.2, 71, 2),
+        (-22.0, -44.0, 4.5, 5.5, 5.5, 73, 0),
+        (24.0, 44.0, 4.2, 5.2, 5.0, 79, 1),
+        (-48.0, -4.0, 4.5, 5.4, 5.4, 83, 2),
+        (34.0, -42.0, 3.6, 5.0, 4.6, 89, 0),
+    ];
+    for &(tu, tw, th, cr, ch, seed, sp) in &trees {
+        let (ca, cb) = match sp {
+            0 => (sakura_a, sakura_b),
+            1 => (maple_a, maple_b),
+            _ => (pine_a, pine_b),
+        };
+        let kt = ornamental_tree(u - tu, y, w - tw, th, cr, ch, seed, s, dark_timber, ca, cb);
+        if kt != 0 {
+            return kt;
+        }
+    }
+    0
+}
+
+// ── San Francisco Botanical Garden (Golden Gate Park). Terrain-following garden hero (#60):
+// Naturalistic waterfowl & lily pond with wooden Moon Viewing Pavilion, circular Fountain Plaza, glazed Botanical
+// Pavilion & redwood pergola entrance, curving decomposed-granite paths, vibrant multi-zone botanical flowerbeds,
+// blooming pink Magnolias, coastal Redwoods, and sculptural palms.
+fn botanical_pond_sdf(u: f32, w: f32) -> f32 {
+    let a = ((u + 26.0) / 21.0).powi(2) + ((w + 4.0) / 17.5).powi(2) - 1.0;
+    let b = ((u + 38.0) / 14.0).powi(2) + ((w - 11.0) / 13.0).powi(2) - 1.0;
+    a.min(b) + 0.07 * (u * 0.14).cos() * (w * 0.15).sin()
+}
+
+fn botanical_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
+    if u.abs() > 76.0 || w.abs() > 56.0 {
+        return None;
+    }
+    let pond = botanical_pond_sdf(u, w);
+    if pond < 0.0 {
+        let h = hash3((u * 1.5) as i32, 0, (w * 1.5) as i32, 61);
+        if pond < -0.15 && h % 23 == 0 {
+            return Some(kind(LEAVES, colour(8, 4))); // floating water lily pads
+        }
+        return Some(kind(WATER, colour(13, 5)));
+    }
+    if pond < 0.12 {
+        return Some(kind(ROCK, grey(7)));
+    }
+    // Circular Fountain Plaza at (+10, -2), radius 11.5 m.
+    let fp_r = ((u - 10.0).powi(2) + (w + 2.0).powi(2)).sqrt();
+    if fp_r < 4.2 {
+        return Some(kind(WATER, colour(13, 3))); // sparkling fountain pool
+    }
+    if fp_r < 11.5 {
+        return Some(kind(CONCRETE, colour(3, 0))); // sandstone plaza pavers
+    }
+    // Curving decomposed-granite garden promenades connecting Pavilion -> Fountain Plaza -> Pond -> Flower Walks.
+    let walk_ew = (w + 2.0 - 8.0 * (u * 0.045).sin()).abs() < 2.6;
+    let walk_ns = (u - 10.0 - 9.0 * (w * 0.05).sin()).abs() < 2.4;
+    let ring_walk = ((fp_r - 28.0).abs() < 2.2) && u > -20.0;
+    if walk_ew || walk_ns || ring_walk {
+        return Some(kind(SAND, colour(3, 1)));
+    }
+    // Vibrant curated botanical flowerbeds flanking Fountain Plaza & Pavilion!
+    let beds: [(f32, f32, f32, f32, u8, u8); 6] = [
+        (24.0, -20.0, 12.0, 7.0, colour(21, 4), colour(22, 2)), // magenta & pink rhododendron bed
+        (24.0, 18.0, 12.0, 7.5, colour(3, 4), colour(1, 4)),   // California golden poppy & coral bed
+        (-2.0, 26.0, 14.0, 7.0, colour(18, 3), colour(19, 2)), // purple lavender & salvia garden
+        (-4.0, -28.0, 13.0, 7.0, colour(4, 4), colour(2, 3)),  // daffodil gold & warm amber blooms
+        (48.0, -24.0, 11.0, 6.5, colour(0, 4), colour(22, 1)), // crimson camellia & blush blossoms
+        (48.0, 24.0, 11.0, 6.5, colour(16, 3), colour(18, 2)), // blue ceanothus & iris bed
+    ];
+    for &(bu, bw, ru, rw, c1, c2) in &beds {
+        let d = ((u - bu) / ru).powi(2) + ((w - bw) / rw).powi(2);
+        if d < 1.0 {
+            let h = hash3((u * 2.5) as i32, 3, (w * 2.5) as i32, 47);
+            return Some(match h % 5 {
+                0 => kind(LEAVES, c1),
+                1 => kind(LEAVES, c2),
+                2 => kind(LEAVES, WHITE),
+                _ => kind(GRASS, colour(8, 5)),
+            });
+        }
+    }
+    // Great Meadow natural muted botanical turf (feathered cleanly into Golden Gate Park's own grass at the perimeter).
+    if u.abs() > 62.0 || w.abs() > 44.0 {
+        return None;
+    }
+    let h = hash3((u * 0.8) as i32, 1, (w * 0.8) as i32, 13);
+    Some(kind(GRASS, if h % 3 == 0 { colour(7, 5) } else { colour(7, 8) }))
+}
+
+fn botanical_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(0.0..25.0).contains(&y) || u.abs() > 76.0 || w.abs() > 56.0 {
+        return 0;
+    }
+    let redwood = kind(WOOD, colour(1, 5));
+    let dark_wood = kind(WOOD, colour(2, 9));
+    let white = kind(STEEL, WHITE);
+    let glass = kind(GLASS, colour(13, 1));
+    let stone = kind(CONCRETE, colour(3, 0));
+
+    // 1. Sculpted Tiered Stone Fountain in Fountain Plaza (+10, -2).
+    let fp_r = ((u - 10.0).powi(2) + (w + 2.0).powi(2)).sqrt();
+    if fp_r <= 4.5 && y < 4.5 {
+        if (fp_r - 4.1).abs() < 0.35 && y < 0.85 {
+            return stone; // circular stone fountain basin rim
+        }
+        if fp_r < 1.6 && y < 1.8 || fp_r < 1.0 && y < 2.9 {
+            return stone;
+        }
+        if fp_r < 0.35 && y < 4.0 {
+            return kind(WATER, colour(13, 0)); // rising sparkling water jet
+        }
+    }
+
+    // 2. Wooden Moon Viewing Pavilion & Boardwalk jutting over the pond (-10, -4).
+    let (mu, mw) = (u + 10.0, w + 4.0);
+    if mu.abs() <= 6.5 && mw.abs() <= 6.5 && y < 6.0 {
+        if y < 0.65 && mu.abs() <= 5.5 && mw.abs() <= 5.5 {
+            return redwood; // cedar deck over the pond bank
+        }
+        if (0.65..3.5).contains(&y) && (mu.abs() - 4.2).abs() < 0.35 && (mw.abs() - 4.2).abs() < 0.35 {
+            return dark_wood; // corner redwood posts
+        }
+        if (3.4..5.4).contains(&y) {
+            let t = ((y - 3.4) / 2.0).clamp(0.0, 1.0);
+            if mu.abs() <= 6.0 * (1.0 - t * 0.72) && mw.abs() <= 6.0 * (1.0 - t * 0.72) {
+                return kind(ROOFING, colour(2, 8)); // warm cedar-shingle hip roof
+            }
+        }
+    }
+
+    // 3. Airy Glazed Botanical Pavilion & Redwood Entrance Arbor (+46, -2).
+    let (gu, gw) = (u - 46.0, w + 2.0);
+    if gu.abs() <= 14.5 && gw.abs() <= 10.5 && y < 9.5 {
+        // Low sandstone knee wall & redwood pergola frame.
+        if y < 1.3 && (gu.abs() > 13.0 || gw.abs() > 9.0) {
+            return if gw.abs() < 3.0 { 0 } else { stone };
+        }
+        // Glazed pitched steel-and-glass conservatory hall.
+        if y < 4.6 {
+            let on_wall = (13.8 - gu.abs()).min(9.8 - gw.abs());
+            if on_wall >= 0.0 && on_wall < 0.75f32.max(s) {
+                if gw.abs() < 2.6 && gu < 0.0 {
+                    return 0; // open grand archway facing Fountain Plaza
+                }
+                let post = line(gu, 3.4, 0.0, 0.28, s) || line(gw, 3.4, 0.0, 0.28, s);
+                return if post { white } else { glass };
+            }
+        } else {
+            let ridge = 8.4 - gw.abs() * 0.38;
+            if y <= ridge && gu.abs() <= 14.2 && gw.abs() <= 10.2 {
+                let shell = (ridge - y) < 0.55f32.max(s) || gu.abs() > 13.5;
+                if shell {
+                    return if line(gu, 3.4, 0.0, 0.26, s) || (ridge - y) < 0.25 && gw.abs() < 0.4 { white } else { glass };
+                }
+            }
+        }
+    }
+
+    // 4. Low blooming botanical shrubs & flowering hedges rising 0.2..1.0 m above the curated flowerbeds!
+    if y < 1.15 {
+        let beds: [(f32, f32, f32, f32, u8, u8); 6] = [
+            (24.0, -20.0, 11.0, 6.0, colour(21, 4), colour(22, 2)),
+            (24.0, 18.0, 11.0, 6.5, colour(3, 4), colour(1, 4)),
+            (-2.0, 26.0, 13.0, 6.0, colour(18, 3), colour(19, 2)),
+            (-4.0, -28.0, 12.0, 6.0, colour(4, 4), colour(2, 3)),
+            (48.0, -24.0, 10.0, 5.5, colour(0, 4), colour(22, 1)),
+            (48.0, 24.0, 10.0, 5.5, colour(16, 3), colour(18, 2)),
+        ];
+        for &(bu, bw, ru, rw, c1, c2) in &beds {
+            let d = ((u - bu) / ru).powi(2) + ((w - bw) / rw).powi(2);
+            if d < 0.92 {
+                let mound = 0.85 * (1.0 - d).sqrt() + 0.25 * (u * 0.9).sin().abs();
+                if y < mound {
+                    let h = hash3((u * 3.0) as i32, (y * 3.0) as i32, (w * 3.0) as i32, 29);
+                    return match h % 4 {
+                        0 => kind(LEAVES, c1),
+                        1 => kind(LEAVES, c2),
+                        _ => kind(LEAVES, colour(8, 5)),
+                    };
+                }
+            }
+        }
+    }
+
+    // 5. Specimen Botanical Trees: iconic SF Botanical Garden Pink Magnolias, Towering Redwoods & Golden Acacias!
+    let mag_a = kind(LEAVES, colour(22, 1));
+    let mag_b = kind(LEAVES, colour(21, 2));
+    let red_a = kind(LEAVES, colour(9, 6));
+    let red_b = kind(LEAVES, colour(8, 6));
+    let gold_a = kind(LEAVES, colour(4, 3));
+    let gold_b = kind(LEAVES, colour(5, 4));
+    let trees: [(f32, f32, f32, f32, f32, u32, u8); 18] = [
+        // Magnolias flanking Fountain Plaza & Pond
+        (-10.0, 16.0, 3.0, 5.2, 4.4, 101, 0),
+        (16.0, -34.0, 3.2, 5.5, 4.6, 103, 0),
+        (36.0, -34.0, 3.0, 5.0, 4.2, 107, 0),
+        (34.0, 34.0, 3.1, 5.2, 4.5, 109, 0),
+        (-24.0, -30.0, 3.0, 5.0, 4.4, 113, 0),
+        // Coastal Redwood Grove (tall conical dark evergreens on perimeter)
+        (-62.0, -34.0, 7.5, 6.2, 13.5, 127, 1),
+        (-64.0, 14.0, 8.0, 6.4, 14.0, 131, 1),
+        (-56.0, 38.0, 7.0, 5.8, 12.5, 137, 1),
+        (-28.0, 42.0, 7.5, 6.0, 13.0, 139, 1),
+        (64.0, -36.0, 7.2, 5.8, 12.8, 149, 1),
+        (66.0, 32.0, 7.6, 6.0, 13.2, 151, 1),
+        (4.0, -44.0, 7.0, 5.8, 12.2, 157, 1),
+        (6.0, 44.0, 7.4, 6.0, 12.8, 163, 1),
+        // Sunlit Golden Acacias & Australian/Mediterranean specimen trees
+        (-46.0, -24.0, 3.4, 5.4, 4.8, 167, 2),
+        (26.0, 40.0, 3.2, 5.0, 4.4, 173, 2),
+        (-42.0, 30.0, 3.6, 5.2, 4.6, 179, 2),
+        (64.0, 4.0, 3.5, 5.0, 4.6, 181, 0),
+        (-66.0, -8.0, 6.5, 5.6, 11.0, 191, 1),
+    ];
+    for &(tu, tw, th, cr, ch, seed, sp) in &trees {
+        let (ca, cb) = match sp {
+            0 => (mag_a, mag_b),
+            1 => (red_a, red_b),
+            _ => (gold_a, gold_b),
+        };
+        let kt = ornamental_tree(u - tu, y, w - tw, th, cr, ch, seed, s, dark_wood, ca, cb);
+        if kt != 0 {
+            return kt;
+        }
+    }
+    0
+}
+
+// ── Conservatory of Flowers (1879) + Conservatory Valley Floral Parterres (Golden Gate Park).
+// Frame: u along the glasshouse east-west axis (76 m), w south down Conservatory Valley (+w toward JFK Dr),
+// y up from terrace foot 74.4 m (glasshouse) and over_g for the sloping Valley carpet parterres (#60).
+fn conservatory_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
+    if u.abs() > 48.0 || !(-20.0..=90.0).contains(&w) {
+        return None;
+    }
+    // Crisp white-gravel promenade terrace directly around the Conservatory.
+    if (-18.0..=27.0).contains(&w) && u.abs() <= 44.0 {
+        return Some(kind(SAND, grey(2)));
+    }
+    // Conservatory Valley (w = 27..90): manicured Victorian botanical parterres with natural floral stippling!
+    if w > 27.0 && w <= 88.0 && u.abs() <= 46.0 {
+        if (u.abs() < 3.0 && w < 42.0) || w > 83.0 || u.abs() > 43.0 {
+            return Some(kind(SAND, colour(3, 0)));
+        }
+        let h = hash3((u * 3.0) as i32, 5, (w * 3.0) as i32, 83);
+        let dapple = |bloom: u8, alt: u8| -> Kind {
+            match h % 5 {
+                0 | 1 => kind(LEAVES, bloom),
+                2 => kind(LEAVES, alt),
+                _ => kind(LEAVES, colour(8, 5)),
+            }
+        };
+        // Central Victorian circular dahlia & floral medallion at (0, 56), radius 14 m.
+        let cr = (u * u + (w - 56.0).powi(2)).sqrt();
+        if cr < 16.0 {
+            if cr > 14.0 {
+                return Some(kind(SAND, grey(2)));
+            }
+            if cr > 12.6 {
+                return Some(kind(LEAVES, colour(8, 6))); // manicured dark boxwood rim
+            }
+            let ang = (w - 56.0).atan2(u);
+            let lobe = ((ang * 6.0).sin() > 0.0) as u8;
+            return Some(if cr < 3.4 {
+                dapple(colour(3, 3), colour(4, 2)) // golden marigold center
+            } else if cr < 7.2 {
+                dapple(if lobe == 1 { colour(0, 3) } else { WHITE }, colour(22, 1)) // rose-crimson & white petals
+            } else {
+                dapple(if lobe == 1 { colour(22, 2) } else { colour(19, 2) }, colour(3, 1)) // blush-pink & soft lavender
+            });
+        }
+        // Symmetrical East & West curved floral crescent parterres (u = ±19..±40, w = 33..78).
+        let au = u.abs();
+        if (19.5..=39.5).contains(&au) && (33.0..=78.0).contains(&w) {
+            let lu = (au - 29.5) / 10.0;
+            let lw = (w - 55.5) / 22.5;
+            let ov = lu * lu + lw * lw;
+            if ov < 1.0 {
+                if ov > 0.82 {
+                    return Some(kind(LEAVES, colour(8, 6))); // curved boxwood hedge outline
+                }
+                if ov < 0.25 {
+                    return Some(dapple(colour(3, 3), WHITE)); // warm cream & gold floral heart
+                }
+                if ov < 0.56 {
+                    return Some(dapple(colour(0, 3), colour(22, 2))); // crimson & rose floral band
+                }
+                return Some(dapple(colour(18, 2), colour(19, 1))); // soft lavender & lilac outer bloom
+            }
+        }
+        return Some(kind(GRASS, if h % 3 == 0 { colour(7, 5) } else { colour(8, 5) }));
+    }
+    None
+}
+
+fn conservatory(u: f32, y: f32, over_g: f32, w: f32, s: f32) -> Kind {
+    let white = kind(PLASTER, WHITE);
+    let steel_white = kind(STEEL, WHITE);
+    let glass = kind(GLASS, colour(13, 0));
+    let glass_pale = kind(GLASS, colour(14, 1));
+    let palm_green = kind(LEAVES, colour(8, 5));
+
+    // Low raised manicured boxwood & floral mounds on the Conservatory Valley slope (w > 27 m).
+    if w > 27.0 && w <= 88.0 && u.abs() <= 46.0 {
+        if over_g > 0.0 && over_g < 0.7 {
+            let cr = (u * u + (w - 56.0).powi(2)).sqrt();
+            if cr < 14.0 {
+                let h = if cr > 12.6 { 0.52 } else { 0.34 };
+                if over_g < h {
+                    return conservatory_surface(u, w, s).unwrap_or(palm_green);
+                }
+            }
+            let au = u.abs();
+            if (19.5..=39.5).contains(&au) && (33.0..=78.0).contains(&w) {
+                let lu = (au - 29.5) / 10.0;
+                let lw = (w - 55.5) / 22.5;
+                let ov = lu * lu + lw * lw;
+                if ov < 1.0 && over_g < if ov > 0.82 { 0.52 } else { 0.30 } {
+                    return conservatory_surface(u, w, s).unwrap_or(palm_green);
+                }
+            }
+        }
+        return 0;
+    }
+
+    // ── Victorian White-Framed Glazed Glasshouse (76 x 34 m) at w = -18..+20 m.
+    if !(-3.5..22.5).contains(&y) || u.abs() > 40.5 || !(-18.0..=20.0).contains(&w) {
+        return 0;
+    }
+    let (au, aw) = (u.abs(), w.abs());
+    // Solid white masonry terrace plinth down to -3.5 m.
+    if y < 0.0 {
+        return if au <= 39.5 && (-13.0..=16.5).contains(&w) { white } else { 0 };
+    }
+    // 1. Ornate Victorian South Entry Vestibule & Stairs (u = -7..+7, w = +9.5..+18).
+    if au <= 7.2 && w > 9.2 && w <= 18.0 {
+        // Broad white stone entry stairs climbing to floor level.
+        if w > 14.8 && y < (18.0 - w) * 0.45 {
+            return kind(CONCRETE, grey(2));
+        }
+        if w <= 15.0 {
+            if y < 6.4 {
+                let on_shell = au > 6.4 || w > 14.2;
+                if !on_shell {
+                    return 0;
+                }
+                if w > 14.2 && round_arch(u, y, 2.6, 3.2, 2.2) {
+                    return if y < 3.4 { kind(GLASS, colour(14, 7)) } else { glass };
+                }
+                return if y < 1.6 || y > 5.8 || line(u, 2.2, 0.0, 0.32, s) { white } else { glass };
+            }
+            // Triangular Victorian pediment gable over the entry portico.
+            let gable = 9.8 - au * 0.48;
+            if y <= gable && w <= 15.2 {
+                return if (gable - y) < 0.55 || y < 6.8 || w > 14.6 { white } else { glass_pale };
+            }
+        }
+        return 0;
+    }
+
+    // 2. Central Iconic Tiered White-Ribbed Glass Palm Dome (r <= 12.6 m, rising to 21.8 m!).
+    let r = (u * u + w * w).sqrt();
+    if r <= 12.8 {
+        if y < 2.2 {
+            return if r >= 11.4 { white } else { 0 };
+        }
+        // Lower glazed drum & ornate white Victorian cornice (2.2..9.0 m).
+        if y < 9.0 {
+            if r >= 11.4 && r <= 12.4 {
+                if y > 8.2 || y < 2.6 || line(r * w.atan2(u), 2.1, 0.0, 0.28, s) {
+                    return white;
+                }
+                return glass;
+            }
+            // Lush interior tropical palms glimpsed inside the glass dome!
+            if r < 7.0 && y < 7.5 && hash3((u * 1.2) as i32, (y * 1.2) as i32, (w * 1.2) as i32, 31) % 5 == 0 {
+                return palm_green;
+            }
+            return 0;
+        }
+        // Clerestory lantern ring (9.0..11.4 m) stepped inward.
+        if y < 11.4 {
+            if r <= 11.8 && r >= 10.2 {
+                return if y > 10.8 || y < 9.4 || line(r * w.atan2(u), 1.8, 0.0, 0.28, s) { white } else { glass_pale };
+            }
+            return 0;
+        }
+        // Sweeping Victorian curved ribbed glass Palm Dome (11.4..18.8 m).
+        if y < 18.8 {
+            let h = (y - 11.4) / 7.4;
+            let rd = 10.6 * (1.0 - h * h * 0.94).max(0.0).sqrt();
+            if r <= rd.max(s * 0.5) && r >= (rd - 0.85f32.max(s)).max(0.0) {
+                let theta = w.atan2(u);
+                let rib = line(theta * 10.6, 10.6 * std::f32::consts::PI / 8.0, 0.0, 0.34, s);
+                let ring = line(y, 1.85, 11.4, 0.24, s);
+                return if rib || ring { steel_white } else { glass_pale };
+            }
+            return 0;
+        }
+        // Delicate white Victorian cupola & spire finial (18.8..22.0 m).
+        if y < 20.6 && r <= 2.4 {
+            return if r > 1.8 && !line(w.atan2(u) * 2.0, 1.0, 0.0, 0.28, s) { glass } else { white };
+        }
+        return if y < 22.0 && r <= (1.6 - (y - 20.6) * 1.0).max(0.22).max(s * 0.5) { steel_white } else { 0 };
+    }
+
+    // 3. Symmetrical Curved Glass Barrel-Vault Wings (au = 12..30 m) & Wider Victorian End Pavilions (au = 30..39.5 m).
+    if au <= 39.5 {
+        let end_pav = au >= 30.0;
+        let half_w = if end_pav { 12.2 } else { 9.2 };
+        if aw > half_w {
+            return 0;
+        }
+        let wall_h = if end_pav { 6.6 } else { 5.4 };
+        let top_h = if end_pav { 12.6 } else { 10.4 };
+        if y < wall_h {
+            let shell = (half_w - aw).min(39.5 - au);
+            if shell <= 0.75f32.max(s) {
+                if y < 2.0 || y > wall_h - 0.55 {
+                    return white;
+                }
+                let rib = line(u, 2.2, 0.0, 0.24, s) || line(w, 2.2, 0.0, 0.24, s) || line(y, 1.8, 2.0, 0.16, s);
+                return if rib { steel_white } else { glass };
+            }
+            // Tropical ferns visible faintly behind the clear glass.
+            if y < 3.6 && shell > 2.2 && hash3((u * 1.4) as i32, (y * 1.4) as i32, (w * 1.4) as i32, 43) % 7 == 0 {
+                return palm_green;
+            }
+            return 0;
+        }
+        // Curved barrel-vault roof (wings) or hipped glass roof (end pavilions) with crisp white structural ribs!
+        let roof_y = if end_pav {
+            let du = (au - 34.75).abs() / 4.75;
+            let dw = aw / half_w;
+            wall_h + (top_h - wall_h) * (1.0 - du.max(dw)).max(0.0)
+        } else {
+            wall_h + (top_h - wall_h) * (1.0 - (aw / half_w).powi(2)).max(0.0).sqrt()
+        };
+        if y <= roof_y && y >= roof_y - 0.75f32.max(s) {
+            let rib = line(u, 2.2, 0.0, 0.28, s) || line(y, 1.6, wall_h, 0.18, s) || (roof_y - y < 0.3 && aw < 0.5);
+            return if rib { steel_white } else { glass_pale };
+        }
+    }
+    0
+}
+
+// ── The Painted Ladies — 710–722 Steiner Street (Matthew Kavanaugh, 1892–1896).
+// Seven stepped Queen Anne Victorian rowhouses climbing the Steiner St hill across from Alamo Square.
+// Frame: u runs north-to-south along Steiner St (from 722 at -22.2 m to 710 at +22.3 m), +w faces west toward
+// Alamo Square, y up from 722's base datum (60.6 m). Verified against Painted Ladies.jpg (#60).
+fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(-4.5..20.5).contains(&y) || u < -28.0 || u > 26.8 || w < -10.5 || w > 12.6 {
+        return 0;
+    }
+    // Exact surveyed (u_mid, half_width, base_rel_m, body_colour, accent_colour, trim_colour) from north (722) to south (710):
+    let houses: [(f32, f32, f32, u8, u8, u8); 7] = [
+        (-22.2, 4.7, 0.0, colour(15, 9), colour(14, 8), WHITE),          // 722 Steiner: deep charcoal-navy & crisp white
+        (-13.2, 3.6, 0.8, colour(6, 8), colour(4, 2), colour(4, 0)),    // 720 Steiner: warm olive-sage & cream trim
+        (-6.1, 3.45, 1.4, colour(10, 8), colour(11, 2), WHITE),         // 718 Steiner: muted slate-teal & crisp white
+        (1.0, 3.45, 2.2, colour(3, 1), colour(1, 2), WHITE),            // 716 Steiner: warm butter-cream & coral accent
+        (8.1, 3.45, 2.8, colour(21, 7), colour(20, 8), WHITE),          // 714 Steiner: soft lavender-taupe & dusty rose
+        (15.2, 3.45, 3.4, colour(12, 1), colour(13, 2), WHITE),         // 712 Steiner: pale robins-egg aqua & crisp white
+        (22.3, 3.55, 4.0, colour(23, 8), colour(3, 0), WHITE),          // 710 Steiner: warm plum-cocoa & cream bay
+    ];
+    let slate = kind(ROOFING, grey(12));
+    let brick = kind(BRICK, colour(0, 6));
+    let glass = kind(GLASS, colour(14, 9));
+    let dark_room = kind(PLASTER, grey(13));
+
+    for (idx, &(um, hw, base, body_c, acc_c, trim_c)) in houses.iter().enumerate() {
+        let lu = u - um;
+        if lu.abs() > hw - 0.08 {
+            continue;
+        }
+        let body = kind(PLASTER, body_c);
+        let accent = kind(PLASTER, acc_c);
+        let trim = kind(PLASTER, trim_c);
+        let hy = y - base;
+        if hy < -4.2 || hy > 14.8 {
+            continue;
+        }
+        // Main house box: w from -9.0 (rear) to +7.8 (main front plane).
+        // Foundation skirt down to -4.2 m embeds cleanly into Steiner St's hillside.
+        if hy < 0.0 {
+            return if w >= -9.0 && w <= 9.6 { kind(CONCRETE, grey(6)) } else { 0 };
+        }
+        // Brick chimney rising near the rear ridge.
+        if hy >= 9.0 && hy < 14.4 && (lu - 1.2).abs() < 0.55 && (w + 3.5).abs() < 0.55 {
+            return brick;
+        }
+        // Steep Queen Anne pitched front gable roof (hy = 9.4..13.5 m) running front-to-back!
+        let roof_eave = 9.4;
+        let gable_peak = if idx == 0 { 13.0 } else { 13.4 };
+        let slope_y = gable_peak - (lu.abs() / hw) * (gable_peak - roof_eave);
+        if hy >= roof_eave {
+            // Front bay-window decorative hipped turret cap & gable overhang.
+            let front_w = if idx == 0 { 8.4 } else { 8.6 };
+            if w > front_w || w < -9.2 {
+                return 0;
+            }
+            if hy > slope_y {
+                return 0;
+            }
+            // Front gable facade (w = 7.4..8.6): crisp white scalloped bargeboard verge, decorative attic window!
+            if w > 7.4 {
+                if (slope_y - hy) < 0.55 || (hy - roof_eave) < 0.45 {
+                    return trim;
+                }
+                if lu.abs() < 0.75 && hy > roof_eave + 0.8 && hy < gable_peak - 1.2 {
+                    return if w > 7.9 { 0 } else if lu.abs() < 0.14 || (hy - (roof_eave + 1.8)).abs() < 0.14 { trim } else { glass };
+                }
+                return if ((hy * 3.0) as i32) % 2 == 0 { accent } else { body };
+            }
+            // Dark slate pitched roof over the house body.
+            if (slope_y - hy) < 0.55f32.max(s) {
+                return slate;
+            }
+            return body;
+        }
+        // ── Prominent 2-Story 3-Sided Polygonal Bay Window on the north side of each house front (lu = -hw+0.3 .. +0.75).
+        let bay_u0 = -hw + 0.35;
+        let bay_u1 = 0.75;
+        let bay_mid = (bay_u0 + bay_u1) * 0.5;
+        let bay_hw = (bay_u1 - bay_u0) * 0.5;
+        let in_bay_u = lu >= bay_u0 && lu <= bay_u1;
+        if w > 7.8 && in_bay_u {
+            let edge_t = ((lu - bay_mid).abs() - bay_hw * 0.55).max(0.0) / (bay_hw * 0.45);
+            let bay_proj = 7.8 + 1.55 * (1.0 - edge_t * 0.75); // crisp 3-sided polygonal bay bevel!
+            if w > bay_proj {
+                return 0;
+            }
+            // Bay roof cornice & floor belt courses.
+            if hy >= 8.95 || (hy - 5.5).abs() < 0.25 || (hy - 2.1).abs() < 0.25 {
+                return trim;
+            }
+            // Ground-floor raised basement bay windows (0.4..1.8) + 2 tall Victorian stories (2.3..5.2 and 5.7..8.7).
+            let fy = if hy >= 5.5 { hy - 5.5 } else if hy >= 2.1 { hy - 2.1 } else { -1.0 };
+            let on_face = bay_proj - w < 0.45f32.max(s);
+            if fy >= 0.0 && on_face {
+                // Three tall narrow double-hung Victorian sash windows across the 3 facets of the bay!
+                let pane_c = (lu - bay_mid).abs() < 0.62;
+                let pane_side = ((lu - bay_mid).abs() - bay_hw * 0.68).abs() < 0.46;
+                if (pane_c || pane_side) && (0.45..2.85).contains(&fy) {
+                    let sash = (fy - 1.65).abs() < 0.12 || (fy - 0.45) < 0.14 || (2.85 - fy) < 0.14;
+                    return if sash { trim } else if bay_proj - w < 0.18 && s <= 0.25 { 0 } else { glass };
+                }
+                // Decorative Queen Anne spandrel panel below each window.
+                if fy < 0.45 {
+                    return accent;
+                }
+            }
+            if hy < 2.1 && on_face && (lu - bay_mid).abs() < 0.85 && (0.6..1.7).contains(&hy) {
+                return glass;
+            }
+            return body;
+        }
+        // ── Recessed Covered Front Entry Porch & Stairs on the south side of each house front (lu = +0.75 .. +hw-0.2).
+        if w > 7.8 && lu > bay_u1 {
+            // Elevated front porch stairs descending toward Steiner St sidewalk (w = 7.8..11.0).
+            if w <= 11.2 && hy < 2.2 {
+                let step_h = 2.15 * (1.0 - ((w - 8.2).max(0.0) / 3.0)).clamp(0.0, 1.0);
+                if hy <= step_h {
+                    return if (lu - (bay_u1 + 0.18)).abs() < 0.18 || (lu - (hw - 0.25)).abs() < 0.18 { trim } else { kind(CONCRETE, grey(4)) };
+                }
+            }
+            // Porch deck, white balustrade, turned white corner columns & porch cornice (w = 7.8..9.6).
+            if w <= 9.6 {
+                if (2.1..2.35).contains(&hy) || (5.3..5.65).contains(&hy) {
+                    return trim;
+                }
+                // Porch railing balusters.
+                if (2.35..3.15).contains(&hy) && w > 9.2 && lu < bay_u1 + 0.9 {
+                    return if hy > 3.0 || line(lu, 0.35, 0.0, 0.12, s) { trim } else { 0 };
+                }
+                // Turned white porch columns supporting the second-floor porch roof.
+                if (2.3..5.35).contains(&hy) && w > 9.15 && ((lu - (bay_u1 + 0.2)).abs() < 0.2 || (lu - (hw - 0.35)).abs() < 0.2) {
+                    return trim;
+                }
+                // Upstairs decorative porch balcony rail (5.65..6.45).
+                if (5.65..6.45).contains(&hy) && w > 9.2 {
+                    return if hy > 6.3 || line(lu, 0.4, 0.0, 0.12, s) { trim } else { 0 };
+                }
+            }
+            return 0;
+        }
+        // ── Main Victorian house body (w = -9.0..+7.8).
+        if w >= -9.0 && w <= 7.8 {
+            let on_front = 7.8 - w < 0.6f32.max(s);
+            let on_rear = w + 9.0 < 0.5f32.max(s);
+            if on_front {
+                if hy >= 9.0 || (hy - 5.5).abs() < 0.22 || (hy - 2.1).abs() < 0.22 {
+                    return trim;
+                }
+                // Recessed panelled front entry door with transom on porch side (lu > 0.9).
+                if lu > 1.1 && lu < hw - 0.6 && (2.2..4.9).contains(&hy) {
+                    if hy > 4.2 {
+                        return glass; // glass fanlight/transom
+                    }
+                    return if 7.8 - w < 0.25 { 0 } else { kind(WOOD, colour(1, 6)) };
+                }
+                // Tall upstairs sash window over the front porch.
+                if lu > 1.2 && lu < hw - 0.7 && (6.0..8.6).contains(&hy) {
+                    let sash = (hy - 7.3).abs() < 0.12 || (lu - (hw * 0.5 + 0.4)).abs() < 0.1;
+                    return if sash { trim } else if 7.8 - w < 0.2 && s <= 0.25 { 0 } else { glass };
+                }
+            }
+            if on_rear && hy > 2.2 && hy < 8.6 && (hy - 2.2).rem_euclid(3.3) > 0.6 && (hy - 2.2).rem_euclid(3.3) < 2.6 && line(lu, 2.8, 0.0, 1.2, s) {
+                return glass;
+            }
+            return if on_front || on_rear || (hw - lu.abs()) < 0.5 { body } else { dark_room };
+        }
+    }
+    0
+}
+
+// ── de Young Museum (Herzog & de Meuron, 2005, Golden Gate Park).
+// Frame: u along the main gallery axis (150 m), w across (74 m, -w facing Music Concourse), y up from 74.5 m.
+// Signature oxidized perforated copper cladding, deeply recessed glass ground floor beneath a sweeping cantilevered
+// copper roof overhang, and the iconic 44 m twisting copper Hamon Observation Tower at (u = -66.4 m, w = +29.2 m) (#60).
+fn de_young(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(-7.5..46.0).contains(&y) || u.abs() > 78.0 || w.abs() > 42.0 {
+        return 0;
+    }
+    let copper_a = kind(STEEL, colour(2, 8));
+    let copper_b = kind(STEEL, colour(2, 5));
+    let copper_patina = kind(STEEL, colour(6, 9));
+    let dark_steel = kind(STEEL, grey(12));
+    let glass = kind(GLASS, colour(13, 7));
+    let concrete = kind(CONCRETE, grey(5));
+
+    // Refined architectural oxidized copper cladding: uniform warm bronze sheets with fine vertical standing seams
+    // (1.8 m pitch) and subtle horizontal panel joints rather than blocky camouflage noise (#60).
+    let copper_at = |a: f32, b: f32| {
+        if line(a, 1.8, 0.0, 0.14, s) || line(b, 3.2, 0.0, 0.12, s) {
+            copper_b
+        } else if (hash3((a * 0.55).floor() as i32, (b * 0.32).floor() as i32, 0, 29) % 11) == 0 {
+            copper_patina
+        } else {
+            copper_a
+        }
+    };
+
+    // 1. Iconic 44 m Twisting Copper Hamon Observation Tower centered at exact surveyed (-66.4, +29.2)!
+    let (tu, tw) = (u + 66.4, w - 29.2);
+    if tu.abs() <= 16.5 && tw.abs() <= 16.5 && y >= -7.0 && y <= 44.5 {
+        // Smooth horizontal twist of ~38 degrees as the tower rises from gallery grid to neighborhood street grid!
+        let twist = 0.66 * (y.max(0.0) / 44.0);
+        let (ct, st) = (twist.cos(), twist.sin());
+        let ru = tu * ct + tw * st;
+        let rw = -tu * st + tw * ct;
+        // Slight architectural taper with height.
+        let hu = 10.6 - 0.8 * (y.max(0.0) / 44.0);
+        let hw = 7.8 - 0.6 * (y.max(0.0) / 44.0);
+        if ru.abs() <= hu && rw.abs() <= hw {
+            if y < 0.0 {
+                return concrete;
+            }
+            let face = (hu - ru.abs()).min(hw - rw.abs());
+            // Panoramic 360-degree glazed observation floor near the top (37.5..41.2 m).
+            if (37.5..41.2).contains(&y) {
+                if face < 0.8f32.max(s) {
+                    let post = line(ru + rw, 3.2, 0.0, 0.25, s);
+                    return if post { dark_steel } else { glass };
+                }
+                return if y < 38.0 { concrete } else { 0 };
+            }
+            if y > 44.0 {
+                return dark_steel;
+            }
+            // Perforated oxidized copper tower skin with narrow vertical slit windows.
+            if face < 0.7f32.max(s) && s <= 0.6 && (8.0..35.0).contains(&y) && line(ru + rw, 4.6, 0.0, 0.35, s) && (y as i32) % 7 < 3 {
+                return glass;
+            }
+            return copper_at(ru + rw, y);
+        }
+    }
+
+    // 2. Main 3-Story Sweeping Copper Museum Volume (148 x 72 m, height 13.8 m).
+    if u.abs() > 74.5 || w.abs() > 36.5 || y > 14.2 {
+        return 0;
+    }
+    if y < 0.0 {
+        return if u.abs() <= 71.0 && w.abs() <= 33.0 { concrete } else { 0 };
+    }
+    // Signature sculptural cantilevered copper roof slab (11.2..13.8 m) overhanging deeply recessed Music Concourse plaza!
+    if y >= 11.2 {
+        // Flush linear architectural roof skylight above the central concourse hall (no exposed solid notch).
+        let skylight = (u - 6.0).abs() < 4.5 && w > -18.0 && w < 8.0 && y > 13.3;
+        if skylight {
+            return if line(u, 2.2, 0.0, 0.22, s) || line(w, 2.6, 0.0, 0.22, s) { dark_steel } else { glass };
+        }
+        return if y > 13.4 { kind(ROOFING, grey(10)) } else { copper_at(u + w, y) };
+    }
+    // Deeply recessed transparent glass ground floor & entry court (0..5.2 m).
+    if y < 5.2 {
+        if u.abs() > 67.0 || w.abs() > 28.0 {
+            // Slender dark steel columns supporting the dramatic cantilevered copper overhang.
+            if (w + 33.0).abs() < 0.45 && u.abs() <= 70.0 && line(u, 11.0, 0.0, 0.6, s) {
+                return dark_steel;
+            }
+            return 0;
+        }
+        let face = (67.0 - u.abs()).min(28.0 - w.abs());
+        if face < 0.8f32.max(s) {
+            let along = if 67.0 - u.abs() < 28.0 - w.abs() { w } else { u };
+            return if line(along, 2.8, 0.0, 0.2, s) { dark_steel } else { glass };
+        }
+        return concrete;
+    }
+    // Upper copper-clad gallery box (5.2..11.2 m) with crisp horizontal clerestory ribbon windows.
+    if u.abs() <= 72.0 && w.abs() <= 33.5 {
+        let face = (72.0 - u.abs()).min(33.5 - w.abs());
+        if face < 0.8f32.max(s) && (7.6..9.1).contains(&y) && s <= 0.8 {
+            let along = if 72.0 - u.abs() < 33.5 - w.abs() { w } else { u };
+            if (along + 4.0).rem_euclid(14.0) < 7.5 {
+                return glass;
+            }
+        }
+        return copper_at(u + w, y);
+    }
+    0
+}
+
 thread_local! {
     static FACES: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
 }
@@ -1184,8 +2767,10 @@ mod tests {
             assert_ne!(golden_gate(u, 226.95, GG_PLANE, 0.1), 0);
             assert_eq!(golden_gate(u, 227.05, GG_PLANE, 0.1), 0);
         }
-        assert_eq!(material(golden_gate(0.05, 77.95, 0.05, 0.1)), ASPHALT);
-        assert_eq!(golden_gate(0.05, 78.25, 0.05, 0.1), 0);
+        assert_eq!(material(golden_gate(0.05, 77.95, 2.05, 0.1)), ASPHALT);
+        assert_eq!(golden_gate(0.05, 78.25, 2.05, 0.1), 0);
+        // Movable concrete/yellow median barrier runs down the centre line of the 6-lane deck (#60).
+        assert_eq!(material(golden_gate(0.05, 78.25, 0.05, 0.1)), CONCRETE);
         assert_eq!(material(golden_gate(600.05, 75.3, 3.05, 0.1)), ASPHALT);
         assert!((1..600).all(|j| golden_gate(300.05, j as f32 * 0.1 + 0.05, 0.05, 0.1) == 0));
         // Past a quarter of the way along the span, between two hangers, a cable is 119 m up: in every size of cell one cell of it or two
@@ -1197,10 +2782,11 @@ mod tests {
             assert!(!held.is_empty() && held.len() as f32 * s <= 1.2f32.max(2.0 * s), "{s} m cells: {held:?}");
             assert!(held.iter().all(|y| (y - high).abs() <= 0.6f32.max(s)), "{s} m cells: {held:?} against {high}");
         }
-        // A hanger is there in cells of 0.4 m and left out of cells of 1.6 m.
+        // A hanger is visible through cells of 1.6 m and left out at 3.2 m (#60).
         let hanger = |s: f32| (-1..=1).any(|i| golden_gate(((15.24 * 10.0 / s).floor() + i as f32) * s + s / 2.0, 84.0 + s / 2.0, (GG_PLANE / s).floor() * s + s / 2.0, s) != 0);
         assert!(hanger(0.4));
-        assert!(!hanger(1.6));
+        assert!(hanger(1.6));
+        assert!(!hanger(3.2));
     }
 
     #[test]
@@ -1259,5 +2845,53 @@ mod tests {
         assert!(owns(BAY_BRIDGE, 0.0, 0.0, 0.0));
         assert!(owns(BAY_BRIDGE, 0.0, 50.0, 10.0));
         assert!(!owns(BAY_BRIDGE, 0.0, 10.0, 0.0));
+        // Golden Gate also owns its south anchorage (clearing the embedded building at u=-1149 m) and south pier
+        // fender (clearing the concrete lidar spike beside the pier), while keeping Fort Point under the arch (#60).
+        assert!(owns(GOLDEN_GATE, -1149.0, 40.0, -3.0));
+        assert!(owns(GOLDEN_GATE, -640.0, 10.0, 44.0));
+        assert!(!owns(GOLDEN_GATE, -1022.0, 10.0, 28.0));
+    }
+
+    #[test]
+    fn every_sf_landmark_has_reach_night_and_distinct_geometry() {
+        let all = [
+            SALESFORCE, GOLDEN_GATE, TRANSAMERICA, BAY_BRIDGE, FERRY_BUILDING, SUTRO_TOWER, CITY_HALL, FINE_ARTS,
+            FORT_POINT, ACADEMY_SCIENCES, JAPANESE_TEA_GARDEN, BOTANICAL_GARDEN, CONSERVATORY, PAINTED_LADIES, DE_YOUNG,
+        ];
+        for sort in all {
+            assert!(reach(sort).is_some(), "missing reach for sort {sort}");
+            assert!(night(sort).is_some(), "missing night for sort {sort}");
+        }
+        // Fort Point: red brick casemates + open central parade courtyard.
+        assert_eq!(material(fort_point(30.0, 8.0, 0.0, 0.2)), BRICK);
+        assert_eq!(fort_point(0.0, 8.0, 0.0, 0.2), 0);
+        // California Academy of Sciences: living green roof hills + circular porthole skylight + white rim + sheer glass wall.
+        assert!(matches!(material(academy_sciences(-24.8, 21.0, 8.2, 0.2)), GRASS | LEAVES));
+        assert_eq!(material(academy_sciences(-28.0, 21.4, 5.0, 0.2)), GLASS);
+        assert_eq!(material(academy_sciences(-28.0, 21.4, 6.55, 0.2)), STEEL);
+        assert_eq!(material(academy_sciences(1.3, 6.0, -55.2, 0.2)), GLASS);
+        // Japanese Tea Garden: koi pond water surface, 5-story pagoda, and arched Drum Bridge.
+        assert_eq!(surface_at(JAPANESE_TEA_GARDEN, 2.0, 13.0, 75.0, 0.2).map(material), Some(WATER));
+        assert_ne!(japanese_tea_garden(-16.0, 14.0, -12.0, 0.2), 0);
+        assert_eq!(material(japanese_tea_garden(9.0, 4.0, 8.0, 0.2)), WOOD);
+        // SF Botanical Garden: reflective pond, flowerbeds, and glass pavilion.
+        assert_eq!(surface_at(BOTANICAL_GARDEN, -26.0, -4.0, 74.0, 0.2).map(material), Some(WATER));
+        assert_eq!(material(botanical_garden(47.7, 3.0, 7.6, 0.2)), GLASS);
+        // Conservatory of Flowers: glazed white-ribbed dome (r ~= 8.45 m at y=16) + floral Valley parterres.
+        assert_ne!(conservatory(0.0, 16.0, 16.0, 8.2, 0.2), 0);
+        assert_eq!(surface_at(CONSERVATORY, 0.0, 56.0, 71.0, 0.2).map(material), Some(LEAVES));
+        // Painted Ladies: all 7 distinct houses rise sequentially up Steiner St with pitched slate roofs.
+        for (idx, &(um, base)) in [(-22.2f32, 0.0f32), (-13.2, 0.8), (-6.1, 1.4), (1.0, 2.2), (8.1, 2.8), (15.2, 3.4), (22.3, 4.0)].iter().enumerate() {
+            assert_ne!(painted_ladies(um, base + 4.0, 7.5, 0.2), 0, "house at u={um}");
+            let peak = if idx == 0 { 12.85 } else { 13.25 };
+            assert_eq!(material(painted_ladies(um, base + peak, 0.0, 0.2)), ROOFING, "gable roof at u={um}");
+        }
+        // de Young Museum: copper cladding and twisting 44 m Hamon Observation Tower.
+        assert_eq!(material(de_young(0.0, 10.0, 33.2, 0.2)), STEEL);
+        let tw39 = 0.66_f32 * (39.0 / 44.0);
+        assert_eq!(material(de_young(-66.4 - 6.9 * tw39.sin(), 39.0, 29.2 + 6.9 * tw39.cos(), 0.2)), GLASS);
+        assert_ne!(de_young(-66.4, 42.5, 29.2, 0.2), 0);
+        // Palace of Fine Arts lagoon turns concrete-coded basin east of rotunda into real WATER.
+        assert_eq!(surface_at(FINE_ARTS, 55.0, 0.0, 0.6, 0.2).map(material), Some(WATER));
     }
 }

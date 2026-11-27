@@ -89,10 +89,19 @@ Every layer keeps its own terms, listed in [DATA-LICENSES.md](https://github.com
 
 The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works, whose layer records state no licence. The owner chose to include them. `--no-public-works-fixtures` bakes lamps and wires from OSM alone; start a fresh output directory when switching. Adding a source means adding its row to `DATA-LICENSES.md` and to the skill, with how its terms were checked.
 
+## Landmarks, ordinary houses and multi-city fidelity
+
+Every city follows three tiers so ordinary streets, parks and iconic landmarks all read accurately without hand-authoring every house:
+
+1. **Semantic ingest (`earth.py`, `street_sources.py`, `street_detail_sources.py`, `street_detail.py`).** Overture Maps and OpenStreetMap already carry building materials, colours, roof shapes, inland water bodies and garden polygons. `earth.py` preserves `facade_material`, `facade_color`, `roof_shape`, `roof_material` and `roof_color` (sculpting gabled, hipped, pyramidal and domed roofs rather than flattening them, and rendering living green roofs and glazed conservatories in their true materials). `street_sources.py` and `street_detail_sources.py` retain those tags plus inland water and garden polygons alongside road geometry in the same OSM pass, and `street_detail.py` stamps inland ponds and lagoons as `WATER` so elevated park basins ripple and reflect in `core/src/bay.rs` rather than turning into concrete yards.
+2. **Ordinary-house facade rules (`core/src/bay.rs`, `street_detail.py`, `page/march.ts`).** Surveyed bay windows and recessed porches inherit street-facing windows across faceted chains, narrow angled bay panes centre a single sash window rather than falling blank, footprints that already trace bays skip duplicate synthetic bay extrusion, and stepped lower porches or pitched gables never protrude floating parapet cornice slabs or get sliced flat. Painted plaster walls render as smooth stucco with subtle course tooling rather than heavy horizontal clapboard ribs across every neighbourhood.
+3. **Parametric landmarks and landscape heroes (`core/src/heroes.rs`, `sf/heroes.json`, `sf/landmark-tiles.mjs`).** Iconic bridges, civic buildings, museums, conservatories, stepped historic rows and botanical or tea gardens are built from reusable architectural and landscape primitives (arches, ribbed domes, pagoda eaves, pitched gables, arched footbridges, stone lanterns, specimen trees, ponds and floral parterres). `bay.rs` supports overlapping heroes (such as Fort Point beneath the Golden Gate Bridge's south arch) and terrain-hugging ground-surface overrides (such as the Palace of Fine Arts lagoon, Japanese Tea Garden koi ponds, San Francisco Botanical Garden ponds and Conservatory Valley parterres). `sf/landmark-tiles.mjs` covers both ends of suspension bridges (including Marin Headlands and Yerba Buena Island) so no bridge terminates in open water.
+
 ## Check a change
 
 ```sh
 ~/.village/engine/bay/venv/bin/python -m unittest discover -s engine/bay -p 'test_*.py'
+node engine/sf/landmark-audit.mjs   # verifies every landmark rule, ownership and bridge-end tiles
 cd engine && npm run sf      # the realm's checks in Chrome
 ```
 
