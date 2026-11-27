@@ -26,7 +26,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 
 | Module | What it decides |
 | --- | --- |
-| `city.rs` | The generated town: hills, streets, houses, towers, parks. Synthetic data, made by rule, so none of it is stored. |
+| `city.rs` | The generated town: hills, streets, street furniture (lamps, signs, hydrants, bins, mailboxes), houses, towers, parks. Synthetic data, made by rule, so none of it is stored. Streets carry no cars made of world cells: every car is a fine, drivable vehicle. |
 | `land.rs` | The ground beyond the town: mountains, a plain, open country. |
 | `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes. Where no pack is loaded the world is level water. |
 | `heroes.rs` | Landmarks written as programs, asked for any cell at any size. |
