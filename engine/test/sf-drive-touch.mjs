@@ -43,7 +43,7 @@ const until = (page, what, arg, ms = 5000) => page.waitForFunction(what, arg, { 
 try {
   const context = await browser.newContext({ viewport: { width: 844, height: 390 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
   // (Once: a kept value that is not a record, as a broken write would leave.)
-  await context.addInitScript(() => { if (!sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.setItem('vw.drive-touch.v1', '{not json') } })
+  await context.addInitScript(() => { if (!localStorage.getItem('seeded')) { localStorage.setItem('seeded', '1'); localStorage.setItem('vw.drive-touch.v1', '{not json') } })
   const errors = []
   // (A page and its CDP session: a second one, in the same context and so the same storage, stands for a reload.)
   let page, cdp
