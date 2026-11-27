@@ -1,7 +1,8 @@
 // One-command local deploy for both Cloudflare Workers:
-//   npm --prefix deploy run ship [-- --world-only | --site-only] [--public] [--skip-build] [--skip-live] [--allow-dirty] [--dry-run]
+//   npm --prefix deploy run ship [-- --world-only | --site-only] [--egg-media] [--skip-build] [--skip-live] [--allow-dirty] [--dry-run]
 //
-// Automatically picks up ~/.village/engine/sf/eggs/media when present (pass --public for procedural eggs only),
+// Ships procedural eggs only by default. The private clips go in only when asked for: --egg-media takes
+// ~/.village/engine/sf/eggs/media, or VOXELWRIGHT_EGG_MEDIA names a folder. --public is still accepted and wins.
 // verifies local `cf` auth up front, builds engine/site/assemble, deploys with the HEAD commit SHA message, and
 // checks live endpoints plus engine/test/sf-live.mjs.
 import { execFileSync } from 'node:child_process'
@@ -15,7 +16,7 @@ const DEFAULT_EGG_MEDIA = join(homedir(), '.village', 'engine', 'sf', 'eggs', 'm
 
 export function parseShipArgs(argv) {
   const flags = new Set(argv)
-  const known = new Set(['--world-only', '--site-only', '--public', '--skip-build', '--skip-live', '--allow-dirty', '--dry-run', '--help', '-h'])
+  const known = new Set(['--world-only', '--site-only', '--public', '--egg-media', '--skip-build', '--skip-live', '--allow-dirty', '--dry-run', '--help', '-h'])
   const unknown = argv.filter((a) => !known.has(a))
   if (unknown.length) throw new Error(`unknown argument: ${unknown.join(', ')}`)
   if (flags.has('--world-only') && flags.has('--site-only')) throw new Error('pass at most one of --world-only and --site-only')
@@ -24,6 +25,7 @@ export function parseShipArgs(argv) {
     world: !flags.has('--site-only'),
     site: !flags.has('--world-only'),
     publicOnly: flags.has('--public'),
+    eggMedia: flags.has('--egg-media'),
     skipBuild: flags.has('--skip-build'),
     skipLive: flags.has('--skip-live'),
     allowDirty: flags.has('--allow-dirty'),
@@ -31,10 +33,13 @@ export function parseShipArgs(argv) {
   }
 }
 
-export function resolveEggMedia({ publicOnly, env = process.env, defaultDir = DEFAULT_EGG_MEDIA, exists = existsSync }) {
+/** The folder of private egg clips to build in, or null for procedural eggs. Only an explicit ask includes any. */
+export function resolveEggMedia({ publicOnly, eggMedia = false, env = process.env, defaultDir = DEFAULT_EGG_MEDIA, exists = existsSync }) {
   if (publicOnly) return null
   if (env.VOXELWRIGHT_EGG_MEDIA) return env.VOXELWRIGHT_EGG_MEDIA
-  return exists(defaultDir) ? defaultDir : null
+  if (!eggMedia) return null
+  if (!exists(defaultDir)) throw new Error(`--egg-media: no egg media at ${defaultDir}`)
+  return defaultDir
 }
 
 export function buildPlan(opts, sha) {
@@ -82,7 +87,7 @@ async function verifyLive(opts) {
 async function main() {
   const opts = parseShipArgs(process.argv.slice(2))
   if (opts.help) {
-    console.log('usage: npm --prefix deploy run ship [-- --world-only | --site-only] [--public] [--skip-build] [--skip-live] [--allow-dirty] [--dry-run]')
+    console.log('usage: npm --prefix deploy run ship [-- --world-only | --site-only] [--egg-media] [--skip-build] [--skip-live] [--allow-dirty] [--dry-run]')
     return
   }
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim()

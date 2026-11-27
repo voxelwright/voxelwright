@@ -2,8 +2,11 @@
 import { escapeHtml as x } from "./markdown.mjs";
 import { markdownTwin, postPath, sitePath } from "../lib/paths.mjs";
 
-/** https://llmstxt.org: H1, a blockquote summary, then H2 sections of links. */
-export function llmsTxt(site, posts, pages) {
+/**
+ * https://llmstxt.org: H1, a blockquote summary, then H2 sections of links. `front` is the personal front page
+ * at the origin's "/" (generator/front.mjs) when the site is mounted below it and the front page is built.
+ */
+export function llmsTxt(site, posts, pages, front = null) {
   const abs = (p) => site.origin + markdownTwin(p, site.base);
   const at = (p) => site.origin + sitePath(site.base, p);
   // posts have their own section
@@ -21,6 +24,7 @@ export function llmsTxt(site, posts, pages) {
     "",
     "## Pages",
     "",
+    ...(front ? [`- [Home](${site.origin}/index.md): ${front.description}`] : []),
     ...pageLinks.map((p) => `- [${p.path === "/" ? "Home" : p.title}](${abs(p.path)})`),
     "",
     "## Optional",
@@ -61,9 +65,10 @@ ${entries.join("\n")}
 `;
 }
 
-export function sitemap(site, pages, posts) {
+/** Every page, and the personal front page at "/" first when `front` is given (see llmsTxt). */
+export function sitemap(site, pages, posts, front = null) {
   const dates = new Map(posts.map((p) => [postPath(site.base, p.slug), p.date]));
-  const urls = pages
+  const urls = [...(front ? [front] : []), ...pages]
     .filter((p) => p.path.endsWith("/"))
     .map((p) => `  <url><loc>${x(site.origin + p.path)}</loc>${dates.has(p.path) ? `<lastmod>${dates.get(p.path)}</lastmod>` : ""}</url>`);
   return `<?xml version="1.0" encoding="utf-8"?>
