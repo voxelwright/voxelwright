@@ -696,6 +696,23 @@ export const names = async (nearAt?: readonly [number, number], margin = 1200): 
   return (await Promise.all(wanted.map((e) => loadNames(e.url)))).filter((n): n is Names => !!n)
 }
 
+/** How many squares' names `whereabouts` keeps (#81): the nearest; a drive across the city does not hold all 155. */
+export const NAMES_KEPT = 32
+/**
+ * Lets the squares furthest from (x, z) go once more than `NAMES_KEPT` are held, never one the eye is near (the
+ * margin `whereabouts` fetches by): `gone` is told each one's square and address, to forget it was asked.
+ */
+export function forgetFar<T extends { box: readonly [number, number, number, number] | null }>(held: Map<string, T>, x: number, z: number, gone: (square: string, url: string) => void, entries: readonly { square: string; url: string }[], most = NAMES_KEPT): void {
+  if (held.size <= most) return
+  const far = (b: T['box']) => (b ? Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) : 0)
+  const order = [...held].filter(([, v]) => !nearBox(v.box, x, z, 600)).sort((a, b) => far(b[1].box) - far(a[1].box))
+  for (const [square] of order) {
+    if (held.size <= most) break
+    held.delete(square)
+    gone(square, entries.find((e) => e.square === square)?.url ?? '')
+  }
+}
+
 /**
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the
  * place is made from. `at` is the eye's place in cells. Nothing here says who lives anywhere: the data does not.
@@ -740,6 +757,7 @@ export async function whereabouts(at: () => [number, number], /** Whose else the
   const update = () => {
     const [x, z] = at()
     ensure(x, z)
+    forgetFar(loaded, x, z, (square, url) => { asked.delete(square); namedCache.delete(url) }, entries)
     let street = '', least = 400 ** 2
     let address: Names['addresses'][number] | null = null, best = 300 ** 2
     for (const s of loaded.values()) {
