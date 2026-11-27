@@ -3,7 +3,12 @@
 // the sun: for each of its texels, how far towards the sun the last solid thing on that line
 // is. A lit point is one at least that far. A map is 16 x 16 tiles; a few tiles are drawn each
 // frame, the nearest first, and a tile is drawn again when an edit touches its line or it has
-// grown old. Where a tile is not yet drawn the shader traces a ray as before.
+// grown old. Where a tile is not yet drawn the shader asks the next coarser box's map, and traces
+// a ray as before only where none has one.
+//
+// A tile is 4,096 rays that each go through everything up-sun of them, so tiles are what a frame
+// with no time to spare can least afford more of (#73): whoever draws says how many this frame has
+// room for (main.ts `sunRoom`).
 //
 // A map's texel is as wide as its box's cell, and a texel keeps its place in the world: the
 // map wraps round as the camera moves, like the boxes themselves.
@@ -94,29 +99,37 @@ export class SunMaps {
    * up to `most` that are not drawn, the finest and nearest first; then those an edit made wrong; then, while
    * there is room, tiles whose box has moved since they were drawn (all still used meanwhile), then the oldest one, so a tile
    * drawn while the world behind it was still being made does not stay wrong. `ready` is whether the
-   * world is made enough to draw from.
+   * world is made enough to draw from, or the finest box from which it is (world.ts `wholeFrom`): a tile's lines go
+   * through its own box and every coarser one, so the coarser maps are drawn while the finest boxes are still
+   * being made (going fast they always are, #73).
    */
-  plan(eye: V3, most: number, ready: boolean): SunTile[] {
+  plan(eye: V3, most: number, ready: boolean | number): SunTile[] {
     this.clock++
     const want: (SunTile & { rank: number })[] = [], wrong: (SunTile & { rank: number })[] = [], aged: (SunTile & { rank: number })[] = []
-    let oldest: (SunTile & { rank: number }) | null = null
+    let oldest: (SunTile & { rank: number }) | null = null, undrawn = 0, spoiled = 0
+    const from = ready === true ? 0 : ready === false ? Infinity : ready
     for (let level = 0; level < this.levels; level++) {
       const texel = 1 << level, held = this.held[level]
       const cx = Math.floor(dot(eye, this.u) / texel / SUN_TILE), cy = Math.floor(dot(eye, this.v) / texel / SUN_TILE)
       for (let ty = cy - AROUND; ty <= cy + AROUND; ty++) for (let tx = cx - AROUND; tx <= cx + AROUND; tx++) {
         const slotX = mod(tx, TILES), slotY = mod(ty, TILES), slot = slotX + TILES * slotY
         if (held[slot * 2] !== tx || held[slot * 2 + 1] !== ty) { held[slot * 2] = tx; held[slot * 2 + 1] = ty; this.clear(level, slot) }
+        const drawn = this.isDrawn(level, slot)
+        // (Counted before anything is left out: what is not drawn is not drawn, whoever may draw it.)
+        if (!drawn) undrawn++
+        else if (this.isWrong(level, slot)) spoiled++
+        if (level < from) continue
         const tile = { level, slotX, slotY, tx, ty }
         const rank = (tx - cx) ** 2 + (ty - cy) ** 2 + level * 6
-        if (!this.isDrawn(level, slot)) want.push({ ...tile, rank })
+        if (!drawn) want.push({ ...tile, rank })
         else if (this.isWrong(level, slot)) wrong.push({ ...tile, rank })
         else if (this.when[level][slot] === 0) aged.push({ ...tile, rank })
         else if (!oldest || this.when[level][slot] < oldest.rank) oldest = { ...tile, rank: this.when[level][slot] }
       }
     }
-    this.undrawn = want.length
-    this.spoiled = wrong.length
-    if (!ready) return []
+    this.undrawn = undrawn
+    this.spoiled = spoiled
+    if (most <= 0 || (!want.length && !wrong.length && !aged.length && !oldest)) return []
     want.sort((a, b) => a.rank - b.rank)
     wrong.sort((a, b) => a.rank - b.rank)
     aged.sort((a, b) => a.rank - b.rank)

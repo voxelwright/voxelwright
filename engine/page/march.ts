@@ -2049,7 +2049,7 @@ export const CELLS = 256
 const FOG_THICK = 1 / 2400, FOG_TOP = 1400
 export const PANES_FORMAT: GPUTextureFormat = 'rgba16float'
 /** Tiles of the sun's maps drawn each frame. */
-const SUN_TILES_A_FRAME = 8
+export const SUN_TILES_A_FRAME = 8
 
 export interface Marcher {
   /** Draws the world into `to`, and how far off each pixel's thing is into its depth. */
@@ -2074,8 +2074,13 @@ export interface Marcher {
    * What it does to a frame's cost is not known until it is measured: `node test/bench.mjs` before and after.
    */
   reshade(change: (wgsl: string) => string): Promise<{ compiled: number; ms: number }>
-  /** Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands. `ready` is whether the world is made enough to draw them from. */
-  tend(encoder: GPUCommandEncoder, view: View, ready: boolean): void
+  /**
+   * Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands.
+   * `ready` is whether the world is made enough to draw them from, or the finest box from which it is (sun.ts `plan`).
+   * `most` is how many tiles this frame has room for (#73: SUN_TILES_A_FRAME at most, and where it is not said), and
+   * `timing` two places in a query set for when the first of them began and the last ended. Returns how many it drew.
+   */
+  tend(encoder: GPUCommandEncoder, view: View, ready: boolean | number, most?: number, timing?: { querySet: GPUQuerySet; begin: number; end: number }): number
   /** The sun's maps: an edit must spoil the tiles it touches. */
   readonly sun: SunMaps
   /** The colours and materials as the GPU holds them, for whatever else is drawn into the picture. */
@@ -2386,14 +2391,16 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     panes: panesView,
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
-    tend(encoder, view, ready) {
-      const anchor = tell(view, [1, 1], 0, 0)
-      sunMaps.plan(view.eye, SUN_TILES_A_FRAME, ready).forEach((tile, i) => {
+    tend(encoder, view, ready, most = SUN_TILES_A_FRAME, timing) {
+      const anchor = tell(view, [1, 1], 0, 0), tiles = sunMaps.plan(view.eye, Math.min(SUN_TILES_A_FRAME, most), ready)
+      tiles.forEach((tile, i) => {
         const { buffer, bind: tileBind } = sunTiles[i], corner = sunMaps.corner(tile, anchor), block = new ArrayBuffer(32)
         new Float32Array(block).set([corner[0], corner[1], 1 << tile.level, 0, tile.slotX * SUN_TILE, tile.slotY * SUN_TILE])
         new Uint32Array(block)[3] = tile.level
         device.queue.writeBuffer(buffer, 0, block)
-        const pass = encoder.beginRenderPass({ colorAttachments: [{ view: sunMaps.layers[tile.level], loadOp: 'load', storeOp: 'store' }] })
+        // (The GPU's clock, where it is asked: read as the first tile's pass begins and as the last one's ends.)
+        const first = timing && i === 0, last = timing && i === tiles.length - 1
+        const pass = encoder.beginRenderPass({ colorAttachments: [{ view: sunMaps.layers[tile.level], loadOp: 'load', storeOp: 'store' }], ...(first || last ? { timestampWrites: { querySet: timing!.querySet, ...(first ? { beginningOfPassWriteIndex: timing!.begin } : {}), ...(last ? { endOfPassWriteIndex: timing!.end } : {}) } } : {}) })
         pass.setPipeline(sunPipeline)
         pass.setBindGroup(0, sunBind)
         pass.setBindGroup(1, tileBind)
@@ -2402,6 +2409,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         pass.draw(3)
         pass.end()
       })
+      return tiles.length
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
     marks(bytes) {
