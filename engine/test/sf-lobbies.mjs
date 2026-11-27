@@ -262,12 +262,15 @@ step('arriving')
   await Promise.all(pair.map((p) => up(p)))
   const tap = (p, x, y) => (PHONE ? p.page.touchscreen.tap(x, y) : p.page.mouse.click(x, y))
   for (const p of pair) {
-    // The way in a visitor takes: the EXPLORE board, asked twice (explore.ts), to the roof.
+    // The way in a visitor takes: the EXPLORE board opens the map picker, and Start dives in.
     const landing = await p.page.evaluate(() => document.documentElement.classList.contains('first'))
     await p.page.waitForFunction(() => globalThis.engine.explore && globalThis.engine.boards?.where('explore'), null, { timeout: 120_000 })
-    for (let i = 0; i < 2; i++) { const w = await p.page.evaluate(() => globalThis.engine.boards.where('explore')); await tap(p, w.x, w.y); await p.page.waitForTimeout(900) }
+    const w = await p.page.evaluate(() => globalThis.engine.boards.where('explore'))
+    await tap(p, w.x, w.y)
+    await p.page.waitForFunction(() => globalThis.engine.map?.picking, null, { timeout: 10_000 })
+    await p.page.locator('#world-map .wm-visit').click()
     const roof = await p.page.waitForFunction(() => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, null, { timeout: 90_000 }).then(() => true, () => false)
-    check(landing && roof, `${p.name} opens on the landing (${landing}) and goes in by the EXPLORE board, asked twice, to the roof (${roof})`)
+    check(landing && roof, `${p.name} opens on the landing (${landing}) and goes in via the EXPLORE map picker (${roof})`)
     await p.page.waitForTimeout(1500)
     // The Servers key, the row, the name.
     await servers(p)

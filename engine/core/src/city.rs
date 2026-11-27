@@ -487,50 +487,6 @@ fn stamp_canopy(s: &mut Scratch, x0: i32, z0: i32) {
     s.fill([x0, g + 39, z0], [x0 + wide, g + 40, z0 + deep], kind(CONCRETE, colour(1, 5)), Meet::Touch);
 }
 
-/// A works yard. Where each thing stands, from the block's low corner.
-/// A parked car, 4.2 m by 1.8 m: a painted steel body on four wheels, a cabin of glass under a steel roof, lamps
-/// at both ends. `along_x` is which way it points; its wheels reach down to the street, which may slope under it.
-fn stamp_car(s: &mut Scratch, x: i32, z: i32, along_x: bool, seed: u32) {
-    if s.lod > 2 {
-        return;
-    }
-    let (long, wide) = (42, 18);
-    // A box told along the car and across it from its low corner.
-    let at = |a: (i32, i32), c: (i32, i32)| if along_x { ([x + a.0, z + c.0], [x + a.1, z + c.1]) } else { ([x + c.0, z + a.0], [x + c.1, z + a.1]) };
-    let wheels = [((5, 12), (0, 3)), ((5, 12), (wide - 3, wide)), ((30, 37), (0, 3)), ((30, 37), (wide - 3, wide))];
-    let under = |w: &((i32, i32), (i32, i32))| {
-        let (lo, hi) = at(w.0, w.1);
-        ground((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2)
-    };
-    let base = wheels.iter().map(under).max().unwrap() + 1;
-    if base < 8 {
-        return;
-    }
-    let mut put = |s: &mut Scratch, a: (i32, i32), c: (i32, i32), y: (i32, i32), k: Kind| {
-        let (lo, hi) = at(a, c);
-        s.fill([lo[0], y.0, lo[1]], [hi[0], y.1, hi[1]], k, Meet::Middle);
-    };
-    let paint = kind(STEEL, [colour((seed >> 4) as u8 % 24, [3, 4, 5, 8][(seed >> 10) as usize & 3]), grey(1), grey(11), grey(6)][(seed >> 13) as usize & 3]);
-    let dark = kind(STEEL, grey(13));
-    for w in &wheels {
-        put(s, w.0, w.1, (under(w) + 1, base + 6), dark);
-    }
-    put(s, (0, long), (0, wide), (base + 3, base + 9), paint);
-    // The cabin: glass all round, hollow, a roof on it.
-    let cabin = if (seed >> 16) & 1 == 0 { (9, 33) } else { (7, 38) };
-    put(s, cabin, (1, wide - 1), (base + 9, base + 15), kind(GLASS, colour(14, 9)));
-    if s.lod == 0 {
-        put(s, (cabin.0 + 1, cabin.1 - 1), (2, wide - 2), (base + 9, base + 14), 0);
-    }
-    put(s, cabin, (1, wide - 1), (base + 14, base + 15), paint);
-    if s.lod <= 1 {
-        for c in [(2, 5), (wide - 5, wide - 2)] {
-            put(s, (long - 1, long), c, (base + 5, base + 7), kind(LAMP, colour(3, 0)));
-            put(s, (0, 1), c, (base + 5, base + 7), kind(STEEL, colour(0, 4)));
-        }
-    }
-}
-
 /// A fire hydrant, a mailbox, or a bin: small things that stand on the pavement.
 fn stamp_small(s: &mut Scratch, x: i32, z: i32, which: u32) {
     if s.lod > 1 {
@@ -2047,17 +2003,14 @@ pub fn make(s: &mut Scratch) {
                 }
             }
         } else if sort != Block::Shore {
-            // Along the street on the block's low z side and the one on its low x side: cars parked at both kerbs,
-            // and now and then something small on the pavement.
+            // Along the street on the block's low z side and the one on its low x side: now and then something small on
+            // the pavement (hydrant, mailbox or bin). No cars are stamped as world cells (#100): every car is a fine
+            // drivable vehicle.
             for (along_x, length) in [(true, BLOCK_X - STREET), (false, BLOCK_Z - STREET)] {
                 for n in 0..(length - 80) / 58 {
                     let along = STREET + 40 + n * 58;
-                    for (side, across) in [(0, PAVEMENT + 2), (1, STREET - PAVEMENT - 20)] {
+                    for side in [0, 1] {
                         let seed = hash(bx * 64 + n, bz * 4 + side + if along_x { 0 } else { 2 }, 61);
-                        let (cx, cz) = if along_x { (x0 + along, z0 + across) } else { (x0 + across, z0 + along) };
-                        if seed % 100 < 55 && reaches(cx, cx + 42, cz, cz + 42) {
-                            stamp_car(s, cx, cz, along_x, seed);
-                        }
                         if (seed >> 7) % 5 == 0 {
                             let edge = if side == 0 { PAVEMENT - 5 } else { STREET - PAVEMENT + 1 };
                             let (px, pz) = if along_x { (x0 + along + 48, z0 + edge) } else { (x0 + edge, z0 + along + 48) };
@@ -2103,7 +2056,8 @@ mod tests {
     /// moves a cell here fails; if the town was meant to change, the pictures and the baseline are to be taken
     /// again and the sum set to what the failure prints. (Set again on November 12 for the shopping street across
     /// from the water tower and the yard's six-storey office; the shops' row is one of the places since then. Set again
-    /// on November 14 for roofs that hold in the coarser copies, #163: the finest cells are as they were.)
+    /// on November 14 for roofs that hold in the coarser copies, #163: the finest cells are as they were. Set again
+    /// on November 27 when plain stamped cars (`stamp_car`) were removed from generated streets, #100.)
     #[test]
     fn the_town_is_cell_for_cell_what_it_was() {
         let mut sum = 0xcbf29ce484222325u64;
@@ -2122,7 +2076,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(sum, 4626774200439058952, "the town's sum");
+        assert_eq!(sum, 15269414300296233582, "the town's sum");
     }
 
     /// Looking for earth laid bare: in the yard across from the start, at each coarseness, how many columns of a
@@ -2219,5 +2173,63 @@ mod tests {
             }
         }
         assert!(seen.iter().all(|&n| n > 10), "{seen:?}");
+    }
+
+    /// Generated streets hold no cars made of world cells (#100): the carriageway between both kerbs
+    /// (PAVEMENT + 1 .. STREET - PAVEMENT - 1) at car height (1 to 25 cells above ground) has no steel,
+    /// glass or lamp cells, while kerb furniture (hydrants, bins, mailboxes, stop signs, lamps) stays on the pavement.
+    #[test]
+    fn generated_streets_have_no_cars_made_of_cells() {
+        let mut s = Scratch::new();
+        let mut bad = 0usize;
+        let mut samples = Vec::new();
+        // Check streets bordering blocks around the start (0, 5), homes, towers, park and yard.
+        for &(bx, bz) in &[(0, 5), (0, 4), (1, 5), (1, 4), (-1, 5), (2, 5)] {
+            if matches!(block(bx, bz), Block::Shore | Block::Open) {
+                continue;
+            }
+            let (x0, z0) = (bx * BLOCK_X, bz * BLOCK_Z);
+            // Sample sectors along both streets of the block (low z along x, and low x along z).
+            for (sx, sz) in (x0 + STREET..x0 + BLOCK_X).step_by(SIDE).map(|x| (x.div_euclid(SIDE as i32), (z0 + PAVEMENT + 10).div_euclid(SIDE as i32)))
+                .chain((x0 + STREET..x0 + BLOCK_X).step_by(SIDE).map(|x| (x.div_euclid(SIDE as i32), (z0 + STREET - PAVEMENT - 10).div_euclid(SIDE as i32))))
+                .chain((z0 + STREET..z0 + BLOCK_Z).step_by(SIDE).map(|z| ((x0 + PAVEMENT + 10).div_euclid(SIDE as i32), z.div_euclid(SIDE as i32))))
+                .chain((z0 + STREET..z0 + BLOCK_Z).step_by(SIDE).map(|z| ((x0 + STREET - PAVEMENT - 10).div_euclid(SIDE as i32), z.div_euclid(SIDE as i32))))
+            {
+                let g_mid = ground(sx * SIDE as i32 + 32, sz * SIDE as i32 + 32);
+                let sy0 = g_mid.div_euclid(SIDE as i32);
+                for sy in sy0..=sy0 + 1 {
+                    s.start(sx, sy, sz, 0);
+                    make(&mut s);
+                    for cz in 0..SIDE {
+                        let wz = sz * SIDE as i32 + cz as i32;
+                        let lz = wz.rem_euclid(BLOCK_Z);
+                        for cx in 0..SIDE {
+                            let wx = sx * SIDE as i32 + cx as i32;
+                            let lx = wx.rem_euclid(BLOCK_X);
+                            let in_road_x = lx >= STREET && lz > PAVEMENT && lz < STREET - PAVEMENT;
+                            let in_road_z = lz >= STREET && lx > PAVEMENT && lx < STREET - PAVEMENT;
+                            if !in_road_x && !in_road_z {
+                                continue;
+                            }
+                            let g = ground(wx, wz);
+                            for cy in 0..SIDE {
+                                let wy = sy * SIDE as i32 + cy as i32;
+                                if wy <= g || wy > g + 25 {
+                                    continue;
+                                }
+                                let k = s.cells[at(cx, cy, cz)];
+                                if k != 0 && matches!(material(k), STEEL | GLASS | LAMP) {
+                                    bad += 1;
+                                    if samples.len() < 8 {
+                                        samples.push((wx, wy, wz, material(k)));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(bad, 0, "found {bad} vehicle cells (steel/glass/lamp) in generated street carriageways: {samples:?}");
     }
 }

@@ -1,6 +1,8 @@
-// 3D Map-to-Reality Optical Dive checks (#23): verifies clean first view (no playtest switcher chrome, zero map bytes
-// before click 2), 2-click EXPLORE arming + Optical Dive into Financial District, 3D Map Visit optical dive to Coit Tower,
-// mid-dive M interrupt, Backquote return to Ina Coolbrith Park, prefers-reduced-motion cross-fade, and portrait phone.
+// Instant 3D Map Picker & Optical Dive checks (#23): verifies clean first view (zero map bytes on cold load),
+// 1-click EXPLORE opening the 3D map immediately with scenic default (North Beach) + background preloading,
+// Esc returning cleanly to Ina Coolbrith Park, custom spot picking + Start confirmation diving optically onto
+// Columbus Ave, in-game 3D Map Visit to Coit Tower, mid-dive M interrupt, Backquote return, reduced-motion,
+// and portrait phone 1-tap EXPLORE → map → Start.
 //
 //   node test/sf-entry.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/entry]
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -32,8 +34,8 @@ const waitReady = async (page) => {
 }
 
 try {
-  // ── 1. Desktop (1280x720): Pure First View → 2-Click EXPLORE Map Dive → Map Visit → Mid-Dive M → Backquote ──
-  console.log('\ndesktop (1280x720): default Map Dive entry & Map Visit')
+  // ── 1. Desktop (1280x720): Pure First View → 1-Click EXPLORE Map Picker → Esc → Start Dive → Map Visit → M Interrupt → Backquote ──
+  console.log('\ndesktop (1280x720): 1-click EXPLORE map picker, preloading & Optical Dive')
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } })
   const page = await ctx.newPage()
   const mapRequests = []
@@ -52,33 +54,71 @@ try {
     state: globalThis.engine.explore.state,
     engaged: globalThis.engine.first.engaged,
     noSwitcher: !document.querySelector('#first .entry-btn') && !document.getElementById('entry-picker') && !document.getElementById('threshold-ui') && !document.getElementById('skydive-hud'),
-    noMapTravel: !document.querySelector('#world-map .wm-travel'),
+    noExploreHint: !document.getElementById('explore-hint'),
   }))
-  check(init.state === 'idle' && !init.engaged && init.noSwitcher && init.noMapTravel, `first view boots clean with zero playtest switcher chrome (${JSON.stringify(init)})`)
+  check(init.state === 'idle' && !init.engaged && init.noSwitcher && init.noExploreHint, `first view boots clean with zero switcher or arming hint chrome (${JSON.stringify(init)})`)
   check(mapRequests.length === 0, `zero /bay/map.bin requests on cold first view (${mapRequests.length})`)
   await page.screenshot({ path: join(shots, '01-first-view-desktop.png') })
 
-  // Click 1 on EXPLORE: arms cleanly with zero /bay/map.bin bytes fetched!
+  // Click 1 on EXPLORE: immediately opens fullscreen 3D map picker with scenic default (North Beach) & starts background preloading!
   const boardPos = await page.evaluate(() => { const w = globalThis.engine.boards.where('explore'); return w && { x: w.x, y: w.y } })
   check(!!boardPos, `EXPLORE board visible in first view (${JSON.stringify(boardPos)})`)
+  const clickAt = Date.now()
   await page.mouse.click(boardPos.x, boardPos.y)
-  await page.waitForTimeout(550)
-  const armed = await page.evaluate(() => ({
+  await page.waitForFunction(() => globalThis.engine.map?.open && globalThis.engine.map?.picking, null, { timeout: 3000 })
+  const openMs = Date.now() - clickAt
+  await page.waitForFunction(() => globalThis.engine.map?.ready, null, { timeout: 15_000 })
+  await page.waitForTimeout(650)
+
+  const picked = await page.evaluate(() => ({
     state: globalThis.engine.explore.state,
     engaged: globalThis.engine.first.engaged,
-    hint: document.getElementById('explore-hint')?.textContent ?? '',
-    hintOn: document.getElementById('explore-hint')?.classList.contains('on') ?? false,
+    mapOpen: globalThis.engine.map.open,
+    picking: globalThis.engine.map.picking,
+    mode: globalThis.engine.map.mode,
+    name: document.querySelector('#world-map .wm-route-name')?.textContent ?? '',
+    startText: document.querySelector('#world-map .wm-visit')?.textContent ?? '',
+    clearHidden: getComputedStyle(document.querySelector('#world-map .wm-clear')).display === 'none',
+    noHint: !document.getElementById('explore-hint'),
   }))
-  check(armed.state === 'armed' && !armed.engaged && armed.hintOn && /Click again to explore/.test(armed.hint), `click 1 arms EXPLORE without entering (${JSON.stringify(armed)})`)
-  check(mapRequests.length === 0, `click 1 keeps /bay/map.bin unfetched (${mapRequests.length})`)
-  await page.screenshot({ path: join(shots, '02-explore-armed-desktop.png') })
+  check(
+    picked.state === 'picking' && !picked.engaged && picked.mapOpen && picked.picking && picked.mode === '3d' && picked.name === 'North Beach' && picked.startText === 'Start' && picked.clearHidden && picked.noHint && openMs < 500,
+    `click 1 opens 3D map picker in ${openMs} ms with default scenic spot (${JSON.stringify(picked)})`,
+  )
+  check(mapRequests.length >= 1, `opening map triggered /bay/map.bin fetch (${mapRequests.length})`)
+  await page.screenshot({ path: join(shots, '02-entry-map-desktop.png') })
 
-  // Click 2 on EXPLORE: launches 3D Map-to-Reality Optical Dive into Financial District!
-  const boardPos2 = await page.evaluate(() => { const w = globalThis.engine.boards.where('explore'); return w && { x: w.x, y: w.y } })
+  // Pressing Esc closes the map cleanly back to Ina Coolbrith Park first view without engaging!
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(350)
+  const escaped = await page.evaluate(() => ({
+    state: globalThis.engine.explore.state,
+    engaged: globalThis.engine.first.engaged,
+    mapOpen: globalThis.engine.map.open,
+    picking: globalThis.engine.map.picking,
+  }))
+  check(escaped.state === 'idle' && !escaped.engaged && !escaped.mapOpen && !escaped.picking, `Esc returns cleanly to first view (${JSON.stringify(escaped)})`)
+
+  // Re-click EXPLORE: map re-opens instantaneously (cached map.bin); select another spot then return to North Beach and confirm Start!
+  const reopenAt = Date.now()
+  await page.mouse.click(boardPos.x, boardPos.y)
+  await page.waitForFunction(() => globalThis.engine.map?.open && globalThis.engine.map?.picking, null, { timeout: 2000 })
+  const reopenMs = Date.now() - reopenAt
+  check(reopenMs < 400, `re-opening cached map is instantaneous (${reopenMs} ms)`)
+
+  // Verify user can pick any landmark or arbitrary point on the map
+  await page.locator('#world-map .wm-chip', { hasText: 'Palace of Fine Arts' }).click()
+  await page.waitForTimeout(250)
+  const customPicked = await page.evaluate(() => document.querySelector('#world-map .wm-route-name')?.textContent ?? '')
+  check(customPicked === 'Palace of Fine Arts', `clicking landmark chip updates selected start spot (${customPicked})`)
+
+  // Select default scenic North Beach chip again and click Start!
+  await page.locator('#world-map .wm-chip', { hasText: 'North Beach' }).click()
+  await page.waitForTimeout(450)
   const diveStart = Date.now()
-  await page.mouse.click(boardPos2.x, boardPos2.y)
+  await page.locator('#world-map .wm-visit').click()
   await page.waitForFunction(() => document.getElementById('world-map')?.classList.contains('dive'), null, { timeout: 10_000 })
-  await page.waitForTimeout(820)
+  await page.waitForTimeout(750)
   const midDive = await page.evaluate(() => {
     const wm = document.getElementById('world-map')
     return {
@@ -94,7 +134,7 @@ try {
 
   await page.waitForFunction(() => globalThis.engine.first.engaged && globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, null, { timeout: 25_000 })
   const diveMs = Date.now() - diveStart
-  await page.waitForTimeout(550)
+  await page.waitForTimeout(600)
   await page.screenshot({ path: join(shots, '04-dive-landed-desktop.png') })
   const landed = await page.evaluate(() => ({
     engaged: globalThis.engine.first.engaged,
@@ -105,17 +145,20 @@ try {
     fov: Math.round(globalThis.engine.fov),
     skyPanelFolded: !document.querySelector('#realm .sky')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }),
     backButtons: document.querySelectorAll('#realm .home').length,
+    streetReady: globalThis.engine.street?.ready ?? false,
   }))
-  check(landed.engaged && landed.onFoot && landed.diveCleared && landed.skyPanelFolded && landed.backButtons === 1, `Map Dive settled on foot in ${diveMs} ms at ${landed.pos.join(',')} (fov=${landed.fov}, skyFolded=${landed.skyPanelFolded}, backBtn=${landed.backButtons})`)
-  check(Math.hypot(landed.stand.x / 10 - landed.pos[0], landed.stand.z / 10 - landed.pos[2]) < 30, `explore.stand reflects resolved Financial District street spot (${Math.round(landed.stand.x / 10)}, ${Math.round(landed.stand.z / 10)})`)
+  check(landed.engaged && landed.onFoot && landed.diveCleared && landed.skyPanelFolded && landed.backButtons === 1, `Start Map Dive settled on foot in ${diveMs} ms at ${landed.pos.join(',')} (fov=${landed.fov}, streetReady=${landed.streetReady})`)
+  check(Math.hypot(landed.stand.x / 10 - 52125, landed.stand.z / 10 - 66340) < 40, `landed at North Beach scenic spot (${Math.round(landed.stand.x / 10)}, ${Math.round(landed.stand.z / 10)})`)
 
-  // Open 3D Map (`M`), verify clean dock (no switcher), Visit Coit Tower via Optical Dive!
+  // Open in-game 3D Map (`M`), verify Visit Coit Tower via Optical Dive!
   await page.keyboard.press('KeyM')
-  await page.waitForFunction(() => globalThis.engine.map?.open && globalThis.engine.map?.ready, null, { timeout: 10_000 })
+  await page.waitForFunction(() => globalThis.engine.map?.open && !globalThis.engine.map?.picking && globalThis.engine.map?.ready, null, { timeout: 10_000 })
   await page.waitForTimeout(400)
   const beforeVisit = await page.evaluate(() => ({ x: globalThis.engine.pose.x, z: globalThis.engine.pose.z }))
   await page.locator('#world-map .wm-chip', { hasText: 'Coit Tower' }).click()
   await page.waitForTimeout(300)
+  const visitText = await page.evaluate(() => document.querySelector('#world-map .wm-visit')?.textContent ?? '')
+  check(visitText === 'Visit', `in-game map button restores Visit label (${visitText})`)
   await page.locator('#world-map .wm-visit').click()
   await page.waitForTimeout(650)
   await page.screenshot({ path: join(shots, '05-visit-coit-mid-desktop.png') })
@@ -127,7 +170,7 @@ try {
     mapOpen: globalThis.engine.map.open,
     onFoot: globalThis.engine.me.on,
   }), beforeVisit)
-  check(!afterVisit.mapOpen && afterVisit.dist > 300 && afterVisit.onFoot, `Map Visit optically dove ${afterVisit.dist} m to Coit Tower cleanly on foot`)
+  check(!afterVisit.mapOpen && afterVisit.dist > 250 && afterVisit.onFoot, `Map Visit optically dove ${afterVisit.dist} m to Coit Tower cleanly on foot`)
 
   // Press M mid-dive during a Visit to Ferry Building — must cancel dive cleanly and reopen map immediately!
   await page.keyboard.press('KeyM')
@@ -171,7 +214,7 @@ try {
   await rmCtx.close()
 
   // ── 3. Portrait Phone (390x844, safe areas, touch) ──
-  console.log('\nportrait phone (390x844): 2-tap EXPLORE Map Dive')
+  console.log('\nportrait phone (390x844): 1-tap EXPLORE → map → Start')
   const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   const phone = await phoneCtx.newPage()
   phone.on('pageerror', (e) => errors.push(`phone pageerror: ${e.message}`))
@@ -183,14 +226,17 @@ try {
 
   const phoneBoard = await phone.evaluate(() => { const w = globalThis.engine.boards.where('explore'); return w && { x: w.x, y: w.y } })
   await phone.touchscreen.tap(phoneBoard.x, phoneBoard.y)
-  await phone.waitForTimeout(500)
-  const phoneArmed = await phone.evaluate(() => globalThis.engine.explore.state)
-  check(phoneArmed === 'armed', `phone tap 1 arms EXPLORE (${phoneArmed})`)
-  const phoneBoard2 = await phone.evaluate(() => { const w = globalThis.engine.boards.where('explore'); return w && { x: w.x, y: w.y } })
-  await phone.touchscreen.tap(phoneBoard2.x, phoneBoard2.y)
-  await phone.waitForFunction(() => document.getElementById('world-map')?.classList.contains('dive'), null, { timeout: 10_000 })
-  await phone.waitForTimeout(750)
-  await phone.screenshot({ path: join(shots, '07-dive-mid-phone.png') })
+  await phone.waitForFunction(() => globalThis.engine.map?.open && globalThis.engine.map?.picking && globalThis.engine.map?.ready, null, { timeout: 15_000 })
+  await phone.waitForTimeout(600)
+  await phone.screenshot({ path: join(shots, '07-entry-map-phone.png') })
+  const phonePicking = await phone.evaluate(() => ({
+    state: globalThis.engine.explore.state,
+    startBtn: document.querySelector('#world-map .wm-visit')?.textContent ?? '',
+    name: document.querySelector('#world-map .wm-route-name')?.textContent ?? '',
+  }))
+  check(phonePicking.state === 'picking' && phonePicking.startBtn === 'Start' && phonePicking.name === 'North Beach', `phone tap 1 opens entry map with North Beach & Start (${JSON.stringify(phonePicking)})`)
+
+  await phone.locator('#world-map .wm-visit').tap()
   await phone.waitForFunction(() => globalThis.engine.first.engaged && globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, null, { timeout: 25_000 })
   await phone.waitForTimeout(550)
   await phone.screenshot({ path: join(shots, '08-dive-landed-phone.png') })
@@ -208,7 +254,7 @@ try {
       hitsMm,
     }
   })
-  check(phoneLanded.engaged && phoneLanded.onFoot && phoneLanded.fov >= 75 && phoneLanded.hasWalks && !phoneLanded.hitsMm, `phone 2-tap Map Dive settled on foot cleanly with title clear of minimap (${JSON.stringify(phoneLanded)})`)
+  check(phoneLanded.engaged && phoneLanded.onFoot && phoneLanded.fov >= 75 && phoneLanded.hasWalks && !phoneLanded.hitsMm, `phone 1-tap map Start settled on foot cleanly with title clear of minimap (${JSON.stringify(phoneLanded)})`)
   await phoneCtx.close()
 
   check(errors.length === 0, `zero page/console/http errors (${errors.length}${errors.length ? `: ${errors.slice(0, 3).join('; ')}` : ''})`)

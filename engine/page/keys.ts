@@ -25,7 +25,7 @@ export const OWN: Readonly<Record<string, string>> = {
  */
 export const YIELDED: Readonly<Record<string, string>> = {
   KeyE: 'get on a ride, take up an instrument, beside one',
-  KeyR: 'rain; open radio while driving', KeyF: 'fire ahead; repair while driving', KeyH: 'heat', KeyK: 'maps', KeyL: 'shadows',
+  KeyR: 'rain; open radio while driving', KeyF: 'fire ahead; take a stopped traffic car; repair while driving', KeyH: 'heat', KeyK: 'maps', KeyL: 'shadows',
   KeyN: 'next radio station while driving',
 }
 

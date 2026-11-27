@@ -168,11 +168,11 @@ The limiter's look-ahead is why a key on an instrument leaves the synthesiser 3 
 | --- | --- | --- |
 | A tool is used | the hammer plays the struck material's `HIT` and `BREAK` patches, a charge its `BREAK` alone; the torch, cutter, brick and cannon have their own | `used()` |
 | A blast | a crack for those near and a boom that carries, late by distance. A blast under 8 cells (the hammer) plays nothing here: the hammer is heard through `used()` | `blast()` |
-| The solver's report | a living thing striking something (`told.struck`, with its speed and material); a body whose speed changed sharply between two reports. The five heaviest blows in a report play as themselves, the rest feed the rubble's grinding bed | `told()` |
+| The solver's report | a living thing striking something (`told.struck`, with its speed and material): a person bumping a car or wall is silent at walking speed and plays a muted `bodyBump` when running, while vehicle impacts play damped `carBump`, `carCrunch` at speed and `BREAK.glass` on severe crashes (never ringing `HIT.steel`); loose bodies whose speed changed sharply play their five heaviest blows and fold the rest into the rubble's grinding bed | `told()` |
 | Glass turning to dust | the glass `BREAK` patch | `told()` |
 | Each frame | rain, wind (stronger with height and speed), fire (louder and closer with more flames nearby), surf (the sea looked for in eight directions), the sea overhead | `frame()` |
 | Walking | a step every 75 cm with the eye at head height, hard, soft or loose by the ground's paving | `frame()` |
-| Driving | engine, tyre and road beds from `drive()`, whose `boost` sets the turbo whine; one-shots from `carEvent()` (door, start, shift, pop, landing); a two-note `horn()` | called from `engine/page/living.ts`, through the hooks `main.ts` hands it |
+| Driving | engine, tyre and road beds from `drive()`, whose `boost` sets the turbo whine; one-shots from `carEvent()` (door, start, shift, pop, landing); damped collisions from `carCrash()`; a two-note `horn()` | called from `engine/page/living.ts`, through the hooks `main.ts` hands it |
 | Driving fast past something | a pass-by whoosh, and the radio | `radio.ts`, below |
 | A made thing | its own `hit` and `break` in place of its material's; one with a surface can be played | [things.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/things.ts) |
 | A rule's sound | a kept word or the rule's own patch, placed where the rule says, or following someone | `sounded()`, `follows()` |
@@ -203,7 +203,7 @@ Three things change while you drive.
 - Getting out turns it off. Getting back in brings the last station back after 0.42 s.
 - It starts on Bay Drive FM for a person and off when `navigator.webdriver` is set, unless `?radio=` says otherwise.
 
-Open the picker with R while driving, the touch Radio button, or Radio in settings. YouTube plays through its embedded player. Spotify and Apple Music are behind `?radio_providers=all` and require provider configuration. The horn and crashes also duck streaming audio.
+Open the picker with R while driving, the touch Radio button, or Radio in settings. YouTube plays through its embedded player. Spotify and Apple Music are behind `?radio_providers=all` and require provider configuration. The horn and crashes also duck streaming audio. While driving, `pwa.ts` mirrors the active station or streaming track to `navigator.mediaSession` so lock screens, Control Center and hardware media keys control playback and station or track changes.
 
 **Pass-by whooshes.** Above 70 km/h, a `whoosh` patch (a band of noise sweeping from 2,800 Hz down to 260 Hz) and a lower `whooshTail` 55 ms later are played on the side something passes. They are triggered three ways:
 

@@ -40,6 +40,7 @@ Cloudflare runs a zone's Single Redirect rules before either Worker. Then each W
   - adds the early-alpha notice (`alpha.js`) to every HTML page through [notice.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/notice.mjs);
   - gives `index.html` the title `Voxelwright — San Francisco`, a description, the site's favicon (`/favicon.svg`, from the site build), its canonical and Open Graph and X tags, and points its `/blog/` links at zahynailo.dev;
   - publishes the world's own share card, `deploy/og-world.png` (1200 × 630, the voxel skyline under the Voxelwright plate), at `/og.png`;
+  - adds the PWA manifest (`/manifest.webmanifest`, `display: "fullscreen"` with `standalone` fallback, `focus-existing` launch handler, and Explore / Night Drive / Golden Hour shortcuts), Voxelmorphism PNG icons under `/icons/` (`192`, `512`, `maskable` and `apple-touch-icon`), iOS/mobile web-app meta tags and a build-stamped `/sw.js` service worker (precaching the engine shell, caching visited `/releases/*` tiles in a bounded LRU bucket with a 12 s fetch timeout and single-pass buffering that prunes superseded releases when `/current.json` advances, serving `/bay/*` stale-while-revalidate and keeping `/weather` cached for offline fallback);
   - writes `/robots.txt`, a dark `/404.html` in the realm's `#10141a`, and `_headers` (below);
   - keeps `.br` copies only under `releases/` and `bay/`, where the Worker sends them;
   - drops the plain copy of a `.bay`, `.far` or `.bin` file under those folders when its `.br` copy exists;
@@ -53,6 +54,9 @@ The early-alpha notice says the realm is in active development. It never shows o
 | --- | --- |
 | `/*` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `Permissions-Policy: camera=(), microphone=(), geolocation=()` and the CSP |
 | `/current.json` | `Cache-Control: no-cache`, so a new pin shows at once |
+| `/sw.js` | `Cache-Control: no-cache`, so service worker shell updates take effect promptly |
+| `/manifest.webmanifest` | `Content-Type: application/manifest+json; charset=utf-8` and `Cache-Control: public, max-age=3600` |
+| `/icons/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
 | `/loading-*.webp` | `public, max-age=31536000, immutable`: the loader's pictures are named by their content |
 | `/kit/fonts/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
 

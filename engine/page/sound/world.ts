@@ -42,6 +42,8 @@ export interface Scene {
   riding?(): boolean
   /** Whether the listener is sitting inside an enclosed vehicle cabin (warms cabin acoustics and softens exterior weather). */
   inside?(): boolean
+  /** Whether a solver body id belongs to a person on foot (so bumps sound like a soft body thud, not a car crash). */
+  person?(id: number): boolean
   /** Live driven car pose, speed (km/h), and nearby vehicles for car radio and Doppler pass-by whooshes. */
   driving?(): { at: readonly [number, number, number]; yaw: number; kmh: number; nearby?: readonly (readonly [number, number, number])[] } | null
   /** The made things, the layer over the picture and the keys, once the page has them: for things that sound and are played. */
@@ -226,6 +228,17 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
       voice.play(map[kind], { force: Math.min(1, Math.max(0.15, force)) * (0.92 + 0.16 * Math.random()), size: 0.94 + 0.12 * Math.random(), gain: 0.75, room: 0.12 })
       if (kind === 'thump' && force > 0.55) radio.duck(force * 0.45, 0.2)
     },
+    /** Plays a damped vehicle impact/crash at a world position (chassis thud, sheet-metal crunch at speed, glass shatter when severe). */
+    carCrash(at: readonly [number, number, number], force: number, speed: number) {
+      const f = Math.min(1, Math.max(0.12, force)) * (0.92 + 0.16 * Math.random())
+      voice.play(WORLD.carBump, { at, force: Math.min(1, f * 0.95), size: 0.95 + 0.35 * f, reach: 16, travels: false })
+      if (speed >= 36 || f >= 0.42) {
+        const crunch = Math.min(1, Math.max(f * 0.75, (speed - 28) / 85))
+        voice.play(WORLD.carCrunch, { at, force: crunch, size: 0.9 + 0.3 * f, reach: 18, travels: false })
+      }
+      if (speed > 60) voice.play(BREAK.glass, { at, force: Math.min(0.85, (speed - 55) / 90), size: 0.95, reach: 16, travels: false })
+      if (speed > 32 || f > 0.45) radio.duck(f, 0.28)
+    },
     /** Holds or releases a punchy dual-tone car horn. */
     horn(on: boolean) {
       radio.setHorn(on)
@@ -266,18 +279,37 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
       count.tellings++; count.moved += told.moves.length
       for (const b of told.bursts) blast(b.at, b.radius)
       for (const d of told.dust) if ((d.kind & 15) === 11 && d.amount > 2) voice.play(BREAK.glass, { at: d.at, force: Math.min(1, 0.4 + d.amount / 40), reach: 8 })
-      // Real impacts reported by the core for living things (cars hitting walls, kerbs, props, or each other).
+      // Real impacts reported by the core for living things (people bumping into cars/walls, or cars hitting walls, kerbs, props, or each other).
       for (const s of told.struck) {
-        if ((s.flags & 3) === 0 || s.speed < 12) continue
+        if ((s.flags & 3) === 0) continue
+        const isPerson = !!(scene.person?.(s.a) || (s.b !== 0 && scene.person?.(s.b)))
+        const minSpeed = isPerson ? 22 : 16
+        if (s.speed < minSpeed) continue
         const lastAt = struckQuiet.get(s.a) ?? 0
         if (now < lastAt) continue
-        struckQuiet.set(s.a, now + 0.11)
-        const f = Math.min(1, (s.speed / 120) ** 0.85) * (0.9 + 0.2 * Math.random())
+        struckQuiet.set(s.a, now + (isPerson ? 0.22 : 0.14))
+        if (s.b !== 0) struckQuiet.set(s.b, now + (isPerson ? 0.22 : 0.14))
+        if (isPerson) {
+          // A person bumping into a car or wall gets a soft, muted body thud — never a ringing steel bell.
+          const pf = Math.min(0.65, ((s.speed - 18) / 70) ** 0.85) * (0.9 + 0.2 * Math.random())
+          voice.play(WORLD.bodyBump, { at: s.at, force: pf, size: 0.92 + 0.16 * Math.random(), reach: 8, travels: false })
+          if (s.speed > 45) voice.play(WORLD.carBump, { at: s.at, force: Math.min(0.55, (s.speed - 40) / 90), size: 0.95, reach: 12, travels: false })
+          count.blows++
+          continue
+        }
+        const f = Math.min(1, ((s.speed - 10) / 110) ** 0.85) * (0.9 + 0.2 * Math.random())
         const mat = stuff(s.kindB)
-        voice.play(HIT[mat] ?? HIT.concrete, { at: s.at, force: f, size: 1.3 + 0.5 * f, reach: 14, travels: false })
-        voice.play(HIT.steel, { at: s.at, force: f * 0.8, size: 1.7, reach: 16, travels: false })
-        if ((s.flags & 4) !== 0) voice.play(BREAK[mat] ?? BREAK.brick, { at: s.at, force: Math.min(1, f * 0.95), size: 1.4, reach: 18, travels: false })
-        if (s.speed > 55) voice.play(BREAK.glass, { at: s.at, force: Math.min(0.8, (s.speed - 45) / 90), size: 0.9, reach: 14, travels: false })
+        // Damped chassis/bumper thud + sheet-metal crunch at speed; never ring HIT.steel/BREAK.steel like a church bell.
+        voice.play(WORLD.carBump, { at: s.at, force: Math.min(1, f * 0.95), size: 0.95 + 0.35 * f, reach: 16, travels: false })
+        if (s.speed >= 36) voice.play(WORLD.carCrunch, { at: s.at, force: Math.min(1, ((s.speed - 28) / 85) ** 0.9), size: 0.9 + 0.3 * f, reach: 18, travels: false })
+        if (mat !== 'steel' && mat !== 'glass' && mat !== 'lamp') {
+          voice.play(HIT[mat] ?? HIT.concrete, { at: s.at, force: f * 0.6, size: 1.0 + 0.3 * f, reach: 14, travels: false })
+        }
+        if ((s.flags & 4) !== 0) {
+          const broken = mat === 'steel' ? WORLD.carCrunch : (BREAK[mat] ?? BREAK.brick)
+          voice.play(broken, { at: s.at, force: Math.min(1, f * 0.9), size: 1.25, reach: 18, travels: false })
+        }
+        if (s.speed > 60) voice.play(BREAK.glass, { at: s.at, force: Math.min(0.8, (s.speed - 55) / 90), size: 0.9, reach: 14, travels: false })
         if (s.speed > 32) radio.duck(f, 0.28)
         count.blows++
       }

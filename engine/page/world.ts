@@ -167,8 +167,8 @@ function holdsFiner(words: Int32Array): boolean {
   return false
 }
 
-/** A maker of sectors as the world keeps it: how many asks it has in hand, which, when it was last heard, and how to let it go. */
-interface Maker { worker: Worker; busy: number; asked: Set<number>; lose: () => void }
+/** A maker of sectors as the world keeps it: how many asks it has in hand, which, when each was sent, and how to let it go. */
+interface Maker { worker: Worker; busy: number; asked: Set<number>; askedAt: Map<number, number>; lose: () => void }
 
 export class World {
   levels: Level[]
@@ -207,9 +207,15 @@ export class World {
   /** A maker of sectors (worker.ts). One that fails is let go and another hired: what it was making is asked again. */
   private hire(): Maker {
     const worker = share(new Worker(new URL(`./worker.ts${BAY}`, import.meta.url), { type: 'module' }))
-    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), lose: () => {} }
+    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), askedAt: new Map<number, number>(), lose: () => {} }
     if (this.core) worker.postMessage({ core: this.core })
-    worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; slot.asked.delete(e.data.id); this.take(e.data) }
+    worker.onmessage = (e: MessageEvent<Answer>) => {
+      if (e.data.failed) { lose(); return }
+      slot.busy = Math.max(0, slot.busy - 1)
+      slot.asked.delete(e.data.id)
+      slot.askedAt.delete(e.data.id)
+      this.take(e.data)
+    }
     worker.onerror = (e) => { e.preventDefault(); lose() }
     const lose = (slot.lose = () => {
       if (!this.workers.includes(slot)) return
@@ -350,6 +356,17 @@ export class World {
   /** The edits that reach a column of the finest box's sectors, in order. */
   reaching(sx: number, sz: number): readonly Edit[] { return this.reach[0]?.get(column(sx, sz)) ?? [] }
 
+  /** Live maker worker queue depth and oldest in-flight column ask (ms), for diagnostics. */
+  workerHealth(): { busy: number[]; maxAskMs: number } {
+    const now = performance.now()
+    let maxAskMs = 0
+    const busy = this.workers.map((w) => {
+      for (const sent of w.askedAt.values()) { const age = now - sent; if (age > maxAskMs) maxAskMs = age }
+      return w.busy
+    })
+    return { busy, maxAskMs: Math.round(maxAskMs) }
+  }
+
   /** Everything done to the world so far, in order. */
   done(): readonly Edit[] { return this.edits }
 
@@ -382,8 +399,13 @@ export class World {
       }
     }
     if (this.again.length) this.retry()
-    // A worker that has gone silent is gone too (a tab out of memory ends a worker without a word).
-    for (const w of this.workers) if (silent(w.worker) > this.patience) w.lose()
+    // A worker that has gone silent, or whose in-flight column ask has stalled past the watchdog, is replaced.
+    const now = performance.now(), askLimit = Math.max(this.patience, 15_000)
+    for (const w of this.workers) {
+      let stalled = false
+      for (const sent of w.askedAt.values()) if (now - sent > askLimit) { stalled = true; break }
+      if (silent(w.worker) > this.patience || stalled) w.lose()
+    }
     if (this.plan) this.replan(eye)
     this.send()
     this.flush()
@@ -467,8 +489,10 @@ export class World {
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
         w.busy++
-        w.asked.add(this.nextId)
-        w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)
+        const askId = this.nextId++
+        w.asked.add(askId)
+        w.askedAt.set(askId, performance.now())
+        w.worker.postMessage({ id: askId, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)
       }
     }
   }

@@ -152,7 +152,7 @@ On loading a fine tile, the core samples the roof inside each ordinary building'
 
 Two trailers may follow the trunks, in this order. Any other trailing bytes make the pack invalid.
 
-**`SFST`, street fixtures.** Lamps, poles, signs, wires.
+**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |

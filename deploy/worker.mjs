@@ -39,6 +39,7 @@ export function worldCsp(hashes = []) {
     "connect-src 'self' https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https: wss:",
     "object-src 'none'",
     "base-uri 'self'",
+    "manifest-src 'self'",
     "frame-ancestors 'self' https://zahynailo.dev",
   ].join('; ')
 }
