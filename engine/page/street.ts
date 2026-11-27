@@ -155,7 +155,7 @@ export interface Street {
   /** Autonomous robotaxi services, stations, stuck-incident & crowd-reaction inspection and deterministic test triggers. */
   readonly robotaxis: {
     readonly services: { id: string; name: string; badge: string; station: string }[]
-    readonly stations: { serviceId: string; serviceName: string; name: string; cx: number; cz: number; visit: readonly [number, number]; bays: number; occupied: number; exiting: number; entering: number; shown: boolean }[]
+    readonly stations: { serviceId: string; serviceName: string; name: string; cx: number; cz: number; visit: readonly [number, number]; bays: number; occupied: number; exiting: number; entering: number; arrivals: number; departures: number; shown: boolean }[]
     readonly stuck: { id: number; serviceId: string; serviceName: string; kind: 'intersection' | 'narrow'; x: number; y: number; z: number; heading: number; age: number; hazardOn: boolean; hazardPhase: number }[]
     readonly reactions: { honks: number; shouts: number; filmers: number; yellers: number }
     triggerStuck(kind?: 'intersection' | 'narrow', serviceId?: string): { id: number; serviceId: string; serviceName: string; kind: 'intersection' | 'narrow'; x: number; y: number; z: number; heading: number } | null
@@ -995,7 +995,7 @@ export function street(o: {
       const head = darkNow ? 1.0 : 0.0
       c.piece.lamps = [brake, -hazard, head, c.model.front + 1]
       // Spinning 360° roof LiDAR turret on nearby robotaxis (< 140 m): calm brand spin vs amber hazard alert when stuck!
-      if (d < 1400) {
+      if (d < 1400 && c.model.domeOffset) {
         const wantMode = stuck ? 'stuck' : 'normal'
         if (!c.dome || c.domeMode !== wantMode) {
           c.dome?.destroy()
@@ -1003,7 +1003,7 @@ export function street(o: {
           c.domeMode = wantMode
         }
         const spin = c.lidarAngle ?? (c.seed * 0.7)
-        const domeOff = rotate(q, c.model.domeOffset ?? [1.5, 17.7, 0])
+        const domeOff = rotate(q, c.model.domeOffset)
         c.dome.pos = [c.x + domeOff[0], c.y + domeOff[1], c.z + domeOff[2]]
         c.dome.rot = mulQ(q, [0, Math.sin(spin / 2), 0, Math.cos(spin / 2)])
         c.dome.cell = 0.25
@@ -1486,6 +1486,8 @@ export function street(o: {
     inGateLift: number
     outGateLift: number
     lastSpawn: number
+    arrivals: number
+    departures: number
     pieces: {
       gantry: Piece | null; mascot: Piece | null; northCanopy: Piece | null; southCanopy: Piece | null
       pavilion: Piece | null; inGate: Piece | null; outGate: Piece | null; inGatePosts: Piece | null; outGatePosts: Piece | null
@@ -1501,6 +1503,8 @@ export function street(o: {
     inGateLift: 0,
     outGateLift: 0,
     lastSpawn: -99,
+    arrivals: 0,
+    departures: 0,
     pieces: {
       gantry: null, mascot: null, northCanopy: null, southCanopy: null, pavilion: null,
       inGate: null, outGate: null, inGatePosts: null, outGatePosts: null,
@@ -1712,10 +1716,12 @@ export function street(o: {
             const [bx, bz] = st.toWorld(b.u, b.w)
             c.x = bx; c.z = bz; c.heading = b.heading; c.v = 0; c.kind = 'parked'
             d.phase = 'charging'; d.until = now + 12 + random() * 16
+            depot.arrivals++
             settle(c)
           } else {
             depotCars.splice(i, 1)
-            if (!attachToCityRoad(c)) hide(c)
+            if (attachToCityRoad(c)) depot.departures++
+            else hide(c)
           }
           continue
         }
@@ -2635,6 +2641,8 @@ export function street(o: {
             occupied: depotCars.filter((c) => c.depot?.serviceId === sid && c.depot.phase === 'charging').length,
             exiting: depotCars.filter((c) => c.depot?.serviceId === sid && c.depot.phase === 'exiting').length,
             entering: depotCars.filter((c) => c.depot?.serviceId === sid && c.depot.phase === 'entering').length,
+            arrivals: depot.arrivals,
+            departures: depot.departures,
             shown: depot.shown,
           }
         }),

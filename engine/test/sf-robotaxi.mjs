@@ -105,16 +105,12 @@ try {
     `${primary.station} rendered with active bays (${JSON.stringify(st1.station)})`)
   await page.screenshot({ path: join(shots, '01-station-overview.png') })
 
-  // Watch for 3.5 s and confirm depot robotaxis actively move in/out of the station!
-  const beforePos = st1.cars.map((c) => [c.x, c.z])
-  await page.waitForTimeout(3500)
-  const st2 = await page.evaluate((serviceId) => {
-    const e = globalThis.engine
-    const st = e.street.robotaxis.stations.find((s) => s.serviceId === serviceId) ?? e.street.robotaxis.stations[0]
-    return { station: st, cars: e.street.cars(st.cx, st.cz, 500).filter((car) => car.model === 'robotaxi' && car.service === serviceId) }
-  }, primary.id)
-  const movedAny = st2.cars.some((c) => beforePos.every(([bx, bz]) => Math.hypot(c.x - bx, c.z - bz) > 8))
-  check(movedAny, `${primary.name} depot cars actively circulate in and out of bays (${st2.cars.length} ${primary.name}s around depot)`)
+  // A Visit can arrive while every visible bay is charging. Count completed trips in each direction.
+  const trips = await page.waitForFunction((id) => {
+    const station = globalThis.engine.street.robotaxis.stations.find((s) => s.serviceId === id)
+    return station.arrivals && station.departures && { arrivals: station.arrivals, departures: station.departures }
+  }, primary.id, { timeout: 65_000, polling: 250 }).then((handle) => handle.jsonValue())
+  check(true, `${primary.station} completed ${trips.arrivals} bay arrivals and ${trips.departures} departures into city traffic`)
 
   // Street-level close-up right outside Stockton St gantry entrance showing signage + gate hardware + robotaxis.
   await page.evaluate(async (serviceId) => {
@@ -305,43 +301,48 @@ try {
       if (mode === 'crowd-closeup') {
         const list = e.street.folk(e.view(), performance.now() / 1000)
         // Prefer actively filming bystanders (phone outstretched), then gesturing yellers/speakers, sorted nearest first!
-        const actors = list
-          .filter((p) => (p.filming > 0.2 || !!p.move || !!p.says) && Math.hypot(p.at[0] - st.x, p.at[2] - st.z) < 260)
-          .sort((a, b) => (b.filming > 0.2 && b.says ? 4 : b.filming > 0.2 ? 3 : b.says ? 2 : 1) - (a.filming > 0.2 && a.says ? 4 : a.filming > 0.2 ? 3 : a.says ? 2 : 1) || Math.hypot(a.at[0] - st.x, a.at[2] - st.z) - Math.hypot(b.at[0] - st.x, b.at[2] - st.z))
-        const clearCloseup = (px, pz, hM) => {
-          const f = e.feet(Math.round(px), Math.round(pz)), y = f + Math.round(hM * 10)
-          for (const [ox, oz] of [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6]]) if (e.kind(Math.round(px + ox), y, Math.round(pz + oz)) !== 0) return false
-          // Never stand underneath a low storefront awning so no dark awning edge intrudes into the top of the close-up frame!
-          for (let dy = 8; dy <= 28; dy += 4) if (e.kind(Math.round(px), y + dy, Math.round(pz)) !== 0) return false
-          for (const c of cars) {
-            if (Math.hypot(c.x - st.x, c.z - st.z) < 8) continue
-            if (Math.hypot(c.x - px, c.z - pz) < 22) return false
-            const vx = st.x - px, vz = st.z - pz, l2 = vx * vx + vz * vz || 1
-            const t = ((c.x - px) * vx + (c.z - pz) * vz) / l2
-            if (t > 0.08 && t < 0.85 && Math.hypot(c.x - (px + vx * t), c.z - (pz + vz * t)) < 22) return false
-          }
-          return true
+        const actors = list.filter((p) => (p.filming > 0.3 || p.move) && Math.hypot(p.at[0] - st.x, p.at[2] - st.z) < 240)
+        const clearOfTraffic = (x, z, tx, tz) => {
+          const dx = tx - x, dz = tz - z, length2 = dx * dx + dz * dz || 1
+          return cars.every((c) => {
+            if (Math.hypot(c.x - st.x, c.z - st.z) < 8) return true
+            const t = Math.max(0, Math.min(1, ((c.x - x) * dx + (c.z - z) * dz) / length2))
+            const clearance = ['bus', 'tram', 'trolley', 'cable'].includes(c.model) ? 64 : ['truck', 'van'].includes(c.model) ? 38 : 24
+            return Math.hypot(c.x - x - t * dx, c.z - z - t * dz) > clearance
+          })
         }
+        let best = null
         for (const actor of actors) {
-          const vx = st.x - actor.at[0], vz = st.z - actor.at[2], vl = Math.hypot(vx, vz) || 1
-          if (vl < 40) continue
-          const ux = vx / vl, uz = vz / vl, px = -uz, pz = ux
-          for (const [fwd, lat] of [[-14, 34], [-14, -34], [-10, 38], [-10, -38], [-2, 42], [-2, -42], [6, 40], [6, -40], [14, 36], [14, -36]]) {
-            const camX = actor.at[0] + ux * fwd + px * lat
-            const camZ = actor.at[2] + uz * fwd + pz * lat
-            if (!clearCloseup(camX, camZ, 1.65)) continue
-            const camY = e.feet(Math.round(camX), Math.round(camZ)) + 16.5
-            if (!rayClear(actor.at[0], actor.at[1] + 13, actor.at[2], camX, camY, camZ)) continue
-            if (!rayClear(camX, camY, camZ, st.x, st.y + 10, st.z)) continue
-            const dax = actor.at[0] - camX, daz = actor.at[2] - camZ, dal = Math.hypot(dax, daz) || 1
-            const dsx = st.x - camX, dsz = st.z - camZ, dsl = Math.hypot(dsx, dsz) || 1
-            if ((dax * dsx + daz * dsz) / (dal * dsl) < 0.35) continue
-            const bx = (dax / dal) * 0.56 + (dsx / dsl) * 0.44
-            const bz = (daz / dal) * 0.56 + (dsz / dsl) * 0.44
-            Object.assign(e.pose, { x: camX / 10, y: camY / 10, z: camZ / 10, yaw: Math.atan2(bx, -bz), pitch: -0.04 })
-            e.fov = 74
-            return 'closeup'
+          const vx = st.x - actor.at[0], vz = st.z - actor.at[2], dist = Math.hypot(vx, vz)
+          if (dist < 40) continue
+          const ux = vx / dist, uz = vz / dist
+          for (const along of [-18, -5, 8]) for (const lateral of [35, -35, 49, -49]) {
+            const cx = actor.at[0] + ux * along - uz * lateral, cz = actor.at[2] + uz * along + ux * lateral
+            const cy = e.feet(Math.round(cx), Math.round(cz)) + 18
+            if (e.kind(cx, cy, cz) || e.kind(cx, cy + 10, cz) || e.kind(cx, cy + 25, cz)) continue
+            if (!clearOfTraffic(cx, cz, st.x - fx * 12, st.z - fz * 12) || !clearOfTraffic(cx, cz, actor.at[0], actor.at[2])) continue
+            if (!rayClear(cx, cy, cz, st.x, st.y + 10, st.z)) continue
+            if (![-6, 0, 6].every((off) => rayClear(cx, cy, cz, actor.at[0] + uz * off, actor.at[1] + 13, actor.at[2] - ux * off))) continue
+            const ax = actor.at[0] - cx, az = actor.at[2] - cz, ad = Math.hypot(ax, az)
+            const bx = st.x - cx, bz = st.z - cz, bd = Math.hypot(bx, bz)
+            const dot = (ax * bx + az * bz) / (ad * bd)
+            if (dot < 0.47 || dot > 0.96) continue
+            const dx = ax / ad + bx / bd, dz = az / ad + bz / bd
+            const dl = Math.hypot(dx, dz)
+            const companions = actors.filter((p) => {
+              if (p === actor) return false
+              const px = p.at[0] - cx, pz = p.at[2] - cz, d = Math.hypot(px, pz)
+              return d > 25 && d < 155 && (px * dx + pz * dz) / (d * dl) > 0.76 &&
+                clearOfTraffic(cx, cz, p.at[0], p.at[2]) && rayClear(cx, cy, cz, p.at[0], p.at[1] + 14, p.at[2])
+            }).length
+            const score = Math.min(3, companions) * 3 + (actor.filming > 0.3 ? 5 : 0) - bd / 150
+            if (!best || score > best.score) best = { cx, cy, cz, dx, dz, score }
           }
+        }
+        if (best) {
+          Object.assign(e.pose, { x: best.cx / 10, y: best.cy / 10, z: best.cz / 10, yaw: Math.atan2(best.dx, -best.dz), pitch: -0.05 })
+          e.fov = 74
+          return 'closeup'
         }
       }
       // Try front three-quarter views first, then the rest of the street if traffic fills the foreground.
@@ -408,10 +409,9 @@ try {
   await page.waitForTimeout(40)
   await page.screenshot({ path: join(shots, '05-stuck-intersection-crowd.png') })
 
-  await pickCleanView(stuckInfo, 'crowd-closeup')
-  await page.waitForTimeout(260)
   await waitHazardOn()
-  await page.waitForTimeout(40)
+  await pickCleanView(stuckInfo, 'crowd-closeup')
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
   await page.screenshot({ path: join(shots, '06-stuck-crowd-closeup.png') })
 
   await page.evaluate(() => { globalThis.engine.hour = 20.6 })
@@ -479,7 +479,7 @@ try {
   check(driveResult.ok, `player took and drove ${primary.name} with E (${JSON.stringify(driveResult)})`)
 
   check(errors.length === 0, `zero runtime page/console errors (${errors.length}${errors.length ? ': ' + errors[0] : ''})`)
-  writeFileSync(join(shots, 'report.json'), JSON.stringify({ registry, hasStationPlace, st1, nearRate, farRate, react, driveResult, errors, failures }, null, 2))
+  writeFileSync(join(shots, 'report.json'), JSON.stringify({ registry, hasStationPlace, st1, trips, nearRate, farRate, react, driveResult, errors, failures }, null, 2))
 } finally {
   await browser.close()
   site.stop()

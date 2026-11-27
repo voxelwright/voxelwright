@@ -184,7 +184,7 @@ export const ROBOTAXI_SERVICES: readonly RobotaxiService[] = [robotaxiService({
   stationBoost: 0.54,
   livery: {
     body: k(STEEL, grey(0)),       // glossy pearl white
-    roof: k(STEEL, grey(13)),      // two-tone floating gloss-black roof
+    roof: k(STEEL, grey(1)),       // pearl roof cap above the dark glazing
     accent: k(STEEL, hue(10, 4)),  // crisp PayMo emerald-mint lower ribbon
     accentLamp: k(LAMP, hue(11, 4)), // electric cyan-mint visor & display LEDs
     text: k(STEEL, hue(15, 6)),    // high-contrast deep navy door badge

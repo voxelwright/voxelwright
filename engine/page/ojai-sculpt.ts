@@ -1,13 +1,4 @@
-// Waymo Ojai (Zeekr RT) autonomous robotaxi sculpted from continuous shapes (#57), not stacked boxes:
-// modeled after the sixth-generation monobox electric robotaxi silhouette (4.68 m long, 1.98 m wide,
-// 3.00 m long wheelbase with ultra-short overhangs, smoothly rounded pebble nose flowing straight into a
-// swept panoramic windshield, contrasting gloss-black floating roof and B-pillarless wrap-around sliding-door
-// glasshouse, recessed full-width Stargate visor lightbar with wrap-around amber hazards, slim horizontal rear
-// LED bar, streamlined roof LiDAR fairing, compact fender cheek pods, stalked aero mirrors, sculpted 19-inch
-// EV turbine wheels, and a flat-floor lounge interior with empty driver seat and glowing ride displays).
-//
-// Zero DOM/browser imports: Node (sf/fleet.mjs, sf/cars.mjs) and the browser (page/robotaxi.ts) share this
-// exact geometry as one source of truth. Lengths are metres; cells laid `cells[x + w * (z + d * y)]`, +x front.
+// Ojai robotaxi, sampled at 2.5 cm. Coordinates are metres, +x forward.
 import { mostAround, outsideAir, sealLeaks } from './car-sculpt.ts'
 
 const GLASS = 11, STEEL = 12, ROOFING = 14, LAMP = 15, PLASTER = 9
@@ -43,11 +34,11 @@ export const OJAI_KINDS = {
 export interface OjaiLivery {
   /** Main lower/mid body clearcoat paint (e.g. pearl white). */
   body: number
-  /** Two-tone floating roof & pillar clearcoat paint (e.g. gloss obsidian black). */
+  /** Roof cap clearcoat above the dark glazed band. */
   roof: number
   /** Brand accent stripe & rocker badge color. */
   accent: number
-  /** Emissive LED accent for front visor status bar, roof sensor indicator, and cabin displays. */
+  /** Emissive accent used by the service’s spinning roof sensor and station. */
   accentLamp: number
   /** High-contrast door badge lettering color. */
   text: number
@@ -83,8 +74,8 @@ export const OJAI_SPEC: OjaiSpec = {
   wheelY: 0.43,
   wheelR: 0.36,
   tyreW: 0.25,
-  // Roof fairing crown is centered at x = 2.50 m (+1.5 cells ahead of L/2 = 2.35 m), plinth top at y = 1.77 m (17.7 cells).
-  domeOffset: [1.5, 17.7, 0],
+  // The body origin is the centre of its rounded-up 47-cell footprint.
+  domeOffset: [7.8, 18.0, 0],
   eye: [28.0, 12.6, 6.2],
   seats: [
     [27.5, 0.2, 6.2],
@@ -146,7 +137,7 @@ const through = (pts: readonly (readonly [number, number])[]) => (s: number) => 
   if (s <= pts[0][0]) return pts[0][1]
   for (let i = 1; i < pts.length; i++) if (s <= pts[i][0]) {
     const [s0, y0] = pts[i - 1], [s1, y1] = pts[i], t = (s - s0) / (s1 - s0)
-    return y0 + (y1 - y0) * (1 - Math.cos(Math.PI * t)) / 2
+    return y0 + (y1 - y0) * t
   }
   return pts[pts.length - 1][1]
 }
@@ -185,7 +176,7 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
   /** Rising modern beltline separating the pearl-white lower body from the two-tone floating black glasshouse. */
   const belt = (X: number) => {
     const s = X / L
-    return 0.935 + 0.032 * smooth(0.68, 0.12, s) - 0.028 * smooth(0.78, 0.92, s)
+    return 1.095 - 0.065 * smooth(0.33, 0.22, s) - 0.015 * smooth(0.78, 0.92, s)
   }
 
   /**
@@ -193,19 +184,10 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
    * steep swept windshield -> short rounded pebble nose (ZERO boxy step between hood and windshield!).
    */
   const upperMid = through([
-    [0.0, 0.62],
-    [0.025, 0.94],
-    [0.06, 1.24],
-    [0.12, 1.56],
-    [0.18, 1.665],
-    [0.36, 1.705],
-    [0.52, 1.70],
-    [0.64, 1.655],
-    [0.74, 1.40],
-    [0.825, 1.045],
-    [0.895, 0.925],
-    [0.955, 0.835],
-    [1.0, 0.63],
+    [0.0, 0.72], [0.018, 1.15], [0.042, 1.49], [0.085, 1.62],
+    [0.16, 1.68], [0.36, 1.71], [0.56, 1.715], [0.655, 1.70],
+    [0.69, 1.67], [0.73, 1.58], [0.84, 1.235], [0.89, 1.09],
+    [0.945, 0.98], [0.975, 0.91], [0.992, 0.82], [1.0, 0.72],
   ])
 
   /** Front & rear curved nose/tail boundary in plan + vertical roll-in (eliminates vertical flat walls at nose & tail). */
@@ -241,7 +223,7 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     // Smooth continuous glasshouse tumblehome above the beltline: curves gracefully inward to the arched roof.
     if (Y > yBelt) {
       const t = clamp((Y - yBelt) / Math.max(0.25, yTop - yBelt))
-      u -= 0.22 * t ** 1.38
+      u -= 0.155 * t ** 1.38
     }
     return Math.max(0.05, u)
   }
@@ -256,8 +238,7 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     return yMid - crown * q ** 2.35
   }
 
-  // ── Signature Stargate Front Visor & Rear Horizontal Lightbar Recesses ──
-  const frontVisorZone = (Y: number, u: number, b: number) => Y > 0.675 && Y < 0.775 && u < b * 0.96
+  // Lower intake, rear lamps, registration plate and diffuser recesses.
   const frontIntakeZone = (Y: number, u: number, b: number) => Y > 0.27 && Y < 0.45 && u < b * 0.66
   const rearBarZone = (Y: number, u: number, b: number) => Y > 0.845 && Y < 0.955 && u < b * 0.96
   const rearPlateZone = (Y: number, u: number) => Y > 0.44 && Y < 0.59 && u < 0.245
@@ -265,7 +246,7 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
 
   const recess = (atFront: boolean, Y: number, u: number) => {
     const b = B(atFront ? L - 0.22 : 0.22)
-    if (atFront) return frontVisorZone(Y, u, b) ? 0.032 : frontIntakeZone(Y, u, b) ? 0.048 : 0
+    if (atFront) return frontIntakeZone(Y, u, b) ? 0.048 : 0
     return rearBarZone(Y, u, b) ? 0.028 : rearPlateZone(Y, u) ? 0.026 : rearDiffuserZone(Y, u, b) ? 0.035 : 0
   }
 
@@ -299,21 +280,16 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     }
   }
 
-  // Streamlined teardrop gloss-black roof LiDAR fairing blending seamlessly into the curved black roof (x = 2.08..2.94 m).
-  const podCx = 2.50
+  // The sixth-generation array spans the roof above the windshield header.
+  // Its forward-facing lenses sit on a transverse beam with a flat turret deck.
+  const podCx = L / 2 + sp.domeOffset[0] / 10
   const roofPod = (X: number, Y: number, u: number) => {
-    if (X < 2.06 || X > 2.96 || Y < 1.63 || Y > 1.80) return false
-    const dx = X >= podCx ? (X - podCx) / 0.44 : (podCx - X) / 0.42
-    const dz = u / 0.34
-    const base = topAt(X, u) - 0.02
-    const arch = 1 - dx * dx - dz * dz
-    if (arch <= 0) return false
-    // Flat circular turret mounting deck around podCx (r <= 0.21 m) at y = 1.77 m.
-    const rDeck = Math.hypot(X - podCx, u)
-    const capH = rDeck < 0.21 ? 1.775 : base + 0.125 * Math.sqrt(arch)
-    return Y >= base && Y <= Math.min(1.785, capH)
+    const dx = (X - podCx) / 0.29, dz = u / 0.74
+    if (dx ** 4 + dz ** 6 > 1) return false
+    const top = sp.domeOffset[1] / 10 - 0.034 * dz ** 4 - 0.018 * dx ** 4
+    return Y >= topAt(X, u) - 0.025 && Y <= top
   }
-  add(2.04, 2.98, 1.62, 1.80, roofPod)
+  add(podCx - 0.30, podCx + 0.30, 1.49, 1.82, roofPod)
 
   // Compact aerodynamic rear-roof camera/spoiler pod (x = 0.56..0.82 m).
   const rearPod = (X: number, Y: number, u: number) => {
@@ -324,17 +300,18 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
   }
   add(0.54, 0.84, 1.56, 1.76, rearPod)
 
-  // Smoothly faired front-fender cheek sensor blisters just behind the front wheel arches (x = 3.18..3.46 m).
+  // Each black fender module covers the top of its wheel arch, with two inset optics.
+  const cheekX = xf + 0.055, cheekY = 0.955
   const cheekPod = (X: number, Y: number, u: number) => {
-    const sU = side(X, Y)
-    const dx = (X - 3.32) / 0.14, dy = (Y - 0.87) / 0.068
-    const arch = 1 - dx * dx - dy * dy
-    return arch > 0 && u >= sU - 0.03 && u <= sU + 0.052 * Math.sqrt(arch)
+    const dx = (X - cheekX) / 0.29, dy = (Y - cheekY) / 0.115
+    const outline = dx ** 4 + dy ** 4
+    if (outline > 1) return false
+    return u >= side(X, Y) - 0.045 && u < 1.046 - 0.036 * outline
   }
-  add(3.16, 3.48, 0.79, 0.96, cheekPod)
+  add(cheekX - 0.30, cheekX + 0.30, cheekY - 0.12, cheekY + 0.12, cheekPod)
 
   // Sleek aerodynamic stalked wing mirrors with integrated amber side hazard repeaters (x = 3.06..3.24 m, y = 0.99..1.11 m).
-  const mx = 3.15, my = 1.05
+  const mx = 3.15, my = 1.16
   const mu = side(mx, my) + 0.072
   const mirrorPod = (X: number, Y: number, u: number) => {
     const cap = ((X - mx) / 0.078) ** 2 + ((Y - my) / 0.048) ** 2 + ((u - mu) / 0.058) ** 2 <= 1
@@ -379,8 +356,15 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
   const kindAt = (x: number, y: number, z: number, added: boolean): number => {
     const X = (x + 0.5) / S, Y = (y + 0.5) / S, u = Math.abs((z + 0.5) / S - zc), s = X / L
     if (added) {
-      // Roof LiDAR fairing & rear-roof sensor pod: pure gloss obsidian (spinning LiDAR turret owns the status/amber beacon LED!).
+      if (X > podCx - 0.31 && X < podCx + 0.31 && Y > 1.48) {
+        if (X > podCx + 0.16 && Math.abs(u - 0.51) < 0.08 && Math.abs(Y - 1.70) < 0.035) return K.alloy
+        return K.gloss
+      }
       if (Y > 1.50) return K.gloss
+      if (X > cheekX - 0.30) {
+        if (u > 1.0 && Math.abs(Math.abs(X - cheekX) - 0.16) < 0.050 && Math.abs(Y - cheekY) < 0.038) return K.alloy
+        return K.gloss
+      }
       // Wing mirror: gloss black housing + integrated amber side-repeater signal strip facing forward & outward!
       if (Y > 0.96) {
         const cap = ((X - mx) / 0.078) ** 2 + ((Y - my) / 0.048) ** 2 + ((u - mu) / 0.058) ** 2 <= 1
@@ -398,19 +382,19 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     }
     if (nearArch(X, Y, 0.052) && Y < 0.88 && u > side(X, Y) - 0.045) return liv.trim
 
-    // ── Front fascia: full-width gloss-black Stargate visor lightbar, crisp white LED blades, tidy wrap-around amber hazards & lower aero intake ──
+    // The black brow slopes across the upper nose. Two lamp pockets sit in its shoulders.
     const fX = frontX(Y, u), bf = B(L - 0.22), sFront = Math.max(0.25, side(X, Y))
-    if (X > fX - 0.105) {
-      const q = u / sFront
-      if (frontVisorZone(Y, u, sFront)) {
-        // Laser-slim outer wrap-around amber corner hazard blinkers inside the gloss-black visor bezel!
-        if (q > 0.84 && Y > 0.695 && Y < 0.755) return K.amber
-        // Crisp horizontal bright-white LED matrix headlamp blades inside the gloss-black Stargate visor!
-        if (q > 0.36 && q <= 0.81 && Y > 0.695 && Y < 0.755) return Y > 0.73 ? K.drl : K.head
-        // Sleek glowing center brand status bar in the Stargate visor.
-        if (q < 0.17 && Y > 0.70 && Y < 0.748) return liv.accentLamp
-        return K.gloss
+    const hoodY = topAt(X, u)
+    if (s > 0.865 && Y > 0.805 && Y > hoodY - 0.075 && u < sFront - 0.025) {
+      const dx = (X - (4.42 - 0.13 * u)) / 0.145, dz = (u - 0.48) / 0.21
+      if (dx ** 4 + dz ** 4 <= 1) {
+        if (dz > 0.72 && Math.abs(dx) < 0.66) return K.amber
+        if (dx > 0.32 && dx < 0.75 && Math.abs(dz) < 0.77) return K.head
+        return K.alloy
       }
+      return K.gloss
+    }
+    if (X > fX - 0.105) {
       if (frontIntakeZone(Y, u, bf)) {
         // Recessed gloss-black lower bumper intake + center imaging radar module.
         if (u < 0.16 && Y > 0.32 && Y < 0.41) return K.gloss
@@ -418,9 +402,6 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
       }
       if (Y < 0.32) return liv.trim
     }
-    // Tidy slim wrap-around amber corner blinker on the front fender cheek (matches visor height cleanly).
-    if (X > L - 0.30 && X < L - 0.14 && Y > 0.695 && Y < 0.755 && u > sFront - 0.05 && u > sFront * 0.85) return K.amber
-
     // ── Rear fascia: full-width slim crimson LED bar, bold wrap-around amber hazards, reverse lenses, plate & diffuser ──
     const rX = backX(Y, u), bt = B(0.22)
     if (X < rX + 0.105) {
@@ -442,38 +423,25 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     // Wrap rear amber hazard cleanly onto the rear quarter cheek so it's unmistakable from side and 3/4 views!
     if (X < 0.32 && Y > 0.85 && Y < 0.95 && u > side(X, Y) - 0.055 && u > bt * 0.76) return K.amber
 
-    // ── Two-tone floating gloss-black roof & B-pillarless wrap-around panoramic glasshouse (signature Waymo Ojai / Zeekr Mix!) ──
+    // Pearl roof and rear quarter wrap over a continuous dark passenger window band.
     const yBelt = belt(X)
     if (Y >= yBelt - 0.01) {
-      const f = facing(x, y, z)
-      const yTop = topAt(X, u)
-      const sU = side(X, Y)
-      // Huge swept monovolume panoramic windshield (s = 0.64..0.85).
-      if (s > 0.64 && f.ahead > 0.12 && u < sU - 0.04) {
-        // Sleek gloss-black A-pillar frame edges & lower cowl blackout band.
-        if (Y < yBelt + 0.045 || u > sU - 0.065) return liv.roof
+      const f = facing(x, y, z), yTop = topAt(X, u), sU = side(X, Y)
+      if (s > 0.675 && f.ahead > 0.16 && u < sU - 0.035) {
+        if (Y < yBelt + 0.025 || u > sU - 0.075) return K.gloss
         return K.screen
       }
-      // Clean raked rear liftgate window (s < 0.14).
-      if (s < 0.14 && f.ahead < -0.12 && u < sU - 0.04) {
-        if (Y < yBelt + 0.06 || Y > 1.56 || u > sU - 0.10) return liv.roof
+      if (s < 0.10 && f.ahead < -0.18 && u < sU - 0.12) {
+        return Y > yBelt + 0.04 && Y < 1.56 ? K.glass : liv.body
+      }
+      if (s < 0.69 && (Y > yTop - 0.092 || f.up > 0.72)) return liv.roof
+      if (s < 0.14 + 0.025 * clamp((Y - yBelt) / 0.6)) return liv.body
+      const aPillar = 0.90 - clamp((Y - yBelt) / 0.60) * 0.21
+      if (s < aPillar - 0.028 && Y > yBelt + 0.018) {
+        if (Math.abs(s - 0.48) < 0.005 || Math.abs(s - 0.32) < 0.004) return K.gloss
         return K.glass
       }
-      // Upper black floating roof cap & spoiler band.
-      if (Y > yTop - 0.085 || (f.up > 0.72 && s > 0.14 && s < 0.65)) {
-        // Panoramic tinted glass moonroof panel framed by the gloss-black floating roof rails!
-        if (s > 0.22 && s < 0.58 && u < sU - 0.14 && Y > 1.62) return K.glass
-        return liv.roof
-      }
-      // B-pillarless panoramic sliding-door side windows (uninterrupted sleek dark glass from A-pillar to D-pillar!).
-      if (s > 0.12 && s < 0.78 && Y > yBelt + 0.025 && Y < yTop - 0.095) {
-        // Slim gloss-black A-pillar trim along windshield rake + slim D-pillar corner cap at the very back.
-        const aPillar = 0.84 - clamp((Y - yBelt) / 0.72) * 0.20
-        if (s > aPillar - 0.03) return liv.roof
-        if (s < 0.155 + clamp((Y - yBelt) / 0.72) * 0.035) return liv.roof
-        return K.glass
-      }
-      return liv.roof
+      return K.gloss
     }
 
     // ── Lower body sills, rocker cladding, and sleek brand-accent side stripe ──
@@ -600,7 +568,7 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     }
   }
 
-  // ── 7. Spacious flat-floor Ojai lounge interior (visible through panoramic glass: NO driver, glowing ride screens!) ──
+  // Passenger compartment visible through the windows.
   const fill = (x0: number, x1: number, y0: number, y1: number, test: (X: number, Y: number, u: number, zs: number) => number) => {
     for (let y = Math.max(0, Math.floor(y0 * S)); y < Math.min(h, Math.ceil(y1 * S)); y++) {
       for (let z = 0; z < d; z++) {
@@ -636,15 +604,14 @@ export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiS
     if (Y >= 0.52 && Y < 1.24 && X > lean - 0.04 && X < lean + 0.14) return K.seat
     return 0
   })
-  // Minimalist floating EV dashboard, compact steering column (empty!), front & rear glowing autonomous ride tablets!
-  fill(3.26, 3.74, 0.72, 0.96, (_X, Y, u) => (u < 0.78 && Y < 0.94 ? K.dash : 0))
-  fill(3.12, 3.24, 0.94, 1.16, (X, Y, u) => {
-    if (u > 0.24) return 0
-    return X < 3.18 && u < 0.21 && Y > 0.97 && Y < 1.13 ? liv.accentLamp : K.gloss
+  // Contoured low dash and a small passenger-facing display below the cowl.
+  fill(3.32, 3.96, 0.77, 0.97, (X, Y, u) => {
+    const top = 0.86 + 0.10 * smooth(3.32, 3.96, X) - 0.035 * (u / 0.8) ** 2
+    return u < 0.80 && Y < top && Y > top - 0.055 ? K.dash : 0
   })
-  fill(2.26, 2.34, 0.88, 1.10, (X, Y, u) => {
-    if (u > 0.22) return 0
-    return X < 2.30 && u < 0.19 && Y > 0.91 && Y < 1.07 ? liv.accentLamp : K.gloss
+  fill(3.29, 3.36, 0.84, 0.975, (X, Y, u) => {
+    if (u > 0.15) return 0
+    return X < 3.32 && u < 0.12 && Y > 0.865 && Y < 0.948 ? K.alloy : K.gloss
   })
 
   sealLeaks(kinds, [w, h, d], (kk) => kk === liv.body || kk === liv.roof)
