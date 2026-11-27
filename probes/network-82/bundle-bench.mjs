@@ -13,13 +13,15 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { brotliCompressSync, constants as Z, gzipSync } from 'node:zlib'
+import { brotliCompressSync, constants as Z, gzipSync, zstdCompressSync } from 'node:zlib'
 
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..'), engine = join(repo, 'engine')
 const esbuild = createRequire(join(resolve(arg('esbuild', '.')), 'x.js'))('esbuild')
 const outBase = resolve(arg('out', join(repo, 'probes/network-82/.bundle')))
 const br = (b, q = 11) => brotliCompressSync(b, { params: { [Z.BROTLI_PARAM_QUALITY]: q, [Z.BROTLI_PARAM_SIZE_HINT]: b.length } }).length
+// What the live edge sends scripts as, to Chrome (measured: `content-encoding: zstd`); level 3 comes within 4% of the live bytes.
+const zs = (b) => zstdCompressSync(b, { params: { [Z.ZSTD_c_compressionLevel]: 3 } }).length
 const kb = (n) => Math.round(n / 102.4) / 10
 const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))
 
@@ -44,9 +46,9 @@ if (asked) {
     const path = ['.ts', '.mjs', '.js'].map((e) => join(engine, stem + e)).find((p) => { try { return statSync(p).isFile() } catch { return false } })
     if (!path) continue
     const text = Buffer.from(path.endsWith('.ts') ? stripTypeScriptTypes(readFileSync(path, 'utf8')) : readFileSync(path, 'utf8'))
-    n++; raw += text.length; gz += gzipSync(text, { level: 9 }).length; b11 += br(text); b5 += br(text, 5)
+    n++; raw += text.length; gz += gzipSync(text, { level: 9 }).length; b11 += br(text); b5 += zs(text)
   }
-  rows.push({ build: 'now: one file a module (landing)', files: n, 'raw KB': kb(raw), 'gzip KB': kb(gz), 'br q5 KB (edge-like)': kb(b5), 'br q11 KB': kb(b11) })
+  rows.push({ build: 'now: one file a module (landing)', files: n, 'raw KB': kb(raw), 'gzip KB': kb(gz), 'zstd 3 KB (edge-like)': kb(b5), 'br q11 KB': kb(b11) })
 }
 for (const [label, options] of [['bundled, split, not minified', {}], ['bundled, split, minified', { minify: true }], ['bundled, split, minified, names kept', { minifyWhitespace: true, minifySyntax: true }]]) {
   const outdir = join(outBase, label.replace(/\W+/g, '-'))
@@ -58,7 +60,7 @@ for (const [label, options] of [['bundled, split, not minified', {}], ['bundled,
   })
   const ms = performance.now() - t0
   const outs = Object.entries(result.metafile.outputs).filter(([p]) => p.endsWith('.js'))
-  const weigh = (list) => { let raw = 0, gz = 0, b11 = 0, b5 = 0; for (const [p] of list) { const b = readFileSync(join(engine, p)); raw += b.length; gz += gzipSync(b, { level: 9 }).length; b11 += br(b); b5 += br(b, 5) } return { files: list.length, 'raw KB': kb(raw), 'gzip KB': kb(gz), 'br q5 KB (edge-like)': kb(b5), 'br q11 KB': kb(b11) } }
+  const weigh = (list) => { let raw = 0, gz = 0, b11 = 0, b5 = 0; for (const [p] of list) { const b = readFileSync(join(engine, p)); raw += b.length; gz += gzipSync(b, { level: 9 }).length; b11 += br(b); b5 += zs(b) } return { files: list.length, 'raw KB': kb(raw), 'gzip KB': kb(gz), 'zstd 3 KB (edge-like)': kb(b5), 'br q11 KB': kb(b11) } }
   rows.push({ build: `${label} (everything)`, ...weigh(outs), 'build ms': Math.round(ms) })
   if (asked) {
     const needed = outs.filter(([, o]) => Object.keys(o.inputs).some(wasAsked))
