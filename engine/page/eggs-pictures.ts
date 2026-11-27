@@ -52,17 +52,33 @@ export function codeRain(): Picture {
 /** The band of the view, top to bottom, where the city's windows are from the park: above it is sky. */
 const BAND = [0.1, 0.98]
 
+/** What of the view a video must stay off, top to bottom (fractions of it): the player's strip (eggs.ts). */
+export interface Clear { top: number; bottom: number }
+
+/**
+ * Where a video stands on the view, as fractions of it (left, top, width, height): as tall as the band allows between
+ * what it must stay off (`clear`), unless that would lose more than `crop` of its width off the sides (a tall phone
+ * crops a 4:3 picture's sides). `aspect` is the view's width over its height, `va` the video's. The one rule for it:
+ * the picture is drawn by it, and the player and the checks keep clear of it by it.
+ */
+export function videoRect(aspect: number, va: number, crop = 0.5, clear: Clear = { top: 0, bottom: 1 }) {
+  const top = Math.max(BAND[0], clear.top), tall = Math.max(0, Math.min(BAND[1], clear.bottom) - top)
+  const h = Math.min(tall, aspect / (1 - crop) / va), w = (h * va) / aspect
+  return { x: (1 - w) / 2, y: top + (tall - h) / 2, w, h }
+}
+
 /**
  * A video on the windows. The media element plays it, sound and all, and is the clock: each new frame it shows is
  * copied into the picture, so the windows and the sound cannot drift apart and pausing it pauses both. `outside` is
  * what the panes beyond the video show (rgb and how much of their lamp it puts out; null keeps the city's own), and
- * `contrast` a lift round mid-grey, so the picture survives the haze and the glass. `aspect` is the view's.
+ * `contrast` a lift round mid-grey, so the picture survives the haze and the glass. `aspect` is the view's, and
+ * `clear` what of it the video stays off (videoRect).
  */
-export function videoPicture(media: HTMLVideoElement, aspect: () => number, { outside = null as readonly [number, number, number, number] | null, contrast = 1, crop = 0.5 } = {}): Picture {
+export function videoPicture(media: HTMLVideoElement, aspect: () => number, { outside = null as readonly [number, number, number, number] | null, contrast = 1, crop = 0.5, clear = (): Clear | undefined => undefined } = {}): Picture {
   const [w, h] = SCREEN_SIZE
   const canvas = new OffscreenCanvas(w, h), ctx = canvas.getContext('2d', { alpha: true })!
   ctx.imageSmoothingQuality = 'high'
-  let frames = 0, drawn = -1
+  let frames = 0, drawn = ''
   const watch = typeof media.requestVideoFrameCallback === 'function'
   let handle = 0
   const tick = () => { frames++; handle = media.requestVideoFrameCallback(tick) }
@@ -73,18 +89,17 @@ export function videoPicture(media: HTMLVideoElement, aspect: () => number, { ou
     moving: true,
     draw(device, texture) {
       const ready = media.readyState >= 2 && media.videoWidth > 0
-      const key = !ready ? -1 : watch ? frames : media.currentTime
+      // (A frame is drawn again for the view turned, or the player's strip moved, a paused one too.)
+      const r = ready ? videoRect(aspect(), media.videoWidth / media.videoHeight, crop, clear()) : null
+      const key = !r ? '' : `${watch ? frames : media.currentTime} ${r.x} ${r.y} ${r.w}`
       if (key === drawn) return false
       drawn = key
       ctx.clearRect(0, 0, w, h)
       if (outside) { ctx.fillStyle = `rgb(${outside[0]} ${outside[1]} ${outside[2]} / ${outside[3] / 255})`; ctx.fillRect(0, 0, w, h) }
-      if (ready) {
-        // The picture is the view's shape stretched to the screen's: a video as tall as the band allows, unless that
-        // would lose more than `crop` of its width off the sides (a tall phone crops a 4:3 picture's sides).
-        const sx = w / (h * aspect()), top = BAND[0] * h, tall = (BAND[1] - BAND[0]) * h, va = media.videoWidth / media.videoHeight
-        const height = Math.min(tall, (h * aspect()) / (1 - crop) / va), width = height * va * sx
+      if (r) {
+        // The picture is the view's shape stretched to the screen's.
         ctx.filter = contrast === 1 ? 'none' : `contrast(${contrast})`
-        ctx.drawImage(media, (w - width) / 2, top + (tall - height) / 2, width, height)
+        ctx.drawImage(media, r.x * w, r.y * h, r.w * w, r.h * h)
         ctx.filter = 'none'
       }
       device.queue.copyExternalImageToTexture({ source: canvas }, { texture }, [w, h])

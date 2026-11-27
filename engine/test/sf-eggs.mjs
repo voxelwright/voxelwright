@@ -84,6 +84,18 @@ const bannerSeen = (page, ms = 12_000) => page.evaluate(async (ms) => {
     await new Promise((r) => requestAnimationFrame(r))
   }
 }, ms)
+/**
+ * The player against the video on the windows (#134): where each is on the page (the video as eggs.ts lays it,
+ * videoRect, its sides cut off by the screen's), and whether they meet. The video waits for its size: no screen yet is
+ * no answer (`ok` false), and the Matrix's music, which has none, has nothing to cover (`screen` null).
+ */
+const clearOfVideo = (page) => page.waitForFunction(() => { const e = globalThis.engine.eggs; return e.state.running === 'matrix' || e.screen }, null, { timeout: 15_000 }).catch(() => null).then(() => page.evaluate(() => {
+  const p = document.querySelector('.egg-player').getBoundingClientRect(), v = globalThis.engine.eggs.screen, music = globalThis.engine.eggs.state.running === 'matrix'
+  const seen = v && { left: Math.max(0, v.left), top: Math.max(0, v.top), right: Math.min(innerWidth, v.right), bottom: Math.min(innerHeight, v.bottom) }
+  const meets = !!seen && p.left < seen.right - 0.5 && p.right > seen.left + 0.5 && p.top < seen.bottom - 0.5 && p.bottom > seen.top + 0.5
+  return { ok: (music || !!seen) && !meets, music, player: [p.left, p.top, p.right, p.bottom].map(Math.round), screen: seen && [seen.left, seen.top, seen.right, seen.bottom].map(Math.round) }
+}))
+const saysClear = (c) => c.music ? `its player at ${c.player.join(' ')} (music: no picture to keep clear of)` : `its player at ${c.player.join(' ')} ${c.ok ? 'clear of' : 'OVER'} the video at ${c.screen?.join(' ') ?? '(not laid)'}`
 /** Until an egg is running (a picture or a video is fetched when it starts). */
 const started = (page, egg) => page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg, egg, { timeout: 30_000 }).catch(() => null)
 /** Says something on the line, as a visitor does: slash (Enter is the Make bar when making is on), the words, Enter. */
@@ -378,6 +390,8 @@ const fromFirst = async () => {
       const p = await page.evaluate(() => { const p = document.querySelector('.egg-player').getBoundingClientRect(), s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
         return { box: [p.left, p.top, p.right, p.bottom].map(Math.round), under: [...['banner', 'pyramid', 'crown'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)], running: globalThis.engine.eggs.state.running } })
       check(p.running === 'apple' && !p.under.length, `${kind}: the Pyramid's lamp tapped starts Bad Apple!!, and its player at ${p.box.join(' ')} is over ${p.under.join(', ') || 'no spot and no board'}`)
+      const clear = await clearOfVideo(page)
+      check(clear.ok, `${kind}: Bad Apple!!: ${saysClear(clear)}`)
       await page.screenshot({ path: join(dir, `${kind}-pyramid-apple.png`) })
       const t = (await firstLook(page)).spots.pyramid
       await press(t.x, t.y)
@@ -487,7 +501,7 @@ const fromFirst = async () => {
         await until(() => globalThis.engine.eggs.state.playing, null, 20_000)
         await page.waitForTimeout(1500)
         const player = await page.evaluate(() => {
-          const keys = [...document.querySelectorAll('.egg-player button')].filter((b) => b.checkVisibility({ visibilityProperty: true })).map((b) => { const q = b.getBoundingClientRect(), top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { text: b.textContent, x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), w: Math.round(q.width), h: Math.round(q.height), onTop: top === b } })
+          const keys = [...document.querySelectorAll('.egg-player button')].filter((b) => b.checkVisibility({ visibilityProperty: true })).map((b) => { const q = b.getBoundingClientRect(), top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { text: b.getAttribute('aria-label') ?? b.textContent, x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), w: Math.round(q.width), h: Math.round(q.height), onTop: top === b } })
           const c = document.querySelector('#first .credits').getBoundingClientRect(), p = document.querySelector('.egg-player').getBoundingClientRect()
           // (Nor over a spot that ends it, or a board.)
           const s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
@@ -495,6 +509,8 @@ const fromFirst = async () => {
           return { keys, under, shown: !document.querySelector('.egg-player').hidden, box: [p.left, p.top, p.right, p.bottom].map(Math.round), credits: [c.left, c.top, c.right, c.bottom].map(Math.round), meets: [c, ...[document.querySelector('#realm > .fold')].filter((g) => g?.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((g) => g.getBoundingClientRect())].some((c) => p.left < c.right && p.right > c.left && p.top < c.bottom && p.bottom > c.top), ...globalThis.engine.eggs.state }
         })
         r.eggs[egg].player = player
+        const clear = await clearOfVideo(page)
+        check(clear.ok, `${kind}: ${egg}: ${saysClear(clear)}`)
         check(player.shown && player.keys.every((k) => k.onTop && (!touch || k.h >= 44)) && !player.meets && !player.under.length, `${kind}: its player is shown in the first view at ${player.box.join(' ')}, clear of the credits and settings keys${player.under.length ? ` but over ${player.under.join(', ')}` : ', the spots and the boards'}, its keys on top${touch ? ' and a thumb tall' : ''}: ${player.keys.map((k) => `${k.text} ${k.w} x ${k.h} at ${k.x}, ${k.y}`).join('; ')}`)
         const played = await page.evaluate(() => globalThis.playedIn)
         check(player.playing && !player.muted && player.sound > 0 && played[0] === 'click', `${kind}: ${egg} plays with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${played.join(', ')}; muted ${player.muted}, ${player.sound} bytes of sound decoded; Chrome, not Safari)`)
@@ -581,6 +597,8 @@ const fromFirst = async () => {
     await page.waitForTimeout(1500)
     const inRealm = await playerIn()
     check(inside && inRealm.running === 'apple' && inRealm.stopOnTop && !inRealm.meets.length, `${kind}: gone in with Bad Apple!! playing, its player at ${inRealm.box.join(' ')} is over ${inRealm.meets.join(', ') || "none of the realm's controls"}, Stop on top ${inRealm.stopOnTop}`)
+    const clearIn = await clearOfVideo(page)
+    check(clearIn.ok, `${kind}: gone in, ${saysClear(clearIn)}`)
     await page.screenshot({ path: join(dir, `${kind}-in-with-player.png`) })
     if (touch) {
       // Turned wide once in, the same.
@@ -588,6 +606,8 @@ const fromFirst = async () => {
       await page.waitForTimeout(1500)
       const wide = await playerIn()
       check(wide.running === 'apple' && wide.stopOnTop && !wide.meets.length, `${kind}: turned wide in the realm, its player at ${wide.box.join(' ')} is over ${wide.meets.join(', ') || "none of the realm's controls"}, Stop on top ${wide.stopOnTop}`)
+      const clearWide = await clearOfVideo(page)
+      check(clearWide.ok, `${kind}: turned wide in the realm, ${saysClear(clearWide)}`)
       await page.screenshot({ path: join(dir, `${kind}-in-wide-with-player.png`) })
     }
     check(page.errors.length === 0, `${kind}: no errors on the page${page.errors.length ? `: ${page.errors.slice(0, 3).join(' | ')}` : ''}`)
@@ -877,36 +897,41 @@ try {
   // The player: a link to where it came from, Pause and Play, the fader to where in it, Next for another.
   await sayTo(page, 'this')
   await page.waitForFunction(() => globalThis.engine.eggs.state.time > 0.3, null, { timeout: 15_000 }).catch(() => null)
-  const shown = await page.evaluate(() => { const a = document.querySelector('.egg-player .title'); return { href: a.href, target: a.target, rel: a.rel, text: a.textContent, keys: [...document.querySelectorAll('.egg-player .keys button')].map((b) => b.textContent) } })
+  const shown = await page.evaluate(() => { const a = document.querySelector('.egg-player .title'); return { href: a.href, target: a.target, rel: a.rel, text: a.textContent, keys: [...document.querySelectorAll('.egg-player button')].map((b) => b.getAttribute('aria-label')) } })
   check(shown.href === 'https://www.youtube.com/watch?v=_Rz9-Vbb_fk' && shown.target === '_blank' && /noopener/.test(shown.rel), `the player links "${shown.text}" to its original in a new tab (${shown.href}); keys ${shown.keys.join(', ')}`)
   await page.click('.egg-player .pause')
   await page.waitForTimeout(600)
   const t0 = (await state(page)).time
   await page.waitForTimeout(800)
   s = await state(page)
-  check(s.paused && s.time === t0 && (await page.locator('.egg-player .pause').textContent()) === 'Play', `Pause holds it (${round(s.time)} s, and still ${round(t0)} s after 0.8 s); the key says Play`)
+  check(s.paused && s.time === t0 && (await page.locator('.egg-player .pause').getAttribute('aria-label')) === 'Play', `Pause holds it (${round(s.time)} s, and still ${round(t0)} s after 0.8 s); the key says Play`)
   await page.click('.egg-player .pause')
   await page.waitForTimeout(800)
   s = await state(page)
   check(!s.paused && s.playing && s.time > t0, `Play plays it on (${round(s.time)} s)`)
-  const box = await page.locator('.egg-player .seek input').boundingBox()
+  const box = await page.locator('.egg-player .vx-slider input').boundingBox()
   await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2)
   await page.waitForTimeout(400)
   const d = await page.evaluate(() => globalThis.engine.eggs.media.duration)
   s = await state(page)
   check(Math.abs(s.time - d * 0.75) < d * 0.1, `the fader clicked three quarters along goes there (${round(s.time)} s of ${round(d)})`)
-  // Tucked away: slid off the left edge, the video playing on, only the tab at the edge; the tab brings it back.
-  const tuckedBox = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), t = p.querySelector('.tab').getBoundingClientRect(); return { right: Math.round(r.right), tab: [t.left, t.right].map(Math.round), tabOnTop: document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2) === p.querySelector('.tab'), keysInert: !!p.querySelector('.stop').closest('[inert]') } })
+  // Hidden (#134): the row folds into its hide key where that key was, the only thing of it left on the picture, the
+  // video playing on and its picture where it was; the key brings the row back.
+  const laid = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), k = p.querySelector('.tuck'), q = k.getBoundingClientRect(), v = globalThis.engine.eggs.screen
+    return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), key: [q.left, q.top, q.right, q.bottom].map(Math.round), name: k.getAttribute('aria-label'), onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)?.closest('.tuck') === k,
+      seen: [...p.querySelectorAll('button, a, input, output')].filter((e) => e.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map((e) => e.getAttribute('aria-label') ?? e.className), screen: v && [v.left, v.top, v.right, v.bottom].map(Math.round) } })
+  const row = await laid()
   await page.click('.egg-player .tuck')
   await page.waitForTimeout(700)
-  const away = await tuckedBox(), t1 = (await state(page)).time
+  const away = await laid(), t1 = (await state(page)).time
   await page.waitForTimeout(500)
   s = await state(page)
-  check(away.right <= 0 && away.tab[0] >= 0 && away.tab[0] <= 2 && away.tabOnTop && away.keysInert && s.playing && s.time > t1, `the player tucks away (its right edge at ${away.right} px, the tab at ${away.tab.join('-')} px and on top, its keys out of reach ${away.keysInert}), the video playing on (${round(s.time)} s)`)
-  await page.click('.egg-player .tab')
+  const kept = away.key.every((v, i) => Math.abs(v - row.key[i]) <= 2) && away.box.every((v, i) => v >= 0 && v <= [1280, 720][i % 2])
+  check(away.seen.length === 1 && away.name === 'Show the player' && away.onTop && kept && String(away.screen) === String(row.screen) && s.playing && s.time > t1, `the player hides to its one key (${away.seen.join(', ')}, at ${away.key.join(' ')}, was ${row.key.join(' ')}; its box ${away.box.join(' ')} on the screen, on top ${away.onTop}), the video playing on (${round(s.time)} s) where it was (${away.screen?.join(' ')})`)
+  await page.click('.egg-player .tuck')
   await page.waitForTimeout(700)
-  const backBox = await page.locator('.egg-player .next').boundingBox()
-  check(backBox && backBox.x > 0, `the tab brings it back (Next at ${round(backBox?.x ?? -1)} px)`)
+  const back = await laid()
+  check(back.seen.length === row.seen.length && String(back.box) === String(row.box) && back.name === 'Hide the player', `the key brings the row back as it was (${back.seen.length} controls, at ${back.box.join(' ')})`)
   await page.click('.egg-player .next')
   await page.waitForFunction(() => { const s = globalThis.engine.eggs.state; return s.running && s.running !== 'this' }, null, { timeout: 10_000 }).catch(() => null)
   s = await state(page)

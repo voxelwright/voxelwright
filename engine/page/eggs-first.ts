@@ -74,7 +74,7 @@ const STYLE = /* css */ `
 #egg-lamps i.hot { scale: 1.45; animation: none; opacity: 1; }
 /* A real obstruction lamp: on for half its beat, a faint glow left between. */
 @keyframes egg-lamp { 0% { opacity: 1; } 55% { opacity: 0.18; } }
-/* A video's player in the first view (eggs.ts laidOn): on a wide picture its top left is the Pyramid's lamp and the banner's round, so it stands at the bottom right, over the city. Gone in, it is where the realm lays it, clear of the thumbs. */
+/* A video's player in the first view (eggs.ts laidOn): on a wide picture its top is the towers' lamps and the banner's round, so it stands at the bottom right, and the video is fitted above it (eggs.ts strip). Gone in, it is where the realm lays it, clear of the thumbs. */
 @media (min-aspect-ratio: 1/1) { html.first #first > .egg-player { inset: auto max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) auto !important; } }
 @media (prefers-reduced-motion: reduce) { #egg-lamps i { animation: none; opacity: 0.9; transition: none; } }
 `

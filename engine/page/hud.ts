@@ -277,8 +277,12 @@ export function hud(input: Input): Hud {
     const n = document.createElement('p')
     n.textContent = text
     // Under what a realm's rules show (page/hands.ts puts their cards where notices go): a notice over a card hid both (seen November 14).
-    const cards = panels.get('shown')
-    notices.style.top = cards && !cards.hidden && cards.offsetHeight ? `${cards.offsetTop + cards.offsetHeight + 6}px` : ''
+    // And under what the page lays across the top of the picture (`data-hud-clear`, as an egg's player is on a phone
+    // held wide): a notice over its keys hid them (#134).
+    const cards = panels.get('shown'), mid = innerWidth / 2, half = Math.min(240, innerWidth * 0.42)
+    const under = [...document.querySelectorAll<HTMLElement>('[data-hud-clear]')].filter((e) => !e.hidden && e.offsetParent).map((e) => e.getBoundingClientRect()).filter((r) => r.top < innerHeight / 3 && r.left < mid + half && r.right > mid - half).map((r) => r.bottom + 6)
+    if (cards && !cards.hidden && cards.offsetHeight) under.push(cards.offsetTop + cards.offsetHeight + 6)
+    notices.style.top = under.length ? `${Math.max(...under)}px` : ''
     notices.append(n)
     setTimeout(() => n.remove(), ms)
   }
