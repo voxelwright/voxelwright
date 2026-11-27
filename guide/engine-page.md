@@ -92,6 +92,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `recorder.ts`, `feedback.ts` | 30 s black-box gameplay flight recorder, passive anomaly watchers (stuck player, vehicle overlap, falls, stalls, GPU/worker faults), synchronous WebGPU canvas capture, and the F8 / `/bug` feedback dialog (`engine.recorder`, `engine.feedback`). |
+| `pwa.ts` | Progressive Web App runtime (`engine.pwa`): manifest-gated `/sw.js` registration, `navigator.storage.persist()` when installed, dynamic sky `<meta name="theme-color">` sync, Screen Wake Lock while playing, Car Radio `navigator.mediaSession` bridge, and the Settings `Install app` prompt (`beforeinstallprompt` and iOS Safari guidance). |
 | `bay.ts` | Loading the core (`open`), San Francisco tiles from a release, and cell-to-WGS84/tile helpers (`latLon`, `tileOf`) ([worlds as cells](/cells)). |
 
 ## The sun's share of a frame

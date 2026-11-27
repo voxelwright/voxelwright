@@ -203,7 +203,7 @@ Three things change while you drive.
 - Getting out turns it off. Getting back in brings the last station back after 0.42 s.
 - It starts on Bay Drive FM for a person and off when `navigator.webdriver` is set, unless `?radio=` says otherwise.
 
-Open the picker with R while driving, the touch Radio button, or Radio in settings. YouTube plays through its embedded player. Spotify and Apple Music are behind `?radio_providers=all` and require provider configuration. The horn and crashes also duck streaming audio.
+Open the picker with R while driving, the touch Radio button, or Radio in settings. YouTube plays through its embedded player. Spotify and Apple Music are behind `?radio_providers=all` and require provider configuration. The horn and crashes also duck streaming audio. While driving, `pwa.ts` mirrors the active station or streaming track to `navigator.mediaSession` so lock screens, Control Center and hardware media keys control playback and station or track changes.
 
 **Pass-by whooshes.** Above 70 km/h, a `whoosh` patch (a band of noise sweeping from 2,800 Hz down to 260 Hz) and a lower `whooshTail` 55 ms later are played on the side something passes. They are triggered three ways:
 

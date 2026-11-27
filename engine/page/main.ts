@@ -72,6 +72,7 @@ import { createMapSystem, type MapSystem } from './minimap.ts'
 import { createCarSummon } from './summon.ts'
 import { createRecorder, type Recorder } from './recorder.ts'
 import { feedbackUi, type FeedbackUi } from './feedback.ts'
+import { initPwa } from './pwa.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -86,6 +87,7 @@ const phone = DEVICE === 'phone'
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
 const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
 const over = hud(controls)
+const pwa = initPwa({ notice: (text, ms) => over.notice(text, ms) })
 
 /** Cells in a metre. */
 const M = 10
@@ -236,7 +238,7 @@ async function main() {
     const radio = ears.radio
     void (radioPickerPromise ??= import('./radio-ui.ts').then(({ createRadioPicker }) => createRadioPicker({ radio, input: controls }), (e) => { radioPickerPromise = null; throw e })).then((p) => p.open(tab)).catch(() => {})
   }
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)) }).catch(() => {})
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)); pwa.bindRadio(ears.radio) }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -2128,17 +2130,21 @@ async function main() {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     keptGraphics()
-    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, report: () => void feedback?.open(), say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, report: () => void feedback?.open(), install: pwa.install, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
       modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}), ...(query.get('sound') !== '0' ? { radio: () => openRadioPicker() } : {}),
       // The servers (#526, lobbies.ts): where the realm's rule allows lobbies and a master is known, out of any lobby; fetched when first pressed.
       ...(MASTER && !joined ? { servers: () => { if (agreed('list')) void import('./lobbies.ts').then((l) => l.open({ master: MASTER!, hud: over, input: controls, door: null })) } } : {}) })
+    // Sync mobile status bar & desktop PWA titlebar theme-color to the live sky zenith, and hold Screen Wake Lock in play.
+    watchers.add(() => pwa.theme.update({ day: march.day, cloud: march.cloud, fog: march.fog, rain: march.rain, ownSky: march.air.sky?.zenith ?? null }))
+    if (first) first.during(() => { pwa.wakeLock.release(); return () => pwa.wakeLock.engage() })
+    if (!first || first.engaged) pwa.wakeLock.engage()
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     // In a lobby it stays folded, as it is on the roof alone (#526).
     first?.during(() => { realmUi.fold(true); return () => { if (!joined) realmUi.rest() } })
     if (joined || directLL) realmUi.fold(true)
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { pwa, realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
