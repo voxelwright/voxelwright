@@ -346,10 +346,12 @@ fn deformPaintSeen(albedo: vec3f, scuff: f32, crease: f32, p: vec3f, detail: f32
   let scar = tip * (1.0 - smoothstep(-0.06,0.06,edge + 0.15*(grain-0.5)));
   let rubbed = smoothstep(0.12,0.52,scuff) * scar * detail;
   let steel = smoothstep(0.58,0.80,grain) * smoothstep(0.30,0.73,scuff);
-  let primer = albedo * 0.42 + vec3f(0.044,0.037,0.033);
-  let colour = mix(albedo, mix(primer,vec3f(0.23,0.22,0.20),steel), rubbed);
-  let rough = min(0.85, scuff*0.21 + crease*0.10 + rubbed*0.57);
-  return DeformPaint(colour,rough,1.0 - min(0.94,scuff*0.36 + rubbed*0.80));
+  let primer = mix(vec3f(0.18,0.15,0.13), albedo, 0.16);
+  let colour = mix(albedo, mix(primer,vec3f(0.32,0.30,0.27),steel), rubbed);
+  // A crushed coat crazes on both flanks. Primer and bare chips lose the coat entirely.
+  let crazed = smoothstep(0.12, 0.70, scuff) * (0.55 + 0.45 * crease);
+  let rough = min(0.91, crazed * 0.52 + rubbed * 0.66);
+  return DeformPaint(colour, rough, (1.0 - crazed * 0.86) * (1.0 - rubbed * 0.98));
 }
 // p is window-local, relative to the impact center, in the same fine cells as scuff.
 fn deformGlass(crack: f32, scuff: f32, p: vec3f) -> f32 {

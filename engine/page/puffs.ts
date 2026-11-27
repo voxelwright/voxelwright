@@ -4,6 +4,7 @@
 // for the eye. What burns, and what that does to the world, is the core's (fire.rs).
 import { shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
+import { crashOpening } from './crash-opening.ts'
 import type { Piece } from './pieces.ts'
 import { deformPointCpu, type DeformState } from './deform.ts'
 
@@ -18,7 +19,7 @@ const vents = new WeakMap<Piece, { state: DeformState; revision: number; faces: 
 /** Find the grille, lamp or trim face nearest the front impact, then carry it with the car. */
 export function engineVent(piece: Piece, bonnet: readonly [number, number, number]): readonly [number, number, number] {
   const state = piece.deform
-  if (!state?.dentCount) return bonnet
+  if (!state?.dentCount || !piece.cell) return bonnet
   const { faces, size, com } = piece.born
   let vent = vents.get(piece)
   if (vent?.state !== state || vent.revision !== state.revision || vent.faces !== faces) {
@@ -51,11 +52,18 @@ export function engineVent(piece: Piece, bonnet: readonly [number, number, numbe
       const distance = (point[across] - beside) ** 2 + 0.3 * (point[1] - hood[1]) ** 2 + (point[front] - nose) ** 2 + paintPenalty ** 2
       if (distance < best) { best = distance; face = point }
     }
+    // The flame, the missing outer skin and the recessed walls use the same mouth.
+    const large = state.hoodDamage >= 0.7, prior = piece.opening
+    const sameMouth = prior && prior.axis === front && prior.sign === sign && prior.large === large &&
+      prior.face.every((v, i) => v === face[i]) && prior.cabin.every((v, i) => v === state.cabin[i])
+    if (piece.skin && !sameMouth) {
+      piece.opening = crashOpening(piece.skin, size, piece.cell, face, front, sign, large, state.cabin)
+    }
     const normal: Point = [0, 0, 0], offset: Point = [0, 0, 0]
     normal[front] = sign
     const bent = deformPointCpu(face, normal, state)
-    // The light and smoke start 5.5 cm outside the deformed face.
-    for (let i = 0; i < 3; i++) offset[i] = (bent.pos[i] - com[i]) * piece.cell + bent.norm[i] * 0.55
+    // The light and smoke start just outside the deformed mouth.
+    for (let i = 0; i < 3; i++) offset[i] = (bent.pos[i] - com[i]) * piece.cell + bent.norm[i] * 0.16
     vent = { state, revision: state.revision, faces, offset }
     vents.set(piece, vent)
   }
@@ -85,7 +93,7 @@ const FAR = 100000.0;
   var world = at.xyz - u.eye + (u.right * corner.x + u.up * corner.y) * at.w;
   if (more.w < 0.0) {
     // Engine fire grows from the vent along world up, anchored at the bottom of the quad.
-    world = at.xyz - u.eye + u.right * corner.x * at.w + vec3f(0.0, (corner.y + 1.0) * at.w * 1.75, 0.0);
+    world = at.xyz - u.eye + u.right * corner.x * at.w + vec3f(0.0, (corner.y + 1.0) * at.w * 0.98, 0.0);
   }
   let d = dot(world, u.forward);
   var out: Out;
@@ -381,7 +389,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.32, late: 0.0 })
       }
       // Redraw one attached flame while the engine burns. Smoke alone drifts away.
-      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.12 + 0.18 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
+      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.42 + 0.18 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
     },
     step(dt) {
       flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)

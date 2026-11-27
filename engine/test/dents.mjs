@@ -15,6 +15,13 @@ const page = await city('fire=0&people=0&hour=11', { size: [1280, 720], dpr: 1 }
 await still(page)
 await page.evaluate(async () => {
   const e = globalThis.engine, x = 600, z = 4074, ground = Math.round(e.ground(x / 10, z / 10) * 10)
+  const add = e.falling.add.bind(e.falling)
+  globalThis.parts = []
+  e.falling.add = (...args) => {
+    const part = add(...args)
+    globalThis.parts.push(part)
+    return part
+  }
   globalThis.car = await e.alive.spawn(e.car([x, ground + 5, z]))
 })
 await page.waitForFunction(() => globalThis.engine.bodies === 0 && globalThis.engine.alive.where(globalThis.car), null, { timeout: 20_000 })
@@ -166,6 +173,7 @@ await page.evaluate(() => {
     draw(encoder, target, view)
   }
   GPUQueue.prototype.writeBuffer = function(buffer, offset, data, start, count) {
+    if (buffer.label === 'broken nose mesh') globalThis.brokenNose = data.slice()
     if (buffer.label === 'puff instances' && globalThis.burningVent && globalThis.flameDraws.length < 24) {
       const errors = []
       for (let i = 0; i < count; i += 12) {
@@ -204,6 +212,21 @@ const ventInBody = () => page.evaluate(async () => {
 await page.waitForFunction(() => globalThis.flameDraws.length >= 24, null, {timeout: 8000})
 const flames = await page.evaluate(() => globalThis.flameDraws)
 check(flames.every(frame => frame.length === 1 && frame[0] < 0.015), 'each burning frame draws one flame attached to the vent')
+const socket = await page.evaluate(() => {
+  const damage = globalThis.engine.alive.damage(globalThis.car)
+  const opening = globalThis.parts.find(p => p.deform === damage)?.opening, drawn = globalThis.brokenNose
+  if (!opening || !drawn) return null
+  const walls = new Set()
+  for (let w = 0; w < opening.walls.length; w += 2) walls.add(opening.walls[w] + ':' + opening.walls[w+1])
+  let closed = 0, interior = 0
+  for (let i = 0; i < drawn.length; i += 6) {
+    if (!drawn[i+1]) continue
+    if (opening.removed.has(drawn[i])) closed++
+    if (walls.has(drawn[i] + ':' + drawn[i+1])) interior++
+  }
+  return { removed: opening.removed.size, closed, interior }
+})
+check(socket && socket.removed >= 8 && socket.closed === 0 && socket.interior >= 4, `the rendered vent has missing outer skin and recessed inner faces (${JSON.stringify(socket)})`)
 const vent = await ventInBody()
 check(!vent.inside && vent.front>0.88 && vent.side>0.58, `flame starts in air at the struck nose opening (length ${vent.front.toFixed(2)}, width ${vent.side.toFixed(2)}, inside skin ${vent.inside})`)
 await page.evaluate(() => {

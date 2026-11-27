@@ -998,6 +998,7 @@ async function main() {
       let born = by.get(size.join())
       if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
       const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
+      piece.skin = kinds
       smoothing.get(born)?.push(piece)
       return piece
     },

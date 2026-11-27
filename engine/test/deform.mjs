@@ -225,6 +225,23 @@ const gapAt = (y) => {
   return deformPointCpu(p, [1,0,0], side).pos[1] - p[1]
 }
 assert.ok(gapAt(0.16) < gapAt(-0.28) - 0.12*dent.depth, 'a struck grille pinches closed across its upper and lower edges')
+// Read the normals across a door at the height of a side impact. A smoothly
+// bowed panel changes its reflection gradually; folded metal has a distinct edge.
+const doorBody = { ...body, cell: 0.25, born: { com: [0,0,0], size: [168,52,72] } }
+const door = tracker.recordImpact(706, doorBody, [8,4,0], [0,0,-1], 130, 10000, { min: [72,25,31], max: [93,45,51] })
+const doorHit = door.dents[0]
+let lastNormal, sharpest = 0
+for (let k = -20; k <= 20; k++) {
+  const point = [...doorHit.center]
+  point[0] += k * doorHit.radius / 24
+  const { norm } = deformPointCpu(point, [0,0,-1], door)
+  if (lastNormal) {
+    const dot = norm.reduce((sum, v, i) => sum + v * lastNormal[i], 0)
+    sharpest = Math.max(sharpest, Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI)
+  }
+  lastNormal = norm
+}
+assert.ok(sharpest > 16, `a struck door bends its reflection across a crease (${sharpest.toFixed(1)} degrees)`)
 const states = [undefined, state, multi, protectedState, windshield, side]
 const uniforms = new Float32Array(52 * 64)
 for (let i = 0; i < 64; i++) packDeformUniforms(states[i % states.length], uniforms, i * 52)
@@ -395,6 +412,7 @@ struct ViewOut { @builtin(position) clip: vec4f, @location(0) p: vec3f, @locatio
       assert.ok(row[8] > 0 && row[9] > 0 && row[10] > 0 && row[11] <= 1); scuffed++
       if (row[15] > 0) cracked++
       if (row[8] > 0.35 && row[8] < 0.55) assert.equal(row[7], 0, 'a lamp beside the impact keeps its light')
+      if (row[8] > 0.78 && row[9] > 0.60) assert.ok(row[11] < 0.42, 'heavily creased paint loses its factory clear coat')
       if (row[8] > 0.92) assert.equal(row[7], 1, 'a directly crushed lamp goes dark')
       if (distance > 0) assert.ok(distBox(want, s.cabin) > 0, 'deformed metal stays outside cabin')
     }

@@ -13,6 +13,7 @@
 // its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only a struck piece pays for it:
 // it draws from a copy of its faces split into rows a cell long, so every corner lies on the cells' lattice and faces
 // that meet still meet once bent (a merged row bent at its two ends only would open a gap beside its neighbours).
+import type { CrashOpening } from './crash-opening.ts'
 import { shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
@@ -493,6 +494,9 @@ fn paneCrack(in: Out) -> vec2f {
 /** One body as the GPU holds it. */
 export interface Piece {
   born: Born
+  /** A living look keeps its intact fine skin for a local break and repair. */
+  skin?: Uint16Array
+  opening?: CrashOpening
   /** Its middle of mass in the world's finest cells, and its turn (x, y, z, w). */
   pos: [number, number, number]
   rot: [number, number, number, number]
@@ -536,27 +540,37 @@ const OWN = 192, DEFORM_AT = OWN / 4, CRACKS_BYTES = 16 * 4, CRACKS_AT = (OWN + 
  * a row of smooth faces is merged only where its corners' words are alike, so each piece of it keeps its first ones and
  * the last keeps the row's last.
  */
-function sortFaces(born: Born, unit: boolean) {
+function sortFaces(born: Born, unit: boolean, opening?: CrashOpening) {
   const all = born.faces, smooth = born.smooth, total = all.length / 2
   let size = total
   if (unit) { size = 0; for (let f = 0; f < total; f++) size += (all[f * 2 + 1] & 255) || 1 }
-  const sorted = new Uint32Array(size * 6)
+  const sorted = new Uint32Array((size + (opening?.walls.length ?? 0) / 2) * 6)
   let at = 0, glass = 0
-  for (const glassy of [false, true]) for (let f = 0; f < total; f++) {
-    const a = all[f * 2], b = all[f * 2 + 1]
-    if ((((b >>> 16) & 15) === 11) !== glassy) continue
-    const long = unit ? (b & 255) || 1 : 1, axis = (b >>> 8) & 3
-    for (let k = 0; k < long; k++) {
-      // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
-      const start = axis === 0 ? a + (k << 20) : a + k
-      sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
-      if (smooth) {
-        sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
-        const last = k === long - 1
-        sorted[at * 6 + 3] = smooth[f * 4 + (last ? 1 : 0)]; sorted[at * 6 + 5] = smooth[f * 4 + (last ? 3 : 2)]
-      }
+  for (const glassy of [false, true]) {
+    // Interior walls are solid and draw before the glass. Their square normals
+    // catch light on the recessed edge of the broken lamp surround.
+    if (glassy && opening) for (let w = 0; w < opening.walls.length; w += 2) {
+      sorted[at * 6] = opening.walls[w]
+      sorted[at * 6 + 1] = opening.walls[w + 1]
       at++
-      if (glassy) glass++
+    }
+    for (let f = 0; f < total; f++) {
+      const a = all[f * 2], b = all[f * 2 + 1]
+      if ((((b >>> 16) & 15) === 11) !== glassy) continue
+      const long = unit ? (b & 255) || 1 : 1, axis = (b >>> 8) & 3
+      for (let k = 0; k < long; k++) {
+        // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
+        const start = axis === 0 ? a + (k << 20) : a + k
+        if (opening?.removed.has(start)) continue
+        sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
+        if (smooth) {
+          sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
+          const last = k === long - 1
+          sorted[at * 6 + 3] = smooth[f * 4 + (last ? 1 : 0)]; sorted[at * 6 + 5] = smooth[f * 4 + (last ? 3 : 2)]
+        }
+        at++
+        if (glassy) glass++
+      }
     }
   }
   return { sorted, count: at, glass }
@@ -588,18 +602,27 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   interface Faces { faces: GPUBuffer; count: number; glass: number }
   /** unit: the same faces a cell long, made the first time one of its pieces is drawn bent (#37). */
   interface Shared extends Faces { users: number; unit?: Faces }
-  interface Held extends Piece { faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number; glass: number; held: Shared }
+  interface Held extends Piece { pocket?: { opening: CrashOpening; mesh: Faces }; faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number; glass: number; held: Shared }
   /** A look's faces on the GPU: the solid ones first, then the glass, each with its corners' smooth words. */
-  const upload = (born: Born, unit = false): Faces => {
-    const { sorted, count, glass } = sortFaces(born, unit)
-    const faces = device.createBuffer({ size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+  const upload = (born: Born, unit = false, opening?: CrashOpening): Faces => {
+    const { sorted, count, glass } = sortFaces(born, unit, opening)
+    const faces = device.createBuffer({ label: opening ? 'broken nose mesh' : 'piece faces', size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
     device.queue.writeBuffer(faces, 0, sorted)
     return { faces, count, glass }
   }
   const release = (held: Shared) => { held.faces.destroy(); held.unit?.faces.destroy() }
   /** The faces a piece is drawn from now: a cell long once it is bent. */
   const facesOf = (piece: Held): Faces => {
+    const opening = piece.deform?.dentCount && piece.deform.hoodDamage >= 0.35 ? piece.opening : undefined
+    if (piece.pocket && piece.pocket.opening !== opening) {
+      piece.pocket.mesh.faces.destroy()
+      piece.pocket = undefined
+    }
     if (!piece.deform?.dentCount) return piece
+    if (opening) {
+      piece.pocket ??= { opening, mesh: upload(piece.born, true, opening) }
+      return piece.pocket.mesh
+    }
     return piece.held.unit ??= upload(piece.born, true)
   }
 
@@ -611,7 +634,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     get smooth() { return smooth },
     set smooth(on: boolean) { smooth = on },
     get count() { return live.size },
-    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount && p.held.unit ? p.held.unit : p).count; return n },
+    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount ? p.pocket?.mesh ?? p.held.unit ?? p : p).count; return n },
     add(born, share = false) {
       let made = share ? common.get(born.faces) : undefined
       if (!made) {
@@ -621,7 +644,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       made.users++
       const held = made, uniforms = device.createBuffer({ size: UNIFORMS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: own, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
+      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); piece.pocket?.mesh.faces.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
       live.add(piece)
       return piece
     },
@@ -629,6 +652,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       const piece = p as Held
       if (!live.has(piece) || piece.held.users !== 1 || common.get(piece.born.faces) === piece.held) return
       release(piece.held)
+      piece.pocket?.mesh.faces.destroy(); piece.pocket = undefined
       piece.born.faces = faces
       piece.born.smooth = smooth
       piece.held = { ...upload(piece.born), users: 1 }
