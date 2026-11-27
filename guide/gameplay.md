@@ -52,7 +52,8 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
 | Horn | Hold H | Hold Horn | L3 |
-| Next radio station | N | Radio, or tap the station's name while it shows | - |
+| Next FM station | N | Choose a station in Radio | - |
+| Open the radio picker | R | Radio, or tap the station name while it shows | - |
 | Repair car | F | Repair | D-pad right |
 | View from the seat | V | Seat | R3 or D-pad up |
 | Get out | E | Get off | Y / Triangle |
@@ -169,7 +170,7 @@ Inside, the picture's rain effect is at 45% and the outside sounds dull ([sound]
 
 ### Radio
 
-N cycles the car radio through Radio Off, Bay Drive FM, Twin Peaks Chill and Fillmore Funk, and a click or tap on the station's name, shown for 2.2 s after each change, does the same. A person starts on Bay Drive FM. A browser driven by a check (`navigator.webdriver`) starts with it off, and `?radio=` picks the station. The page remembers the station when you get out and back in. Each station is composed as it plays; [sound](/sound#in-a-car) explains how, and the pass-by whooshes heard at speed.
+N cycles the car radio through Radio Off, Bay Drive FM, Twin Peaks Chill and Fillmore Funk. Tap the station name during its 2.5-second display, tap Radio in the driving controls or settings, or press R to open the picker. Choose FM, a curated YouTube stream or a saved playlist. A person starts on Bay Drive FM. A browser driven by a check (`navigator.webdriver`) starts with it off, and `?radio=` picks the station. The page remembers the station when you get out and back in. Each station is composed as it plays; [sound](/sound#in-a-car) explains how, and the pass-by whooshes heard at speed.
 
 ### Wheels
 
