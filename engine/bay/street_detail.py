@@ -16,6 +16,7 @@ from shapely.strtree import STRtree
 from street_furniture import bake as furniture, encode
 from earth import style
 from street_sources import UTM
+from mapped_water import for_square as square_water, level_of, levelled, mask as water_mask
 from street_graph import cells
 from bake import rings
 
@@ -291,7 +292,8 @@ def facades(sq, src, detail, stats):
         mid = (pts + next_) / 2
         near = np.zeros(len(pts), bool)
         clear = np.ones(len(pts), bool)
-        for dist in (15, 30, 55, 80, 110, 145):
+        # Search up to 23 m outward so hillside/setback houses with front yards are still classified as street-facing (#60).
+        for dist in (15, 30, 55, 80, 110, 145, 185, 230):
             ij = np.floor((mid + outward * dist - sq.h[10:12]) / 5).astype(int)
             x, z = ij.clip(0, sq.h[9] - 1).T
             clear &= (ij == ij.clip(0, sq.h[9] - 1)).all(1)
@@ -305,15 +307,18 @@ def facades(sq, src, detail, stats):
         ]
         if not fronts:
             continue
+        # Do not attach synthetic bay extrusion (`features |= 1`) when the surveyed footprint already traces faceted bays (#60).
+        faceted_bays = len(pts) >= 7 and sum(1 for i in fronts if 5 <= length[i] <= 45) >= 3
         main = max(fronts, key=lambda i: length[i])
         for i in fronts:
             # Flags describe this wall, not every elevation of the parcel.
             features = 0
-            if home and (not year or year < 1960) and length[i] >= 35:
+            if home and not faceted_bays and (not year or year < 1960) and length[i] >= 35:
                 features |= 1
-            if (year and year < 1960) or (
-                stories >= 2 and sq.verts[row[0] + i][2] & 128
-            ):
+            # Only emit protruding flat-parapet cornices where lidar confirmed a level eave (bit 128) and the edge is
+            # not an isolated short corner stub, avoiding floating white turrets on pitched gables (#60).
+            has_flat_eave = bool(sq.verts[row[0] + i][2] & 128)
+            if has_flat_eave and length[i] >= 14 and ((year and year < 1960) or stories >= 2):
                 features |= 2
             if (
                 i == main
@@ -449,6 +454,45 @@ def streets(sq, network, stats):
     sq.cls[stripes] |= 32
 
 
+def inland_water(sq, detail, stats):
+    """Stamp retained OSM inland water polygons (park ponds, lagoons, fountains) onto the surface class grid
+    so elevated water bodies are rendered as reflective WATER rather than concrete YARD (#60)."""
+    records = square_water(detail.get("square"), detail)
+    if not records:
+        return
+    sample = np.arange(sq.h[9]) * sq.h[8]
+    inside = water_mask(records, sq.h[10] + sample, sq.h[11] + sample)
+    ground = sq.cls & 7
+    # Aerial classification calls much of McBean Pond pavement. Keep roads and the mapped island.
+    paint = inside & (ground != 0) & (ground != 5)
+    sq.cls[paint] = (sq.cls[paint] & 248) | 5
+    stats["inlandWaterSamples"] += int(paint.sum())
+    # The renderer's water stands on the 1 m ground, and the DEM under a pond is a TIN across it: contours and a
+    # triangle in the reflection. A surveyed body is one level, out to every sample a water cell's height is
+    # interpolated from (core bay.rs `ground_height`), so the bank rises from the waterline and not inside the water.
+    # A path or bridge sample (road in the 50 cm cells round it) keeps its own height, and islands stay dry.
+    records = [r for r in records if level_of(r) is not None]
+    if not records:
+        return
+    n = sq.h[5]
+    corners = lambda cells: np.pad(cells, ((1, 0), (1, 0)))[: 2 * n, : 2 * n].reshape(-1, 2, n, 2).any(axis=(1, 3))
+    sized = lambda cells: np.pad(cells, ((0, 2 * n - cells.shape[0]), (0, 2 * n - cells.shape[1])))
+    keep = corners(sized((sq.cls & 7) == 0))
+    wet = (sq.cls & 7) == 5
+
+    def reach(record):
+        # Cells 2i and 2i+1 lie between samples i and i+1.
+        pairs = sized(water_mask([record], sq.h[10] + sample, sq.h[11] + sample) & wet).reshape(n, 2, n, 2).any(axis=(1, 3))
+        pairs[1:] |= pairs[:-1].copy()
+        pairs[:, 1:] |= pairs[:, :-1].copy()
+        return pairs
+    ground = sq.h[6] + np.arange(n) * sq.h[4], sq.h[7] + np.arange(n) * sq.h[4]
+    moved = levelled(records, *ground, sq.ground, lambda m: round((m - 1.0) * 10), keep, reach)
+    stats["levelledWaterSamples"] += moved
+    if moved and hasattr(sq, "g2"):
+        sq.g2 = np.repeat(np.repeat(sq.ground[:-1, :-1], 2, 0), 2, 1)
+
+
 def apply(path, archive, sidecar, graph, stage=5, *, public_works_fixtures):
     sq = Square(path)
     stats = Counter()
@@ -457,6 +501,7 @@ def apply(path, archive, sidecar, graph, stage=5, *, public_works_fixtures):
         if detail["version"] != 1 or detail["square"] != path.stem:
             raise ValueError("incorrect street detail input")
         audit = buildings(sq, src, detail, stats)
+        inland_water(sq, detail, stats)
         if stage >= 2:
             walls(sq, stats)
         if stage >= 3:

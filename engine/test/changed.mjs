@@ -23,7 +23,7 @@ export const RULES = [
   [/^engine\/page\/(boards|boards-edit|eggs|eggs-pictures|logos|first|explore)\.ts$/, 'a module only the SF realm runs (the city page imports it, so it must still come up)', (m) => ['types', 'city', ...REALM, ...[PART[m[1]]].flat()]],
   [/^engine\/sf\/marks\.mjs$/, "the road's marks, which the page server makes", EVERY],
   [/^engine\/sf\/(places|brands|plazas)/, "neighborhood storefronts, parody brands and plazas", ['types', 'neighborhood', ...REALM]],
-  [/^engine\/sf\/(boards|heroes|street|cars|life|pilot-life|far|landmark)/, "the SF realm's build and data", (m) => ['street', ...REALM, ...[PART[m[1]]].flat()]],
+  [/^engine\/sf\/(boards|heroes|street|cars|life|pilot-life|far|landmark|roof-profile)/, "the SF realm's build and data", (m) => ['street', ...REALM, ...[PART[m[1]]].flat()]],
   [/^engine\/sf\//, "the SF realm's build and data", ['street', ...REALM]],
   [/^engine\/player\//, 'the static host and player', ['types', ...REALM]],
   [/^engine\/(blocks|kit)\//, 'the Voxelmorphism kit and its stage, which the SF realm carries', ['types', 'blocks', ...REALM]],
@@ -36,7 +36,7 @@ export const RULES = [
   [/^engine\/core\//, 'the core, under everything', EVERY],
 ]
 /** The scripts that check one part of the SF realm more closely, by what the part is called. Not part of `npm run sf`. */
-const PART = { boards: ['sf-boards', 'sf-logos'], 'boards-edit': 'sf-boards', eggs: 'sf-eggs', 'eggs-pictures': 'sf-eggs', logos: ['sf-boards', 'sf-logos'], first: ['sf-explore', 'sf-sky'], explore: 'sf-explore', heroes: 'sf-towers', landmark: 'sf-towers', far: 'sf-towers', street: 'sf-life', cars: 'sf-life', life: 'sf-life', 'pilot-life': 'sf-life' }
+const PART = { boards: ['sf-boards', 'sf-logos'], 'boards-edit': 'sf-boards', eggs: 'sf-eggs', 'eggs-pictures': 'sf-eggs', logos: ['sf-boards', 'sf-logos'], first: ['sf-explore', 'sf-sky'], explore: 'sf-explore', heroes: ['sf-towers', 'landmark-audit'], landmark: ['sf-towers', 'landmark-audit'], 'roof-profile': 'landmark-audit', far: ['sf-towers', 'far-ground'], street: 'sf-life', cars: 'sf-life', life: 'sf-life', 'pilot-life': 'sf-life' }
 const tests = join(here, 'test'), KIT = ['all.mjs', 'changed.mjs']
 /** The scripts directly under test/ whose text names `what`, the runners and this map aside. */
 const naming = (what, but = '') => readdirSync(tests).filter((f) => f.endsWith('.mjs') && f !== but && !KIT.includes(f) && readFileSync(join(tests, f), 'utf8').includes(what))

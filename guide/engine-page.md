@@ -14,7 +14,7 @@ description: The browser side of the engine. Sectors live on the GPU, a ray is m
 - **Marcher** (`engine/page/march.ts`). Draws the world into a target with a colour and a depth texture. Flags such as `SHADOWS`, `MIRRORS` and `PICK` change what one draw does.
 - **View** (`View` in `march.ts`). The eye in finest cells and the camera axes. Every pass gets the same view.
 - **Sun maps** (`engine/page/sun.ts`). One shadow map per box, drawn a few tiles a frame. A place whose tile is not yet drawn is answered from the next coarser box's map, and by tracing a ray toward the sun only where no box has one. See [the sun's share of a frame](#the-suns-share-of-a-frame).
-- **Far model** (`engine/page/far.ts`). In San Francisco, the city past the cells' reach is drawn as baked faces. The march leaves those pixels to it (`farCover`).
+- **Far model** (`engine/page/far.ts`). In San Francisco, the city past the cells' reach is drawn as baked faces. The march leaves those pixels to it (`farCover`) once verified faces are loaded, and `World` skips redundant coarse tiles over surveyed `far.ground` (`farCovered`) while streaming fallback cells on demand via `onFallback` → `refreshFar` if a far tile fails or overflows edits.
 
 ## How sectors reach the GPU
 

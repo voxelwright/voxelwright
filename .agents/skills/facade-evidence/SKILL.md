@@ -116,9 +116,49 @@ photographs for that (`evidence_proof.py`).
 
 The survey's 44k lookups, the squares' 6.6k archived photos (in `sf-450-city/inputs/*.zip`) and the city run's
 cached z14 coverage tiles. A coverage point is resolved (one Graph call for pose and thumbnail URL, one download)
-only when picked. The 16 panel references and any camera within 5 m of one are never evidence. Graph pacing:
+only when picked. The 16 panel image IDs are excluded from the fit. The 5 m exclusion for coverage points used
+their pre-resolution positions. Check solved positions again before treating a reference as independent. Graph pacing:
 0.25 s spacing, slowed to 5 s when `X-App-Usage` reaches 75; the token is read from `keys/mapillary.token` and never
 printed.
+
+## Releasing a reviewed field
+
+The release input is `engine/bay/evidence-reviewed-sf.json`. For another survey, supply a file of the same form
+with `release.py ROOT OUT --facades FILE`. Collect licensed images and keep their credit, IDs and solved positions.
+Use the multiview fit to propose a field. Project the exact footprint on a separate photograph and inspect the wall
+beside the old and proposed palette entries. Check colour and finish separately. Omit a field when the wall is
+obscured, the projected front includes several finishes, or sun/shade makes its lightness ambiguous. Include only
+the original wall word, approved fields and geometry from the source row. The stage checks the ordered corners,
+ring ends, original material and colour, residential bit and previous paint. Source cameras must be at least 4 m
+apart, and the reference over 5 m from every source camera at their solved positions.
+
+November 26 replay: 134/217 trusted colours in each panel generation. The independent-of-extractor eye check gives
+light medians 52.9 and 72.4 L* and population offsets −28.1 and −14.5. The same eye set helped choose the second
+normaliser. Its release-colour comparison in the local proof-2 folder put 44/69 changed walls inside their eye class.
+Of 58 changes the reserved cameras could measure, 33 improved and 4 worsened chroma by more than 2; 42 improved
+and 8 worsened lightness. The other 500 sample buildings had 124 trusted colours and no eye labels in the panel
+check. The neighbouring `evidence-2/dump` holds the normaliser study, not another validation population.
+
+Of 50 projected residential-plaster candidates from the trusted panel records with at least 30 visible geometric
+samples, three footprints supplied one field each. For the two accepted colours the following compares absolute
+L* error and chroma distance to the held-out view, for the baked and reviewed palette entries drawn by the tile.
+
+| Place and source pack row | Reviewed field | Distance to nearest fitted camera | L* error, before → after | Chroma distance, before → after |
+| --- | --- | --- | --- | --- |
+| Haight and Ashbury, 1295 | warm cream, palette 46 | 20.2 m | 4.5 → 1.0 | 8.1 → 3.8 |
+| Valencia Street, 1251 | slate blue-grey, palette 174 | 32.0 m | 29.5 → 2.6 | 25.1 → 10.6 |
+| Russian Hill, 1269 | smooth finish, material 7 | 11.6 m | colour withheld | colour withheld |
+
+Russian Hill's two classifier views agreed on stucco at 0.981. Its original panel camera stood 3.9 m from a fitted
+camera. Cached image 260210583354339 shows the apartment's smooth side and street front independently. Its tan walls
+give no reason to accept the grey palette prediction. On 46th Avenue, row 568's front is yellow where the palette
+prediction is dark khaki. On Columbus Avenue row 1424's yellow front was called grey. Neither enters the reviewed
+source. These selected views support individual decisions; they do not estimate citywide colour accuracy.
+
+`evidence_check.py REVIEWED.json --tiles BEFORE/tiles/0 AFTER/tiles/0` reads the exported bytes. On the private
+November 26 stage, 36 tiles cover all candidate tile windows and additional controls. The previous stage missed all
+five expected row edits. The reviewed stage changed only 194_278 and 195_278 (Haight), 203_283 and 204_283
+(Valencia), and 205_264 (Russian Hill). All 6,022 other rows and 158 painted edges kept their bytes.
 
 ## Refresh when
 

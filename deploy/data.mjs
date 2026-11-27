@@ -7,10 +7,9 @@
 //                                as release `sf-data-<digest>` (once: an existing one is left as it is) and writes
 //                                deploy/data.json, which is committed with the pin
 //   node deploy/data.mjs pack-local PIN DIRECTORY   writes DIRECTORY/TAG/data.tar and DIRECTORY/data.json for a staged release
-//   node deploy/data.mjs fetch [--force]   in CI and ./world: downloads the bundle deploy/data.json names, checks it is
-//                                for the pin and that every file is the one packed, writes it all under $HOME/.village
-//                                and records that in a stamp there. A later fetch whose stamp, manifest and files still
-//                                match skips the download; --force downloads again
+//   node deploy/data.mjs fetch [--force | ARCHIVE]   restores the pinned release and verifies its contents.
+//                                An explicit archive is always checked. --force downloads again. An ordinary fetch
+//                                reuses a verified local restore when its stamp, manifest and files match.
 import { brotliCompressSync, brotliDecompressSync, constants } from 'node:zlib'
 import { createWriteStream } from 'node:fs'
 import { Transform } from 'node:stream'
@@ -156,9 +155,12 @@ if (localPack || process.argv[2] === 'pack') {
     rmSync(work, { recursive: true, force: true })
   }
 } else if (process.argv[2] === 'fetch') {
+  const source = process.argv[3]
+  const force = source === '--force'
+  if (process.argv.length > 4 || (source?.startsWith('--') && !force)) fail('usage: node deploy/data.mjs fetch [--force | ARCHIVE]')
   const record = JSON.parse(readFileSync(RECORD, 'utf8'))
   if (record.pin !== pin) fail(`deploy/data.json is for pin ${record.pin.slice(0, 12)} but engine/sf/pilot/current.json pins ${pin.slice(0, 12)}: run node deploy/data.mjs pack and commit deploy/data.json`)
-  if (!process.argv.includes('--force') && restored(record)) {
+  if (!source && restored(record)) {
     console.log(`${record.tag}: already restored for pin ${pin.slice(0, 12)} under ${VILLAGE} (--force downloads again)`)
     process.exit(0)
   }
@@ -166,8 +168,9 @@ if (localPack || process.argv[2] === 'pack') {
   rmSync(STAMP, { force: true })
   const work = mkdtempSync(join(tmpdir(), 'sf-data-'))
   try {
-    await download(record.tag, join(work, 'data.tar'))
     const archive = join(work, 'data.tar')
+    if (source && !force) copyFileSync(source, archive)
+    else await download(record.tag, archive)
     const listing = execFileSync('tar', ['-xOf', archive, 'index.json'], { maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
     if (sha(listing) !== record.digest) throw new Error(`${record.tag} is not the bundle deploy/data.json names`)
     const { files: index } = JSON.parse(listing)
@@ -198,4 +201,4 @@ if (localPack || process.argv[2] === 'pack') {
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
-} else fail('usage: node deploy/data.mjs pack|pack-local PIN DIRECTORY|fetch [--force]')
+} else fail('usage: node deploy/data.mjs pack|pack-local PIN DIRECTORY|fetch [--force | ARCHIVE]')

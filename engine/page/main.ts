@@ -243,7 +243,7 @@ async function main() {
     // Each maker holds its own core and the tiles round what it makes (bay.ts `HOLD`): a phone has two (#450).
     workers: bounded(query.get('workers'), WORKERS, 1, 8, true),
   })
-  const march = await marcher(device, gpu.format, world)
+  const march = await marcher(device, gpu.format, world, false, !!LOCAL?.release)
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
   world.onFine = () => { core.fine_cells(1); void march.reshade((wgsl) => wgsl) }
   // In a world whose process holds a release (#526), this page's core holds finer cells from the start, as that process
@@ -267,12 +267,13 @@ async function main() {
   const farAsked = query.get('far') === '' ? '' : query.has('far') ? samePath(query.get('far')) : null
   if (query.has('far') && farAsked === null) console.warn('?far= names no path of this site: the realm\'s own far model is drawn')
   const farModel = await farOf(device, gpu.format, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
-  // Boxes covering the cells up to the far model's handover: on a full city with a far model, coarser boxes beyond
-  // reach stream after the place is shown so cold load never waits on citywide coarse tiles hidden behind far faces.
+  // Show the place once its near boxes and skyline are ready. Coarser fallback cells have lower fetch priority.
   const nearLevels = farModel.listing && farModel.reach > 0
     ? world.levels.filter((l) => l.index === 0 || ((l.grid[0] * SIDE) << (l.index - 1)) / 2 < farModel.reach * M)
     : world.levels
   world.farFrom = nearLevels.length
+  world.farCovered = (x0, z0, x1, z1) => farModel.covers(x0, z0, x1, z1)
+  farModel.onFallback = (x0, z0, x1, z1) => world.refreshFar(x0, z0, x1, z1)
   loading.step('skyline')
   // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
   const marine = await fog(device, gpu.format, march)
@@ -327,7 +328,7 @@ async function main() {
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
-  const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
+  const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (Math.max(-90, Math.min(90, look[1])) * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
   // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
@@ -401,7 +402,10 @@ async function main() {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
     const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
-    const curRoll = roll + driveRoll, curFov = Math.min(115, Math.max(40, fov + driveFov))
+    const curRoll = roll + driveRoll
+    // A photographic lens can be narrower than the driving camera's range.
+    const curFov = driveFov === 0 && fov > 0 && fov < 180 ? fov
+      : Math.min(115, Math.max(40, (Number.isFinite(fov) ? fov : 70) + driveFov))
     const cr = Math.cos(curRoll), sr = Math.sin(curRoll)
     const right = curRoll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
     const up = curRoll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
@@ -424,7 +428,8 @@ async function main() {
     if (!controls.live('moving')) return
     const [right, up] = controls.turn(), held = controls.held, stick = controls.stick
     pose.yaw += right
-    pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
+    // Keep a registered overhead view vertical until the player tilts it.
+    if (up) pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
     const v = view(), fast = held('ShiftLeft') || held('ShiftRight') ? 5 : 1
     const ahead = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0) - stick[1] * 2, side = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0) + stick[0] * 2
     const rise = (held('Space') ? 1 : 0) - (held('KeyC') || held('ControlLeft') ? 1 : 0)

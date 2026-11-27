@@ -72,7 +72,7 @@ Above a fixed height the planet view replaces the march. To measure what one dra
 
 ## Glass
 
-The march looks through glass. A look that meets a pane goes on and shows what is behind it, tinted by the glass and by how much glass it crosses. A pane also keeps a little mirror, most of it at a glancing angle.
+A released city's first frames can show opaque glass while the GPU compiles the reflection pipeline. Once it is ready, the march looks through glass. A look that meets a pane goes on and shows what is behind it, tinted by the glass and by how much glass it crosses. A pane also keeps a little mirror, most of it at a glancing angle.
 
 - Only the first pane is looked through (`PANES` in `engine/page/march.ts`). The pane behind it, a pane too far off for its cells to be two pixels wide (`THROUGH`), and glass in the coarser boxes show what is likely there instead: a dim room, or from inside, the day. The look fades into that over a band, so a wall of windows has no seam.
 - At night a window with someone home (`litWindow`) shows a lit blind instead of the room.

@@ -64,15 +64,17 @@ def shadow(h, cell, bearing, height):
     return s
 
 
-def faces(h, inside, colour, wall_colour, wall_style, bid, shade, floor, yq):
+def faces(h, inside, colour, wall_colour, wall_style, bid, shade, floor, yq, owned=None):
     """The faces of the columns `inside` of one block. h: heights in units of `yq` tenths of a metre (whole numbers);
     colour: each top's (24 bits); wall_colour: each column's walls'; shade: the shadow's height in tenths of a metre;
-    floor: how low a wall goes where the neighbour is not `inside` (the ground there), in h's units."""
+    floor: how low a wall goes where the neighbour is not `inside` (the ground there), in h's units.
+    The margin supplies neighbouring heights. Only owned cells may contribute to a merged rectangle."""
     out = []
     nr, nc = h.shape
     lit = (shade <= np.round(h * yq) + 1).astype(np.int64)
     # Tops: alike in height, colour, building and whether the sun reaches them.
-    key = np.where(inside, (h.astype(np.int64) << 44) | (colour.astype(np.int64) << 20) | ((bid.astype(np.int64) & 0x7ffff) << 1) | lit, -1)
+    emit = inside if owned is None else inside & owned
+    key = np.where(emit, (h.astype(np.int64) << 44) | (colour.astype(np.int64) << 20) | ((bid.astype(np.int64) & 0x7ffff) << 1) | lit, -1)
     r0, c0, tall, wide, v = rects(key)
     hh = np.round((v >> 44) * yq).astype(np.int64)
     out.append(pack(c0, r0, wide, tall, hh, hh, 0, 1, np.where(v & 1, 0, 65535), (v >> 20) & 0xffffff, np.zeros(len(v), np.int64), (v >> 1) & 0x7ffff))
@@ -88,7 +90,7 @@ def faces(h, inside, colour, wall_colour, wall_style, bid, shade, floor, yq):
         # Where the neighbour is not of this layer the wall goes down to the ground there.
         bottom = np.where(other_in, low, np.minimum(floor, h))
         edge = (low >= 0)
-        wall = inside & edge & (h - bottom >= 1)
+        wall = emit & edge & (h - bottom >= 1)
         # The shadow on a wall is the shadow over the cell it looks on, said in half metres so that walls still merge.
         sh = np.clip((other_shade + 2) // 5, 0, 4095)
         sh = np.where(sh * 5 <= np.round(bottom * yq), 0, np.where(sh * 5 >= np.round(h * yq), 4095, sh))
@@ -128,7 +130,7 @@ def rgb24(r, g, b):
     return (np.clip(r, 0, 255).astype(np.int64) << 16) | (np.clip(g, 0, 255).astype(np.int64) << 8) | np.clip(b, 0, 255).astype(np.int64)
 
 
-def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, hq, u0, w0, cell):
+def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, hq, u0, w0, cell, pyramid=None):
     """Writes one layer's faces, a block at a time, and lists the blocks."""
     t = math.radians(TURN)
     rows, cols = np.nonzero(inside)
@@ -144,12 +146,13 @@ def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, 
             sl = (slice(ra, rb), slice(ca, cb))
             own = np.zeros((rb - ra, cb - ca), bool)
             own[r0 - ra:r1 - ra, c0 - ca:c1 - ca] = True
-            f = faces(h[sl], inside[sl], roof[sl], [w[sl] for w in walls] if isinstance(walls, list) else walls[sl], style[sl], ids[sl].astype(np.int64), shade[sl], floor[sl], hq)
-            # Faces that begin in the margin are the neighbouring block's.
-            x, z = (f[:, 0] & 0x7ff).astype(np.int64), ((f[:, 0] >> 11) & 0x7ff).astype(np.int64)
-            f = f[own[np.clip(z, 0, rb - ra - 1), np.clip(x, 0, cb - ca - 1)]]
+            f = faces(h[sl], inside[sl], roof[sl], [w[sl] for w in walls] if isinstance(walls, list) else walls[sl], style[sl], ids[sl].astype(np.int64), shade[sl], floor[sl], hq, owned=own)
             if not len(f):
                 continue
+            if pyramid is not None:
+                # Word 2 bit 29 marks the measured skin. Leave the five photo-fitted
+                # colours, shadow, window style and footprint ID intact for the Ina view.
+                looks.mark_pyramid(f, f[:, 4] == pyramid)
             name = f'{layer}-{br}_{bc}.bin'
             f.astype('<u4').tofile(f'{out}/{name}')
             # The block's low corner (of its margin) in the engine's cells of 10 cm.
@@ -400,6 +403,7 @@ def main():
     # Each building's colours are the ones fitted to the photograph (fitcolours.py), where that has been run: the
     # owner's word of November 17 is that a building's colours may be taken from it. The index says where they are from.
     photo = json.load(open(f'{DATA}/colours-photo.json'))['colours'] if not plain and os.path.exists(f'{DATA}/colours-photo.json') else None
+    pyramid = next((b['id'] for b in table if b.get('name') == 'Transamerica Pyramid'), None)
     given = {}
     blocks = []
     for layer, grid, cell_out, lo, hi, standing in (('near', 'fine', 0.25, 3.0, HANDOVER, True), ('far', 'far', 0.5, HANDOVER, WEDGE['far'], True), ('ground-near', 'fine', 1.0, 3.0, HANDOVER, False), ('ground-far', 'far', 2.0, HANDOVER, WEDGE['far'], False)):
@@ -509,7 +513,7 @@ def main():
             style = np.zeros(h.shape, np.int64)
             shade = np.round((sh[sub] - SEA) * 10).astype(np.int64)
             ids = np.zeros(h.shape, np.int32)
-        write(out, blocks, layer, np.maximum(h, 0), inside, roof, walls, style, ids, np.maximum(shade, 0), np.maximum(floor, 0), hq, u0, w0, cell * step)
+        write(out, blocks, layer, np.maximum(h, 0), inside, roof, walls, style, ids, np.maximum(shade, 0), np.maximum(floor, 0), hq, u0, w0, cell * step, pyramid if standing else None)
         if standing:
             # The crowns, over what stands under them: three slabs, each further inside the crown and hanging lower,
             # since a column's faces are its top and its walls and a crown is round underneath. The first is the

@@ -99,6 +99,7 @@ struct Out {
   @location(6) @interpolate(flat) style: u32,
   @location(7) along: f32,
   @location(8) @interpolate(flat) way: u32,
+  @location(9) @interpolate(flat) surveySkin: u32,
 }
 // The march's depth (march.ts fs), to leave what its cells hide.
 const NEAR = 1.0;
@@ -136,6 +137,7 @@ const FAR = 100000.0;
   out.shade = f32((w2 >> 13u) & 0xffffu);
   out.high = p.y;
   out.id = w4;
+  out.surveySkin = (w2 >> 29u) & 1u;
   out.way = select(2u + (axis - 1u) * 2u + u32(side), 1u, axis == 0u);
   out.style = w3 >> 24u;
   out.along = select(select(b.u0 + p.x * b.cell * 0.1, b.w0 + p.z * b.cell * 0.1, axis == 1u), 0.0, axis == 0u);
@@ -190,17 +192,40 @@ struct Drawn { @location(0) colour: vec4f }
   // which way it looks.
   let lit = select(1.0, step(in.shade, in.high + 0.5), v.shaded > 0.5);
   let direct = max(dot(in.n, v.sun), 0.0) * lit;
-  var paint = mix(in.rgb, st.glass.rgb, pane);
-  var rough = mix(0.9, 0.35, pane);
+  // On the Pyramid the Ina fit includes the shade and exposure of one afternoon.
+  // Elsewhere light the quartz and aluminium in the current sky. The beacon's
+  // taper bounds the louvres, leaving the lift wings in quartz.
+  var surface = in.rgb;
+  var surfaceRoughness = 0.9;
+  if (in.surveySkin != 0u) {
+    surface = vec3f(0.82, 0.82, 0.80);
+    let at = in.seen + g.eye;
+    for (var i = 0u; i < 8u; i++) {
+      let h = g.beacon[i];
+      if (h.more.w <= 0.0) { break; }
+      let q = (at - h.at.xyz) * 0.1;
+      let t = clamp((q.y - h.span.x) / max(h.span.y - h.span.x, 1.0), 0.0, 1.0);
+      if (h.span.w == 0.0 && q.y >= h.span.x && q.y <= h.span.y + 1.0 && length(q.xz) <= beaconRadius(h, t)) {
+        surface = vec3f(0.76, 0.78, 0.80);
+        surfaceRoughness = 0.5;
+        pane = 0.0;
+        break;
+      }
+    }
+  }
+  let photoFit = select(1.0, v.light.z, in.surveySkin != 0u);
+  var paint = mix(mix(surface, in.rgb, photoFit), st.glass.rgb, pane);
+  var rough = mix(surfaceRoughness, 0.35, pane);
   var col = shade(paint, in.n, rd, v.sun, direct, 1.0, rough, 0.0);
   // The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light fill times the
   // engine's, the whole gain times brighter. Drawn in the engine's own, the wedge's walls were a third darker than
   // the photograph, and its foreground (100 m on, through the park's lens) darker still. Only in the wedge, where the
   // faces take over at 100 m (HANDOVER): the photograph vouches for no more. Out of it (or through a wider lens),
   // downtown's faces lit so stood at 150 against the cells' 89 beside them.
-  if (v.light.x != 1.0 || v.light.y != 1.0) {
+  if (photoFit > 0.0 && (v.light.x != 1.0 || v.light.y != 1.0)) {
     if (inWedge(in.seen, v.wedge, v.bear)) {
-      col = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
+      let fitted = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
+      col = mix(col, fitted, photoFit);
     }
   }
   if (in.style == 15u) {
@@ -347,8 +372,16 @@ export interface Listing {
   wedge?: { at: [number, number]; from: number; to: number; far: number }
   /** The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light `fill` times the engine's, the whole `gain` times brighter. */
   light?: { fill: number; gain: number }
+  /** Tiles that hold only landmarks' faces (pack.mjs owner `hero`): drawn over the cells, which keep their ground. */
+  landmarks?: string[]
+  /** Listed tiles completely inside the packed survey. Older packs carry no footprint. */
+  ground?: string[]
 }
 type Rec = { path: string; bytes: number; sha256: string }
+
+/** A partial or legacy pack may draw faces over the cells without owning the surrounding ground. */
+export const grounded = (listing: Listing): Set<string> => new Set(listing.ground ?? [])
+
 interface Landing { eye: [number, number, number]; tiles: Record<string, Rec>; reach?: number; fov?: number; size?: [number, number]; yaw?: number; pitch?: number; heights?: number[] }
 interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; runs: { way: number; start: number; count: number; lods: number[] }[]; lo: number[]; hi: number[] }
 interface Head { sections: Section[]; styles: { storey: number; bay: number; wide: number; tall: number; glass: number[] }[]; sun: { vector: [number, number, number] } | null; grouped: boolean }
@@ -398,6 +431,10 @@ export interface Far {
    * draw had it: the reach, or in the wedge through a narrow lens the nearer one. Cells; Infinity where nothing is drawn as faces.
    */
   handover(x: number, z: number): number
+  /** Whether every 500 m far tile overlapping `[x0..x1, z0..z1]` is surveyed `far.ground` owned by the far model, with no overflow edits and no failed fetch (so a 404 immediately falls back to coarse cells via `onFallback`). */
+  covers(x0: number, z0: number, x1: number, z1: number): boolean
+  /** Called with `[x0, z0, x1, z1]` (finest cells) when a surveyed `far.ground` tile fails to fetch or overflows edits so the world streams fallback coarse cells immediately. */
+  onFallback: ((x0: number, z0: number, x1: number, z1: number) => void) | null
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
@@ -405,7 +442,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity, covers: () => false, onFallback: null }
   const reachAsked = bounded(query.get('farreach'), 500, 0, 20_000)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -464,6 +501,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const corner: [number, number] = [Math.min(...keys.map((k) => k[0])), Math.min(...keys.map((k) => k[1]))]
   const anchor = [corner[0] * size, 0, corner[1] * size]
   const cover = new Uint32Array(128)
+  /** The tiles whose ground the far model draws: the march hands only these over (`grounded`). */
+  const owned = grounded(listing)
+  /** Surveyed `owned` tiles whose far geometry failed to fetch (e.g. 404), so coarse cells must stand in until a retry succeeds. */
+  const failedGround = new Set<string>()
   let covered = ''
 
   const load = async (t: Tile, band: number) => {
@@ -508,6 +549,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       t.held[band] = { band, buffer, bytes: faces.byteLength, sections, used: frame }
       stats.fetched++
       t.fails[band] = 0
+      if (failedGround.has(t.key) && t.fails.every((f) => f === 0)) failedGround.delete(t.key)
       stats.fetchedBytes += bytes.length
     } catch (e) {
       // A listed object that does not come is a load error (release.md): said, left out, and tried again later.
@@ -516,6 +558,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       t.held[band] = null
       // Tried again, but not before a while: twice as long after each failure, to a minute.
       t.retry[band] = performance.now() + Math.min(60_000, 1000 * 2 ** Math.min(6, (t.fails[band] = (t.fails[band] ?? 0) + 1)))
+      if (owned.has(t.key) && !failedGround.has(t.key)) {
+        failedGround.add(t.key)
+        self.onFallback?.(t.x * size, t.z * size, (t.x + 1) * size, (t.z + 1) * size)
+      }
     }
     stats.coming--
   }
@@ -600,7 +646,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const near = edits.find((e) => gap(e) <= JOIN)
       if (near) { for (let a = 0; a < 3; a++) { near[a] = Math.min(near[a], b[a]); near[a + 3] = Math.max(near[a + 3], b[a + 3]) } return }
       if (edits.length < EDITS) { edits.push(b); return }
-      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
+      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) {
+        const k = `${x}_${z}`, fresh = !changed.has(k)
+        changed.add(k)
+        if (fresh && owned.has(k)) self.onFallback?.(x * size, z * size, (x + 1) * size, (z + 1) * size)
+      }
     },
     forget() { edits.length = 0; changed.clear() },
     keep(box) { kept = box },
@@ -608,6 +658,17 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       if (!handed) return Infinity
       const w = handed.wedge, dx = w ? x - w[0] : 0, dz = w ? z - w[1] : 0, b = Math.atan2(dx, -dz), bearing = b < 0 ? b + 2 * Math.PI : b
       return w && bearing > w[4] && bearing < w[5] && dx * dx + dz * dz < w[2] * w[2] ? Math.min(handed.reach, w[3]) : handed.reach
+    },
+    onFallback: null,
+    covers(x0, z0, x1, z1) {
+      if (!owned.size || x1 <= x0 || z1 <= z0) return false
+      const tx0 = Math.floor(x0 / size), tx1 = Math.floor((x1 - 1) / size)
+      const tz0 = Math.floor(z0 / size), tz1 = Math.floor((z1 - 1) / size)
+      for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) {
+        const k = `${tx}_${tz}`
+        if (!owned.has(k) || changed.has(k) || failedGround.has(k)) return false
+      }
+      return true
     },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
@@ -669,11 +730,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // Out of sight and over a kilometre off, a tile holds only its biggest faces, until the eye turns to it (the
       // march's cells stand in meanwhile): the park's narrow lens had fetched the whole circle round it.
       const need = d >= FURTHEST * 10 ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
-      let all = true
+      let all = true, bandHeld = false
       for (const [k, h] of t.held.entries()) {
         if (k === C || !t.listed[k]) continue
         if (need[k] && (h === null || h === 'coming')) all = false
-        if (h && h !== 'coming') { held += h.bytes / 20; heldBytes += h.bytes; if (need[k]) h.used = frame }
+        if (h && h !== 'coming') {
+          held += h.bytes / 20; heldBytes += h.bytes
+          if (need[k]) { h.used = frame; bandHeld = true }
+        }
       }
       t.full = all
       // The landing's cut is let go once every band the tile needs is here and the view is not the cut's own, or the eye has left the landing.
@@ -697,9 +761,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // (Through the cut's own view, the cut is a tile's whole, and a tile it has nothing of shows nothing.)
       const hidden = exact && !t.listed[C]
       if (!all && !(exact && cutHeld) && !hidden && seen) whole = false
-      // The march hands a tile over once what it needs is here, or the landing's cut of it while the eye is there (or,
-      // through the cut's own view, a tile it has nothing of): until then its cells stand in. Nor one the world was changed in.
-      if ((all || cutHeld || hidden) && d < FURTHEST * 10 && !changed.has(t.key)) {
+      // A cut taken from another angle, a missing band, or a tile touched only by the edge of
+      // the survey can add visible faces without replacing the coarse terrain behind them.
+      const replaces = (all && bandHeld) || (exact && (cutHeld || hidden))
+      if (replaces && d < FURTHEST * 10 && !changed.has(t.key) && owned.has(t.key)) {
         const bx = t.x - map[0], bz = t.z - map[1]
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
       }
@@ -723,8 +788,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut || exact ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
+    // Fade the fitted colour as the eye or lens leaves the calibrated panorama.
+    const photoFit = w && cutTan.y < NARROW ? fair * Math.max(0, 1 - Math.hypot(eye[0] - w.at[0], eye[2] - w.at[1]) / LANDED)
+      * Math.min(1, Math.max(0, (NARROW - view.tanHalf) / (NARROW - cutTan.y))) : 0
     if (!clear) handed = { reach, wedge }
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, photoFit, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
     const boxes = new Float32Array(EDITS * 8)
     for (const [i, e] of edits.entries()) boxes.set([e[0] - eye[0], e[1] - eye[1], e[2] - eye[2], 0, e[3] - eye[0], e[4] - eye[1], e[5] - eye[2], 1], i * 8)
     device.queue.writeBuffer(uniforms, 160, boxes)

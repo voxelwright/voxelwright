@@ -22,6 +22,7 @@ The bars were fixed before any new reading was scored (November 21, 2026):
 
 import argparse
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -31,6 +32,7 @@ import evidence_tile
 import facade_evidence as fe
 from bake import palette
 from tiles import read
+from compact_store import split_tile
 
 EYE = json.loads(Path(__file__).with_name("evidence_eye.json").read_text())
 BARS = dict(light_median=68, light_dark_share=0.10, dark_median=52, dark_light_share=0.10, mid=(45, 75), population=15)
@@ -91,11 +93,65 @@ def check(records):
     return out
 
 
+def check_tiles(source, before, after):
+    """Compare two exported L0 directories. Compute the permitted byte edits directly from the reviewed fields."""
+    windows, _ = evidence_tile.load_reviewed(source, "10n4250")
+    records = {key: record for window in windows.values() for key, record in window.items()}
+    found, applied = set(), set()
+    changed, bad = {}, []
+    rows = misses = false_matches = 0
+    old_files = {p.name for p in before.glob("*.bay")}
+    new_files = {p.name for p in after.glob("*.bay")}
+    if old_files != new_files or not old_files:
+        raise ValueError("expected corresponding level-zero tiles in both directories")
+    for name in sorted(old_files):
+        old, new = (before / name).read_bytes(), (after / name).read_bytes()
+        h = struct.unpack_from("<16i", old)
+        if h[3] != 2500:
+            raise ValueError(f"expected level-zero tile: {name}")
+        start = evidence_tile.rows_at(h)
+        vertices = start + 24 * h[12]
+        _, paint = split_tile(old)
+        painted = {struct.unpack_from("<I", p)[0] for p in paint or ()}
+        expected = bytearray(old)
+        for n in range(h[12]):
+            at = start + n * 24
+            first, count, wall, trim, style, _ = struct.unpack_from("<6I", old, at)
+            lo = vertices + 12 * first
+            verts = list(struct.iter_unpack("<3i", old[lo:lo + 12 * count]))
+            key = ";".join(f"{x},{z}" for x, z, _ in verts)
+            r = records.get(key)
+            rows += 1
+            if r and r["ends"] == [i for i, v in enumerate(verts) if v[2] & 4]:
+                found.add(key)
+                if (wall == r["fromWall"] and style & 65536 and not style & (3 << 17)
+                        and not trim & 65536 and painted.isdisjoint(range(first, first + count))):
+                    if "palette" in r:
+                        wall = (wall & ~65280) | (r["palette"] << 8)
+                        trim |= 65536
+                    if "material" in r:
+                        wall = (wall & ~15) | r["material"]
+                    struct.pack_into("<2I", expected, at + 8, wall, trim)
+            if old[at:at+24] != expected[at:at+24]:
+                applied.add(key)
+                changed[name] = changed.get(name, 0) + 1
+                misses += expected[at:at+24] != new[at:at+24]
+            elif old[at:at+24] != new[at:at+24]:
+                false_matches += 1
+        if new != expected:
+            bad.append(name)
+    return dict(records=len(records), matched=len(found), eligible=len(applied), rows=rows, expectedEdits=changed,
+                missedRows=misses, unexpectedRows=false_matches, incorrectTiles=bad,
+                ok=bool(applied) and len(found) == len(records) and not bad)
+
+
 def main():
     cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     cli.add_argument("records", type=Path)
+    cli.add_argument("--tiles", type=Path, nargs=2, metavar=("BEFORE", "AFTER"),
+                     help="audit a reviewed source against two exported level-zero tile directories")
     a = cli.parse_args()
-    out = check(evidence_tile.load(str(a.records)))
+    out = check_tiles(a.records, *a.tiles) if a.tiles else check(evidence_tile.load(str(a.records)))
     print(json.dumps(out, indent=1))
     sys.exit(0 if out["ok"] else 1)
 

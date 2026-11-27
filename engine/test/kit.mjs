@@ -12,6 +12,12 @@ export const arg = (name, fallback) => { const at = process.argv.indexOf(`--${na
 export const has = (name) => process.argv.includes(`--${name}`)
 export const CHROME = { channel: 'chrome', headless: !has('headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] }
 
+// The static realm runs on Metal on the Mac and on the Ally's AMD GPU through headless Vulkan.
+export const REALM_CHROME = process.platform === 'linux' ? {
+  ...CHROME, channel: 'chromium',
+  args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'],
+} : CHROME
+
 /** The browsers a check may draw with, by name. Take a turn first (`turn`, `quiet`). */
 export const browsers = { chrome: () => chromium.launch(CHROME), webkit: () => webkit.launch({ headless: CHROME.headless }) }
 
@@ -359,6 +365,42 @@ export async function film(page, seconds, act = async () => {}) {
   for (const g of gaps) { at += g; if (g > 25) long.push(`${g.toFixed(0)} ms at ${(at / 1000).toFixed(1)} s`) }
   gaps.sort((a, b) => a - b)
   return { webm: Buffer.from(webm, 'base64'), frames: gaps.length, p50: gaps[gaps.length >> 1], p95: gaps[Math.floor(gaps.length * 0.95)], worst: gaps.at(-1), long, seconds: at / 1000 }
+}
+
+/** Include the presented WebGPU frame beneath the live HUD in a realm screenshot. */
+export async function realmShot(page, path) {
+  // Headless Vulkan can omit the swap chain from a browser screenshot. Chrome paints
+  // an ordinary image from the same canvas in the right stacking order, including on mobile.
+  const frame = await page.evaluateHandle(async () => {
+    const canvas = document.querySelector('body > canvas')
+    await new Promise((done) => requestAnimationFrame(done))
+    const picture = new Image()
+    picture.src = canvas.toDataURL('image/png')
+    await picture.decode()
+    const box = canvas.getBoundingClientRect()
+    Object.assign(picture.style, { position: 'fixed', left: `${box.left}px`, top: `${box.top}px`,
+      width: `${box.width}px`, height: `${box.height}px`, pointerEvents: 'none' })
+    canvas.after(picture)
+    return picture
+  })
+  try {
+    const png = await page.screenshot()
+    await page.evaluate(async (bytes) => {
+      const image = new Image()
+      image.src = 'data:image/png;base64,' + bytes
+      await image.decode()
+      const probe = new OffscreenCanvas(64, 36).getContext('2d')
+      probe.drawImage(image, 0, 0, 64, 36)
+      const pixels = probe.getImageData(0, 0, 64, 36).data
+      for (let i = 3; i < pixels.length; i += 4) {
+        if (pixels[i] < 255) throw Error('realm screenshot is missing its opaque world canvas')
+      }
+    }, png.toString('base64'))
+    writeFileSync(path, png)
+  } finally {
+    await frame.evaluate((picture) => picture.remove())
+    await frame.dispose()
+  }
 }
 
 /** The picture as it is on the screen, made small: how bright on the whole (0 to 1), what share of it is bright, and its mean red, green and blue. */

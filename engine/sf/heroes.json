@@ -6,7 +6,7 @@
     "toward": [37.789092, -122.3961895],
     "foot": 4.1,
     "far": "place",
-    "from": "As #423 (engine/bay/heroes.json on PR 428): Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its outline and height; its taper off a photograph. Its far model is the Ina wedge's (landing/ina/heroes.mjs)."
+    "from": "Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its outline and height. Crown widths checked against USGS 3DEP (CA_SanFrancisco_1_B23) and both edges in the Potrero Hill (Pi.1415926535, February 2020) and Ina Coolbrith Park (Frank Schulenburg, July 2021) photographs. The Ina wedge bakes this same rule at 0.8 m (landing/ina/heroes.mjs)."
   },
   {
     "name": "Golden Gate Bridge",
@@ -15,7 +15,7 @@
     "toward": [37.8254996, -122.479234],
     "foot": 0,
     "step": 16,
-    "from": "As #423 (PR 428): Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its place, turn and towers; the bridge district's published figures for spans, heights, cables and truss."
+    "from": "As #423 (PR 428): Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its place, turn and towers; the bridge district's published figures for spans, heights, cables and truss. The midpoint of US 101 segments 1b5877f0 and 82e8434e traces the north approach to its landing on the B23 terrain in tile 0/182_250."
   },
   {
     "name": "Transamerica Pyramid",
@@ -39,10 +39,10 @@
     "name": "Ferry Building",
     "sort": 5,
     "at": [37.795533, -122.393439],
-    "toward": [37.794812, -122.392759],
+    "toward": [37.7948055, -122.3927683],
     "foot": 2.5,
     "step": 4,
-    "from": "Outline 202 by 56 m along bearing 143 degrees, 15 to 16 m high, and the clock tower's seven stages over a 12 m square to 70 m: Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 3.46 m NAVD88. Arcade, clock and belfry by eye. The rule is engine/core/src/heroes.rs."
+    "from": "Hall 202.5 by 48.8 m with a central 45 m entrance projecting 8.9 m plaza-side, from DataSF Building Footprints 201006.0000058. Tower stages from Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation). Foot from USGS 3DEP 1 m elevation, 3.46 m NAVD88. Arcade and clock by eye from the operator’s photograph at https://www.ferrybuildingmarketplace.com/wp-content/uploads/fb-about-main.jpg. The rule is engine/core/src/heroes.rs."
   },
   {
     "name": "Sutro Tower",
@@ -60,7 +60,7 @@
     "toward": [37.778389, -122.419054],
     "foot": 17.6,
     "step": 4,
-    "from": "Outline 127 by 98 m, 30 m high, the cross wing and the rotunda's stages to the dome at 75 m: Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation); the dome's top at 93.6 m (307.5 feet) as published. Its foot: USGS 3DEP 1 m elevation, 18.55 m NAVD88. Colonnades, courts and gilding by eye. The rule is engine/core/src/heroes.rs."
+    "from": "DataSF supplies the building outline. The 0.25 m lidar in 550.7_4180.5 and 550.7_4181.5 locates the two light courts, wing roof ridges, drum and dome above the 17.6 m BAY1 foot. The finial keeps the model’s 93.6 m height. The city gives 307 ft 6 in in https://www.sf.gov/sites/default/files/2021-12/12746-DocentPresentation.pdf. The open lantern, colonnades, pediments and gilding follow the daylight site photograph in SF Planning record 2021-010778COA, Exhibit A, page 7. Individual shafts and ornamental details are approximate. https://sfpublicworks.org/sites/default/files/Item%204c_PWC%20SFCH%20Elevator%20mod%202024-2-12%20v26_1.pdf"
   },
   {
     "name": "Palace of Fine Arts",
@@ -69,6 +69,69 @@
     "toward": [37.802927, -122.447414],
     "foot": 1.7,
     "step": 4,
-    "from": "The rotunda's place and its height of 49 m (162 feet) as published; the exhibition hall behind is the map's (Overture Maps 2026-10-21.0, © OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 2.68 m NAVD88. Piers, arches, colonnade and planter boxes by eye. The rule is engine/core/src/heroes.rs."
+    "from": "Placed from OpenStreetMap (© OpenStreetMap contributors, ODbL, read 2026-11-26): the rotunda (way 288371295), its eight piers (ways 1549377328 to 1549377345), deck (1549377350), drum (456820274) and dome (456820271), the arcades (288371306, 288371310) and their gateways (288371313, 288371314). Heights from the lidar under the landmark: dome 49.0 m, drum 40.0 m, deck 36.8 m with an outer step of 28.5 m to 25.4 m out and the piers' feet past it 5.3 m, arcade entablature 17.7 m and planter boxes 21.7 m; the gateways are at OSM's 21 m, and past 85.5 m north and south, where the lidar grid ends, the arcades keep the measured entablature and have no boxes. NPS listing: 160 feet across, 162 feet high, eight piers. Its foot: USGS 3DEP 1 m elevation, 2.68 m NAVD88. The National Register nomination and NPS lagoon photograph show paired russet columns, buff surrounds and a pale dome. Shaft dimensions, arch rise and shell thickness are estimated. The exhibition hall, lagoon and islands retain their survey geometry."
+  },
+  {
+    "name": "Fort Point",
+    "sort": 10,
+    "at": [37.810606, -122.477123],
+    "toward": [37.810106, -122.478069],
+    "foot": 1.8,
+    "step": 4,
+    "from": "Third System brick coastal fort (1861) directly beneath the Golden Gate Bridge's south arch: footprint and elevation from DataSF/Overture Maps (© OpenStreetMap contributors, Overture Maps Foundation) and USGS 3DEP. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "California Academy of Sciences",
+    "sort": 11,
+    "at": [37.769726, -122.465976],
+    "toward": [37.770327, -122.46513],
+    "foot": 73.0,
+    "step": 4,
+    "from": "The DataSF footprint separates the 161 by 102 m canopy from a 5.5 m-wide path. The roof heights come from the 0.25 m lidar in square 546.7_4179.5. NAIP locates the piazza glazing and the two unequal skylight fields. Individual openings and window mullions are illustrative. Roof reference: https://www.fondazionerenzopiano.org/en/project/california-academy-of-sciences/image-717.pdf"
+  },
+  {
+    "name": "Japanese Tea Garden",
+    "sort": 12,
+    "at": [37.770194, -122.470198],
+    "toward": [37.770194, -122.469198],
+    "foot": 75.5,
+    "step": 4,
+    "from": "Golden Gate Park Japanese Tea Garden (1894). Fence, pond, Pagoda, Tea House, Main Gate, Drum Bridge, footbridge and Peace Lantern placed from OpenStreetMap (© OpenStreetMap contributors, ODbL; ways 30900516, 409163924, 34221099, 34220947, 494967002, 136898969, 34218824; read 2026-11-26); the Gift Shop and Temple Gate are left to the map. Dry Landscape Garden gravel and two interior footprints follow the Project Location plan, p. 4 (https://gggp.org/wp-content/uploads/2023/12/RecParkPagodaLandscapePresentation.pdf), fitted to six mapped parts (0.63 m RMS). The operator’s Dry Landscape Garden photo guides gravel, moss and stone finishes (https://gggp.org/japanese-tea-garden/). Retained NAIP shows overhead vegetation in tile 545.7_4179.5. Island heights, individual trees and other lanterns are approximate. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "San Francisco Botanical Garden",
+    "sort": 13,
+    "at": [37.7672, -122.4679],
+    "toward": [37.7672, -122.4669],
+    "foot": 75.0,
+    "step": 4,
+    "from": "San Francisco Botanical Garden, Golden Gate Park, round its Great Meadow and main gate. Fountain court and flowerbeds placed from OpenStreetMap (© OpenStreetMap contributors, ODbL; ways 476290501, 1036243321, 1064976638, 1072073350, 1063385914, 1072073345; read 2026-11-26). Anelli, Dwarf Conifer and Bamboo ponds south of the meadow (ways 1062189335, 388991375, 388991378) are water on the ground, not owned; OSM maps no pond, pavilion or glasshouse on the meadow itself, so none is drawn there; the County Fair Building, toilets, bookstore and ticket kiosk are left to the map. The two terrain bakes use the mapped Waterfowl Pond with its island (relation 2792384), and the Moon Viewing pond (way 1064989905) to the northwest. Trees and the meadow walk are unchecked. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Conservatory of Flowers",
+    "sort": 14,
+    "at": [37.772627, -122.460235],
+    "toward": [37.772726, -122.459107],
+    "foot": 74.4,
+    "step": 4,
+    "from": "The Conservatory public galleries follow OpenStreetMap way 30675038 (© OpenStreetMap contributors). The two-tier dome, low curved galleries and transverse end houses follow the 0.25 m lidar in 546.7_4180.5. The daylight exterior and whitewash follow https://gggp.org/conservatory-of-flowers/. Valley flowerbeds follow OSM ways 1168983830 and 1168986284–1168986307. Way 867911035 and the lidar locate the main flight of 18 steps between the valley and terrace. The park photograph shows low foliage and scattered flower spikes in the seasonal border. Their planting and colours are illustrative. Four frontage palms stand at OSM nodes 10725865300–10725865303. In node order the local lidar gives heights of about 21.6, 21.5, 17.6 and 16.3 m above ground. Crown widths of roughly 7–9 m are uncertain where adjacent returns overlap. Tile 190_277 merges the western pair into one inferred trunk and gives the eastern pair three. Those four survey crowns and their trunks are replaced. Frond shapes follow the park exterior photograph at https://gggp.org/wp-content/uploads/2023/11/hero-cof.jpg."
+  },
+  {
+    "name": "Painted Ladies",
+    "sort": 15,
+    "at": [37.776274, -122.432753],
+    "toward": [37.775829, -122.432667],
+    "foot": 60.6,
+    "step": 4,
+    "from": "710-722 Steiner Street (1892-1896): seven stepped Queen Anne Victorian rowhouses facing Alamo Square, the dark corner house (722) under a flat-crowned hipped roof and six front-gabled houses south of it. Lot positions and the two bays at 722 follow OSM ways 261412887, 261412899, 261412879, 261412894, 261412900, 261412895 and 261412896 (© OpenStreetMap contributors). The lidar in square 549.7_4180.5 separates the low square bay from the taller angled bay. The May 2022 Alamo Square panorama (image 1520309078384954) shows the silhouettes. Glazing and trim are illustrative. Rule in engine/core/src/heroes.rs."
+  },
+  {
+    "name": "de Young Museum",
+    "sort": 16,
+    "at": [37.771496, -122.468691],
+    "toward": [37.770898, -122.46954],
+    "foot": 74.5,
+    "step": 4,
+    "from": "Herzog & de Meuron (2005): 150 by 74 m oxidized copper-clad museum with cantilevered Music Concourse overhang and 44 m twisting Hamon Observation Tower. The intermediate tower floors follow OSM building parts 1418750068–1418750073 (© OpenStreetMap contributors). The 0.25 m lidar in 546.7_4180.5 fixes the top parallelogram, its 117.65 m roof and the raised rim. Gallery details and perforations are illustrative. Architectural reference: https://www.herzogdemeuron.com/projects/173-de-young-museum/"
   }
 ]

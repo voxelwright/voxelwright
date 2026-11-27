@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildPlaces, compileBrandRules, DEFAULT_BRANDS, DEFAULT_PLAZAS, DEFAULT_RAW } from '../sf/places.mjs'
+import { buildPlaces, compileBrandRules, DEFAULT_BRANDS, DEFAULT_HEROES, DEFAULT_PLAZAS, DEFAULT_RAW, insideHero, loadHeroExclusions } from '../sf/places.mjs'
 import { neighborhoodPropKit } from '../page/neighborhood-props.ts'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -95,6 +95,26 @@ const hoods = [
 for (const [label, hx, hz] of hoods) {
   const nearby = built.data.shops.filter((s) => Math.hypot(s.x - hx, s.z - hz) < 260)
   assert.ok(nearby.length >= 15, `${label} should have >= 15 storefronts within 260 m, got ${nearby.length}`)
+}
+
+// 4b. Spatial separation from authored #60 landmarks (heroes.json)
+const heroBoxes = loadHeroExclusions(DEFAULT_HEROES)
+assert.ok(heroBoxes.length >= 13, `expected >= 13 ground-level landmark exclusion boxes, got ${heroBoxes.length}`)
+for (const s of built.data.shops) {
+  const hit = insideHero(heroBoxes, s.x, s.z, 2)
+  assert.equal(hit, null, `shop "${s.n}" overlaps landmark "${hit?.name}"`)
+}
+for (const pl of built.data.plazas) {
+  if (pl.hero) continue
+  const cHit = insideHero(heroBoxes, pl.x, pl.z, 4)
+  assert.equal(cHit, null, `non-hero plaza "${pl.label}" center overlaps landmark "${cHit?.name}"`)
+  if (pl.ex != null && pl.ez != null) {
+    const eHit = insideHero(heroBoxes, pl.ex, pl.ez, 4)
+    assert.equal(eHit, null, `non-hero plaza "${pl.label}" entrance overlaps landmark "${eHit?.name}"`)
+  }
+}
+for (const keepId of ['noe-valley-town-square', 'alamo-square', 'ferry-plaza', 'embarcadero-plaza']) {
+  assert.ok(built.data.plazas.some((p) => p.id === keepId), `expected hero plaza "${keepId}" to remain present`)
 }
 
 // 5. Config-driven regeneration proof: editing brands.json updates BOTH places.json AND map.bin POIs!
