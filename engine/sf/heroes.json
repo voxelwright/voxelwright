@@ -123,7 +123,7 @@
     "toward": [37.775829, -122.432667],
     "foot": 60.6,
     "step": 4,
-    "from": "710-722 Steiner Street (1892-1896): seven stepped Queen Anne Victorian rowhouses facing Alamo Square. Lot positions and hillside elevations surveyed from DataSF footprints and USGS 3DEP; colours from Alamo Square reference photography. Rule in engine/core/src/heroes.rs."
+    "from": "710-722 Steiner Street (1892-1896): seven stepped Queen Anne Victorian rowhouses facing Alamo Square, the dark corner house (722) under a flat-crowned hipped roof and six front-gabled houses south of it. Lot positions and hillside elevations surveyed from DataSF footprints and USGS 3DEP; silhouettes and colours from the Alamo Square panorama of May 2022 (image 1520309078384954). Rule in engine/core/src/heroes.rs."
   },
   {
     "name": "de Young Museum",

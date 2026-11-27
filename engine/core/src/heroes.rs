@@ -2340,7 +2340,13 @@ fn conservatory(u: f32, y: f32, over_g: f32, w: f32, s: f32) -> Kind {
 // ── The Painted Ladies — 710–722 Steiner Street (Matthew Kavanaugh, 1892–1896).
 // Seven stepped Queen Anne Victorian rowhouses climbing the Steiner St hill across from Alamo Square.
 // Frame: u runs north-to-south along Steiner St (from 722 at -22.2 m to 710 at +22.3 m), +w faces west toward
-// Alamo Square, y up from 722's base datum (60.6 m). Verified against Painted Ladies.jpg (#60).
+// Alamo Square, y up from 722's base datum (60.6 m). Verified against Painted Ladies.jpg (#60): the corner house, 722,
+// is hipped and flat-crowned; the six to its south are front-gabled. OSM footprints (261412887 and the six beside it)
+// give 9.1 m and 6.9-7.1 m frontages; the rule keeps its 9.4 m and 7.0-7.2 m lots, about 1 m north of OSM's.
+/// 722's hipped roof: metres it rises per metre in from its eaves, and the height of its flat crown above 722's base.
+/// From Painted Ladies.jpg: its roof rises 1.1 times 720's gable and its crown is about 44% of its eave's width.
+const CORNER_PITCH: f32 = 1.7;
+const CORNER_CROWN: f32 = 13.8;
 fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
     if !(-4.5..20.5).contains(&y) || u < -28.0 || u > 26.8 || w < -10.5 || w > 12.6 {
         return 0;
@@ -2353,7 +2359,7 @@ fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
         (1.0, 3.45, 2.2, colour(3, 1), colour(1, 2), WHITE),            // 716 Steiner: warm butter-cream & coral accent
         (8.1, 3.45, 2.8, colour(21, 7), colour(20, 8), WHITE),          // 714 Steiner: soft lavender-taupe & dusty rose
         (15.2, 3.45, 3.4, colour(12, 1), colour(13, 2), WHITE),         // 712 Steiner: pale robins-egg aqua & crisp white
-        (22.3, 3.55, 4.0, colour(23, 8), colour(3, 0), WHITE),          // 710 Steiner: warm plum-cocoa & cream bay
+        (22.3, 3.55, 4.0, colour(4, 7), colour(3, 0), WHITE),           // 710 Steiner: pale cream & white trim (May 2022 photo)
     ];
     let slate = kind(ROOFING, grey(12));
     let brick = kind(BRICK, colour(0, 6));
@@ -2383,13 +2389,26 @@ fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
         // Steep Queen Anne pitched front gable roof (hy = 9.4..13.5 m) running front-to-back!
         let roof_eave = 9.4;
-        let gable_peak = if idx == 0 { 13.0 } else { 13.4 };
+        let gable_peak = 13.4;
         let slope_y = gable_peak - (lu.abs() / hw) * (gable_peak - roof_eave);
         if hy >= roof_eave {
             // Front bay-window decorative hipped turret cap & gable overhang.
             let front_w = if idx == 0 { 8.4 } else { 8.6 };
             if w > front_w || w < -9.2 {
                 return 0;
+            }
+            // 722, the dark corner house, has no front gable: its roof is hipped on all sides, steep, and flat on top,
+            // a broad crown whose ridge runs along the street (Painted Ladies.jpg and the panorama it is cut from).
+            if idx == 0 {
+                let inset = (hw - lu.abs()).min(front_w - w).min(w + 9.2);
+                let roof_top = roof_eave + (inset * CORNER_PITCH).min(CORNER_CROWN - roof_eave);
+                if hy > roof_top {
+                    return 0;
+                }
+                if inset < 0.6 && hy - roof_eave < 0.45 {
+                    return trim;
+                }
+                return if roof_top - hy < 0.55f32.max(s) { slate } else { body };
             }
             if hy > slope_y {
                 return 0;
@@ -2932,7 +2951,7 @@ mod tests {
         // Painted Ladies: all 7 distinct houses rise sequentially up Steiner St with pitched slate roofs.
         for (idx, &(um, base)) in [(-22.2f32, 0.0f32), (-13.2, 0.8), (-6.1, 1.4), (1.0, 2.2), (8.1, 2.8), (15.2, 3.4), (22.3, 4.0)].iter().enumerate() {
             assert_ne!(painted_ladies(um, base + 4.0, 7.5, 0.2), 0, "house at u={um}");
-            let peak = if idx == 0 { 12.85 } else { 13.25 };
+            let peak = if idx == 0 { CORNER_CROWN - 0.15 } else { 13.25 };
             assert_eq!(material(painted_ladies(um, base + peak, 0.0, 0.2)), ROOFING, "gable roof at u={um}");
         }
         // de Young Museum: copper cladding and twisting 44 m Hamon Observation Tower.
@@ -3035,6 +3054,40 @@ mod tests {
         for u in (-80..80).step_by(2) {
             for w in (57..124).step_by(2) {
                 assert!(!owns(BOTANICAL_GARDEN, u as f32, 1.0, w as f32), "owns ({u}, {w})");
+            }
+        }
+    }
+
+    /// The owner saw seven like gables (#60). In the photo the dark corner house, 722, has a flat-crowned hipped
+    /// roof, and only the six to its south have front gables. Sampled at the cells of every size the rule is baked
+    /// at (0.2 m to the realm's 1.6 m) across each house's frontage 3 m above its eave, halfway back: 722's crown is
+    /// roof over most of it, a gable only near its middle. On 722's front above the eave is roof or air, never a wall.
+    #[test]
+    fn painted_ladies_corner_house_is_hipped_and_the_six_are_gabled() {
+        let houses = [(-22.2f32, 4.7f32, 0.0f32), (-13.2, 3.6, 0.8), (-6.1, 3.45, 1.4), (1.0, 3.45, 2.2), (8.1, 3.45, 2.8), (15.2, 3.45, 3.4), (22.3, 3.55, 4.0)];
+        for (idx, &(um, hw, base)) in houses.iter().enumerate() {
+            for s in [0.2f32, 0.4, 0.8, 1.6] {
+                let y = ((base + 9.4 + 3.0) / s).floor() * s + s / 2.0;
+                let cells: Vec<f32> = (0..(2.0 * hw / s) as i32 + 2)
+                    .map(|i| ((um - hw) / s).floor() * s + s / 2.0 + i as f32 * s)
+                    .filter(|u| (u - um).abs() < hw - 0.1)
+                    .collect();
+                let share = cells.iter().filter(|&&u| painted_ladies(u, y, 0.0, s) != 0).count() as f32 / cells.len() as f32;
+                if idx == 0 {
+                    assert!(share > 0.5, "722's crown spans {share:.2} of its frontage at {s} m cells");
+                } else {
+                    assert!(share < 0.35, "house {idx}'s gable spans {share:.2} of its frontage at {s} m cells");
+                }
+            }
+            if idx == 0 {
+                for lu in [-3.0f32, -1.5, 0.0, 1.5, 3.0] {
+                    for hy in [10.4f32, 11.4, 12.4] {
+                        let k = painted_ladies(um + lu, base + hy, 8.1, 0.2);
+                        assert!(k == 0 || material(k) == ROOFING, "722 front at lu={lu} hy={hy} is a wall, not roof");
+                    }
+                }
+            } else {
+                assert_ne!(painted_ladies(um, base + 12.4, 8.1, 0.2), 0, "house {idx} has a gable face");
             }
         }
     }
