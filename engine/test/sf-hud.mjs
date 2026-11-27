@@ -193,6 +193,12 @@ try {
           check(shown.keys.every((k) => k.kit), `${scheme}: its keys are live Voxelmorphism controls`, gate)
           check(!shown.card, `${scheme}: the card of keyboard keys is not shown by touch`)
           const tap = async (act) => { const k = shown.keys.find((k) => k.act === act); if (k) { await page.touchscreen.tap(k.x, k.y); await page.waitForTimeout(500) } return !!k }
+          if (scheme === 'drive') {
+            await tap('radio')
+            const opened = await until(page, () => document.querySelector('#radio-picker')?.open, 5000)
+            check(opened, 'tapping Radio opens the media picker')
+            if (opened) await page.locator('#radio-picker .rp-close').tap()
+          }
           await tap('seat')
           const inSeat = await page.evaluate(() => globalThis.engine.alive.inside)
           if (scheme === 'drive') await look('ride-seat', 'riding, the eye in the seat', false, true)

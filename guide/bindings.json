@@ -108,6 +108,9 @@
   ".agents/skills/sound-judge/SKILL.md": {
     "engine/test/judged.mjs": "lines:^const hard|^const was|^const fresh"
   },
+  ".agents/skills/streaming-music/SKILL.md": {
+    "engine/page/sound/radio-providers.ts": "lines:^export (const|function|interface) (CURATED_PLAYLISTS|ENABLED_STREAMING_PROVIDERS|SPOTIFY_SCOPES|createYouTubeProvider|createSpotifyProvider|createAppleMusicProvider|MusicProvider)"
+  },
   ".agents/skills/technology-grounding/SKILL.md": {
     "AGENTS.md": "lines:^- When work enters|^Adding a vendor"
   },

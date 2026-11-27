@@ -28,7 +28,7 @@ The first view looks across the city from Ina Coolbrith Park. Choose the **EXPLO
 ## What to try
 
 - Walk with WASD and look with the mouse. B switches between walking and flying.
-- Stand beside a car and press E to get in and drive.
+- Stand beside a car and press E to get in and drive. Press N to cycle FM stations or R to choose music. On a phone, tap Radio in the driving controls or realm settings.
 - Press M for the map. Click a place on it to get a route.
 - Open the realm settings to change the hour, the weather and the graphics.
 
