@@ -6,6 +6,7 @@ import { shader, type Target } from '../probe/gpu.ts'
 import { SUN_SIDE, SUN_TILE, SunMaps } from './sun.ts'
 import { SIDE, type World } from './world.ts'
 import { grid as marksGrid, MARKS } from './marks.ts'
+import { createLocalLights, LOCAL_LIGHTS_STRUCT, localLightsEval, type LocalLights } from './lights.ts'
 
 // One more than as things are only where `?fine=2` (#259, finer boxes round the eye) asks for an eleventh box.
 /**
@@ -457,12 +458,13 @@ export const EDITS = 8
  */
 export const EDITED = (boxes: string) => /* wgsl */ `
 fn edited(p: vec3f) -> bool {
+  var hit = false;
   for (var i = 0u; i < ${EDITS}u; i++) {
     let lo = ${boxes}[2u * i];
     let hi = ${boxes}[2u * i + 1u];
-    if (hi.w > 0.0 && all(p >= lo.xyz) && all(p < hi.xyz)) { return true; }
+    hit = hit || (hi.w > 0.0 && all(p >= lo.xyz) && all(p < hi.xyz));
   }
-  return false;
+  return hit;
 }
 `
 
@@ -846,6 +848,8 @@ struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: v
 @group(0) @binding(4) var sunMap: texture_2d_array<f32>;
 @group(0) @binding(5) var screen: texture_2d<f32>;
 ${world.options.surveyedWalls ? MARKS : ''}
+${LOCAL_LIGHTS_STRUCT}
+@group(0) @binding(7) var<uniform> localLights: LocalLights;
 @group(1) @binding(0) var<uniform> sunTile: SunTile;
 ${SCREEN}
 // The window screen where a point of the world is in the view (the middle of a pane, for a pane to be one pixel of it).
@@ -913,7 +917,6 @@ fn farExit(ro: vec3f, rd: vec3f, inv: vec3f, p: vec3f, t: f32) -> f32 {
   let ends = (sides - ro.xz) * inv.xz;
   var next = min(ends.x, ends.y);
   for (var i = 0u; i < ${EDITS}u; i++) {
-    if (looks.edits[2u * i + 1u].w <= 0.0) { break; }
     next = beforeBox(next, looks.edits[2u * i], looks.edits[2u * i + 1u], ro, inv, t);
   }
   // Before the ordinary reach the ray is inside the wedge. Its ownership can end at either
@@ -1364,6 +1367,26 @@ fn solidAt(c: vec3i, L: u32) -> bool {
   if ((entry & UNIFORM) != 0u) { return (entry & 0xffffu) != 0u; }
   return solidIn(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
 }
+// Fast world occlusion for High-quality local lights (horizontal car headlights): 2-tap visibility test
+// in level 1 (20 cm cells, compact cache footprint) so beams never bleed through solid buildings or hills.
+fn worldSolid(q: vec3f) -> bool {
+  let lv1 = g.level[1];
+  let rel1 = (q - lv1.boxMin) * lv1.scale;
+  if (all(rel1 >= vec3f(0.0)) && all(rel1 < lv1.boxSize)) { return solidAt(vec3i(floor(rel1)), 1u); }
+  return false;
+}
+fn worldClear(p: vec3f, n: vec3f, lPos: vec3f) -> f32 {
+  let a = p + n * 2.5 + vec3f(0.0, 2.5, 0.0);
+  let b = lPos + vec3f(0.0, 1.5, 0.0);
+  var vis = 1.0;
+  if (worldSolid(mix(a, b, 0.36))) { vis -= 0.7; }
+  if (worldSolid(mix(a, b, 0.68))) { vis -= 0.7; }
+  return max(vis, 0.0);
+}
+// Diffuse/specular light added by local lights on the current pixel: kept separate from the 10x incandescent bulb
+// bloom channel (glow.ts) so brightly lit walls and crosswalks stay crisp under ACES tone() instead of blooming like bulbs.
+var<private> localAdded: vec3f;
+${localLightsEval({ withOcclusion: true, withWet: true })}
 
 // What a cell of box L is (its kind; 1 for a part of a sector that is all one solid kind, which midOf does not say).
 fn kindAt(c: vec3i, L: u32) -> u32 {
@@ -1708,11 +1731,12 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
         pic = screenOf(p + select(vec3f(mid.x, mid.y, 0.0), vec3f(0.0, mid.y, mid.x), abs(n.x) > abs(n.z)));
       }
       col += wall.rgb * wall.a * clamp(dark * 3.0, 0.0, 1.0) * mix(mix(2.4, PANE_LIGHT, smoothstep(1.5, 4.0, 0.5 / max(wide, 0.001))), 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
-    }` : ''}
+    }` : `
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
     // the sea or under it, nor in open country: a block whose middle is more than 3.5 km from where the page starts
-    // (land.rs HOME and open).
+    // (land.rs HOME and open). (Skipped in surveyed real cities like San Francisco, where real SFST street lamps
+    // drive localLights below without paying for this 9-iteration town-block loop.)
     let out = (floor(vec2f(fine.xz) / vec2f(1280.0, 800.0)) + 0.5) * vec2f(1280.0, 800.0) - vec2f(700.0, 4070.0);
     let lamps = stuff != 5u && fine.y >= 0 && dot(out, out) < 35000.0 * 35000.0;
     var pool = 0.0;
@@ -1743,7 +1767,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let rough = 0.45 + 1.1 * noise2(vec2f(fine.xz) * 0.31) * noise2(vec2f(fine.zx) * 0.07);
       col += vec3f(1.0, 0.72, 0.4) * streak * rough * wet * dark * 2.6;
     }
-    col += albedo * vec3f(1.0, 0.78, 0.48) * min(pool * pool, 1.2) * dark * (0.12 + 0.88 * max(n.y, 0.0)) * 1.5;
+    col += albedo * vec3f(1.0, 0.78, 0.48) * min(pool * pool, 1.2) * dark * (0.12 + 0.88 * max(n.y, 0.0)) * 1.5;`}
     // A tree's crown takes the city's glow (LEAF_NIGHT): the lamps' pools above are its light from under where one is near.
     if (stuff == 13u) { col += leafNight(albedo, n, p) * clamp(dark * 3.0, 0.0, 1.0) * 0.6; }
     // A landmark's own light (heroes.rs night): its crown, its spire.
@@ -1755,6 +1779,12 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       col += own * clamp(dark * 3.0, 0.0, 1.0) * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.5;
     }
     col += landmarkLamp(p) * clamp(dark * 3.0, 0.0, 1.0);
+  }
+  if (NIGHT && localLights.info.x > 0u && stuff != 5u && hit.t < 1600.0) {
+    let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
+    let added = evalLocalLights(p, n, rd, albedo, m.rough, 0.0, wetSurf, shadows == 1u, hit.t);
+    col += added;
+    localAdded += added;
   }
   return col;
 }
@@ -1885,6 +1915,8 @@ override NIGHT: bool = false;
 override FAR_MODEL: bool = false;
 // Underwater shading (deep(), #139): stripped above the sea so fs() does not inline a third copy of lit().
 override UNDERWATER: bool = false;
+// Local-light world occlusion (worldClear octree probes): compiled only on High preset when local lights are active.
+override LOCAL_OCCLUDE: bool = false;
 
 @fragment fn fs(@builtin(position) at: vec4f) -> Drawn {
   let uv = (at.xy / g.res) * 2.0 - 1.0;
@@ -1901,6 +1933,7 @@ override UNDERWATER: bool = false;
   // One march, one lit() and one look across in the loop, each written once: every call of trace or lit is a copy
   // of it in the compiled shader, and with a copy for each pane the street cost 40% more whether glass was in view or not.
   var col = vec3f(0.0);
+  localAdded = vec3f(0.0);
   var keep = vec3f(1.0);
   var depth = 1.0;
   var first = -1.0;
@@ -2100,7 +2133,8 @@ override UNDERWATER: bool = false;
   if ((g.flags & 8u) != 0u) { return Drawn(vec4f(f32(work & 255u) / 255.0, f32(work >> 8u) / 255.0, 0.0, 1.0), seenThrough, depth); }
   // Beside the colour, how far brighter than any lit surface the pixel is (a lamp, a sign, a fire), as one less
   // that: the last pass spreads those into a glow at night, which the colour alone, cut off at white, cannot say.
-  return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)), seenThrough, depth);
+  let emissiveCol = select(col, max(col - localAdded, vec3f(0.0)), NIGHT);
+  return Drawn(vec4f(tone(col), 1.0 - clamp((max(emissiveCol.r, max(emissiveCol.g, emissiveCol.b)) - 1.2) / 3.0, 0.0, 1.0)), seenThrough, depth);
 }
 `
 
@@ -2164,6 +2198,8 @@ export interface Marcher {
   readonly looks: GPUBuffer
   /** What the shaders are told of the view, the boxes and the sun's maps (GLOBALS), for whatever else is lit by them. */
   readonly globals: GPUBuffer
+  /** Dynamic local lights (vehicles, SF street lamps, systemic emissives) shared across march, pieces, people and wheels. */
+  readonly localLights: LocalLights
   /**
    * What the march leaves beside its picture for what is drawn after it (#163), for a picture of this size: where a
    * pane is looked through, what it lets through (rgb) and how far off it is along the look (a, finest cells); all 0
@@ -2232,30 +2268,30 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
   // The pipelines of a shader module: specialised by pipeline-overridable constants (MIRRORS, FOGGY, NIGHT, FAR_MODEL,
-  // UNDERWATER) so daytime / above-water / non-far draws compile without dead code bloating register pressure.
-  // One explicit layout for all march pipelines and one for sun maps, so one bind group serves every variant.
+  // UNDERWATER, LOCAL_OCCLUDE) so daytime / above-water / non-far / Low-Medium draws compile without dead code bloating
+  // register pressure. One explicit layout for all march pipelines and one for sun maps, so one bind group serves every variant.
   const F = GPUShaderStage.FRAGMENT
-  const marchLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }] })
+  const marchLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 7, visibility: F, buffer: {} }] })
   const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [marchLayout0] })
   const sunLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }] })
   const sunLayout1 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }] })
   const sunLayout = device.createPipelineLayout({ bindGroupLayouts: [sunLayout0, sunLayout1] })
-  const keyOf = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean) =>
-    (mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (far ? 8 : 0) | (isUnder ? 16 : 0)
-  const marchDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false): GPURenderPipelineDescriptor => ({
-    label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${far ? ' far' : ''}${isUnder ? ' under' : ''}`,
+  const keyOf = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false) =>
+    (mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (far ? 8 : 0) | (isUnder ? 16 : 0) | (occ ? 32 : 0)
+  const marchDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false, occ = false): GPURenderPipelineDescriptor => ({
+    label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${far ? ' far' : ''}${isUnder ? ' under' : ''}${occ ? ' occ' : ''}`,
     layout: marchLayout,
     vertex: { module: mod, entryPoint: 'vs' },
     fragment: {
       module: mod,
       entryPoint: 'fs',
-      constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, FAR_MODEL: far ? 1 : 0, UNDERWATER: isUnder ? 1 : 0 },
+      constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, FAR_MODEL: far ? 1 : 0, UNDERWATER: isUnder ? 1 : 0, LOCAL_OCCLUDE: occ ? 1 : 0 },
       targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }],
     },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' },
   })
-  const marchingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false) =>
-    device.createRenderPipelineAsync(marchDesc(mod, mirrors, foggy, night, far, isUnder))
+  const marchingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false, occ = false) =>
+    device.createRenderPipelineAsync(marchDesc(mod, mirrors, foggy, night, far, isUnder, occ))
   const marching = (mod: GPUShaderModule, defer = false) => Promise.all([defer ? null : marchingAs(mod, true), marchingAs(mod, false)])
   const sunning = (mod: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: sunLayout, vertex: { module: mod, entryPoint: 'vs' }, fragment: { module: mod, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
   const [initMirrors, initPlain] = await marching(module, deferMirrors)
@@ -2265,21 +2301,21 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const making = new Map<number, Promise<unknown>>()
   let mirrorsStarted = !deferMirrors
   let mirrorsReady = !deferMirrors
-  const warm = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, onReady?: () => void) => {
-    const k = keyOf(mirrors, foggy, night, far, isUnder)
+  const warm = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false, onReady?: () => void) => {
+    const k = keyOf(mirrors, foggy, night, far, isUnder, occ)
     if (pipelines.has(k) || making.has(k)) return
     const of = shaderNow
-    const p = marchingAs(of, mirrors, foggy, night, far, isUnder).then(
+    const p = marchingAs(of, mirrors, foggy, night, far, isUnder, occ).then(
       (ready) => { if (of === shaderNow) { pipelines.set(k, ready); onReady?.() } },
       (error: unknown) => { console.error('The march pipeline could not be compiled', error) },
     ).finally(() => { if (making.get(k) === p) making.delete(k) })
     making.set(k, p)
   }
-  const requirePipeline = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean) => {
-    const k = keyOf(mirrors, foggy, night, far, isUnder)
+  const requirePipeline = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false) => {
+    const k = keyOf(mirrors, foggy, night, far, isUnder, occ)
     let p = pipelines.get(k)
     if (!p) {
-      p = device.createRenderPipeline(marchDesc(shaderNow, mirrors, foggy, night, far, isUnder))
+      p = device.createRenderPipeline(marchDesc(shaderNow, mirrors, foggy, night, far, isUnder, occ))
       pipelines.set(k, p)
     }
     return p
@@ -2310,9 +2346,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0, sky: false, rect: [0, 0, 1, 1] as [number, number, number, number] }
   // The road's marks (marks.ts), empty until `marks` is told them.
   let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
+  const localLights = createLocalLights(device)
   const binding = () => device.createBindGroup({
     layout: marchLayout0,
-    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }],
+    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }, { binding: 7, resource: { buffer: localLights.buffer } }],
   })
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
@@ -2526,6 +2563,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     get sun() { return sunMaps },
     get looks() { return looks },
     get globals() { return globals },
+    get localLights() { return localLights },
     panes: panesView,
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
@@ -2568,9 +2606,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       farEdits = edits
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
       if (reach > 0) {
-        const wantNight = lightsNow() > 0 || screen.up > 0
-        warm(false, false, wantNight, true, under)
-        if (mirrorsReady) warm(true, false, wantNight, true, under)
+        const hasLocal = localLights.count > 0
+        const wantNight = lightsNow() > 0 || screen.up > 0 || hasLocal
+        const wantOcc = wantNight && hasLocal && localLights.stats.quality === 'high'
+        warm(false, false, wantNight, true, under, wantOcc)
+        if (mirrorsStarted || mirrorsReady) warm(true, false, wantNight, true, under, wantOcc, () => { mirrorsReady = true })
       }
     },
     async reshade(change) {
@@ -2591,22 +2631,37 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       tell(view, to.size, flags, time, starts)
       // With mirrors off no pane is looked through, and the march writes no panes (writing them was 1 to 2% of its time with mirrors off).
       const wantsMirrors = (flags & MIRRORS) !== 0
-      const wantNight = lightsNow() > 0 || screen.up > 0
+      const hasLocal = localLights.count > 0
+      const wantNight = lightsNow() > 0 || screen.up > 0 || hasLocal
+      const wantOcc = wantNight && hasLocal && localLights.stats.quality === 'high'
       const wantFar = farMap[3] > 0
       const wantUnder = under || (flags & UNDER) !== 0
       const wantFog = fog > 0
-      if (wantsMirrors && !mirrorsStarted) {
-        mirrorsStarted = true
-        // A reshade can finish first; warm() checks shaderNow before storing.
-        warm(true, false, wantNight, wantFar, wantUnder, () => { mirrorsReady = true })
+      // Never block the main thread compiling a MIRRORS variant synchronously: warm in the background while keeping
+      // the frame running on the non-mirrors (or non-occluded mirrors) pipeline until Metal finishes compiling.
+      let mirrors = false
+      let useOcc = wantOcc
+      if (wantsMirrors) {
+        const wantMirrorFog = wantFog && pipelines.has(keyOf(true, true, wantNight, wantFar, wantUnder, wantOcc))
+        if (pipelines.has(keyOf(true, wantMirrorFog, wantNight, wantFar, wantUnder, wantOcc))) {
+          mirrors = true
+          mirrorsReady = true
+        } else if (wantOcc && pipelines.has(keyOf(true, false, wantNight, wantFar, wantUnder, false))) {
+          mirrors = true
+          useOcc = false
+          warm(true, false, wantNight, wantFar, wantUnder, true)
+        } else {
+          mirrorsStarted = true
+          warm(true, false, wantNight, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true })
+          if (wantFog) warm(true, true, wantNight, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true })
+        }
       }
-      const mirrors = wantsMirrors && mirrorsReady
       let useFog = false
       if (wantFog) {
-        if (pipelines.has(keyOf(mirrors, true, wantNight, wantFar, wantUnder))) useFog = true
-        else warm(mirrors, true, wantNight, wantFar, wantUnder)
+        if (pipelines.has(keyOf(mirrors, true, wantNight, wantFar, wantUnder, useOcc))) useFog = true
+        else warm(mirrors, true, wantNight, wantFar, wantUnder, useOcc)
       }
-      const active = requirePipeline(mirrors, useFog, wantNight, wantFar, wantUnder)
+      const active = requirePipeline(mirrors, useFog, wantNight, wantFar, wantUnder, useOcc)
       const panes = panesFor(to.size)
       glassReady = !wantsMirrors || mirrors
       if (mirrors) panesWritten.add(panes)

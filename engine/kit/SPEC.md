@@ -60,6 +60,8 @@ low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
   concave voxel thumbstick cap (`[data-vx-stick-cap]`).
 - Its icon set (`SLIM_ICONS`, for `data-vx-icon`) adds a media player's: `play`, `pause`, `stop`, `next`, `sound`,
   `muted`, `minimize` and `playing` (level bars), drawn 7 to 9 cells tall to sit crisp at 2 px a cell.
+- A touch steering wheel (`.vx-recess[data-vx-ring]`, `engine/page/drive-touch.ts`) builds a thick rim, three
+  spokes to a hub and a lit stripe at the top of the rim. The page turns the whole element as the wheel turns.
 
 ## 1. Principles
 

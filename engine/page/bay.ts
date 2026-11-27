@@ -297,6 +297,85 @@ export const HOLD: { keep: number[]; bytes: number } = { keep: [...BUDGET.keep],
 /** The tiles the page holds for its cores: each fetched once, the last wanted kept up to `HOLD.bytes`. */
 const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number; hits: number }>()
 let heldTotal = 0, heldClock = 0
+/** Street-lamp head positions `[x, y, z, ...]` (world cells) bucketed into 125 m spatial cells for O(9) lookup. */
+const LAMP_CELL = 1250
+const lampTiles = new Map<string, string[]>()
+const lampBuckets = new Map<string, Map<string, Float32Array>>()
+const LAMP_KIND = 15 | (46 << 8)
+function evictLamps(name: string) {
+  const keys = lampTiles.get(name)
+  if (!keys) return
+  lampTiles.delete(name)
+  for (let i = 0; i < keys.length; i++) {
+    const b = lampBuckets.get(keys[i])
+    if (b) { b.delete(name); if (b.size === 0) lampBuckets.delete(keys[i]) }
+  }
+}
+function extractLamps(name: string, body: ArrayBuffer | null) {
+  if (!body || body.byteLength < 72 || lampTiles.has(name)) return
+  const view = new DataView(body)
+  if (view.getInt32(0, true) !== 0x31594142) return
+  const gw = view.getInt32(20, true), tstep = view.getInt32(32, true), tw = tstep > 0 ? view.getInt32(36, true) : 0
+  const nb = view.getInt32(48, true), nv = view.getInt32(52, true), nt = view.getInt32(56, true)
+  const flags = view.getInt32(60, true)
+  if (gw <= 1 || gw > 8192 || tw < 0 || tw > 8192 || nb < 0 || nv < 0 || nt < 0) return
+  const samples = tw * tw, topBytes = samples * 2
+  let from = 64 + gw * gw * 2 + topBytes + samples + samples + ((flags & 1) === 1 ? topBytes : 0) + nb * 24 + nv * 12 + nt * 16
+  if (from + 8 > body.byteLength) return
+  const b = new Uint8Array(body)
+  if (b[from] !== 0x53 || b[from + 1] !== 0x46 || b[from + 2] !== 0x53 || b[from + 3] !== 0x54) return
+  const n = view.getUint32(from + 4, true)
+  if (from + 8 + n * 32 > body.byteLength) return
+  const perCell = new Map<string, number[]>()
+  for (let i = 0, o = from + 8; i < n; i++, o += 32) {
+    if (view.getInt32(o + 28, true) !== LAMP_KIND) continue
+    const x = (view.getInt32(o, true) + view.getInt32(o + 12, true)) * 0.5
+    const y = (view.getInt32(o + 4, true) + view.getInt32(o + 16, true)) * 0.5
+    const z = (view.getInt32(o + 8, true) + view.getInt32(o + 20, true)) * 0.5
+    const ck = `${Math.floor(x / LAMP_CELL)}_${Math.floor(z / LAMP_CELL)}`
+    let list = perCell.get(ck)
+    if (!list) { list = []; perCell.set(ck, list) }
+    list.push(x, y, z)
+  }
+  if (!perCell.size) return
+  const touched: string[] = []
+  for (const [ck, pts] of perCell) {
+    touched.push(ck)
+    let bucket = lampBuckets.get(ck)
+    if (!bucket) { bucket = new Map(); lampBuckets.set(ck, bucket) }
+    bucket.set(name, new Float32Array(pts))
+  }
+  lampTiles.set(name, touched)
+}
+const lampScratch: number[] = []
+/** Nearby San Francisco street-lamp head positions `[x, y, z, ...]` (world cells) within `radius` of `(x, z)`. */
+export function streetLamps(x: number, z: number, radius: number): readonly number[] {
+  lampScratch.length = 0
+  if (!lampBuckets.size) return lampScratch
+  const r2 = radius * radius
+  const gx0 = Math.floor((x - radius) / LAMP_CELL), gx1 = Math.floor((x + radius) / LAMP_CELL)
+  const gz0 = Math.floor((z - radius) / LAMP_CELL), gz1 = Math.floor((z + radius) / LAMP_CELL)
+  for (let gz = gz0; gz <= gz1; gz++) {
+    for (let gx = gx0; gx <= gx1; gx++) {
+      const bucket = lampBuckets.get(`${gx}_${gz}`)
+      if (!bucket) continue
+      for (const a of bucket.values()) {
+        for (let i = 0; i < a.length; i += 3) {
+          const lx = a[i], lz = a[i + 2]
+          const dx = lx - x, dz = lz - z
+          if (dx * dx + dz * dz > r2) continue
+          let dup = false
+          for (let j = 0; j < lampScratch.length; j += 3) {
+            const ux = lampScratch[j] - lx, uz = lampScratch[j + 2] - lz
+            if (ux * ux + uz * uz < 400) { dup = true; break }
+          }
+          if (!dup) lampScratch.push(lx, a[i + 1], lz)
+        }
+      }
+    }
+  }
+  return lampScratch
+}
 /** What the page has done for its tiles, for the checks: requests, failures, retries, timeouts, and how many asks were answered from what it held. */
 export const tally = { fetched: 0, failed: 0, retried: 0, timedOut: 0, shared: 0, water: 0, held: 0, bytes: 0 }
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -322,6 +401,7 @@ export async function tile(level: number, key: string): Promise<ArrayBuffer | nu
   bytesHeld.set(name, entry)
   try {
     const body = await entry.body
+    if (level === 0 && body) extractLamps(name, body)
     entry.size = body?.byteLength ?? 0; heldTotal += entry.size; tally.held = heldTotal
     // Let go of cold outer coarse tiles before hot neighborhood tiles while keeping actively shared inner coarse tiles.
     if (heldTotal > HOLD.bytes) {
@@ -329,7 +409,7 @@ export async function tile(level: number, key: string): Promise<ArrayBuffer | nu
       for (const [k, e] of [...bytesHeld].sort((a, b) => score(a[0], a[1]) - score(b[0], b[1]))) {
         if (heldTotal <= HOLD.bytes) break
         if (e === entry || !e.size) continue
-        bytesHeld.delete(k); heldTotal -= e.size
+        bytesHeld.delete(k); evictLamps(k); heldTotal -= e.size
       }
     }
     tally.held = heldTotal
@@ -560,7 +640,9 @@ async function whole(url: string): Promise<ArrayBuffer | null> {
   for (let again = 0; again < 3 && !answer.ok && answer.status !== 404; again++) { await pause(1500 * (again + 1)); answer = await fetch(url) }
   if (answer.status === 204 || answer.status === 404) return null
   if (!answer.ok) throw new Error(`${url}: ${answer.status}`)
-  return answer.arrayBuffer()
+  const body = await answer.arrayBuffer()
+  extractLamps(url, body)
+  return body
 }
 
 /** Has a core take a pack. False where there is none to take: a tile that is all sea. */

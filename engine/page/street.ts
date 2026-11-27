@@ -15,6 +15,7 @@
 // a car stopped beside someone (it waits for whoever stands in its lane) can be taken the same way.
 // Lengths are the world's finest cells (10 cm); time is seconds.
 import type { View } from './march.ts'
+import type { LocalLightSink } from './lights.ts'
 import type { Person } from './people.ts'
 import type { Piece, Pieces } from './pieces.ts'
 import type { Living, Making, Motor, Thing } from './living.ts'
@@ -348,6 +349,8 @@ export interface Street {
   prewarm(): void
   /** Pre-fetches the street-life graph squares around `(x, z)` cells ahead of arrival. */
   warmAt(x: number, z: number): void
+  /** Appends active street-vehicle lights (traffic, robotaxis, trams, cable cars) to the shared GPU local-light sink. */
+  lights(sink: LocalLightSink): void
   /** One of every kept vehicle side by side, `gap` cells apart (22), standing still, all facing a heading (radians) with their fronts on a line through a place (cells) and the row going off to their left: for looking at them (the checks' line-up). Null clears it. */
   lineup(at: readonly [number, number] | null, heading?: number, gap?: number): string[]
   /**
@@ -373,6 +376,8 @@ export function street(o: {
   /** Whether the finest terrain tiles covering `(x, z)` are loaded, so parked cars re-settle once fine ground arrives. */
   fine?: (x: number, z: number) => boolean
   hour: () => number; rain: () => number
+  /** How far lamps and headlights are on (0 by day to 1 at night/rain/fog, march.lights). */
+  lights?: () => number
   /** Seconds on the clock people walk by. */
   clock: () => number
   shocks: readonly Shock[]
@@ -1437,17 +1442,12 @@ export function street(o: {
     c.piece.cell = 1 / look.per
     // Dynamic vehicle lamps: robotaxi brake/headlight/4-way amber hazard blinkers, plus annoyed high-beam flashes on blocked cars.
     const nowShow = performance.now() / 1000
-    const hourNow = ((o.hour() % 24) + 24) % 24
-    const darkNow = hourNow < 6.5 || hourNow > 19.2
-    const beamFlashing = !!c.beamFlash && nowShow < c.beamFlash
+    const ls = carLampState(c, nowShow)
     if (c.model.kind === 'robotaxi') {
-      const stuck = !!c.rtStuck
-      const hazard = stuck && (((nowShow - c.rtStuck!.at) * 2.2) % 1) < 0.65 ? 1.0 : 0.0
-      const brake = stuck ? 1.0 : c.depot?.phase === 'charging' ? 0.25 : c.v < 12 ? 0.85 : 0.0
-      const head = darkNow ? 1.0 : 0.0
-      c.piece.lamps = [brake, -hazard, head, c.model.front + 1]
+      c.piece.lamps = [ls.brake, -ls.hazard, ls.head, c.model.front + 1]
       // Spinning 360° roof LiDAR turret on nearby robotaxis (< 140 m): calm brand spin vs amber hazard alert when stuck!
       if (d < 1400 && c.model.domeOffset) {
+        const stuck = !!c.rtStuck
         const wantMode = stuck ? 'stuck' : 'normal'
         if (!c.dome || c.domeMode !== wantMode) {
           c.dome?.destroy()
@@ -1462,11 +1462,34 @@ export function street(o: {
       } else if (c.dome) {
         c.dome.destroy(); c.dome = null; c.domeMode = ''
       }
-    } else if (beamFlashing || (c.kind === 'traffic' && (darkNow || c.v < 8))) {
-      c.piece.lamps = [c.kind === 'traffic' && c.v < 8 ? 0.65 : 0, 0, beamFlashing ? 1.8 : darkNow ? 1.0 : 0, c.model.front + 1]
+    } else if (ls.head > 0 || ls.brake > 0) {
+      c.piece.lamps = [ls.brake, 0, ls.head, c.model.front + 1]
     } else {
       c.piece.lamps = undefined
     }
+  }
+  const isDarkNow = () => {
+    if (o.lights) return o.lights() > 0.2
+    const hourNow = ((o.hour() % 24) + 24) % 24
+    return hourNow < 6.5 || hourNow > 19.2
+  }
+  const carLampState = (c: Car, nowSec: number): { head: number; brake: number; hazard: number } => {
+    const darkNow = isDarkNow()
+    const beamFlashing = !!c.beamFlash && nowSec < c.beamFlash
+    if (c.model.kind === 'robotaxi') {
+      const stuck = !!c.rtStuck
+      const hazard = stuck && (((nowSec - c.rtStuck!.at) * 2.2) % 1) < 0.65 ? 1.0 : 0.0
+      const brake = stuck ? 1.0 : c.depot?.phase === 'charging' ? 0.25 : c.v < 12 ? 0.85 : 0.0
+      const head = darkNow ? 1.0 : 0.0
+      return { head, brake, hazard }
+    }
+    if (beamFlashing || (c.kind === 'traffic' && (darkNow || c.v < 8))) {
+      return { head: beamFlashing ? 1.8 : darkNow ? 1.0 : 0, brake: c.kind === 'traffic' && c.v < 8 ? 0.65 : 0, hazard: 0 }
+    }
+    if ((c.kind === 'tram' || c.kind === 'cable') && darkNow) {
+      return { head: 1.0, brake: 0, hazard: 0 }
+    }
+    return { head: 0, brake: 0, hazard: 0 }
   }
   const hide = (c: Car) => { c.piece?.destroy(); c.piece = null; c.shown = ''; c.dome?.destroy(); c.dome = null; c.domeMode = ''; drawn.delete(c) }
 
@@ -3640,6 +3663,32 @@ export function street(o: {
       pendingWarm = [x, 0, z]
       begin()
       wanted(pendingWarm)
+    },
+    lights(sink) {
+      if (!on) return
+      const nowSec = performance.now() / 1000
+      const emitList = (list: readonly Car[]) => {
+        for (let i = 0; i < list.length; i++) {
+          const c = list[i]
+          if (c.thing && !c.landing) continue
+          const ls = carLampState(c, nowSec)
+          if (ls.head <= 0.01 && ls.brake <= 0.04 && ls.hazard <= 0.05) continue
+          const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+          const cp = Math.cos(c.pitch), sp = Math.sin(c.pitch)
+          sink.addVehicle(
+            c.x, c.y, c.z,
+            ch * cp, sp, sh * cp,
+            -sh, 0, ch,
+            -ch * sp, cp, -sh * sp,
+            c.model.long * 0.5, c.model.wide * 0.5, c.model.size[1],
+            ls.head, ls.brake, 0, ls.hazard, 0, false,
+          )
+        }
+      }
+      emitList(traffic)
+      emitList(depotCars)
+      emitList(trams)
+      emitList(cables)
     },
     get ms() { return ms + peopleMs },
     get ready() { return roads.size > 0 && ready.size > 0 && robotaxiModels.size === ROBOTAXI_SERVICES.length },
