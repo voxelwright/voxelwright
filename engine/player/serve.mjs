@@ -9,7 +9,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json; charset=utf-8', '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bay': 'application/octet-stream', '.far': 'application/octet-stream', '.bin': 'application/octet-stream', '.mp4': 'video/mp4', '.m4a': 'audio/mp4' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json; charset=utf-8', '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bay': 'application/octet-stream', '.far': 'application/octet-stream', '.bin': 'application/octet-stream', '.pack': 'application/octet-stream', '.mp4': 'video/mp4', '.m4a': 'audio/mp4' }
 /**
  * A host of plain files, as a static site's is: each file with its usual type, an ETag, and leave to keep it ten
  * minutes (what GitHub Pages sends). No header of the page server's: no COOP, no COEP, no CSP. `asked` is every
@@ -33,7 +33,8 @@ export async function plain(dir, host = '127.0.0.1', port = 0, { plainly = false
     if (failed) { asked.push({ path, status: failed, at: Date.now(), accept }); res.writeHead(failed, { 'Content-Type': 'text/plain' }); return res.end('failed') }
     if (rel.split(sep).includes('..') || !(extname(rel) in TYPES) || !existsSync(file) || !statSync(file).isFile()) { asked.push({ path, status: 404, at: Date.now(), accept }); res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('not found') }
     const s = statSync(file), etag = `"${s.size.toString(16)}-${Math.round(s.mtimeMs).toString(16)}"`
-    const keep = plainly ? 'max-age=600' : rel.split(sep).includes('releases') ? 'public, max-age=31536000, immutable' : rel.endsWith('current.json') ? 'no-cache' : 'max-age=600'
+    const immutable = !plainly && (rel.split(sep).includes('releases') || rel.startsWith(`assets${sep}`) || /^kit[\\/]voxelmorphism-[0-9a-f]+\.css$/.test(rel) || /(?:^|[\\/])loading-[^\\/]+\.webp$/.test(rel))
+    const keep = plainly ? 'max-age=600' : immutable ? 'public, max-age=31536000, immutable' : rel.endsWith('current.json') ? 'no-cache' : 'max-age=600'
     const squeezed = !plainly && /\bbr\b/.test(accept) && existsSync(`${file}.br`) ? `${file}.br` : null
     const headers = { 'Content-Type': TYPES[extname(rel)], ETag: squeezed ? etag.replace(/"$/, '-br"') : etag, 'Last-Modified': s.mtime.toUTCString(), 'Cache-Control': keep, ...(plainly ? {} : { Vary: 'Accept-Encoding' }) }
     if (req.headers['if-none-match'] === headers.ETag) { asked.push({ path, status: 304, at: Date.now(), accept }); res.writeHead(304, headers); return res.end() }

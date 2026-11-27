@@ -26,6 +26,8 @@ import { NAMED as NAMED_MOVES } from './moves.ts'
 import { unrun } from './runs.ts'
 import { POLISHED } from './spells.ts'
 import { faces as facesOf } from './fine.ts'
+import { LOCAL } from './local.ts'
+import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
 import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiService, type StationBorns } from './robotaxi.ts'
 
 /** What street life asks of the land (the core's exports). */
@@ -483,6 +485,15 @@ export function street(o: {
   /** Life files on their way: at most `LIFE_AT_ONCE` (#81), the nearest the eye first, so a jump across the city does not ask for a dozen at once. */
   let lifeComing = 0
   const LIFE_AT_ONCE = 3
+  const lifePacks = PACKS_ENABLED ? LOCAL?.packs ?? null : null
+  const lifeReleaseRoot = new URL('../', o.life)
+  const lifeJson = async <T>(relPath: string, packUrl: string | null): Promise<T | null> => {
+    if (packUrl) {
+      const packed = await readPackedJson<T>(packUrl, `life/${relPath}`)
+      if (packed) return packed
+    }
+    return fetch(new URL(relPath, o.life)).then((r) => (r.ok ? (r.json() as Promise<T>) : null), () => null)
+  }
   const wanted = (eye: readonly number[]) => {
     if (!index || lifeComing >= LIFE_AT_ONCE) return
     const near: { name: string; d: number }[] = []
@@ -495,7 +506,9 @@ export function street(o: {
     for (const { name } of near.slice(0, LIFE_AT_ONCE - lifeComing)) {
       squares.set(name, 'asked')
       lifeComing++
-      void fetch(new URL(index.life[name].path, o.life)).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) { take(s); squares.set(name, 'held') } }, () => squares.delete(name)).finally(() => { lifeComing-- })
+      const packName = lifePacks?.life ? squarePackName('life', name, lifePacks.life) : null
+      const packUrl = packName ? new URL(`${lifePacks!.dir ?? 'packs/'}${packName}`, lifeReleaseRoot).href : null
+      void lifeJson<Parameters<typeof take>[0]>(index.life[name].path, packUrl).then((s) => { if (s) { take(s); squares.set(name, 'held') } else squares.delete(name) }, () => squares.delete(name)).finally(() => { lifeComing-- })
     }
   }
   /**
@@ -504,30 +517,37 @@ export function street(o: {
    */
   let pendingWarm: readonly [number, number, number] | null = null
   let lifeAsked = false
-  const askLife = () => { if (lifeAsked) return; lifeAsked = true; void fetch(new URL('index.json', o.life)).then((r) => r.json()).then((i) => {
-    index = i
-    if (pendingWarm) wanted(pendingWarm)
-    if (!i.transit) return
-    void fetch(new URL(i.transit.path, o.life)).then((r) => r.json()).then((t: { routes: { ref: string; kind: string; lines: number[][] }[]; buses?: { ref: string; kind: string; operator: string; hours: [number, number]; pieces: { roads: string[]; stops: [number, number][] }[] }[] }) => {
-      // The cable cars run their routes as OSM orders them, one way each; the streetcars are driven.
-      lines.length = 0; cableBases.clear()
-      for (const route of t.routes) for (const flat of route.lines) {
-        const l = line(flat, 0)
-        if (l.len < 3000) continue
-        const seed = mix(Math.round(flat[0]), Math.round(flat[1]))
-        if (route.kind === 'cable') lines.push({ ...l, seed, lights: [] })
-        else tramLines.push({ ...l, seed, lights: [] })
-      }
-      // The buses' and trolleybuses' routes, a piece at a time: a Muni line every 8 minutes or so at its usual 7 m/s
-      // between stops, another operator's every 20.
-      for (const b of t.buses ?? []) for (const p of b.pieces) {
-        const seed = mix(idSeed(Number(p.roads[0].split('/')[0])), b.ref.split('').reduce((h, ch) => mix(h, ch.charCodeAt(0)), 7))
-        busPieces.push({ keys: p.roads, stops: p.stops, seed, apart: (/muni/i.test(b.operator) ? 8 : 20) * 60 * 70, kind: b.kind === 'trolleybus' ? 'trolley' : 'bus', hours: b.hours, ref: b.ref })
-      }
-      for (const r of roads.values()) r.railShift = undefined
-      routed = true
+  const askLife = () => {
+    if (lifeAsked) return
+    lifeAsked = true
+    const metaPack = lifePacks?.lifeMeta ? new URL(lifePacks.lifeMeta, lifeReleaseRoot).href : null
+    void lifeJson<typeof index>('index.json', metaPack).then((i) => {
+      if (!i) return
+      index = i
+      if (pendingWarm) wanted(pendingWarm)
+      if (!i.transit) return
+      void lifeJson<{ routes: { ref: string; kind: string; lines: number[][] }[]; buses?: { ref: string; kind: string; operator: string; hours: [number, number]; pieces: { roads: string[]; stops: [number, number][] }[] }[] }>(i.transit.path, metaPack).then((t) => {
+        if (!t) return
+        // The cable cars run their routes as OSM orders them, one way each; the streetcars are driven.
+        lines.length = 0; cableBases.clear()
+        for (const route of t.routes) for (const flat of route.lines) {
+          const l = line(flat, 0)
+          if (l.len < 3000) continue
+          const seed = mix(Math.round(flat[0]), Math.round(flat[1]))
+          if (route.kind === 'cable') lines.push({ ...l, seed, lights: [] })
+          else tramLines.push({ ...l, seed, lights: [] })
+        }
+        // The buses' and trolleybuses' routes, a piece at a time: a Muni line every 8 minutes or so at its usual 7 m/s
+        // between stops, another operator's every 20.
+        for (const b of t.buses ?? []) for (const p of b.pieces) {
+          const seed = mix(idSeed(Number(p.roads[0].split('/')[0])), b.ref.split('').reduce((h, ch) => mix(h, ch.charCodeAt(0)), 7))
+          busPieces.push({ keys: p.roads, stops: p.stops, seed, apart: (/muni/i.test(b.operator) ? 8 : 20) * 60 * 70, kind: b.kind === 'trolleybus' ? 'trolley' : 'bus', hours: b.hours, ref: b.ref })
+        }
+        for (const r of roads.values()) r.railShift = undefined
+        routed = true
+      }, () => {})
     }, () => {})
-  }, () => {}) }
+  }
 
   // ── People ──
   const routes = new Map<string, Route>()
@@ -1073,18 +1093,31 @@ export function street(o: {
   }
   const serviceOf = (c: Car): RobotaxiService => serviceById.get(c.model.serviceId ?? '') ?? ROBOTAXI_SERVICES[0]
   const lidarBorn = (svc: RobotaxiService, stuck: boolean) => buildLidarDomeBorns(svc)[stuck ? 'stuck' : 'normal']
+  const carsPackUrl = lifePacks?.cars ? new URL(lifePacks.cars, new URL('../', o.cars)).href : null
+  const carsJson = async <T>(relPath: string): Promise<T | null> => {
+    if (carsPackUrl) {
+      const packed = await readPackedJson<T>(carsPackUrl, `cars/${relPath}`)
+      if (packed) return packed
+    }
+    return fetch(new URL(relPath, o.cars)).then((r) => (r.ok ? (r.json() as Promise<T>) : null), () => null)
+  }
   /** The kept vehicles' listing, and each of them: as the life files are, the first time street life is on (#81). */
   let carsAsked = false
-  const askCars = () => { if (carsAsked) return; carsAsked = true; void fetch(new URL('index.json', o.cars)).then((r) => r.json()).then((l) => {
-    library = l.cars
-    for (const c of library) if (!serviceById.has(c.id)) model(c.id)
-    for (const svc of ROBOTAXI_SERVICES) {
-      if (!library.some((c) => c.id === svc.id)) library = [...library, { id: svc.id, kind: 'robotaxi' }]
-    }
-  }, () => {}) }
+  const askCars = () => {
+    if (carsAsked) return
+    carsAsked = true
+    void carsJson<{ cars: { id: string; kind: string }[] }>('index.json').then((l) => {
+      if (!l) return
+      library = l.cars
+      for (const c of library) if (!serviceById.has(c.id)) model(c.id)
+      for (const svc of ROBOTAXI_SERVICES) {
+        if (!library.some((c) => c.id === svc.id)) library = [...library, { id: svc.id, kind: 'robotaxi' }]
+      }
+    }, () => {})
+  }
   const model = (id: string) => {
     let m = models.get(id)
-    if (!m) models.set(id, m = fetch(new URL(`${id}.json`, o.cars)).then((r) => (r.ok ? r.json() : null)).then((m: Omit<Model, 'id' | 'front' | 'long' | 'wide'> | null) => {
+    if (!m) models.set(id, m = carsJson<Omit<Model, 'id' | 'front' | 'long' | 'wide'>>(`${id}.json`).then((m) => {
       if (!m) return null
       const front = m.motor?.front ?? 0, done = { ...m, id, front, long: (front < 2 ? m.size[0] : m.size[2]), wide: (front < 2 ? m.size[2] : m.size[0]) }
       ready.set(id, done)

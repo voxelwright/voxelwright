@@ -231,6 +231,22 @@ test('service worker ignores cross-origin requests, range requests, sw.js itself
   assert.equal((await sw.dispatchFetch('https://voxelwright.world/weather', { method: 'POST' })).handled, false)
 })
 
+test('content-hashed /assets/* chunks are served cache-first without hitting network again', async () => {
+  let fetches = 0
+  const sw = loadSw({
+    fetchImpl: async () => {
+      fetches++
+      return new Response('export const x = 1;', { status: 200, headers: { 'Content-Type': 'text/javascript' } })
+    },
+  })
+  const first = await sw.dispatchFetch('https://voxelwright.world/assets/main-deadbeef.js')
+  assert.equal(first.handled, true)
+  assert.equal(fetches, 1)
+  const second = await sw.dispatchFetch('https://voxelwright.world/assets/main-deadbeef.js')
+  assert.equal(second.handled, true)
+  assert.equal(fetches, 1, 'cached immutable asset chunk served without revalidation')
+})
+
 test('/releases/* aborts stalled upstream fetches instead of hanging forever', async () => {
   let aborted = false
   const sw = loadSw({

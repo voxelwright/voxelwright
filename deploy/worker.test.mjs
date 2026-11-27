@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import worker, { securityHeaders } from './worker.mjs'
 import { takesBrotli } from './encoding.mjs'
 
-const FILES = { '/releases/p/t.bay': 'PLAIN', '/releases/p/t.bay.br': 'BROTLI', '/releases/p/br-only.bay.br': 'ONLY_BR', '/bay/marks.bin': 'MARKS', '/bay/map.bin.br': 'MAP_BR' }
+const FILES = { '/releases/p/t.bay': 'PLAIN', '/releases/p/t.bay.br': 'BROTLI', '/releases/p/br-only.bay.br': 'ONLY_BR', '/releases/p/packs/landing.pack.br': 'PACK_BR', '/bay/marks.bin': 'MARKS', '/bay/map.bin.br': 'MAP_BR' }
 const asked = []
 const env = { ASSETS: { fetch: async (r) => { const u = new URL(r.url); asked.push(u.href); const p = u.pathname; return u.host === 'voxelwright.world' && p in FILES ? new Response(FILES[p], { headers: { ETag: '"e"' } }) : new Response('not found', { status: 404 }) } } }
 const get = (path, accept, method = 'GET') => worker.fetch(new Request(`https://voxelwright.world${path}`, { method, headers: accept === undefined ? {} : { 'Accept-Encoding': accept } }), env)
@@ -44,6 +44,12 @@ test('a Brotli-only binary asset serves br to Brotli clients and 406 with Vary t
   const noBr = await get('/releases/p/br-only.bay', 'gzip')
   assert.equal(noBr.status, 406)
   assert.equal(noBr.headers.get('vary'), 'Accept-Encoding')
+  const pack = await get('/releases/p/packs/landing.pack', 'br')
+  assert.equal(pack.status, 200)
+  assert.equal(pack.headers.get('content-encoding'), 'br')
+  assert.equal(pack.headers.get('content-type'), 'application/octet-stream')
+  assert.match(pack.headers.get('cache-control'), /immutable/)
+  assert.equal(await pack.text(), 'PACK_BR')
   assert.equal((await get('/releases/p/missing.bay', 'gzip')).status, 404)
 })
 

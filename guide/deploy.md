@@ -43,7 +43,7 @@ Cloudflare runs a zone's Single Redirect rules before either Worker. Then each W
   - adds the PWA manifest (`/manifest.webmanifest`, `display: "fullscreen"` with `standalone` fallback, `focus-existing` launch handler, and Explore / Night Drive / Golden Hour shortcuts), Voxelmorphism PNG icons under `/icons/` (`192`, `512`, `maskable` and `apple-touch-icon`), iOS/mobile web-app meta tags and a build-stamped `/sw.js` service worker (precaching the engine shell, caching visited `/releases/*` tiles in a bounded LRU bucket with a 12 s fetch timeout and single-pass buffering that prunes superseded releases when `/current.json` advances, serving `/bay/*` stale-while-revalidate and keeping `/weather` cached for offline fallback);
   - writes `/robots.txt`, a dark `/404.html` in the realm's `#10141a`, and `_headers` (below);
   - keeps `.br` copies only under `releases/` and `bay/`, where the Worker sends them;
-  - drops the plain copy of a `.bay`, `.far` or `.bin` file under those folders when its `.br` copy exists;
+  - drops the plain copy of a `.bay`, `.far`, `.bin` or `.pack` file under those folders when its `.br` copy exists;
   - leaves out the release's street graphs (`releases/<pin>/graph/`), which no page code reads.
 
 The early-alpha notice says the realm is in active development. It never shows over the realm's failure screen: when the page sets `data-failed` on `<html>`, the notice is not added, or leaves.
@@ -58,6 +58,8 @@ The early-alpha notice says the realm is in active development. It never shows o
 | `/manifest.webmanifest` | `Content-Type: application/manifest+json; charset=utf-8` and `Cache-Control: public, max-age=3600` |
 | `/icons/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
 | `/loading-*.webp` | `public, max-age=31536000, immutable`: the loader's pictures are named by their content |
+| `/assets/*` | `public, max-age=31536000, immutable`: content-hashed ES module bundles, shared chunks, workers and `core-<hash>.wasm` |
+| `/kit/voxelmorphism-*.css` | `public, max-age=31536000, immutable`: content-hashed Voxelmorphism stylesheet |
 | `/kit/fonts/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
 
 [worker.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/worker.mjs) holds the security headers once (`securityHeaders`, `worldCsp`). Assembly writes them into `_headers` and the Worker sets them on every answer it makes. The CSP allows scripts from the realm itself, WebAssembly (`'wasm-unsafe-eval'`) and YouTube's player (the car radio). It allows no inline script except the page's own: assembly hashes each inline `<script>` of the published pages, after every rewrite, and lists each `'sha256-…'` in `script-src`. Styles may be inline. Images, media and workers may come from `blob:`; frames from YouTube; connections from the realm, the AI providers, any `https:` and `wss:` (a player's own provider and the lobbies). It forbids plugins and `<base>`, and only the realm and zahynailo.dev may frame it. A page that gains an inline script gets its hash at the next assembly; a script added to the page at run time is refused.
@@ -66,7 +68,7 @@ Assembly fails when two sources would write the same path, when a folder holds m
 
 ## Binary tiles and Brotli
 
-The realm build writes a quality-11 Brotli copy (`<file>.br`) beside each release file. The Worker sends that copy byte for byte, so what crosses the wire is what the realm's checks measured. Static assets alone can't do this: an asset given `Content-Encoding: br` in `_headers` gets compressed a second time, and the edge sends `.bay`, `.far` and `.bin` files uncompressed.
+The realm build writes a quality-11 Brotli copy (`<file>.br`) beside each release file. The Worker sends that copy byte for byte, so what crosses the wire is what the realm's checks measured. Static assets alone can't do this: an asset given `Content-Encoding: br` in `_headers` gets compressed a second time, and the edge sends `.bay`, `.far`, `.bin` and `.pack` files uncompressed.
 
 For a `GET` or `HEAD` under `/releases/` or `/bay/`, [worker.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/worker.mjs) does this:
 

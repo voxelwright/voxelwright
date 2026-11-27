@@ -16,7 +16,7 @@ recordings under MIT; `NOTICE` lists all three.
 | `src/index.js` | The public API and `components`, the list of registered parts |
 | `src/components/` | One script per part, each opening with a comment that describes it |
 | `src/core/` | The stage, model, materials, light, looks, motion, sound, glyph sets, and the WebGL2 stand-in (`gl.js`) |
-| `src/looks/` | The lit look (`lit.js`), the instrument and its fittings |
+| `src/looks/` | The lit look (`lit.js`), the slim look (`slim.js`), the instrument and its fittings (declared in `package.json` `sideEffects` alongside `src/core/fonts/*.js` so bundlers keep look and font registrations) |
 | `src/engine.js` | Re-exports the engine's WebGPU renderer from `../blocks/renderer.ts` |
 | `css/` | `_kit.css` (tokens and the first parts) and one sheet per part |
 | `voxelmorphism.css` | Generated from `css/` by `tools/css.mjs`. Never edit it by hand |

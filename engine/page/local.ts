@@ -7,6 +7,7 @@
 // The rules are the realm's, not the address's: nothing in the query string turns them back on.
 import type { Realm } from './link.ts'
 import type { SignsFile } from './boards.ts'
+import type { PackConfig } from './pack.ts'
 
 export interface Rules {
   /**
@@ -63,6 +64,10 @@ export interface Local extends Realm {
   signs?: SignsFile
   /** Street life (street.ts): where its graphs of each square (`life/index.json`) and its kept vehicles (`cars/index.json`) are, beside the page. Its people take the place of the town's residents. */
   street?: { life: string; cars: string }
+  /** Embedded Bay metadata (sf/build.mjs): landmarks and road-mark square table, avoiding extra Worker requests on load. */
+  bay?: { heroes?: unknown[]; marksSquares?: string }
+  /** Release packs (sf/build.mjs, pack.ts): bundled small files under the release's packs/ folder. */
+  packs?: PackConfig
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */
