@@ -22,12 +22,10 @@ flowchart LR
 ## Start Studio locally
 
 ```sh
-cd engine
-npm run serve    # page server on http://127.0.0.1:5740
-npm run studio   # Studio Bridge + MCP server on http://127.0.0.1:5764
+npm run dev      # runs engine/serve.mjs --studio (:5740) + Studio Bridge & MCP (:5764)
 ```
 
-Open the printed `/city?studio=1&fly=0#studio=...&secret=...` link. The page stores the session secret in `sessionStorage` and strips it from `location.hash` immediately.
+Open `http://127.0.0.1:5740/city`. The page loads Studio automatically and discovers the loopback bridge via `GET /studio/bootstrap` (or you can run `npm --prefix engine run serve` and `npm --prefix engine run studio` in separate terminals and open `/city?studio=1`). When opened with `#studio=...&secret=...`, the page stores the session secret in `sessionStorage` and strips it from `location.hash` immediately.
 
 ## One-gesture bug capture & fast QA loop
 
@@ -49,7 +47,7 @@ Press `F2` or `Cmd/Ctrl+Shift+I` to toggle the dockable Studio IDE drawer (Right
 
 ## Game-Use MCP (`voxelwright-game`)
 
-The repository `.mcp.json` registers `voxelwright-game` (`node engine/studio/mcp.mjs`). Any MCP-capable agent (including agents spawned by T3 Code) can drive either a freshly spawned headless WebGPU Chrome session or a live user tab once the player clicks **Let Agent Drive**:
+`voxelwright-game` (`node engine/studio/mcp.mjs`) is enabled by default for subsequent agent sessions across Claude Code (`.mcp.json` + `.claude/settings.json`), Antigravity (`.agents/plugins/voxelwright-game/mcp_config.json`), and Codex (`.codex/config.toml`). Any MCP-capable agent (including agents spawned by T3 Code) can drive either a freshly spawned headless WebGPU Chrome session or a live user tab once the player clicks **Let Agent Drive**:
 
 - **Live safety (`SessionControl`)**: read-only tools (`game_status`, `game_snapshot`, `game_frame`, `game_pick`, `game_perf`, `game_flight_recorder`, `game_assert`) never interrupt play. Mutating tools (`game_camera`, `game_act`, `game_world`, `game_debug`, `game_eval`) are blocked whenever a human controls a live tab, and any live key press or `Esc` instantly takes control back and invalidates in-flight agent turns.
 - **Extensible tools**: plugins calling `engine.studio?.registerExtension({ id, panels, collectors, gameTools, actions })` automatically expose new panels in **IDE Lab**, extra context records on `F9`/`F10`, and live `game_ext_<ext>_<tool>` MCP tools.

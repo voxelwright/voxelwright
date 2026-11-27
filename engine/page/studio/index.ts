@@ -72,7 +72,16 @@ export async function bootStudio(opts: {
   const { engine, canvas } = opts
   const qp = new URLSearchParams(location.search)
   const headless = qp.get('headless') === '1'
-  const { bridgeUrl, secret, sessionId } = readAndCleanBridgeParams()
+  let { bridgeUrl, secret, sessionId } = readAndCleanBridgeParams()
+  if ((!bridgeUrl || !secret) && !headless && ['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) {
+    try {
+      const boot = await fetch('/studio/bootstrap').then((r) => (r.ok ? r.json() : null)) as { active?: boolean; url?: string; secret?: string } | null
+      if (boot?.active && boot.url && boot.secret) {
+        bridgeUrl = boot.url
+        secret = boot.secret
+      }
+    } catch { /* direct T3 mode fallback */ }
+  }
 
   const transport: T3Transport = bridgeUrl && secret
     ? createBridgeTransport(bridgeUrl, secret)

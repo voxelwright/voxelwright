@@ -44,6 +44,9 @@ import { createInboxRoutes, DEFAULT_INBOX } from './inbox.mjs'
 const root = dirname(fileURLToPath(import.meta.url))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const port = Number(arg('port', '5740'))
+const studioOn = process.argv.includes('--studio')
+const studioPort = Number(arg('studio-port', '5764'))
+let studioBridge = null
 const reports = arg('reports', join(homedir(), '.village', 'engine', 'reports.jsonl'))
 const inboxDir = arg('inbox', DEFAULT_INBOX)
 const handleInbox = createInboxRoutes(inboxDir, { send: (res, code, body, type) => send(res, code, body, type), foreign })
@@ -68,6 +71,9 @@ async function file(res, path, host = '') {
   // A page talks to this server and to a helper on this machine or on the host it came from, and to nothing else:
   // a wish and a picture cannot be sent anywhere a made-up address says.
   if (extname(rel) === '.html' && rel === join('page', 'index.html') && realms.size) body = pageWith(body)
+  if (extname(rel) === '.html' && rel === join('page', 'index.html') && studioOn) {
+    body = Buffer.from(body.toString('utf8').replace('</head>', '<meta name="vw-studio" content="1">\n</head>'))
+  }
   if (extname(rel) === '.html') {
     const local = tailnet(host) ? ` https://${host}:* wss://${host}:*` : ''
     // The loading template contains one bundled inline script. Allow its exact bytes.
@@ -1311,6 +1317,20 @@ const server = createServer((req, res) => {
   if (url.pathname === '/core/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(coreLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (url.pathname === '/plugins/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(pluginsLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
+  if (req.method === 'GET' && url.pathname === '/studio/bootstrap') {
+    const reqHost = String(req.headers.host ?? '').replace(/:\d+$/, '').toLowerCase()
+    if (foreign(req) || !['127.0.0.1', 'localhost', '[::1]'].includes(reqHost)) return send(res, 403, 'loopback only')
+    if (studioBridge) return send(res, 200, JSON.stringify({ active: true, url: studioBridge.url, secret: studioBridge.secret }), TYPES['.json'])
+    const statePath = join(homedir(), '.village', 'engine', 'studio', 'bridge-runtime.json')
+    try {
+      const info = JSON.parse(readFileSync(statePath, 'utf8'))
+      if (info?.url && info?.secret && Number.isInteger(info?.pid)) {
+        process.kill(info.pid, 0)
+        return send(res, 200, JSON.stringify({ active: true, url: info.url, secret: info.secret }), TYPES['.json'])
+      }
+    } catch { /* no running bridge */ }
+    return send(res, 200, JSON.stringify({ active: false }), TYPES['.json'])
+  }
   if (handleInbox(req, res, url)) return
   if (url.pathname === '/gaps' && req.method === 'GET') return foreign(req) ? send(res, 403, 'not from another site') : send(res, 200, JSON.stringify({ gaps: gapsAll() }), TYPES['.json'])
   if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
@@ -1412,4 +1432,23 @@ const server = createServer((req, res) => {
   done(file(res, path, String(req.headers.host ?? '').replace(/:\d+$/, '')))
 })
 try { coreIs = coreOnDisk() } catch { /* no core built: nothing serves a world anyway */ }
-server.listen(port, '127.0.0.1', () => console.log(`engine page on http://127.0.0.1:${server.address().port}/ (reports kept in ${reports})`))
+server.listen(port, '127.0.0.1', () => {
+  const pageUrl = `http://127.0.0.1:${server.address().port}`
+  console.log(`engine page on ${pageUrl}/ (reports kept in ${reports})`)
+  if (studioOn) {
+    void import('./studio/bridge.mjs').then(({ createStudioBridge }) =>
+      createStudioBridge({
+        port: studioPort,
+        gameUrl: pageUrl,
+        say: (m) => console.log(`[studio] ${m}`),
+      }).then((b) => {
+        studioBridge = b
+        console.log(`Voxelwright Studio Bridge on ${b.url} (MCP: ${b.url}/mcp)`)
+        console.log(`Open ${pageUrl}/city — native T3 Studio IDE loads automatically`)
+        const stop = () => void b.close().finally(() => process.exit(0))
+        process.once('SIGINT', stop)
+        process.once('SIGTERM', stop)
+      }),
+    ).catch((e) => console.error(`studio bridge failed to start: ${e.message}`))
+  }
+})

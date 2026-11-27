@@ -332,7 +332,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `haze`, `clouds` | Realm | Scale the realm's haze and clouds |
 | `hud=wheel`, `context`, `quiet`, `classic` | Realm | The style of play controls |
 | `debug=1` | Realm | Show the line of numbers |
-| `studio=1` | Server | Load the native in-game T3 Studio IDE and Game-Use runtime ([Studio & Game-Use IDE](/studio)); ignored on public static builds |
+| `studio=1`, `studio=0` | Server | Load (`1`) or suppress (`0`, under `serve.mjs --studio`) the native in-game T3 Studio IDE and Game-Use runtime ([Studio & Game-Use IDE](/studio)); ignored on public static builds |
 | `telemetry=1` | Realm | Enable posting `/api/feedback` and `/api/session` traces on a local realm build |
 | `status=1` | Both | Show the status line on a phone |
 | `boards=0`, `boards=edit` | Realm | No signs, or the sign editor |

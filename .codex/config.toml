@@ -1,0 +1,4 @@
+# Project-scoped Codex MCP configuration for Voxelwright (#98).
+[mcp_servers.voxelwright-game]
+command = "node"
+args = ["engine/studio/mcp.mjs"]

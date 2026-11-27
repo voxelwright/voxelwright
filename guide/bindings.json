@@ -37,6 +37,20 @@
     "engine/plugins/sound/check.mjs": "lines:includes\\(\\`\\$\\{k\\} \\(",
     "engine/page/sound/radio.ts": "lines:^\\{ id: '|^(whoosh|whooshTail): \\{ how|^const MIN_WHOOSH_KMH =|^const (targetGain|amt) =|^for \\(const lateral of|^if \\(absSide > "
   },
+  ".agents/skills/game-studio/SKILL.md": {
+    ".mcp.json": [
+      "mcpServers.voxelwright-game"
+    ],
+    ".claude/settings.json": [
+      "enabledMcpjsonServers"
+    ],
+    ".codex/config.toml": "file",
+    "engine/studio/mcp.mjs": "lines:name: 'game_",
+    "engine/package.json": [
+      "scripts.dev",
+      "scripts.studio"
+    ]
+  },
   ".agents/skills/jolt-physics/SKILL.md": {
     "home/package.json": [
       "dependencies.jolt-physics"
@@ -363,6 +377,7 @@
     "engine/studio/t3-client.mjs": "lines:^export const (ORCHESTRATION_PROTOCOL_VERSION|SOCKET_FRAME_PART_PREFIX|STUDIO_DEFAULT_SCOPES)",
     "engine/page/studio/index.ts": "lines:^export async function bootStudio",
     "engine/package.json": [
+      "scripts.dev",
       "scripts.studio"
     ]
   },

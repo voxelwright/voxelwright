@@ -95,6 +95,35 @@ mkdirSync(workDir, { recursive: true })
   const NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1,2}\/[^'"`?$]+?)\.(ts|mjs)\b/g
   const studioMatches = [...mainSrc.matchAll(NAMED)].filter((m) => m[3].includes('studio'))
   check(studioMatches.length === 0, 'sf/build.mjs NAMED import walker reaches 0 Studio files from page/main.ts')
+
+  // Default MCP auto-registration across Claude Code, Antigravity, and Codex
+  const repoRoot = new URL('../..', import.meta.url)
+  const mcpJson = JSON.parse(readFileSync(new URL('.mcp.json', repoRoot), 'utf8'))
+  const claudeSettings = JSON.parse(readFileSync(new URL('.claude/settings.json', repoRoot), 'utf8'))
+  const agyMcp = JSON.parse(readFileSync(new URL('.agents/plugins/voxelwright-game/mcp_config.json', repoRoot), 'utf8'))
+  const codexToml = readFileSync(new URL('.codex/config.toml', repoRoot), 'utf8')
+  check(mcpJson.mcpServers?.['voxelwright-game']?.args?.[0] === 'engine/studio/mcp.mjs', '.mcp.json registers voxelwright-game MCP server')
+  check(claudeSettings.enabledMcpjsonServers?.includes('voxelwright-game'), '.claude/settings.json auto-enables voxelwright-game MCP server')
+  check(agyMcp.mcpServers?.['voxelwright-game']?.args?.[0] === 'engine/studio/mcp.mjs', '.agents/plugins/voxelwright-game/mcp_config.json enables Antigravity MCP')
+  check(codexToml.includes('[mcp_servers.voxelwright-game]') && codexToml.includes('engine/studio/mcp.mjs'), '.codex/config.toml enables Codex MCP')
+
+  // Verify `serve.mjs --studio` injects meta tag, boots loopback Studio Bridge, and protects /studio/bootstrap
+  const studioSrv = await serve('/dev/null', ['--studio', '--studio-port', '0'])
+  try {
+    const html = await fetch(`${studioSrv.url}/city`).then((r) => r.text())
+    check(html.includes('<meta name="vw-studio" content="1">'), 'serve.mjs --studio injects vw-studio bootstrap meta tag on /city')
+    // Wait briefly for in-process Studio Bridge startup
+    let boot = { active: false }
+    for (let i = 0; i < 20 && !boot.active; i++) {
+      boot = await fetch(`${studioSrv.url}/studio/bootstrap`).then((r) => r.json())
+      if (!boot.active) await sleep(100)
+    }
+    check(boot.active === true && typeof boot.url === 'string' && typeof boot.secret === 'string', 'serve.mjs --studio exposes loopback /studio/bootstrap with live bridge URL & secret')
+    const badBoot = await fetch(`${studioSrv.url}/studio/bootstrap`, { headers: { Origin: 'https://evil.example' } })
+    check(badBoot.status === 403, `GET /studio/bootstrap rejects foreign Origin (${badBoot.status})`)
+  } finally {
+    studioSrv.stop()
+  }
 }
 
 // ── 2. Start Mock T3 Code Server (full Effect RPC + DPoP + Upload + Asset + Voice) ──

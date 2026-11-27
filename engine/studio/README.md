@@ -7,12 +7,17 @@ Public `voxelwright.world` static builds (`sf/build.mjs`, `deploy/`) never inclu
 ## Run it
 
 ```sh
+# Single-command local dev (page server on :5740 + Studio Bridge & MCP on :5764):
+npm run dev       # from repo root (or `cd engine && npm run dev`)
+# Then open http://127.0.0.1:5740/city — Studio loads and connects automatically via /studio/bootstrap.
+
+# Or run the page server and Studio Bridge in separate terminals:
 cd engine
 npm run serve    # game page server on http://127.0.0.1:5740
 npm run studio   # Studio Bridge + MCP HTTP endpoint on http://127.0.0.1:5764
 ```
 
-`npm run studio` prints a ready-to-open local URL containing a per-launch secret in the hash (`#studio=...&secret=...`). On boot, `engine/page/studio/index.ts` stores the session secret in `sessionStorage` and immediately strips it from `location.hash`.
+`npm run studio` also prints a ready-to-open link containing a per-launch secret in the hash (`#studio=...&secret=...`). On boot, `engine/page/studio/index.ts` stores the session secret in `sessionStorage` and immediately strips it from `location.hash`, or discovers a live local bridge via loopback-only `GET /studio/bootstrap`.
 
 `node studio/bridge.mjs` accepts:
 
@@ -43,7 +48,7 @@ npm run studio   # Studio Bridge + MCP HTTP endpoint on http://127.0.0.1:5764
 
 ## Game-Use MCP (`voxelwright-game`)
 
-`.mcp.json` registers `voxelwright-game` pointing to `node engine/studio/mcp.mjs`. It runs over stdio (proxying to an active Studio Bridge or booting an embedded one automatically) and over Streamable HTTP at `POST http://127.0.0.1:5764/mcp`.
+The repository enables `voxelwright-game` (`node engine/studio/mcp.mjs`) by default across Claude Code (`.mcp.json` + `.claude/settings.json`), Antigravity (`.agents/plugins/voxelwright-game/mcp_config.json`), and Codex (`.codex/config.toml`). It runs over stdio (proxying to an active Studio Bridge or booting an embedded one automatically) and over Streamable HTTP at `POST http://127.0.0.1:5764/mcp`.
 
 Core tools exposed to AI agents:
 
