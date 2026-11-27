@@ -81,6 +81,7 @@ let checks = [
   ['plugins', 'node', ['test/plugins.mjs'], true],
   ['swap', 'node', ['test/swap.mjs'], true],
   ['workshop', 'node', ['test/workshop.mjs'], true],
+  ['telemetry', 'node', ['test/telemetry.mjs'], true],
   ['taken', 'node', ['test/taken.mjs'], true],
   ['moves', 'node', ['test/moves.mjs'], true],
   ['step', 'node', ['test/step.mjs'], true],

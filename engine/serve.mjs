@@ -2,7 +2,7 @@
 // (Node's own stripper, so there is no bundler and a visit always runs what is on disk), and it
 // keeps what a page reports about the device it ran on: one JSON line a report, outside the repo.
 //
-//   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--world file] [--realms dir] [--idle 300]
+//   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--inbox ~/.village/engine/inbox] [--world file] [--realms dir] [--idle 300]
 //                  [--release <folder or address of a current.json>] [--release-cache dir] [--arrive x,y,z,yaw]
 //
 // With --world it also keeps one shared world (world.mjs): everyone who opens the page with ?shared=1 is in it,
@@ -39,11 +39,14 @@ import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
 import { controlsOf } from './page/living.ts'
 import { arrival, ground as groundOf } from './ground.mjs'
+import { createInboxRoutes, DEFAULT_INBOX } from './inbox.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const port = Number(arg('port', '5740'))
 const reports = arg('reports', join(homedir(), '.village', 'engine', 'reports.jsonl'))
+const inboxDir = arg('inbox', DEFAULT_INBOX)
+const handleInbox = createInboxRoutes(inboxDir, { send: (res, code, body, type) => send(res, code, body, type), foreign })
 /** What the page may ask for: the folders of pages, never the server or its tests. */
 const OPEN = ['probe', 'page']
 const TYPES = { '.html': 'text/html; charset=utf-8', '.ts': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.json': 'application/json' }
@@ -1233,6 +1236,7 @@ const server = createServer((req, res) => {
   if (url.pathname === '/core/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(coreLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (url.pathname === '/plugins/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(pluginsLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
+  if (handleInbox(req, res, url)) return
   if (url.pathname === '/gaps' && req.method === 'GET') return foreign(req) ? send(res, 403, 'not from another site') : send(res, 200, JSON.stringify({ gaps: gapsAll() }), TYPES['.json'])
   if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
     if (!realms.size) return send(res, 404, 'no realms are kept here')

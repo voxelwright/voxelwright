@@ -142,6 +142,10 @@ export interface Street {
   roads(x: number, z: number, r: number): { key: string; name: number; lanes: number; flags: number; next: string[]; line: number[]; open: boolean | null }[]
   /** Vehicles near a place: where each stands, which way it heads, and what it is. */
   cars(x: number, z: number, r: number): { kind: Car['kind']; model: string; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean; wait: string; stuck: number }[]
+  /** Full vehicle state snapshot within `r` cells for black-box telemetry, overlap detection, and replay. */
+  snapshot(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; name: string; x: number; y: number; z: number; heading: number; v: number; long: number; wide: number; road: string; lane: number; s: number; wait: string; stuck: number; blocked: boolean; living: boolean }[]
+  /** Deterministic xorshift32 PRNG state for traffic replay. */
+  rng: number
   /** Seconds from now on the clock people walk by until a cable car is nearest a place, and how near it comes (cells); null with no line. */
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
@@ -1912,6 +1916,28 @@ export function street(o: {
     cars(x, z, r) {
       return [...parked.values(), ...traffic, ...cables, ...trams].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ kind: c.kind, model: c.model.kind, x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing, wait: c.wait ?? '', stuck: c.stuck ?? 0 }))
     },
+    snapshot(x, z, r) {
+      const out: ReturnType<Street['snapshot']> = []
+      const push = (c: Car) => {
+        if (Math.hypot(c.x - x, c.z - z) >= r) return
+        out.push({
+          id: c.id, kind: c.kind, model: c.model.kind, name: c.model.name,
+          x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10, z: Math.round(c.z * 10) / 10,
+          heading: Math.round(c.heading * 1000) / 1000, v: Math.round(c.v * 10) / 10,
+          long: c.model.long, wide: c.model.wide,
+          road: c.road?.key ?? '', lane: c.lane ?? 0, s: Math.round((c.s ?? 0) * 10) / 10,
+          wait: c.wait ?? '', stuck: Math.round((c.stuck ?? 0) * 10) / 10,
+          blocked: !!c.road?.blocked, living: !!c.thing,
+        })
+      }
+      for (const c of parked.values()) push(c)
+      for (const c of traffic) push(c)
+      for (const c of cables) push(c)
+      for (const c of trams) push(c)
+      return out
+    },
+    get rng() { return rng },
+    set rng(v: number) { if (Number.isInteger(v) && v !== 0) rng = v | 0 },
     cable(x, z) {
       let best: { in: number; near: number } | null = null
       const t = o.clock()
