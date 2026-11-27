@@ -28,7 +28,7 @@ import { POLISHED } from './spells.ts'
 import { faces as facesOf } from './fine.ts'
 import { LOCAL } from './local.ts'
 import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
-import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiService, type StationBorns } from './robotaxi.ts'
+import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiModel, type RobotaxiService, type StationBorns } from './robotaxi.ts'
 
 /** What street life asks of the land (the core's exports). */
 export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; top_at?(x: number, z: number): number }
@@ -381,6 +381,8 @@ export function street(o: {
   input: Input
   /** Faces made for a look's cells, for the page to keep beside the ones it makes itself (main.ts): a car brought to life finds its look's faces made. */
   faces?: (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => void
+  /** Pre-sculpted robotaxi models built off the page thread (robotaxi-maker.ts); built synchronously here when omitted. */
+  robotaxis?: Promise<readonly RobotaxiModel[]>
   /** Called on a high-speed clean close pass past a parked or traffic car. */
   onNearMiss?: (info: NearMiss) => void
   /** Called when the driven vehicle collides with a street vehicle (for sparks, audio, and events). */
@@ -1082,14 +1084,21 @@ export function street(o: {
   const models = new Map<string, Promise<Model | null>>(), ready = new Map<string, Model>()
   let library: { id: string; kind: string }[] = []
   // Register every active robotaxi service from `ROBOTAXI_SERVICES` procedurally (zero extra fetches, works on every SF release).
+  // When `o.robotaxis` is provided (built off the main thread in robotaxi-maker.ts), models arrive asynchronously without stalling boot.
   const serviceById = new Map<string, RobotaxiService>()
   const robotaxiModels = new Map<string, Model>()
-  for (const svc of ROBOTAXI_SERVICES) {
-    serviceById.set(svc.id, svc)
-    const built: Model = buildRobotaxiModel(svc)
-    robotaxiModels.set(svc.id, built)
-    ready.set(svc.id, built)
-    models.set(svc.id, Promise.resolve(built))
+  for (const svc of ROBOTAXI_SERVICES) serviceById.set(svc.id, svc)
+  if (o.robotaxis) {
+    for (const svc of ROBOTAXI_SERVICES) {
+      models.set(svc.id, o.robotaxis.then((made) => made.find((m) => m.id === svc.id) ?? null))
+    }
+  } else {
+    for (const svc of ROBOTAXI_SERVICES) {
+      const built: Model = buildRobotaxiModel(svc)
+      robotaxiModels.set(svc.id, built)
+      ready.set(svc.id, built)
+      models.set(svc.id, Promise.resolve(built))
+    }
   }
   const serviceOf = (c: Car): RobotaxiService => serviceById.get(c.model.serviceId ?? '') ?? ROBOTAXI_SERVICES[0]
   const lidarBorn = (svc: RobotaxiService, stuck: boolean) => buildLidarDomeBorns(svc)[stuck ? 'stuck' : 'normal']
@@ -1861,7 +1870,7 @@ export function street(o: {
   const depotCars: Car[] = []
   interface DepotState {
     service: RobotaxiService
-    model: Model
+    model: Model | null
     borns: StationBorns | null
     shown: boolean
     mascotAngle: number
@@ -1878,7 +1887,7 @@ export function street(o: {
   }
   const depots: DepotState[] = ROBOTAXI_SERVICES.map((service) => ({
     service,
-    model: robotaxiModels.get(service.id)!,
+    model: robotaxiModels.get(service.id) ?? null,
     borns: null,
     shown: false,
     mascotAngle: 0,
@@ -1896,6 +1905,17 @@ export function street(o: {
     },
   }))
   const depotByService = new Map<string, DepotState>(depots.map((d) => [d.service.id, d]))
+  if (o.robotaxis) {
+    void o.robotaxis.then((made) => {
+      for (const built of made) {
+        robotaxiModels.set(built.id, built)
+        ready.set(built.id, built)
+        const depot = depotByService.get(built.id)
+        if (depot) depot.model = built
+        if (prewarmOn) enqueueModelWarm(built)
+      }
+    })
+  }
 
   const smoothWaypoints = (ctrl: [number, number][]): { pts: [number, number][]; cum: number[] } => {
     const pts: [number, number][] = []
@@ -1994,7 +2014,7 @@ export function street(o: {
     const total = path.cum[path.cum.length - 1] || 0
     const s = total * progress
     const c: Car = {
-      id: ids++, model: depot.model, paint: -1, kind: phase === 'charging' ? 'parked' : 'traffic', seed: ids,
+      id: ids++, model: depot.model!, paint: -1, kind: phase === 'charging' ? 'parked' : 'traffic', seed: ids,
       x: bx, y: 0, z: bz, heading: b.heading, pitch: 0, v: phase === 'charging' ? 0 : 28, piece: null, shown: '',
       lidarAngle: random() * Math.PI * 2,
       depot: { serviceId: depot.service.id, phase, bay: bayIdx, until: now + 9 + random() * 18, pts: path.pts, cum: path.cum, s },
@@ -2028,6 +2048,7 @@ export function street(o: {
   const depotStep = (dt: number, view: View) => {
     const now = performance.now() / 1000
     for (const depot of depots) {
+      if (!depot.model) continue
       const st = depot.service.station, sid = depot.service.id
       const dist = Math.hypot(view.eye[0] - st.cx, view.eye[2] - st.cz)
       if (dist > st.drawReach) {
@@ -2119,6 +2140,7 @@ export function street(o: {
   }
   const showStations = (view: View, dt: number) => {
     for (const depot of depots) {
+      if (!depot.model) continue
       const st = depot.service.station, sid = depot.service.id, sp = depot.pieces
       const dist = Math.hypot(view.eye[0] - st.cx, view.eye[2] - st.cz)
       if (dist > st.drawReach) { hideDepot(depot); continue }
@@ -3222,7 +3244,8 @@ export function street(o: {
         triggerStuck(kind: 'intersection' | 'narrow' = 'intersection', serviceId?: string) {
           const svc = serviceId === undefined ? ROBOTAXI_SERVICES[0] : serviceById.get(serviceId)
           if (!svc) return null
-          const svcModel = robotaxiModels.get(svc.id)!
+          const svcModel = robotaxiModels.get(svc.id)
+          if (!svcModel) return null
           const eye = lastEye ?? [svc.station.cx, 50, svc.station.cz]
           const nowT = performance.now() / 1000
           // Prefer a visible incident beside actual sidewalk traffic, keeping existing taxis when equally suitable.
@@ -3411,7 +3434,7 @@ export function street(o: {
       wanted(pendingWarm)
     },
     get ms() { return ms + peopleMs },
-    get ready() { return roads.size > 0 && ready.size > 0 },
+    get ready() { return roads.size > 0 && ready.size > 0 && robotaxiModels.size === ROBOTAXI_SERVICES.length },
   }
   return self
 }

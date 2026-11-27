@@ -149,6 +149,8 @@ if (esbuild) {
     worker: 'page/worker.ts',
     mover: 'page/mover.ts',
     streetfaces: 'page/streetfaces.ts',
+    'robotaxi-maker': 'page/robotaxi-maker.ts',
+    'far-unpack': 'page/far-unpack.ts',
     'music-worker': 'page/sound/music/worker.ts',
     kit: 'kit/src/index.js',
     'fonts-index': 'kit/src/core/fonts/index.js',

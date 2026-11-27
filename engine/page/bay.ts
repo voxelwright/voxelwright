@@ -287,7 +287,7 @@ export const DEVICE: 'phone' | 'desktop' = TIER === 'phone' ? 'phone' : 'desktop
  * workers; the pool of the world's cells on the GPU (MiB), how many makers of sectors, and the far model's faces.
  */
 export const BUDGETS = {
-  phone: { keep: [12, 4, 4], bytes: 24 << 20, pool: 128, workers: 2, faces: 3_000_000 },
+  phone: { keep: [12, 4, 4], bytes: 24 << 20, pool: 80, workers: 2, faces: 3_000_000 },
   tablet: { keep: [20, 8, 6], bytes: 48 << 20, pool: 192, workers: 3, faces: 6_000_000 },
   desktop: { keep: [28, 12, 8], bytes: 96 << 20, pool: 256, workers: 6, faces: 12_000_000 },
 } as const
