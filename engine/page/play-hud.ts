@@ -271,10 +271,10 @@ html[data-hud].hung #aim, html.choosing #aim, html.drawer #aim, html:has(#ask.op
 @media (pointer: fine) { html[data-hud="quiet"]:not(.away) #realm[data-hud="quiet"] .tools { opacity: 1; pointer-events: auto; } }
 
 /* Active play fade (pointer locked on desktop): fade secondary chrome so San Francisco fills the screen. */
-html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#first .credits, #realm .fold, #realm .sky, #hud) { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.35s ease-out; }
+html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#realm .fold, #realm .sky, #hud) { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.35s ease-out; }
 html:is([data-hud="quiet"], [data-hud="wheel"]).away #ask:not(.open) { opacity: 0 !important; pointer-events: none !important; }
 html:is([data-hud="quiet"], [data-hud="wheel"]).away:not(.arrived) #where { opacity: 0 !important; transition: opacity 0.4s ease-out; }
-html[data-hud="quiet"] :is(#where, #first .credits, #realm .fold) { transition: opacity 0.25s ease-out; }
+html[data-hud="quiet"] :is(#where, #realm .fold) { transition: opacity 0.25s ease-out; }
 
 /* ── Collapsed Ask trigger: real slim voxel keycap behind ✦ Make ↵ (desktop) and ✦ (mobile) ── */
 html:not(.first)[data-hud] #ask:not(.open) #ask-row {
@@ -431,7 +431,7 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   /* Contextual auto-dimming when idle so the city shines through. */
   #realm[data-hud="quiet"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.22; }
   #realm[data-hud="wheel"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.7; }
-  html[data-hud="wheel"].away :is(#first .credits, #realm .fold) { opacity: 0.86 !important; pointer-events: auto !important; }
+  html[data-hud="wheel"].away #realm .fold { opacity: 0.86 !important; pointer-events: auto !important; }
   html[data-hud="wheel"].away #ask:not(.open) { opacity: 0.72 !important; pointer-events: auto !important; }
 
   /* The Settings gear alone in the top right, matching the minimap top-left. (Back to the view is in its panel, #75.) */

@@ -16,7 +16,7 @@ than flat CSS glass — by refining the kit itself into a compact, low-profile h
 keycaps with 1.5-voxel press travel, translucent smoked polycarbonate (`transmission: 0.14–0.15`) with Fresnel rim
 gleam, deep cobalt enamel (`transmission: 0.06`) on primary/active actions, and a hollow stepped octagonal voxel
 thumbstick gimbal with backlit compass ticks and a sculpted concave voxel cap. Layout stays lean and contextual: Credits
-moves out of gameplay corners into the Settings panel's keys (Mapillary attribution sits neatly inside the minimap corner); the Make composer collapses to a slim voxel trigger
+moves out of HUD corners (both first view and play) into the Settings panel's keys, and Mapillary attribution moves out of the HUD and minimap into the Credits card; the Make composer collapses to a slim voxel trigger
 (`✦ Make ↵` bottom-right on desktop, `✦` 44×44 voxel key bottom-left on mobile that fades out while steering) and
 expands into a centered composer only when opened; mobile puts the minimap top-left, the Settings (`⚙`) slim voxel key alone top-right, the hollow voxel thumbstick under the left thumb, compact
 icon-led slim voxel thumb controls bottom-right, and suppresses the redundant floating `Fly` banner.

@@ -84,7 +84,7 @@ Riding something other than a car (a flying or hovering thing, or one that jumps
 
 ## The first view and EXPLORE
 
-The realm opens on a still picture from Ina Coolbrith Park (`engine/page/first.ts`). No key moves the eye and no click takes the pointer. Only the settings gear (time, weather, graphics), a Credits key and the signs answer. Enter, NumpadEnter and `/` open the eggs' line. `?first=0` skips the first view. The realm hides the line of numbers (frame time, memory, position) unless the address has `?debug=1`.
+The realm opens on a still picture from Ina Coolbrith Park (`engine/page/first.ts`). No key moves the eye and no click takes the pointer. Only the settings gear (time, weather, graphics and Credits), the lockers count and the signs answer. Enter, NumpadEnter and `/` open the eggs' line. `?first=0` skips the first view. The realm hides the line of numbers (frame time, memory, position) unless the address has `?debug=1`.
 
 The EXPLORE board on the roof of 555 California St is the way in (`engine/page/entry.ts`). `engine.explore.state` moves through `idle`, `picking`, `going`, `in` and `leaving`:
 
@@ -235,7 +235,7 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 
-The **settings panel** is in sections: Time & weather (Light, Dark, SF now, the hour fader, the weather), Graphics (Low, Medium, High, Dynamic resolution and Target FPS or the resolution fader), and, in play, the keys that act: Back to the view, Say…, Your AI…, Credits and Reset world. On a desk in play the two sections stand side by side with the keys along the foot; on an upright phone they are one column. The first view's gear, its panel and its Credits and lockers keys use the same slim look as the HUD in play.
+The **settings panel** is in sections: Time & weather (Light, Dark, SF now, the hour fader, the weather), Graphics (Low, Medium, High, Dynamic resolution and Target FPS or the resolution fader), and the keys that act: Credits (shown in both the first view and play, with Mapillary attribution inside the Credits card) plus, in play, Back to the view, Say…, Your AI… and Reset world. On a desk in play the two sections stand side by side with the keys along the foot; on an upright phone they are one column. The first view's gear, its panel and its lockers key use the same slim look as the HUD in play.
 
 ## The minimap, the map and GPS
 

@@ -74,9 +74,11 @@ const panelLaid = (page) => page.evaluate(() => {
 const slimKey = (page, sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el) return null; const cs = getComputedStyle(el), cv = el.querySelector(':scope > .vx-canvas'); return { look: cs.getPropertyValue('--vx-look').trim(), live: el.hasAttribute('data-vx-live') && !!cv?.checkVisibility(), faceZ: Number(el.style.getPropertyValue('--vx-face-z')) } }, sel)
 /** The first view, before going in (default only): its keys in the slim look, and its Settings panel in sections with no control on another. */
 const firstView = async (page, phone) => {
-  await page.waitForFunction(() => document.querySelector('#first .credits')?.hasAttribute('data-vx-live') && document.querySelector('#realm .fold')?.hasAttribute('data-vx-live'), null, { timeout: 30_000 }).catch(() => {})
+  await page.waitForFunction(() => document.querySelector('#realm .fold')?.hasAttribute('data-vx-live'), null, { timeout: 30_000 }).catch(() => {})
   await page.waitForTimeout(800)
-  for (const [what, sel] of [['the credits key', '#first .credits'], ['the settings key', '#realm .fold']]) {
+  const hudNoise = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits'), mlyCorner: !!document.querySelector('#first .corner a[href*="mapillary"]'), mlyMap: !!document.querySelector('#minimap .mm-mly') }))
+  check(!hudNoise.credits && !hudNoise.mlyCorner && !hudNoise.mlyMap, `first view: no Credits button or Mapillary icon in HUD (${JSON.stringify(hudNoise)})`)
+  for (const [what, sel] of [['the settings key', '#realm .fold']]) {
     const k = await slimKey(page, sel)
     check(!!k && k.look === 'slim' && k.live && k.faceZ > 0 && k.faceZ <= 3, `first view: ${what} is a slim voxel key (${JSON.stringify(k)})`)
   }
@@ -84,10 +86,34 @@ const firstView = async (page, phone) => {
   if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
   await page.waitForTimeout(700)
   const laid = await panelLaid(page)
-  check(laid.parts.slice(0, 2).join() === 'world,gfx' && !laid.parts.includes('acts') && laid.meet.length === 0 && laid.out.length === 0, `first view: the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
+  check(laid.parts.slice(0, 2).join() === 'world,gfx' && laid.parts.includes('acts') && laid.meet.length === 0 && laid.out.length === 0, `first view: the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
   const panel = await slimKey(page, '#realm .sky')
   check(panel?.look === 'slim' && panel.live && panel.faceZ > 0 && panel.faceZ <= 4, `first view: the Settings panel is built in the slim look, a low enclosure (${JSON.stringify(panel)})`)
   await page.screenshot({ path: join(shots, `default-first-sky-${NAMED[phone ? (page.viewportSize().width > page.viewportSize().height ? 'side' : 'phone') : 'wide']}.png`) })
+  // Open Credits from Settings: Mapillary lives inside Credits and nothing overflows the card box.
+  const cr = await page.evaluate(() => { const b = document.querySelector('#realm .sky .sky-credits-link')?.getBoundingClientRect(); return b && b.width ? [b.left + b.width / 2, b.top + b.height / 2] : null })
+  check(!!cr, 'first view: Credits button is inside Settings')
+  if (cr) {
+    if (phone) await page.touchscreen.tap(cr[0], cr[1]); else await page.mouse.click(cr[0], cr[1])
+    await page.waitForTimeout(400)
+    const card = await page.evaluate(() => {
+      const pop = document.querySelector('#first-credits')
+      if (!pop || !pop.matches(':popover-open')) return null
+      const scroll = pop.querySelector('.credits-scroll')
+      if (scroll) scroll.scrollTop = scroll.scrollHeight
+      const pr = pop.getBoundingClientRect()
+      const overflow = [...pop.querySelectorAll(':scope > :not(.vx-canvas)')].filter((el) => {
+        const er = el.getBoundingClientRect()
+        return er.width > 0 && (er.left < pr.left - 1 || er.right > pr.right + 1 || er.top < pr.top - 1 || er.bottom > pr.bottom + 1)
+      }).map((el) => el.className || el.tagName)
+      const mly = pop.querySelector('a[href*="mapillary.com"]')
+      return { overflow, popoverOverflow: getComputedStyle(pop).overflow, inView: pr.top >= 0 && pr.bottom <= innerHeight + 1, hasMapillaryLink: !!mly && !mly.hidden, text: pop.innerText }
+    })
+    await page.screenshot({ path: join(shots, `default-first-credits-${NAMED[phone ? (page.viewportSize().width > page.viewportSize().height ? 'side' : 'phone') : 'wide']}.png`) })
+    check(!!card && card.overflow.length === 0 && card.popoverOverflow === 'visible' && card.inView && card.hasMapillaryLink, `first view: Credits card stays inside its box with Mapillary inside (${JSON.stringify(card && { overflow: card.overflow, popoverOverflow: card.popoverOverflow, inView: card.inView, hasMapillaryLink: card.hasMapillaryLink })})`)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+  }
   if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
   await page.waitForTimeout(400)
 }
@@ -642,8 +668,8 @@ try {
         if (key) {
           await page.touchscreen.tap(...key)
           const backed = await until(page, () => !globalThis.engine.first.engaged && document.documentElement.classList.contains('first') && globalThis.engine.explore.state !== 'leaving', 20_000)
-          const after = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state }))
-          check(backed && after.credits, `Back to the view in the panel goes back to the view, the credits key there (${JSON.stringify(after)})`)
+          const after = await page.evaluate(() => ({ fold: !!document.querySelector('#realm .fold')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state }))
+          check(backed && after.fold, `Back to the view in the panel goes back to the view, the settings key there (${JSON.stringify(after)})`)
         }
       }
       // Desktop E prompt vs tool wheel (#75): beside a stopped live traffic car, the prompt binds F (not E), avoids
