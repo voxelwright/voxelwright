@@ -15,6 +15,9 @@ Every script reads a built realm (`engine/dist-sf`, from `node engine/sf/build.m
 | `pack-release.mjs` | Writes an overlay with the landing's cut and band 0 as packs, for `?farpacks=`. |
 | `bundle-bench.mjs` | Bundles the page with esbuild (not a dependency: pass `--esbuild <dir>`) and weighs it against one file per module. Its output does not run. |
 | `far-rings.mjs` | The far model's files, or a run's far requests, by distance from the eye and by whether the tile was in view. |
+| `replay.mjs` | A measured run played back under each proposed change, to count the Worker requests left. A model on a measurement. |
+| `overfetch.mjs` | Band 0's requests and bytes for packs of 1, 2 and 4 km, for the tiles a measured run asked for. |
+| `decompression.mjs` | Which codecs Chrome's `DecompressionStream` takes (gzip only, in Chrome 158). |
 | `cost-model.mjs` | A month's Cloudflare bill at 1k to 1M visitors a day, from the measured requests and the published prices. A model. |
 
 `engine/page/far.ts` carries the one engine change: behind `?farpacks=<index.json>` it reads far objects out of
@@ -32,4 +35,4 @@ node probes/network-82/bundle-bench.mjs --esbuild <dir with esbuild installed> -
 node probes/network-82/cost-model.mjs --bounce <n> --explore <n>
 ```
 
-A live run spends the Worker's daily requests (about 1,500 for the four phases).
+A live run spends the Worker's daily requests (about 1,800 for the four phases).
