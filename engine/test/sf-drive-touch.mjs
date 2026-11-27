@@ -153,7 +153,7 @@ try {
   const idle = await told(), note = await page.evaluate(() => document.querySelector('[data-panel="drive-hud"] .dh-note')?.textContent)
   await touch('touchStart', 5, 600, 120); await touch('touchEnd', 5); await settle()
   const auto = await told()
-  check(idle?.throttle === 0 && /touch to go/i.test(note ?? '') && auto?.throttle === 1, `auto gas waits for a touch ("${note}"), then drives (${idle?.throttle} then ${auto?.throttle})`)
+  check(idle?.throttle === 0 && /tap to drive/i.test(note ?? '') && auto?.throttle === 1, `auto gas waits for a touch ("${note}"), then drives (${idle?.throttle} then ${auto?.throttle})`)
   const fold = await page.evaluate(() => { const r = document.querySelector('#realm .fold').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
   await touch('touchStart', 6, ...fold); await touch('touchEnd', 6); await settle(500)
   const underSettings = await told()

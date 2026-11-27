@@ -29,11 +29,11 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
   steer and one way to drive, never two at once (#75's stick steered and, with no pedal held, drove too). The left half of
   the picture turns the head while driving (`input.stickSide = null`), except with Slide, where it is a slide that steers
   across only. Settings → `Controls…` (touch only) opens the sheet (`#drive-controls`): Steer with Arrows (default) /
-  Wheel / Slide / Tilt, Gas Pedals (default) / Auto, Pedals on the Right (default) / Left, Key size, Key opacity, Steering
+  Wheel / Slide / Tilt, Gas Pedals (default) / Auto, Driving keys on the Right (default) / Left, Key size, Key opacity, Steering
   sensitivity, Center tilt. `layout()` places every key from the bottom corners: the main pedal tall at the edge
   (`80×108` at Medium on its side), Boost above it, Brake and Drift beside it; arrows `84×84`; the wheel a `150` px
-  hollow voxel ring (`.vx-recess[data-vx-ring]`) with a stick cap on its rim. Keys shrink to fit: the clusters stay
-  `>= 24px` apart, the driving cluster stays in the lower half, no key goes under 44 px (`test/drive-touch.mjs` checks
+  voxel wheel (`.vx-recess[data-vx-ring]`: rim, three spokes, hub, lit top stripe) turned as a whole. Keys shrink to fit: the clusters stay
+  `>= 24px` apart, the driving cluster stays in the lower half at Medium (lower at Small, higher at Large), no key goes under 44 px (`test/drive-touch.mjs` checks
   every scheme, hand and size on four phone screens). A cluster is one pad: a thumb sliding from key to key holds the
   key it is on. Everything is let go on touch end or cancel, blur, the page hidden, or anything opened over the keys.
 - **Top-right utility rail (`.drive-util`):** quiet `44×44` icon-only keys (`Horn`, `Radio`, `Cam`, `Get off`, no `Seat`

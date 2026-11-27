@@ -58,8 +58,8 @@ low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
 - A floating touch thumbstick recess (`.vx-recess.float`) builds a hollow stepped octagonal gimbal
   ring with backlit cardinal ticks so the world shows through its interior, paired with a sculpted
   concave voxel thumbstick cap (`[data-vx-stick-cap]`).
-- A touch steering wheel (`.vx-recess[data-vx-ring]`, `engine/page/drive-touch.ts`) is the same hollow ring
-  with a thicker rim. The page moves a stick cap round its rim to show where the wheel's top is.
+- A touch steering wheel (`.vx-recess[data-vx-ring]`, `engine/page/drive-touch.ts`) builds a thick rim, three
+  spokes to a hub and a lit stripe at the top of the rim. The page turns the whole element as the wheel turns.
 
 ## 1. Principles
 

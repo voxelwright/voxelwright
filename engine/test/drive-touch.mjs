@@ -60,7 +60,7 @@ check(wheelSteer(WHEEL_LOCK / 2, 1) === 0.5 && wheelSteer(1, 1) === 0 && near(wh
 // Every scheme's keys on a phone on its side (844 x 390, 59 px safe at each side, 21 at the bottom) and upright
 // (390 x 844, 34 at the bottom), and on a small phone (667 x 375, as an iPhone SE): 44 px a side or more, on the screen
 // within its safe area, none on another, the two thumbs' keys apart, the driving thumb's in the lower half (sf-hud's
-// gate), each on its own thumb's side, and the keys each scheme needs.
+// gate; Large may reach to 58%), each on its own thumb's side, and the keys each scheme needs.
 const screens = { side: { w: 844, h: 390, safe: { left: 59, right: 59, bottom: 21 } }, 'small side': { w: 667, h: 375, safe: { left: 0, right: 0, bottom: 0 } }, upright: { w: 390, h: 844, safe: { left: 0, right: 0, bottom: 34 } }, 'small upright': { w: 375, h: 667, safe: { left: 0, right: 0, bottom: 0 } } }
 let laid = 0, bad = 0
 for (const [name, s] of Object.entries(screens)) {
@@ -79,7 +79,7 @@ for (const [name, s] of Object.entries(screens)) {
     const acts = new Set(rs.map((k) => k.act)), drive = hand, steerSide = hand === 'right' ? 'left' : 'right'
     const need = ['brake', 'drift', 'boost', ...(gas === 'pedals' ? ['gas'] : []), ...(steer === 'arrows' ? ['left', 'right'] : []), ...(steer === 'wheel' ? ['wheel'] : [])]
     const sides = rs.every((k) => ['left', 'right', 'wheel', 'tilt-on'].includes(k.act) || (k.act === 'brake' && steer === 'tilt' && gas === 'pedals') ? k.side === steerSide : k.side === drive)
-    const high = rs.filter((k) => k.side === drive).filter((k) => k.top <= s.h / 2)
+    const high = rs.filter((k) => k.side === drive).filter((k) => k.top <= s.h * (size > 1 ? 0.42 : 0.5))
     const ok = !high.length && !small.length && !out.length && !meet.length && apart >= 24 && need.every((a) => acts.has(a)) && sides && (gas === 'auto') === !acts.has('gas')
     if (!ok) bad++
     if (!ok) check(false, `${tag}: ${JSON.stringify({ high: high.map((k) => k.act), small: small.map((k) => k.act), out: out.map((k) => k.act), meet, apart, missing: need.filter((a) => !acts.has(a)), sides })}`)
@@ -87,6 +87,11 @@ for (const [name, s] of Object.entries(screens)) {
   }
 }
 check(bad === 0, `${laid} layouts (4 steerings, 2 gases, 2 hands, 3 sizes, 4 screens, and tilt waiting): keys 44 px or more, in the safe area, none on another, the two thumbs 24 px or more apart, the driving thumb's in the lower half`)
+
+// Each size is its own size on every screen (on a phone on its side the height once made Large the same as Medium).
+const gasOf = (size, sc) => layout({ ...DEFAULTS, size }, 'arrows', { width: sc.w, height: sc.h, portrait: sc.h > sc.w }).find((k) => k.act === 'gas').h
+const grows = Object.entries(screens).map(([name, sc]) => [name, gasOf(0.85, sc), gasOf(1, sc), gasOf(1.2, sc)])
+check(grows.every(([, a, b, c]) => a < b && b < c), `Small, Medium and Large Gas pedals grow on every screen (${grows.map(([n, a, b, c]) => `${n} ${a}/${b}/${c}`).join(', ')})`)
 
 if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
 console.log('drive-touch: ok')

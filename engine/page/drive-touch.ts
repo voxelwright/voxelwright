@@ -153,8 +153,10 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
   const room = view.width - 28 - (view.portrait ? 0 : 118) - 24
   let k = s.size * (view.portrait ? 0.84 : 1)
   if (widths(k) > room) k *= room / widths(k)
-  // And low: the driving thumb's cluster (main pedal, a gap, boost) within the lower half, allowing 35 px of safe area and margin.
-  const tall = (108 + 10 + 56) * k, low = view.height / 2 - 35 - 4
+  // And low: the driving thumb's cluster (main pedal, a gap, boost) within the lower half at Medium, a little lower at
+  // Small and a little higher at Large (or on a short screen the sizes would all be one), allowing 35 px of safe area
+  // and margin.
+  const tall = (108 + 10 + 56) * k, low = view.height * (0.5 + (s.size - 1) * 0.4) - 35 - 4
   if (tall > low) k *= low / tall
   const px = (v: number) => Math.max(44, Math.round(v * k))
   const gap = Math.round(10 * k)
@@ -165,13 +167,16 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
   // boost over the main pedal. With tilt and pedals, brake goes under the steering thumb, which has nothing else to do.
   const mainW = px(80), mainH = px(108), sideW = px(74), smallH = px(56)
   put(s.gas === 'auto' ? 'brake' : 'gas', drive, 0, 0, mainW, mainH)
-  put('boost', drive, 0, mainH + gap, mainW, smallH)
   if (s.gas === 'pedals' && !brakeAcross) {
+    // Four keys, two by two: Boost over Gas, Drift over Brake.
     const brakeH = px(76)
+    put('boost', drive, 0, mainH + gap, mainW, smallH)
     put('brake', drive, mainW + gap, 0, sideW, brakeH)
     put('drift', drive, mainW + gap, brakeH + gap, sideW, smallH)
   } else {
-    put('drift', drive, mainW + gap, 0, sideW, px(64))
+    // Three: Drift as tall as the main pedal beside it, Boost the width of both over them.
+    put('drift', drive, mainW + gap, 0, sideW, mainH)
+    put('boost', drive, 0, mainH + gap, mainW + gap + sideW, smallH)
   }
   // The steering thumb's.
   if (steer === 'arrows') {
@@ -183,7 +188,7 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
     const d = px(150)
     put('wheel', steerSide, 0, 0, d, d)
   } else if (brakeAcross) {
-    put('brake', steerSide, 0, 0, px(92), mainH)
+    put('brake', steerSide, 0, 0, mainW, mainH)
   }
   return out
 }
@@ -200,21 +205,23 @@ const STYLE = /* css */ `
 /* The wheel: a recess the thumb turns, and the cap on its rim where the wheel's top is. */
 [data-panel="living"] .dt-cluster .dt-wheel { border-radius: 50%; opacity: var(--dt-alpha, 0.82); }
 [data-panel="living"] .dt-cluster .dt-wheel[aria-pressed="true"] { opacity: 1; }
-html [data-panel="living"] .dt-cluster .dt-wheel .cap { position: absolute; left: 50%; top: 50%; inline-size: 26%; block-size: 26%; translate: -50% -50%; min-inline-size: 0 !important; min-block-size: 0 !important; padding: 0; pointer-events: none !important; }
 /* Where the slide comes, before the thumb has found it this time in the car. */
-[data-panel="living"] .dt-cluster .dt-ghost { pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px; inline-size: 168px; block-size: 52px; border-radius: 26px; border: 1.5px dashed rgba(232, 236, 241, 0.34); color: rgba(242, 245, 249, 0.72); font: 600 11px/1 var(--hud-font, -apple-system, system-ui, sans-serif); letter-spacing: 0.06em; text-transform: uppercase; transition: opacity 0.3s ease-out; }
+[data-panel="living"] .dt-cluster .dt-ghost { pointer-events: none; display: flex; align-items: center; justify-content: center; gap: 8px; inline-size: 168px; block-size: 52px; border-radius: 26px; border: 1.5px dashed rgba(232, 236, 241, 0.5); background: rgba(12, 16, 22, 0.42); color: rgba(242, 245, 249, 0.9); font: 600 11px/1 var(--hud-font, -apple-system, system-ui, sans-serif); letter-spacing: 0.06em; text-transform: uppercase; transition: opacity 0.3s ease-out; }
 html.thumb-down [data-panel="living"] .dt-cluster .dt-ghost { opacity: 0; }
 @media (pointer: fine) { [data-panel="living"] .dt-cluster { display: none; } }
 
 /* The Controls sheet. */
-#drive-controls { box-sizing: border-box; inline-size: min(560px, calc(100vw - 24px)); max-block-size: calc(100dvh - 24px); margin: auto; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; background: rgba(14, 18, 26, 0.9); color: #f2f5f9; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font: 400 13px/1.35 -apple-system, system-ui, sans-serif; overflow: auto; overscroll-behavior: contain; }
-#drive-controls::backdrop { background: rgba(4, 6, 10, 0.18); }
+#drive-controls { box-sizing: border-box; inline-size: min(560px, calc(100vw - 24px)); max-block-size: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px)); margin: 12px auto auto; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; background: rgba(14, 18, 26, 0.9); color: #f2f5f9; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font: 400 13px/1.35 -apple-system, system-ui, sans-serif; overflow: auto; overscroll-behavior: contain; }
+#drive-controls::backdrop { background: rgba(4, 6, 10, 0.42); }
+/* A fade at the foot while there is more to scroll to. */
+#drive-controls .dc-body::after { content: ''; position: sticky; bottom: -14px; grid-column: 1 / -1; block-size: 18px; margin-block-start: -18px; background: linear-gradient(transparent, rgba(14, 18, 26, 0.95)); pointer-events: none; }
 #drive-controls[open] { display: grid; }
 #drive-controls * { box-sizing: border-box; }
 #drive-controls [hidden] { display: none !important; }
 #drive-controls .dc-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 16px; background: rgba(14, 18, 26, 0.96); border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 #drive-controls h2 { margin: 0 auto 0 0; font: 700 15px/1.1 -apple-system, system-ui, sans-serif; letter-spacing: -0.01em; }
 #drive-controls .dc-head button { min-inline-size: 44px; block-size: 44px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: inherit; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
+#drive-controls .dc-head .dc-reset { border-color: transparent; background: none; color: rgba(232, 236, 241, 0.7); font-weight: 500; }
 #drive-controls .dc-head .dc-done { background: rgba(56, 120, 255, 0.34); border-color: rgba(120, 170, 255, 0.85); }
 #drive-controls .dc-body { display: grid; gap: 10px; padding: 10px 16px 14px; }
 #drive-controls .dc-row { display: grid; gap: 6px; }
@@ -225,6 +232,8 @@ html.thumb-down [data-panel="living"] .dt-cluster .dt-ghost { opacity: 0; }
 #drive-controls .dc-seg input { position: absolute; opacity: 0; pointer-events: none; }
 #drive-controls .dc-seg label:has(input:checked) { background: rgba(56, 120, 255, 0.28); border-color: rgba(120, 170, 255, 0.85); }
 #drive-controls .dc-seg label:has(input:disabled) { opacity: 0.4; }
+#drive-controls .dc-seg label[data-warn] { border-color: #ffc46b; }
+#drive-controls .dc-seg label[data-warn] small { color: #ffc46b; }
 #drive-controls .dc-seg label:has(input:focus-visible) { outline: 2px solid #8fb6ff; outline-offset: 2px; }
 #drive-controls input[type="range"] { inline-size: 100%; block-size: 44px; margin: -6px 0; accent-color: #5b8cff; }
 #drive-controls .dc-note { margin: 0; min-block-size: 1.35em; color: rgba(232, 236, 241, 0.74); font-size: 12px; }
@@ -398,14 +407,8 @@ export function driveTouch(o: {
     const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2
     return { a: Math.atan2(x - cx, cy - y), far: Math.hypot(x - cx, y - cy) / (r.width / 2) }
   }
-  const drawWheel = () => {
-    const el = keyEl.get('wheel')
-    const cap = el?.querySelector<HTMLElement>('.cap')
-    if (!el || !cap) return
-    // (From its laid-out size, which is known before the page has laid it out: the cap rides the rim's middle.)
-    const r = (parseFloat(el.style.inlineSize) || el.getBoundingClientRect().width) * 0.39, a = wheelTurnNow * Math.PI / 180
-    cap.style.translate = `calc(-50% + ${(Math.sin(a) * r).toFixed(1)}px) calc(-50% - ${(Math.cos(a) * r).toFixed(1)}px)`
-  }
+  // The wheel is turned as a whole, its lit top stripe showing where its top is.
+  const drawWheel = () => { const el = keyEl.get('wheel'); if (el) el.style.rotate = `${wheelTurnNow.toFixed(1)}deg` }
 
   const build = (): HTMLElement[] => {
     keyEl.clear()
@@ -423,7 +426,6 @@ export function driveTouch(o: {
         el.setAttribute('aria-label', 'Steering wheel')
         el.setAttribute('aria-valuemin', '-1'); el.setAttribute('aria-valuemax', '1'); el.setAttribute('aria-valuenow', '0')
         el.setAttribute('aria-pressed', 'false')
-        el.innerHTML = '<span class="vx-button cap" data-vx-stick-cap tabindex="-1"></span>'
       } else {
         const [label, aria] = LABELS[p.act] ?? [p.act, p.act]
         el = key(p.act, label)
@@ -441,7 +443,7 @@ export function driveTouch(o: {
     if (steer === 'slide') {
       const ghost = Object.assign(document.createElement('div'), { className: 'dt-ghost', textContent: '‹  slide to steer  ›' })
       const side = settings.hand === 'right' ? 'left' : 'right'
-      ghost.style.bottom = 'calc(env(safe-area-inset-bottom, 0px) + 40px)'
+      ghost.style.bottom = 'calc(env(safe-area-inset-bottom, 0px) + 30px)'
       ghost.style[side] = `calc(env(safe-area-inset-${side}, 0px) + 28px)`
       c.append(ghost)
     }
@@ -543,6 +545,11 @@ export function driveTouch(o: {
     note.textContent = words
     note.dataset.tone = tone
     sheet.querySelector<HTMLButtonElement>('.dc-center')!.disabled = tilt !== 'live'
+    // Tilt chosen but not to be had: said on its choice too, where the arrows are seen to steer instead.
+    const tiltOption = sheet.querySelector<HTMLInputElement>('input[name="dc-steer"][value="tilt"]')!.closest('label')!
+    const off = settings.steer === 'tilt' && (tilt === 'denied' || tilt === 'none' || tilt === 'insecure')
+    tiltOption.toggleAttribute('data-warn', off)
+    tiltOption.querySelector('small')!.textContent = off ? 'arrows for now' : 'turn the phone'
   }
   const makeSheet = () => {
     const d = document.createElement('dialog')
@@ -553,7 +560,7 @@ export function driveTouch(o: {
 ${seg('steer', 'Steer with', [['arrows', 'Arrows', 'left & right'], ['wheel', 'Wheel', 'turn it'], ['slide', 'Slide', 'thumb across'], ['tilt', 'Tilt', 'turn the phone']])}
 <div class="dc-row dc-tilt wide"><p class="dc-note" role="status"></p><div class="dc-acts"><button class="dc-center" type="button">Center tilt</button></div></div>
 ${seg('gas', 'Gas', [['pedals', 'Pedals', 'gas & brake'], ['auto', 'Auto', 'brake only']])}
-${seg('hand', 'Pedals on the', [['right', 'Right'], ['left', 'Left']])}
+${seg('hand', 'Driving keys on the', [['right', 'Right'], ['left', 'Left']])}
 ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']])}
 <div class="dc-row"><label class="dc-name" for="dc-opacity">Key opacity</label><input id="dc-opacity" name="dc-opacity" type="range" min="30" max="100" step="5"></div>
 <div class="dc-row dc-sens"><label class="dc-name" for="dc-sens">Steering sensitivity</label><input id="dc-sens" name="dc-sens" type="range" min="50" max="200" step="5"></div>
@@ -652,9 +659,9 @@ ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']]
     },
     note() {
       if (!shown) return ''
-      if (settings.steer === 'tilt' && tilt === 'ask') return 'Touch to steer by tilt'
+      if (settings.steer === 'tilt' && tilt === 'ask') return 'Tap for tilt'
       if (settings.steer === 'tilt' && tilt === 'waiting') return 'Tilt: waiting'
-      if (settings.gas === 'auto' && !autoGo) return 'Auto gas · touch to go'
+      if (settings.gas === 'auto' && !autoGo) return 'Tap to drive'
       return ''
     },
     get tilt() { return tilt },
