@@ -387,57 +387,10 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     if !p.fixtures.is_empty() {
-        // Snap stop-sign fixtures (r == 5 cm vertical posts + octagon bars) that landed on asphalt onto the nearest
-        // surveyed pavement within 7.2 m, or drop stray mid-road ones with no adjacent pavement.
+        // Relocate or drop standing street fixtures (street lamps, stop signs, hydrants, utility poles, sensed poles)
+        // whose surveyed or OSM base landed on asphalt (ROAD).
         if p.tstep > 0 {
-            let mut moved: Vec<(i32, i32, Option<(i32, i32, i32)>)> = Vec::new();
-            for r in &p.fixtures {
-                if r[6] != 5 || r[0] != r[3] || r[2] != r[5] || (r[4] - r[1]).abs() < 20 {
-                    continue;
-                }
-                if p.surface(r[0], r[2]).0 & 7 != ROAD {
-                    continue;
-                }
-                let mut dest = None;
-                'search: for rad in (4..=72).step_by(4) {
-                    for a in 0..16 {
-                        let ang = a as f32 * (std::f32::consts::TAU / 16.0);
-                        let nx = r[0] + (ang.cos() * rad as f32).round() as i32;
-                        let nz = r[2] + (ang.sin() * rad as f32).round() as i32;
-                        if p.surface(nx, nz).0 & 7 == PAVEMENT {
-                            let sx = nx + (ang.cos() * 4.0).round() as i32;
-                            let sz = nz + (ang.sin() * 4.0).round() as i32;
-                            let (fx, fz) = if p.surface(sx, sz).0 & 7 == PAVEMENT { (sx, sz) } else { (nx, nz) };
-                            let dy = p.ground(fx, fz) - r[1];
-                            dest = Some((fx - r[0], dy, fz - r[2]));
-                            break 'search;
-                        }
-                    }
-                }
-                moved.push((r[0], r[2], dest));
-            }
-            if !moved.is_empty() {
-                p.fixtures.retain_mut(|r| {
-                    if r[6] != 5 {
-                        return true;
-                    }
-                    let mx = (r[0] + r[3]) / 2;
-                    let mz = (r[2] + r[5]) / 2;
-                    if let Some((_, _, shift)) = moved.iter().find(|&&(px, pz, _)| (mx - px).abs() <= 4 && (mz - pz).abs() <= 4) {
-                        match shift {
-                            Some((dx, dy, dz)) => {
-                                r[0] += *dx; r[3] += *dx;
-                                r[1] += *dy; r[4] += *dy;
-                                r[2] += *dz; r[5] += *dz;
-                                true
-                            }
-                            None => false,
-                        }
-                    } else {
-                        true
-                    }
-                });
-            }
+            p.clean_road_fixtures();
         }
         p.fixtures_near = vec![Vec::new(); (p.pw * p.pw) as usize];
         for (i, r) in p.fixtures.iter().enumerate() {
@@ -718,6 +671,229 @@ impl Pack {
         let patch = (((z - self.gz0) >> PATCH).clamp(0, self.pw - 1) * self.pw + ((x - self.gx0) >> PATCH).clamp(0, self.pw - 1)) as usize;
         let far = |t: &[i32; 4]| (x - t[0]) * (x - t[0]) + (z - t[1]) * (z - t[1]);
         self.stems[patch].iter().map(|&i| self.trunks[i as usize]).min_by_key(far).filter(|t| far(t) <= REACH * REACH).map(|t| ((far(&t) as f32).sqrt(), t))
+    }
+
+    /// Whether `(x, z)` lies inside a surveyed building footprint or within `clear` cells of its exterior wall.
+    fn in_building(&self, x: i32, z: i32, clear: f32) -> bool {
+        self.building(x, z).is_some_and(|(_, q)| q.inside || q.far < clear)
+    }
+
+    /// Nearest off-road spot at street grade, clear of buildings, for relocating a road-standing fixture.
+    /// Prefers PAVEMENT (up to 7.2 m); falls back to roadside GRASS/YARD (up to 4.8 m) for park roads without
+    /// sidewalks. Insets 40 cm behind the edge so the mast clears the carriageway.
+    fn off_road_spot(&self, ox: i32, oz: i32, base_y: i32) -> Option<(i32, i32, i32)> {
+        // Exact 16-compass unit directions (no trig calls so wasm and native stay bit-identical).
+        const DIRS: [(f32, f32); 16] = [
+            (1.0, 0.0), (0.9238795, 0.38268343), (0.70710677, 0.70710677), (0.38268343, 0.9238795),
+            (0.0, 1.0), (-0.38268343, 0.9238795), (-0.70710677, 0.70710677), (-0.9238795, 0.38268343),
+            (-1.0, 0.0), (-0.9238795, -0.38268343), (-0.70710677, -0.70710677), (-0.38268343, -0.9238795),
+            (0.0, -1.0), (0.38268343, -0.9238795), (0.70710677, -0.70710677), (0.9238795, -0.38268343),
+        ];
+        let valid = |x: i32, z: i32, want_pav: bool| -> bool {
+            if self.cell(x, z).is_none() {
+                return false;
+            }
+            let s = self.surface(x, z).0 & 7;
+            let ok_surf = if want_pav { s == PAVEMENT } else { s == GRASS_HERE || s == YARD };
+            ok_surf && (self.ground(x, z) - base_y).abs() <= 15 && !self.in_building(x, z, 4.0)
+        };
+        let mut best_pav: Option<(i32, i32, i32, f32, f32)> = None;
+        let mut best_verge: Option<(i32, i32, i32, f32, f32)> = None;
+        for rad in (4..=72).step_by(4) {
+            for &(ux, uz) in &DIRS {
+                let nx = ox + (ux * rad as f32).round() as i32;
+                let nz = oz + (uz * rad as f32).round() as i32;
+                if best_pav.is_none() && valid(nx, nz, true) {
+                    best_pav = Some((rad, nx, nz, ux, uz));
+                } else if best_verge.is_none() && rad <= 48 && valid(nx, nz, false) {
+                    best_verge = Some((rad, nx, nz, ux, uz));
+                }
+            }
+            if best_pav.is_some() {
+                break;
+            }
+        }
+        let (nx, nz, ux, uz, want_pav) = match (best_pav, best_verge) {
+            (Some(p), Some(v)) if p.0 <= v.0 + 12 => (p.1, p.2, p.3, p.4, true),
+            (_, Some(v)) => (v.1, v.2, v.3, v.4, false),
+            (Some(p), None) => (p.1, p.2, p.3, p.4, true),
+            (None, None) => return None,
+        };
+        let sx = nx + (ux * 4.0).round() as i32;
+        let sz = nz + (uz * 4.0).round() as i32;
+        let (fx, fz) = if valid(sx, sz, want_pav) { (sx, sz) } else { (nx, nz) };
+        Some((fx, self.ground(fx, fz), fz))
+    }
+
+    /// Relocate or remove standing street fixtures whose surveyed/OSM base landed on asphalt (ROAD).
+    /// Handles street lamps (mast + bracket arm + luminaire head), stop signs (post + octagon bars),
+    /// fire hydrants (body + nozzles + cap), utility poles (mast + crossarm), and sensed poles (mast + span wires).
+    fn clean_road_fixtures(&mut self) {
+        let orig = self.fixtures.clone();
+        let n = orig.len();
+        let mut keep = vec![true; n];
+
+        let is_lamp_mast = |r: &[i32; 8]| {
+            r[0] == r[3] && r[2] == r[5] && r[6] == 12 && material(r[7] as Kind) == STEEL && r[4] - r[1] >= 60
+        };
+        // Track already-off-road lamps so a snapped road lamp never stacks on top of an existing corner lamp.
+        let mut kept_lamps: Vec<(i32, i32)> = orig
+            .iter()
+            .filter(|r| is_lamp_mast(r) && self.surface(r[0], r[2]).0 & 7 != ROAD)
+            .map(|r| (r[0], r[2]))
+            .collect();
+
+        let shift_seg = |seg: &mut [i32; 8], dx: i32, dy: i32, dz: i32| {
+            seg[0] += dx; seg[3] += dx;
+            seg[1] += dy; seg[4] += dy;
+            seg[2] += dz; seg[5] += dz;
+        };
+
+        for (i, r) in orig.iter().enumerate() {
+            if r[0] != r[3] || r[2] != r[5] {
+                continue;
+            }
+            let (ox, oy, oz) = (r[0], r[1], r[2]);
+            let dh = r[4] - r[1];
+            if dh < 6 || self.surface(ox, oz).0 & 7 != ROAD {
+                continue;
+            }
+
+            if is_lamp_mast(r) {
+                // Street lamp: mast (r=12, STEEL) + arm (r=5 from oy+79) + luminaire head (r=12, LAMP from arm tip).
+                let arms: Vec<usize> = (0..n)
+                    .filter(|&j| j != i && orig[j][6] == 5 && orig[j][0] == ox && orig[j][1] == oy + 79 && orig[j][2] == oz)
+                    .collect();
+                let mut heads: Vec<(usize, usize)> = Vec::new();
+                for &j in &arms {
+                    let a = orig[j];
+                    for k in 0..n {
+                        if orig[k][6] == 12 && material(orig[k][7] as Kind) == LAMP
+                            && orig[k][0] == a[3] && orig[k][1] == a[4] && orig[k][2] == a[5]
+                        {
+                            heads.push((j, k));
+                        }
+                    }
+                }
+                let spot = self.off_road_spot(ox, oz, oy).filter(|&(fx, _, fz)| {
+                    !kept_lamps.iter().any(|&(lx, lz)| (lx - fx) * (lx - fx) + (lz - fz) * (lz - fz) <= 25 * 25)
+                });
+                if let Some((fx, fy, fz)) = spot {
+                    kept_lamps.push((fx, fz));
+                    self.fixtures[i] = [fx, fy, fz, fx, fy + dh, fz, r[6], r[7]];
+                    // Re-aim arm and luminaire back over the carriageway instead of into a building behind the sidewalk.
+                    let (vx, vz) = ((ox - fx) as f32, (oz - fz) as f32);
+                    let len = (vx * vx + vz * vz).sqrt().max(1.0);
+                    let (ux, uz) = (vx / len, vz / len);
+                    let (ax2, ay2, az2) = (fx + (13.0 * ux).round() as i32, fy + 85, fz + (13.0 * uz).round() as i32);
+                    let (hx2, hz2) = (fx + (18.0 * ux).round() as i32, fz + (18.0 * uz).round() as i32);
+                    for &j in &arms {
+                        self.fixtures[j] = [fx, fy + 79, fz, ax2, ay2, az2, orig[j][6], orig[j][7]];
+                    }
+                    for &(_, k) in &heads {
+                        self.fixtures[k] = [ax2, ay2, az2, hx2, ay2, hz2, orig[k][6], orig[k][7]];
+                    }
+                } else {
+                    keep[i] = false;
+                    for &j in &arms { keep[j] = false; }
+                    for &(_, k) in &heads { keep[k] = false; }
+                }
+            } else if r[6] == 5 && dh >= 20 {
+                // Stop sign: post (r=5) + horizontal octagon bars (r=5) around its top.
+                let bars: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && orig[j][6] == 5
+                            && (orig[j][0] != orig[j][3] || orig[j][2] != orig[j][5])
+                            && ((orig[j][0] + orig[j][3]) / 2 - ox).abs() <= 4
+                            && ((orig[j][2] + orig[j][5]) / 2 - oz).abs() <= 4
+                            && orig[j][1] >= oy && orig[j][1] <= r[4] + 4
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in bars { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in bars { keep[j] = false; }
+                }
+            } else if r[6] == 15 && dh == 7 {
+                // Fire hydrant: body (r=15, dh=7) + cross nozzles (r=10 at oy+4) + cap (r=12 at oy+7..oy+8).
+                let parts: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && (
+                            (orig[j][6] == 10 && orig[j][1] == oy + 4 && orig[j][4] == oy + 4
+                                && (orig[j][0] + orig[j][3]) / 2 == ox && orig[j][2] == oz && orig[j][5] == oz)
+                            || (orig[j][6] == 12 && orig[j][0] == ox && orig[j][3] == ox
+                                && orig[j][2] == oz && orig[j][5] == oz && orig[j][1] == oy + 7 && orig[j][4] == oy + 8)
+                        )
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in parts { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in parts { keep[j] = false; }
+                }
+            } else if r[6] == 16 && dh >= 60 {
+                // Utility pole (OSM pole / metalPole): mast (r=16, dh=96) + crossarm (r=8 at oy+88).
+                let cross: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && orig[j][6] == 8 && orig[j][1] == oy + 88 && orig[j][4] == oy + 88
+                            && ((orig[j][0] + orig[j][3]) / 2 - ox).abs() <= 1
+                            && ((orig[j][2] + orig[j][5]) / 2 - oz).abs() <= 1
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in cross { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in cross { keep[j] = false; }
+                }
+            } else if r[6] == 14 && material(r[7] as Kind) == WOOD && dh >= 40 {
+                // Sensed pole (r=14, WOOD) + attached overhead span wire endpoints (r=3 at top-4).
+                let attach = (ox, r[4] - 4, oz);
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in 0..n {
+                        if orig[j][6] == 3 {
+                            if (orig[j][0], orig[j][1], orig[j][2]) == attach {
+                                self.fixtures[j][0] += dx;
+                                self.fixtures[j][1] += dy;
+                                self.fixtures[j][2] += dz;
+                            }
+                            if (orig[j][3], orig[j][4], orig[j][5]) == attach {
+                                self.fixtures[j][3] += dx;
+                                self.fixtures[j][4] += dy;
+                                self.fixtures[j][5] += dz;
+                            }
+                        }
+                    }
+                } else {
+                    keep[i] = false;
+                    for j in 0..n {
+                        if orig[j][6] == 3
+                            && ((orig[j][0], orig[j][1], orig[j][2]) == attach
+                                || (orig[j][3], orig[j][4], orig[j][5]) == attach)
+                        {
+                            keep[j] = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut idx = 0usize;
+        self.fixtures.retain(|_| {
+            let k = keep[idx];
+            idx += 1;
+            k
+        });
     }
 }
 
@@ -1770,6 +1946,117 @@ mod tests {
         let packs = [pack];
         let c = column(&packs, 285, 285, 1);
         assert!(matches!(c.what, What::Open), "trunkless tall canopy should not float");
+    }
+
+    #[test]
+    fn road_standing_lamps_hydrants_and_poles_are_snapped_or_dropped_cleanly() {
+        let mut bytes = Vec::new();
+        let (gw, tw) = (5i32, 32i32);
+        // Header: gstep=80, gw=5 (320 cells), tstep=10, tw=32 (320 cells), 1 building, 4 verts, 0 trunks
+        let head = [0x3159_4142i32, 1, 0, 0, 80, gw, 0, 0, 10, tw, 0, 0, 1, 4, 0, 0];
+        for w in head { bytes.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { bytes.extend(100i16.to_le_bytes()); }
+        let top = vec![100i16; (tw * tw) as usize];
+        // x < 220 is ROAD; x >= 220 is PAVEMENT (except z < 80, x >= 220 is GRASS_HERE for park road test).
+        let mut cls = vec![ROAD; (tw * tw) as usize];
+        for j in 0..tw {
+            for i in 22..tw {
+                cls[(j * tw + i) as usize] = if j < 8 { GRASS_HERE } else { PAVEMENT };
+            }
+        }
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![0u8; (tw * tw) as usize]);
+        // Building sitting on pavement at x in [220, 290], z in [250, 310]: fixtures must not snap inside it.
+        for w in [0i32, 4, kind(BRICK, OWN) as i32, kind(CONCRETE, OWN) as i32, 30, 100] {
+            bytes.extend(w.to_le_bytes());
+        }
+        for v in [[220i32, 250, 3], [290, 250, 3], [290, 310, 3], [220, 310, 7]] {
+            for w in v { bytes.extend(w.to_le_bytes()); }
+        }
+
+        let steel = kind(STEEL, grey(9)) as i32;
+        let dark = kind(STEEL, grey(14)) as i32;
+        let wood = kind(WOOD, colour(3, 0)) as i32;
+        let white = kind(CONCRETE, grey(1)) as i32;
+        let lamp = kind(LAMP, colour(3, 0)) as i32;
+
+        let fixtures: Vec<[i32; 8]> = vec![
+            // 1. Road-standing lamp at (185, 100, 140), 3.5 m west of pavement -> snaps to x >= 220, arm aims west (-x).
+            [185, 100, 140, 185, 183, 140, 12, steel],
+            [185, 179, 140, 198, 185, 140, 5, steel],  // originally aimed east (into sidewalk!)
+            [198, 185, 140, 203, 185, 140, 12, lamp],
+            // 2. Mid-intersection lamp at (50, 100, 140), 17 m from pavement -> mast, arm, head all dropped.
+            [50, 100, 140, 50, 183, 140, 12, steel],
+            [50, 179, 140, 50, 185, 153, 5, steel],
+            [50, 185, 153, 50, 185, 158, 12, lamp],
+            // 3. Existing sidewalk lamp at (224, 100, 200) + duplicate road lamp at (195, 100, 200) -> road one dropped.
+            [224, 100, 200, 224, 183, 200, 12, steel],
+            [224, 179, 200, 211, 185, 200, 5, steel],
+            [211, 185, 200, 206, 185, 200, 12, lamp],
+            [195, 100, 200, 195, 183, 200, 12, steel],
+            [195, 179, 200, 182, 185, 200, 5, steel],
+            [182, 185, 200, 177, 185, 200, 12, lamp],
+            // 4. Fire hydrant on road at (200, 100, 100) -> body, nozzles, cap all snap to pavement.
+            [200, 100, 100, 200, 107, 100, 15, white],
+            [198, 104, 100, 202, 104, 100, 10, white],
+            [200, 107, 100, 200, 108, 100, 12, white],
+            // 5. Utility pole on road at (205, 100, 170) -> mast + crossarm snap to pavement.
+            [205, 100, 170, 205, 196, 170, 16, wood],
+            [205, 188, 162, 205, 188, 178, 8, wood],
+            // 6. Sensed pole on road at (205, 100, 225) + span wire -> pole snaps & wire endpoint follows it.
+            [205, 100, 225, 205, 190, 225, 14, wood],
+            [205, 186, 225, 260, 180, 225, 3, dark],
+            // 7. Park-road lamp at (200, 100, 40), 2 m west of GRASS_HERE -> snaps onto GRASS_HERE.
+            [200, 100, 40, 200, 183, 40, 12, steel],
+            [200, 179, 40, 213, 185, 40, 5, steel],
+            [213, 185, 40, 218, 185, 40, 12, lamp],
+            // 8. Road lamp right beside the building wall at (205, 100, 280) -> must NOT snap inside building [220..290, 250..310].
+            [205, 100, 280, 205, 183, 280, 12, steel],
+            [205, 179, 280, 192, 185, 280, 5, steel],
+            [192, 185, 280, 187, 185, 280, 12, lamp],
+        ];
+        bytes.extend(b"SFST");
+        bytes.extend((fixtures.len() as u32).to_le_bytes());
+        for f in &fixtures {
+            for w in f { bytes.extend(w.to_le_bytes()); }
+        }
+
+        let pack = read(&bytes).expect("valid pack");
+        // No standing vertical mast/body may remain on ROAD or inside the building.
+        let masts: Vec<_> = pack.fixtures.iter()
+            .filter(|r| r[0] == r[3] && r[2] == r[5] && (r[4] - r[1]) >= 6)
+            .collect();
+        for m in &masts {
+            assert_ne!(pack.surface(m[0], m[2]).0 & 7, ROAD, "fixture mast stayed on ROAD: {m:?}");
+            assert!(!pack.in_building(m[0], m[2], 0.0), "fixture mast snapped into building: {m:?}");
+        }
+        // Kept street lamps: #1 (snapped to pavement), #3a (already on pavement), #7 (snapped to grass).
+        // Dropped: #2 (mid-road), #3b (duplicate), #8 (blocked by building within 4 m).
+        // Wait: #8 at (205, 280) is 3.5 m north of z=246 pavement outside the building, so check count is 3 or 4 and none inside building.
+        let lamp_masts: Vec<_> = masts.iter().filter(|r| r[6] == 12 && r[4] - r[1] == 83).copied().collect();
+        assert!(lamp_masts.len() >= 3 && lamp_masts.len() <= 4, "unexpected lamp mast count: {lamp_masts:?}");
+        // Every luminaire head must correspond to a kept lamp mast (zero orphaned floating lamp heads).
+        let lamp_heads: Vec<_> = pack.fixtures.iter().filter(|r| r[6] == 12 && material(r[7] as Kind) == LAMP).collect();
+        assert_eq!(lamp_heads.len(), lamp_masts.len(), "lamp head/mast mismatch: heads={lamp_heads:?} masts={lamp_masts:?}");
+        // Lamp #1 snapped to pavement near z=140 and its arm now points west (-x) back over the road.
+        let l1 = lamp_masts.iter().find(|r| (r[2] - 140).abs() <= 4).expect("lamp #1 snapped");
+        assert!(l1[0] >= 220);
+        let a1 = pack.fixtures.iter().find(|r| r[6] == 5 && r[0] == l1[0] && r[1] == l1[1] + 79 && r[2] == l1[2]).expect("lamp #1 arm");
+        assert!(a1[3] < a1[0], "snapped lamp arm should reach west over carriageway: {a1:?}");
+        // Hydrant #4: all 3 segments moved off ROAD onto pavement.
+        let h4 = masts.iter().find(|r| r[6] == 15).expect("hydrant #4 snapped");
+        assert!(h4[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 10 && (r[0] + r[3]) / 2 == h4[0] && r[2] == h4[2]));
+        assert!(pack.fixtures.iter().any(|r| r[6] == 12 && r[0] == h4[0] && r[2] == h4[2] && r[4] - r[1] == 1));
+        // Utility pole #5: mast + crossarm moved off ROAD onto pavement.
+        let p5 = masts.iter().find(|r| r[6] == 16).expect("pole #5 snapped");
+        assert!(p5[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 8 && ((r[0] + r[3]) / 2 - p5[0]).abs() <= 1 && ((r[2] + r[5]) / 2 - p5[2]).abs() <= 1));
+        // Sensed pole #6: mast moved off ROAD and span wire endpoint followed it.
+        let s6 = masts.iter().find(|r| r[6] == 14).expect("sensed pole #6 snapped");
+        assert!(s6[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 3 && r[0] == s6[0] && r[1] == s6[4] - 4 && r[2] == s6[2]));
     }
 }
 
