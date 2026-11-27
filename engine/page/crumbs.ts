@@ -25,8 +25,8 @@ const FAR = 100000.0;
   if (axis == 0u) { p = vec3f(side * 0.5, corner.x, corner.y * side); n = vec3f(side, 0.0, 0.0); }
   else if (axis == 1u) { p = vec3f(corner.x * side, side * 0.5, corner.y); n = vec3f(0.0, side, 0.0); }
   else { p = vec3f(corner.x, corner.y * side, side * 0.5); n = vec3f(0.0, 0.0, side); }
-  // Small crash shards (edge < 0.48) are thin tumbling chips/splinters that catch the sun (#62).
-  let shard = step(at.w, 0.48);
+  // Crash fragments carry a spin angle. Ordinary and carried crumbs use a negative sentinel.
+  let shard = step(0.0, colour.a);
   if (shard > 0.5) {
     p = vec3f(p.x * 1.45, p.y * 0.24, p.z * 0.95);
     let a = colour.a;
@@ -63,7 +63,7 @@ const FAR = 100000.0;
 export interface Crumbs {
   /** Throws `count` crumbs of one colour (linear red, green, blue) out of a ball at `at` (finest cells, the world's), `radius` cells across. */
   /** `lasts` is how many seconds they are there for (a few, unless said); `fast` how hard they are thrown, 1 as a blast throws. */
-  burst(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number], edge: number, lasts?: number, fast?: number): void
+  burst(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number], edge: number, lasts?: number, fast?: number, shard?: boolean): void
   /** Moves them `dt` seconds on. `ground` says how high the land is at a column. */
   step(dt: number, ground: (x: number, z: number) => number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
@@ -99,7 +99,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
     carried,
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() { return live },
-    burst(at, radius, count, colour, size, lasts = 2.5, fast = 1) {
+    burst(at, radius, count, colour, size, lasts = 2.5, fast = 1, shard = false) {
       for (let k = 0; k < count; k++) {
         const i = next++ % MOST
         // Somewhere in the ball, thrown outwards and up.
@@ -110,7 +110,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         v[i * 3] = dx * speed; v[i * 3 + 1] = dy * speed + (20 + Math.random() * 30) * fast; v[i * 3 + 2] = dz * speed
         life[i] = lasts * (0.65 + Math.random() * 0.7)
         edge[i] = size * (0.6 + Math.random() * 0.8)
-        spin[i] = Math.random() * 6.283
+        spin[i] = shard ? Math.random() * 2 * Math.PI : -1
         const shade = 0.75 + Math.random() * 0.4
         tone[i * 3] = colour[0] * shade; tone[i * 3 + 1] = colour[1] * shade; tone[i * 3 + 2] = colour[2] * shade
       }
@@ -123,13 +123,13 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         live++
         v[i * 3 + 1] -= 98 * dt
         for (let a = 0; a < 3; a++) p[i * 3 + a] += v[i * 3 + a] * dt
-        const speed = Math.hypot(v[i * 3], v[i * 3 + 1], v[i * 3 + 2])
-        if (speed > 2) spin[i] += (6 + speed * 0.14) * dt
-        const floor = ground(p[i * 3], p[i * 3 + 2]) + 1 + edge[i] * (edge[i] < 0.48 ? 0.14 : 0.5)
+        const floor = ground(p[i * 3], p[i * 3 + 2]) + 1 + edge[i] * (spin[i] >= 0 ? 0.14 : 0.5)
         if (p[i * 3 + 1] < floor) {
           p[i * 3 + 1] = floor
           v[i * 3 + 1] = Math.abs(v[i * 3 + 1]) * 0.25
           v[i * 3] *= 0.5; v[i * 3 + 2] *= 0.5
+        } else if (spin[i] >= 0) {
+          spin[i] += dt * (6 + 0.14 * Math.abs(v[i * 3 + 1]))
         }
       }
     },
@@ -141,7 +141,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         if (n >= MOST) return
         const o = n++ * EACH
         packed[o] = x - anchor[0]; packed[o + 1] = y - anchor[1]; packed[o + 2] = z - anchor[2]; packed[o + 3] = size
-        packed[o + 4] = r; packed[o + 5] = g; packed[o + 6] = b; packed[o + 7] = 1
+        packed[o + 4] = r; packed[o + 5] = g; packed[o + 6] = b; packed[o + 7] = -1
       })
       if (!n && !live) return
       for (let i = 0; i < MOST && n < MOST; i++) {

@@ -114,19 +114,7 @@ fn unfold(word: u32) -> vec3f {
   }
   // Bent by its dents (#37, #62; at once back for a piece never struck). Where the cell is, for its paint and its lamps,
   // stays where it was made: a bent panel keeps its own paint.
-  var bent = deformPoint(p, lit, u.deform);
-  // Physical 3D hood tent-buckle (#62): when the front hood takes crash damage, the crumpled sheet metal
-  // buckles visibly upward along the bent crease ridge (strictly inside the hood band and dent support, so
-  // wheels, roof, windshield and cabin stay untouched while both street and seat views see a raised hood fold).
-  if (u.deform.status.x >= 0.5 && u.deform.status.z > 0.12 && bent.crease > 0.01 && u.midY > 1.0) {
-    let hoodBand = smoothstep(u.midY * 0.78, u.midY * 1.04, p.y) * (1.0 - smoothstep(u.midY * 1.24, u.midY * 1.40, p.y));
-    let hoodLift = hoodBand * bent.crease * clamp(u.deform.status.z * 1.85, 0.0, 1.0);
-    if (hoodLift > 0.001) {
-      bent.pos.y += hoodLift * 6.5;
-      let peakSign = select(-1.0, 1.0, p.z > u.midZ);
-      bent.norm = normalize(bent.norm + vec3f(0.26 * hoodLift, 0.0, peakSign * 0.30 * hoodLift));
-    }
-  }
+  let bent = deformPoint(p, lit, u.deform);
   let world = u.pos + turned * ((bent.pos - u.com) * u.cell) - u.eye;
   let d = dot(world, u.forward);
   out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
@@ -275,84 +263,28 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var albedo: vec3f;
   if (polished && soft) { albedo = factoryPaint(in.kind, in.at - in.n * 0.5); }
   else { albedo = paint(in.kind, vec3i(floor(inside)) + u.cells, in.n, 1.0, fract(inside), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022)); }
-  var n = select(in.facing, litBy(in, rd), soft);
-  // Where it is dented (#37, #62): broken dark lamp recesses on struck headlights/taillights,
-  // crisp sheet-metal buckle folds that kink clearcoat highlights (not dark smudges!), and tight
-  // directional scrapes revealing gleaming brushed bare steel along the raised fold edges.
+  let n = select(in.facing, litBy(in, rd), soft);
   var rough = m.rough;
-  var open = in.open;
+  let open = in.open;
   var coat = 1.0;
-  var bareMetal = 0.0;
   var brokenLamp = 0.0;
-  if (in.hasSmooth != 0u && (in.wear.x > 0.005 || in.wear.y > 0.005)) {
+  if (in.hasSmooth != 0u && in.wear.x > 0.001) {
     if (stuff == 15u) {
-      // Struck headlight or taillight: only break a lamp directly inside the crushed corner, leaving
-      // untouched opposite lamps intact.
-      brokenLamp = smoothstep(0.42, 0.72, in.wear.x);
-      let rimSpark = smoothstep(0.36, 0.54, in.wear.x) * (1.0 - smoothstep(0.58, 0.76, in.wear.x));
-      albedo = mix(albedo, vec3f(0.025, 0.028, 0.034) + vec3f(0.07) * rimSpark, brokenLamp);
+      brokenLamp = smoothstep(0.32, 0.64, in.wear.x);
+      albedo = mix(albedo, vec3f(0.026, 0.029, 0.034), brokenLamp);
       rough = mix(rough, 0.68, brokenLamp);
     } else if (polished) {
-      // Only chip/scrape painted body panels — leave dark matte wheel-arch liners, grilles and black trim intact!
-      let viewDist = length(in.seen);
-      let turned = mat3x3f(u.c0, u.c1, u.c2);
-      var bestW = -1.0;
-      var bestIdx = 0u;
-      let count = min(u32(u.deform.status.x), 6u);
-      for (var i = 0u; i < count; i++) {
-        let z = u.deform.posR[i];
-        if (z.w <= 0.0001) { continue; }
-        let w = 1.0 - length(in.at - z.xyz) / z.w;
-        if (w > bestW) { bestW = w; bestIdx = i; }
-      }
-      let crushDir = u.deform.dirD[bestIdx].xyz;
-      let dLen = length(crushDir);
-      let impact = select(vec3f(1.0, 0.0, 0.0), crushDir / dLen, dLen > 0.001);
-      let upRef = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(impact.y) > 0.85);
-      let t1 = normalize(cross(upRef, impact));
-      let t2 = cross(impact, t1);
-      let rel = (in.at - u.deform.posR[bestIdx].xyz) * u.cell;
-      let rt1 = dot(rel, t1);
-      let rt2 = dot(rel, t2);
-      let rimp = dot(rel, impact);
-      // Dominant stamped sheet-metal V-fold creases centered at the contact scar: sharp normal bends
-      // that snap sky/road clearcoat reflections across the fold (shows dents via bent highlights, NEVER dark soot blotches).
-      let nSmooth = normalize(in.lit);
-      let frontness = smoothstep(0.05, 0.16, dot(n, -rd));
-      let creaseFade = (1.0 - smoothstep(65.0, 180.0, viewDist)) * frontness;
-      var ridgeBoost = 0.0;
-      if (soft && creaseFade > 0.01) {
-        let warp = (deformNoise(vec3f(rt1 * 0.15, rt2 * 0.20, rimp * 0.18)) - 0.5) * 1.2;
-        let c1 = rt2 * 0.80 + rt1 * 0.45 + warp;
-        let c2 = rt1 * 0.72 - rt2 * 0.56 - warp * 0.45;
-        let s1 = sin(c1 * 0.78);
-        let s2 = sin(c2 * 0.90);
-        let slope1 = tanh(s1 * 4.8);
-        let slope2 = tanh(s2 * 3.4);
-        let foldAmp = clamp(in.wear.y * 1.55 + in.wear.x * 0.80, 0.0, 1.0) * 0.76 * creaseFade;
-        let foldDir1 = normalize(turned * (t2 * 0.80 + t1 * 0.45));
-        let foldDir2 = normalize(turned * (t1 * 0.72 - t2 * 0.56));
-        let cand = normalize(n + foldDir1 * (slope1 * foldAmp) + foldDir2 * (slope2 * foldAmp * 0.48));
-        if (dot(cand, -rd) > 0.05) { n = cand; }
-        // Narrow fold crest boost for edge-chipped bare steel, with only minimal AO (never dark dirt smudges!).
-        let kinkLine = 1.0 - smoothstep(0.0, 0.14, abs(s1));
-        ridgeBoost = kinkLine * 0.52 * creaseFade;
-        let creaseValley = kinkLine * clamp(in.wear.y * 0.75 + in.wear.x * 0.40, 0.0, 1.0) * creaseFade;
-        open *= 1.0 - creaseValley * 0.12;
-      }
-      // Use continuous smooth normal nSmooth (NEVER flat voxel-stair in.n / in.facing!) so curved
-      // fenders NEVER alternate between scraped/unscraped on every 2.5cm voxel stair row!
-      let silMask = smoothstep(0.08, 0.30, dot(nSmooth, -rd));
-      let topWeight = smoothstep(0.55, 0.85, abs(nSmooth.y));
-      let scrapeP = mix(vec3f(rt1, rt2, rimp), vec3f(rimp, rt1, rt2), topWeight) * 0.32;
-      let wearHere = in.wear.x * mix(1.0, 0.84, topWeight) * silMask;
-      let detail = 1.0 - smoothstep(22.0, 72.0, viewDist);
-      let worn = deformPaintSeen(albedo, wearHere, clamp(in.wear.y + ridgeBoost, 0.0, 1.0), scrapeP, detail);
+      // Oblique 3D grain runs continuously around the hood and down the fender.
+      let p = in.at * u.cell;
+      let alongX = u.midX >= u.midZ;
+      let along = select(p.z, p.x, alongX);
+      let across = select(p.x, p.z, alongX);
+      let materialAt = vec3f(along + 0.3 * across, p.y + 0.34 * across + 0.12 * along, across);
+      let detail = 1.0 - smoothstep(40.0, 95.0, length(in.seen));
+      let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y, materialAt, detail);
       albedo = worn.albedo;
-      rough = min(1.0, rough + worn.roughBoost * 0.76);
+      rough = min(1.0, rough + worn.roughBoost);
       coat = worn.clearcoatKeep;
-      // Satin brushed steel scratches get crisp metallic sheen strictly on exposed scratch ridges.
-      bareMetal = (1.0 - worn.clearcoatKeep) * smoothstep(0.50, 0.20, worn.roughBoost) * smoothstep(0.22, 0.54, wearHere + ridgeBoost * 0.65);
     }
   }
   var direct = max(dot(n, u.sun), 0.0);
@@ -366,13 +298,6 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow * (1.0 - brokenLamp), 0.0, dynLamp));
   if (dynLamp) { col += vehicleLamp(in, albedo) * (1.0 - brokenLamp); }
   if (polished) { col = mix(col, select(carPaint(col, in.facing, rd, direct), clearCoat(col, albedo, n, rd, direct, open), soft), coat); }
-  // Exposed bare brushed steel: satin metallic sheen (broad specular, restrained sky fill) so scraped steel looks raw, not glossy.
-  if (bareMetal > 0.02 && soft) {
-    let back = reflect(rd, n);
-    let satinEnv = street(back, open) * vec3f(0.42, 0.42, 0.41) * (0.4 + 0.6 * open);
-    let sunBrushed = pow(max(dot(back, u.sun), 0.0), 16.0) * direct * 0.65;
-    col = mix(col, col * 0.58 + satinEnv * 0.45 + vec3f(sunBrushed), bareMetal * 0.75);
-  }
   let lit = tone(col);
   // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
   let glowAlpha = select(1.0, 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0), dynLamp);
@@ -440,19 +365,14 @@ fn paneCrack(in: Out) -> vec2f {
     let p = (in.at - origin) * u.cell * 4.0;
     let maxReach = 24.0 + 38.0 * crack;
     if (length(p) >= maxReach) { continue; }
-    var best = 1e9;
-    var closest = 0u;
-    for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
-      let gap = distance(origin, u.deform.posR[i].xyz);
-      if (gap < best) { best = gap; closest = i; }
-    }
-    let a = abs(u.deform.dirD[closest].xyz);
-    // Clip cracks to the struck window plane so front windshield fractures never bleed across the A-pillar onto side windows.
-    if (a.x > a.z * 1.15 && abs(in.n.z) > 0.5) { continue; }
-    if (a.z > a.x * 1.15 && abs(in.n.x) > 0.5) { continue; }
-    var across = vec2f(p.x, p.y);
-    if (a.x >= a.y && a.x >= a.z) { across = vec2f(p.z, p.y); }
-    else if (a.y >= a.z) { across = vec2f(p.x, p.z); }
+    // Unwrap around the cabin. A side blow can crack the edge of the windshield:
+    // projecting that pane along the impact direction collapsed the web into horizontal lines.
+    let mid = max(vec2f(u.midX, u.midZ), vec2f(1.0));
+    let radial = (origin.xz - mid) / mid;
+    let here = (in.at.xz - mid) / mid;
+    let arc = atan2(radial.x * here.y - radial.y * here.x, dot(radial, here));
+    let span = max(1.0, length(radial.yx * mid));
+    let across = vec2f(arc * span * u.cell * 4.0, p.y * 1.22);
     let dist = length(across);
     if (dist >= maxReach) { continue; }
     let angle = atan2(across.y, across.x);

@@ -170,12 +170,14 @@ function position(p, s) {
   for (let i = 0; i < s.dentCount; i++) {
     const d = s.dents[i], r = Math.hypot(...q.map((v, a) => v - d.center[a]))
     if (d.radius <= 0.0001 || r >= d.radius || d.depth <= 0) continue
-    const t = r / d.radius, h = (1 - t) ** 2 * (1 + 2 * t), core = h * (1.55 - 0.55 * h), env = 16 * t * t * (1 - t) * (1 - t)
-    const u = q.map((x, a) => (x - d.center[a]) / d.radius)
-    const p1 = 3.2 * t + u[0] * 2.4 + u[1] * 1.2 + u[2] * 3.0
-    const p2 = 2.0 * t + u[0] * -2.8 + u[1] * 1.8 + u[2] * 1.6
-    const amount = d.depth * core * (1 + 0.16 * env * (0.62 * Math.sin(p1) + 0.38 * Math.sin(p2)))
-    for (let a = 0; a < 3; a++) q[a] += d.dir[a] * amount
+    const [dx, dy, dz] = d.dir
+    const envelope = (r) => Math.max(0, 1 - (r / d.radius) ** 2) ** 2
+    const compression = d.depth * (0.76 + 0.24 * dy ** 2) * envelope(r)
+    for (let a = 0; a < 3; a++) q[a] += d.dir[a] * compression
+    const v = q.map((x, a) => x - d.center[a])
+    const along = ((3*dx + 0.8*dz)*v[0] + 0.4*v[1] + (3*dz - 0.8*dx)*v[2]) / d.radius - 0.9
+    const lift = 0.64 * d.depth * envelope(Math.hypot(...v)) * Math.max(0, 1 - along*along) ** 2
+    for (let a = 0; a < 3; a++) q[a] += ((a === 1 ? 1 : 0) - dy*d.dir[a]) * lift
   }
   return q
 }
@@ -192,11 +194,28 @@ function numericalNormal(p, s) {
 for (let i = 0; i < 6; i++) tracker.recordImpact(700, body, [57 + (i%3)*8, 15, 14 + Math.floor(i/3)*12], normal, 55, 8000, cabin)
 const multi = tracker.get(700)
 assert.equal(multi.dentCount, 6); safe(multi)
-const states = [undefined, state, multi, protectedState, windshield]
+// A side strike must gather metal into a ridge. Measure the volume change as well as
+// the travel and normals. A positive determinant means neighbours stay in order.
+const side = tracker.recordImpact(705, body, hood, [1, 0, 0], 150, 10000, cabin)
+let highest = 0, minVolume = Infinity
+const dent = side.dents[0]
+for (let x = -6; x <= 6; x++) for (let y = -6; y <= 6; y++) for (let z = -6; z <= 6; z++) {
+  const p = [x,y,z].map((v,i) => dent.center[i] + v * dent.radius / 6)
+  const q = deformPointCpu(p, [0,1,0], side).pos
+  highest = Math.max(highest, q[1]-p[1])
+  assert.ok(Math.hypot(...q.map((v,i) => v-p[i])) <= dent.depth + 1e-6)
+  const [a,b,c] = [0,1,2].map(axis => {
+    const ahead = [...p]; ahead[axis] += 0.0001
+    return deformPointCpu(ahead, [0,1,0], side).pos.map((v,i) => (v-q[i]) / 0.0001)
+  })
+  minVolume = Math.min(minVolume, a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
+}
+assert.ok(highest > 0.32 * dent.depth && minVolume > 0, 'a lateral hit raises a bounded crease without folding the mesh')
+const states = [undefined, state, multi, protectedState, windshield, side]
 const uniforms = new Float32Array(52 * 64)
 for (let i = 0; i < 64; i++) packDeformUniforms(states[i % states.length], uniforms, i * 52)
 const vertices = [], expected = []
-for (let vehicle = 0; vehicle < 4; vehicle++) {
+for (const vehicle of [0,1,2,3,5]) {
   for (let z = 0; z <= 32; z++) for (let x = 0; x <= 32; x++) {
     const p = [48 + x, 15, 4 + z]
     vertices.push(...p, vehicle); expected.push({ p, s: states[vehicle] })
@@ -350,7 +369,7 @@ struct ViewOut { @builtin(position) clip: vec4f, @location(0) p: vec3f, @locatio
     const affected = s && s.dents.slice(0,s.dentCount).some(d => d.radius > 0.0001 && Math.hypot(...p.map((v,a) => v-d.center[a])) < d.radius)
     if (!affected) { vector(row.slice(0,3), p.map(Math.fround), 0); near(row[8], 0); near(row[9], 0); near(row[10], 0); near(row[11], 1); near(row[15], 0) }
     else {
-      changed++; if (s !== protectedState && s !== windshield && distance > 1e-5) assert.ok(row[1] < p[1]); assert.ok(distance <= s.maxCrushCells + 1e-5)
+      changed++; if ((s === state || s === multi) && distance > 1e-5) assert.ok(row[1] < p[1]); assert.ok(distance <= s.maxCrushCells + 1e-5)
       if (Math.abs(row[4]) + Math.abs(row[6]) > 0.03) tilted++
       assert.ok(row[8] > 0 && row[9] > 0 && row[10] > 0 && row[11] <= 1); scuffed++
       if (row[15] > 0) cracked++

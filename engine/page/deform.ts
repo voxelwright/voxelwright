@@ -52,9 +52,9 @@ function distanceToCabin(p: ArrayLike<number>, box: Float64Array) {
   return Math.hypot(Math.max(box[0] - p[0], 0, p[0] - box[3]), Math.max(box[1] - p[1], 0, p[1] - box[4]), Math.max(box[2] - p[2], 0, p[2] - box[5]))
 }
 /** No moving support ball, even after displacement, can enter the survival box:
- * radius <= .8 * distance, depth <= .2 * radius, ripple <= 1.18. Thus
+ * radius <= .8 * distance, depth <= .2 * radius, displacement <= depth (the 1.18 factor is conservative). Thus
  * radius + 1.18 * depth < distance. Composition preserves this for all six dents.
- * |gradient(field)| < 4.6 / radius, so depth/radius <= .2 also keeps every Jacobian positive.
+ * Each of the two component maps has displacement slope < 1 at depth/radius <= .2.
  * This deliberately gives up crumpling right against/inside the cabin, without
  * needing extra uniform fields. Supply the seat/head envelope INCLUDING camera travel.
  * The fallback protects the central upper body; custom seating MUST supply its box.
@@ -191,43 +191,34 @@ export function deformPointCpu(
   for (let i = 0; i < count; i++) {
     const d = state.dents[i]
     if (d.radius <= 0.0001) continue
-    const dx = px - d.center[0], dy = py - d.center[1], dz = pz - d.center[2]
-    const dist = Math.hypot(dx, dy, dz)
-    if (dist >= d.radius) continue
-    const t = dist / d.radius
-    const s = 1 - t * t * (3 - 2 * t)
-    const ds = -6 * t * (1 - t)
-    const core = s * (1.55 - 0.55 * s)
-    const dcore = (1.55 - 1.10 * s) * ds
-    const env = 16 * t * t * (1 - t) * (1 - t)
-    const denv = 32 * t * (1 - t) * (1 - 2 * t)
-    const invD = 1 / Math.max(dist, 0.00001)
-    const rx = dx * invD, ry = dy * invD, rz = dz * invD
-    const ux = dx / d.radius, uy = dy / d.radius, uz = dz / d.radius
-    const p1 = 3.2 * t + ux * 2.4 + uy * 1.2 + uz * 3.0
-    const p2 = 2.0 * t + ux * -2.8 + uy * 1.8 + uz * 1.6
-    const wave = 0.62 * Math.sin(p1) + 0.38 * Math.sin(p2)
-    const c1 = 0.62 * Math.cos(p1), c2 = 0.38 * Math.cos(p2)
-    const buckle = 1 + 0.16 * env * wave
-    const field = core * buckle
-    const radScale = dcore * buckle + core * 0.16 * denv * wave
-    const waveScale = core * 0.16 * env
-    const gScale = d.depth / d.radius
-    const gx = (rx * radScale + waveScale * (c1 * (rx * 3.2 + 2.4) + c2 * (rx * 2.0 - 2.8))) * gScale
-    const gy = (ry * radScale + waveScale * (c1 * (ry * 3.2 + 1.2) + c2 * (ry * 2.0 + 1.8))) * gScale
-    const gz = (rz * radScale + waveScale * (c1 * (rz * 3.2 + 3.0) + c2 * (rz * 2.0 + 1.6))) * gScale
-    const cDotN = d.dir[0] * nx + d.dir[1] * ny + d.dir[2] * nz
-    const denom = 1 + d.dir[0] * gx + d.dir[1] * gy + d.dir[2] * gz
-    if (Math.abs(denom) > 1e-6) {
-      const k = cDotN / denom
-      nx -= gx * k; ny -= gy * k; nz -= gz * k
-      const nl = Math.hypot(nx, ny, nz) || 1
-      nx /= nl; ny /= nl; nz /= nl
+    const [dx, dy, dz] = d.dir, inv = 1 / d.radius
+    let x = (px - d.center[0]) * inv, y = (py - d.center[1]) * inv, z = (pz - d.center[2]) * inv
+    let support = 1 - x*x - y*y - z*z
+    if (support <= 0 || d.depth <= 0) continue
+    // Each map pushes in a single direction. Its inverse-transpose updates the wheel normal too.
+    const push = (ax: number, ay: number, az: number, amount: number, gx: number, gy: number, gz: number) => {
+      const k = (ax*nx + ay*ny + az*nz) / (1 + ax*gx + ay*gy + az*gz)
+      nx -= k*gx; ny -= k*gy; nz -= k*gz
+      px += ax*amount; py += ay*amount; pz += az*amount
     }
-    const move = d.depth * field
-    px += d.dir[0] * move; py += d.dir[1] * move; pz += d.dir[2] * move
+    const depth = d.depth * (0.76 + 0.24 * dy*dy)
+    const slope = -4 * support * depth * inv
+    push(dx, dy, dz, depth * support*support, slope*x, slope*y, slope*z)
+
+    // The compressed metal gathers into a diagonal ridge just behind the contact.
+    x = (px - d.center[0]) * inv; y = (py - d.center[1]) * inv; z = (pz - d.center[2]) * inv
+    support = 1 - x*x - y*y - z*z
+    const ax = 3 * dx + 0.8 * dz, az = 3 * dz - 0.8 * dx
+    const along = ax*x + az*z + 0.4*y - 0.9, ridge = 1 - along*along
+    if (support <= 0 || ridge <= 0 || Math.abs(dy) === 1) continue
+    const lift = 0.64 * d.depth, shape = support * ridge
+    const g = -4 * shape * lift * inv
+    push(-dx*dy, 1-dy*dy, -dz*dy, lift*shape*shape,
+      g*(ridge*x + support*along*ax), g*(ridge*y + support*along*0.4), g*(ridge*z + support*along*az))
+
   }
-  return { pos: [px, py, pz], norm: [nx, ny, nz] }
+  const norm = Math.hypot(nx, ny, nz) || 1
+  return { pos: [px, py, pz], norm: [nx/norm, ny/norm, nz/norm] }
 }
 
 /** Offset in floats, 16-byte aligned within out. Exactly 52 floats: meta, six posR,
@@ -272,85 +263,59 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
   if (def.status.x < 0.5) { return result; }
   for (var i = 0u; i < min(u32(def.status.x), 6u); i++) {
     let zone = def.posR[i]; let crush = def.dirD[i];
-    let delta = result.pos - zone.xyz;
-    let dist = length(delta);
-    if (zone.w <= 0.0001 || dist >= zone.w) { continue; }
-    let t = dist / zone.w;
-    let u = delta / zone.w;
-    // Broad flat-crushed core (1.55*s - 0.55*s^2) with low-frequency architectural sheet-metal folds
-    // (no high-frequency ripples that spike thin voxel silhouettes): C1-smooth, buckle in [0.84, 1.16], Jacobian > 0.
-    let s = 1.0 - t * t * (3.0 - 2.0 * t);
-    let ds = -6.0 * t * (1.0 - t);
-    let core = s * (1.55 - 0.55 * s);
-    let dcore = (1.55 - 1.10 * s) * ds;
-    let env = 16.0 * t * t * (1.0 - t) * (1.0 - t);
-    let denv = 32.0 * t * (1.0 - t) * (1.0 - 2.0 * t);
-    let radial = delta / max(dist, 0.00001);
-    let g1 = vec3f(2.4, 1.2, 3.0);
-    let g2 = vec3f(-2.8, 1.8, 1.6);
-    let p1 = 3.2 * t + dot(u, g1);
-    let p2 = 2.0 * t + dot(u, g2);
-    let wave = 0.62 * sin(p1) + 0.38 * sin(p2);
-    let dwave = 0.62 * cos(p1) * (radial * 3.2 + g1) + 0.38 * cos(p2) * (radial * 2.0 + g2);
-    let buckle = 1.0 + 0.16 * env * wave;
-    let field = core * buckle;
-    let derivative = radial * (dcore * buckle + core * 0.16 * denv * wave) + (core * 0.16 * env) * dwave;
-    let gradient = derivative * (crush.w / zone.w);
-    // Exact inverse-transpose of I + dir * gradient^T, composed per dent.
-    // CPU depth/radius limits (<= 0.2) keep 1 + dot(dir, gradient) > 0; no flipped normals.
-    result.norm = normalize(result.norm - gradient * dot(crush.xyz, result.norm) / (1.0 + dot(crush.xyz, gradient)));
-    result.pos += crush.xyz * (crush.w * field);
-    // Zero-depth cabin dents still carry scuffs and cracks. The 208-byte format
-    // has no per-zone cosmetic scalar, so these use the vehicle wear aggregate.
-    let strength = select(clamp(crush.w / zone.w * 7.5, 0.0, 1.0), clamp((1.0 - def.status.y) * 3.0, 0.0, 1.0), crush.w <= 0.0);
-    // Concentrate paint chipping tightly around the actual contact core (s^2.7) so wear never
-    // bleeds across the whole hood or opposite fender; keep crease broader (s^2) for fold shading & hood lift.
-    let tight = s * s * (0.25 + 0.75 * s);
-    let rim = 4.0 * t * (1.0 - t);
-    let bend = clamp(length(derivative) * 0.45, 0.0, 1.0);
-    result.scuff = max(result.scuff, strength * tight);
-    result.crease = max(result.crease, strength * s * s * (0.22 + 0.78 * max(bend * rim, env * abs(wave))));
+    if (zone.w <= 0.0001) { continue; }
+    let u = (result.pos - zone.xyz) / zone.w;
+    let support = 1.0 - dot(u, u);
+    if (support <= 0.0) { continue; }
+    let core = support * support;
+    let dir = crush.xyz;
+    let depth = crush.w * (0.76 + 0.24 * dir.y * dir.y);
+    let grad = (-4.0 * support * depth / zone.w) * u;
+    result.norm -= grad * (dot(dir, result.norm) / (1.0 + dot(dir, grad)));
+    result.pos += dir * (depth * core);
+
+    // A horizontal strike shortens the panel, then lifts a diagonal ridge behind its crushed lip.
+    // Both displacements vanish at the support boundary. |grad(core)| <= 1.54/r and the
+    // ridge coordinate has slope <= 3.14/r. Each map's displacement slope stays below one
+    // at depth <= 0.2r. Their directions are orthogonal and their combined travel <= depth.
+    var shape = 0.0;
+    if (abs(dir.y) < 1.0 && crush.w > 0.0) {
+      let v = (result.pos - zone.xyz) / zone.w;
+      let edge = max(0.0, 1.0 - dot(v, v));
+      let axis = vec3f(3.0 * dir.x + 0.8 * dir.z, 0.4, 3.0 * dir.z - 0.8 * dir.x);
+      let along = dot(v, axis) - 0.9;
+      let ridge = max(0.0, 1.0 - along * along);
+      shape = edge * ridge;
+      let up = vec3f(0, 1, 0) - dir * dir.y;
+      let lift = 0.64 * crush.w;
+      let gradLift = (-4.0 * shape * lift / zone.w) * (ridge * v + edge * along * axis);
+      result.norm -= gradLift * (dot(up, result.norm) / (1.0 + dot(up, gradLift)));
+      result.pos += up * (lift * shape * shape);
+    }
+
+    // A protected window can still be marked by a zero-depth impact.
+    let strength = select(min(crush.w / zone.w * 7.5, 1.0), min((1.0 - def.status.y) * 3.0, 1.0), crush.w <= 0.0);
+    result.scuff = max(result.scuff, strength * core);
+    result.crease = max(result.crease, strength * core * (0.25 + 0.75 * shape));
+
   }
+  result.norm = normalize(result.norm);
   return result;
 }
 fn deformPaint(albedo: vec3f, scuff: f32, crease: f32, p: vec3f) -> DeformPaint { return deformPaintSeen(albedo, scuff, crease, p, 1.0); }
-// Crumpled painted sheet metal (#62): preserves the vehicle's own paint colour across most of each
-// dented panel so dents read as folded steel rather than flat grey primer smears. Breaks showroom
-// clear coat over the bent panel and limits exposed brushed bare metal to thin, crisp directional
-// scratches and narrow chipped fold-ridge scars (zero broad grey halos, zero periodic zebra stripes).
+// Rub through the colour coat in short, interrupted tracks. p is in world cells
+// (10 cm), oriented along the sheet. Low spots keep their paint between the tracks.
 fn deformPaintSeen(albedo: vec3f, scuff: f32, crease: f32, p: vec3f, detail: f32) -> DeformPaint {
   if (scuff <= 0.0 && crease <= 0.0) { return DeformPaint(albedo, 0.0, 1.0); }
-  let wear = clamp(scuff, 0.0, 1.0);
-  let fold = clamp(crease, 0.0, 1.0);
-  // Organic domain warp along the drag axis p.x so individual scratches sweep naturally without repeating.
-  let w1 = deformNoise(vec3f(p.x * 0.20, p.y * 0.90, p.z * 0.30) + vec3f(2.1, 7.3, 4.9)) - 0.5;
-  let w2 = deformNoise(vec3f(p.x * 0.38, p.y * 1.75, p.z * 0.35) + vec3f(9.4, 1.7, 6.2)) - 0.5;
-  let py = p.y + w1 * 0.55;
-  // Non-periodic multi-octave elongated scratch noise (thresholded strictly at sparse high peaks, NOT periodic ridges).
-  let sMacro = deformNoise(vec3f(p.x * 0.16, py * 2.1, p.z * 0.25) + vec3f(3.7, 1.2, 6.4));
-  let sLong = deformNoise(vec3f(p.x * 0.24, (py + w2 * 0.35) * 5.6, p.z * 0.28) + vec3f(14.2, 3.8, 7.1));
-  let sFine = deformNoise(vec3f(p.x * 0.42, (py + w1 * 0.25) * 11.5, p.z * 0.32) + vec3f(4.6, 12.1, 9.5));
-  let sBreak = deformNoise(vec3f(p.x * 0.65, py * 1.6, p.z * 0.50) + vec3f(8.1, 5.4, 2.3));
-  // Thin, sparse, crisp directional bare-steel gouges along the contact scar & sharpest fold ridge (~12-18% coverage, 82%+ red paint).
-  let scratchField = sLong * 0.58 + sFine * 0.27 + sMacro * 0.15;
-  let coreScratch = smoothstep(0.56, 0.67, scratchField + (wear - 0.48) * 0.16) * smoothstep(0.32, 0.62, sBreak) * smoothstep(0.14, 0.46, wear + fold * 0.34);
-  let fineScratch = smoothstep(0.62, 0.74, sFine * 0.65 + sLong * 0.35) * smoothstep(0.38, 0.68, sMacro) * smoothstep(0.12, 0.42, wear + fold * 0.30) * detail;
-  // Crisp chipped bare-metal flecks right along the sharpest bent crease crest (e.g. pinched wheel-arch lip & hood fold).
-  let ridgeChip = smoothstep(0.54, 0.68, sLong * 0.55 + sBreak * 0.45) * smoothstep(0.42, 0.74, fold) * smoothstep(0.12, 0.38, wear + fold * 0.26);
-  let bareSteel = clamp(max(max(coreScratch, fineScratch * 0.88), ridgeChip * 0.94), 0.0, 1.0);
-  // Crisp narrow dark primer / rubbed-paint border right beside bare scratches (never a broad soot smudge!).
-  let scuffEdge = smoothstep(0.50, 0.63, scratchField + (wear - 0.44) * 0.14) * smoothstep(0.32, 0.60, sBreak) * smoothstep(0.14, 0.44, wear + fold * 0.28) * (1.0 - bareSteel);
-  // Keep rich painted colour across the panel; show dents via bent clearcoat highlights, not darkened soot.
-  var col = mix(albedo, albedo * 0.34 + vec3f(0.038, 0.040, 0.044), clamp(scuffEdge * 0.75, 0.0, 0.75));
-  // Thin bright brushed bare-steel scratches with fine metallic contrast.
-  let steelCol = vec3f(0.34, 0.345, 0.342) * (0.76 + 0.44 * sFine);
-  col = mix(col, steelCol, bareSteel);
-  // Only minimal fold tinting (0.05) so curved dents read via bent highlights rather than dirt blotches.
-  col *= 1.0 - smoothstep(0.50, 0.95, fold) * 0.05;
-  // Break showroom clearcoat across the bent panel while keeping the paint rich red; bare steel is satin-metallic.
-  let roughBoost = clamp(max(wear * 0.30 + fold * 0.28, mix(scuffEdge * 0.65, 0.26, bareSteel)), 0.0, 1.0);
-  let coatKeep = clamp(1.0 - clamp(wear * 0.70 + fold * 0.54 + bareSteel * 0.85 + scuffEdge * 0.55, 0.0, 0.92), 0.08, 1.0);
-  return DeformPaint(col, roughBoost, coatKeep);
+  let grain = deformNoise(p * vec3f(0.48, 4.6, 0.52));
+  let chips = deformNoise(p * vec3f(1.35, 1.85, 1.1) + 7.2);
+  let contact = smoothstep(0.16, 0.63, scuff);
+  let rub = contact * smoothstep(0.37, 0.70, grain + 0.22 * (chips - 0.5));
+  let cut = rub * smoothstep(0.50, 0.76, chips) * detail;
+  let primer = mix(albedo, albedo * 0.23 + vec3f(0.076, 0.067, 0.061), rub);
+  let colour = mix(primer, vec3f(0.24, 0.23, 0.22), cut);
+  let rough = clamp(0.18 * crease + 0.35 * scuff + 0.28 * rub, 0.0, 1.0);
+  return DeformPaint(colour, rough, 1.0 - min(0.97, scuff * 0.58 + rub * 0.65));
 }
 // p is window-local, relative to the impact center, in the same fine cells as scuff.
 fn deformGlass(crack: f32, scuff: f32, p: vec3f) -> f32 {
