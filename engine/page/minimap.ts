@@ -55,6 +55,7 @@ export interface MapSystem {
   readonly destination: { x: number; z: number; name: string } | null
   readonly route: GpsRoute | null
   readonly progress: RouteProgress | null
+  readonly places: readonly MapPlace[]
   readonly stats: { nodes: number; edges: number; buildings: number; places: number; renderMs: number; span: number; zoom: number; lookAhead: number }
   /** Current parsed map data (null until MAP1 has loaded). */
   readonly data: MapData | null
@@ -1864,6 +1865,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     get destination() { return destination ? { ...destination } : null },
     get route() { return route },
     get progress() { return progress },
+    get places() { return map?.places ?? [] },
     get stats() {
       return {
         nodes: map?.nNodes ?? 0,

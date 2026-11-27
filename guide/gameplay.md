@@ -131,6 +131,7 @@ The street's kept cars get their motors from `HANDLING` in `engine/sf/fleet.mjs`
 | `saloon` | grey saloon | 475 (171 km/h) | 112 | 1.38 | 0.58 | 210 |
 | `hatch` | blue saloon, taxi | 445 (160 km/h) | 100 | 1.42 | 0.60 | 200 |
 | `suv` | grey SUV | 420 (151 km/h) | 96 | 1.48 | 0.54 | 280 |
+| `robotaxi` | PayMo (Waymo Ojai) | 440 (158 km/h) | 108 | 1.52 | 0.58 | 270 |
 | `van` | delivery van | 345 (124 km/h) | 84 | 1.32 | 0.48 | 360 |
 | `truck` | box truck | 295 (106 km/h) | 76 | 1.28 | 0.42 | 500 |
 
@@ -198,6 +199,7 @@ They react to you:
 - **Crashes.** Hit a car and it wakes as a real drivable body with its interior, is knocked by the impact, and both vehicles dent immediately, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams bounce you off and dent your car. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
+- **PayMo robotaxis.** Open the map, select **PayMo Station** and choose **Visit** to reach the six charging bays on Stockton Street between Beach and North Point. More PayMos drive nearby as cars leave and return to the depot. Look for the short nose, white roof and wide sensor bar above the Ojai’s windshield. A PayMo occasionally stalls at an intersection or on a narrow street. Its amber hazards flash, drivers behind it honk, and pedestrians stop at the curb to yell or hold up phones to film. When the car clears, they resume their walk. Press **E** beside a stopped car to drive it.
 
 ### Stunts
 
@@ -362,7 +364,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Seat, wheels, summoning | `engine/page/cockpit.ts`, `engine/page/wheels.ts`, `engine/page/summon.ts` | `engine/test/seat-view.mjs` (the seat) |
 | Radio, pass-by whooshes | `engine/page/sound/radio.ts` | `engine/test/radio.mjs` |
 | Stunts | `engine/page/stunts.ts` | `engine/test/stunts.mjs` |
-| Traffic | `engine/page/street.ts` | `engine/test/street.mjs` |
+| Traffic & robotaxis | `engine/page/street.ts`, `engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts` | `engine/test/street.mjs`, `engine/test/sf-robotaxi.mjs` |
 | HUD | `engine/page/hud.ts`, `engine/page/play-hud.ts`, `engine/page/radial.ts` | `engine/test/sf-hud.mjs` |
 | Map and GPS | `engine/page/minimap.ts`, `engine/page/gps.ts` | `engine/test/sf-map.mjs` |
 | Gamepad | `engine/page/gamepad.ts` | `engine/test/gamepad.mjs` |
