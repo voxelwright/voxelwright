@@ -61,10 +61,11 @@ export interface Answer {
     ms: number;
     refused: number;
     lacking?: boolean;
+    failed?: string;
 }
 ```
 
-In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](/engine-core#the-edit-format). `lacking` means a San Francisco tile did not arrive, so the column was made as water and will be asked for again.
+In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](/engine-core#the-edit-format). `lacking` means a San Francisco tile did not arrive (or timed out), so the column was made as water and will be asked for again. `failed` reports a worker error (such as a WASM trap or OOM), prompting `World` to replace the worker and requeue its columns.
 
 ## Files to know
 

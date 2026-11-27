@@ -955,7 +955,7 @@ async function main() {
   }
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
-  let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0, burning = 0
+  let heard = 0, waiting = 0, ticking = false, tickSentAt = 0, moverFailedAt = 0, owed = 0, bodies = 0, burning = 0
   /** Whether water is flowing, or may be: after anything is broken the mover is asked once, and says. */
   let running = false
   /** Where it burns, as the mover last said: some of the burning cells. */
@@ -997,8 +997,13 @@ async function main() {
     const step = !far && ticking && !answer.released && answer.spawned === undefined
     if (far) { if (answer.released && asked.shift()) waiting-- }
     else if (answer.released) waiting--
-    else if (answer.spawned === undefined) ticking = false
-    if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
+    else if (answer.spawned === undefined) { ticking = false; tickSentAt = 0 }
+    if (answer.failed) {
+      report.notes.push(`moving failed: ${answer.failed}`)
+      const now = performance.now()
+      if (!far && now - moverFailedAt > 2000) { moverFailedAt = now; loseMover(moverWorker) }
+      return
+    }
     const told = read(answer.words)
     alive.heard(answer, told)
     // What goes fast is seen in flight (shots.ts), once this page is up to date with its world.
@@ -1067,7 +1072,7 @@ async function main() {
     }
   }
   // A world that refuses this page's ask says why, as text: a thing of someone else's in a lobby, or ground that has not come (#526).
-  mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`); if (joined && e.message.startsWith('the world refused: ')) over.notice(`Not done: ${e.message.slice(19, 219)}`, 6000) }
+  mover.onerror = (e) => { waiting = 0; ticking = false; tickSentAt = 0; report.notes.push(`mover: ${e.message}`); if (joined && e.message.startsWith('the world refused: ')) over.notice(`Not done: ${e.message.slice(19, 219)}`, 6000) }
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
   const streaks = shots(smoke, debris)
@@ -1200,8 +1205,11 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
-    if (!far && silent(moverWorker) > moverPatience) loseMover(moverWorker)
+    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickSentAt = performance.now(); tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
+    if (!far && (silent(moverWorker) > moverPatience || (ticking && tickSentAt > 0 && performance.now() - tickSentAt > moverPatience))) {
+      if (ticking && silent(moverWorker) <= moverPatience) report.notes.push(`mover stalled on step (${Math.round(performance.now() - tickSentAt)} ms)`)
+      loseMover(moverWorker)
+    }
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
@@ -2116,7 +2124,8 @@ async function main() {
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
     moving.clear(); lying = []; putting = []; asked.length = 0
-    heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
+    heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; tickSentAt = 0; owed = 0; flames = new Float32Array(0)
+    if (STREAM) mover.postMessage({ bay: [Math.round(ahead ? ahead[0] : pose.x * M), Math.round(ahead ? ahead[2] : pose.z * M)] } as never)
     const done = world.done()
     if (done.length) mover.postMessage({ edit: stream(done), after: -1 } satisfies Ask)
     if (afoot) me.walk(true)
@@ -2290,6 +2299,12 @@ async function main() {
     topAt: (x, z) => core.top_at(x, z),
     worldKind: (x, y, z) => core.world_kind(x, y, z),
     whereLabel: () => document.querySelector('#where > div')?.textContent?.trim() ?? '',
+    diagnostics: () => ({
+      tiles: { ...tally },
+      mover: { ticking, waitMs: ticking && tickSentAt > 0 ? Math.round(performance.now() - tickSentAt) : 0, bodies, waiting },
+      workers: { ...world.workerHealth(), crashed: world.stats.crashed, lacking: world.stats.lacking },
+      notes: report.notes.slice(-20),
+    }),
     endpointBase: !LOCAL || query.get('telemetry') === '1' ? '' : null,
   })
   feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })

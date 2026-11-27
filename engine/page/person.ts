@@ -149,7 +149,7 @@ export function person(o: {
   name?: string
 }): Me {
   const M = 10
-  let on = false, id = 0, asked = false, view: Me['view'] = 'behind', can: Can = AS_IT_IS, clock = 1
+  let on = false, id = 0, asked = false, askedAt = 0, askRetries = 0, view: Me['view'] = 'behind', can: Can = AS_IT_IS, clock = 1
   // Whether the core last said the body is in the air, and whether its motor is the flying one: told again only when that changes.
   // (`aloft` is the core's word for one the air carries: one who flies, or hangs from a canopy. `off` is any body with no foot on anything.)
   let aloft = false, off = false, flyingMotor = '', canopy = false, opened = 0
@@ -224,7 +224,7 @@ export function person(o: {
       if (id) o.send({ vanish: id })
       // Up from where the body stood, the eye where the head was.
       if (at) { o.pose.x = at[0] / M; o.pose.z = at[2] / M; o.pose.y = (at[1] - com[1] - LEG + EYES) / M }
-      id = 0; at = null; asked = false; aloft = false; off = false; canopy = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
+      id = 0; at = null; asked = false; askedAt = 0; askRetries = 0; aloft = false; off = false; canopy = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
       return
     }
     // The body is made where the eye is, the eye in its head: from the air it falls to whatever is under it.
@@ -233,6 +233,8 @@ export function person(o: {
     sinking = 0
     eyeY = o.pose.y * M
     asked = true
+    askedAt = performance.now()
+    askRetries = 0
     aloft = false
     o.send({ figure: { low, size: BODY, motor: numbers(motorOf(can, false)) } })
     o.wake()
@@ -270,7 +272,7 @@ export function person(o: {
       waiting = false
       // While the core says a body of its own is awake it is asked on: one in the air told nothing must still come down.
       awake = answer.bodies > 0
-      if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } tellCan() }
+      if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; askedAt = 0; askRetries = 0; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } tellCan() }
       if (!id) return
       for (const m of told.moves) if (m.id === id) at = m.pos
       for (const l of told.live) if (l.id === id) {
@@ -303,6 +305,19 @@ export function person(o: {
       // Behind it, the body turns to face the way it goes; in its head it faces where the eye looks and steps aside.
       const looks = o.pose.yaw - Math.PI / 2
       let ask: NonNullable<Ask['walk']> | null = null
+      if (asked && !id && askedAt > 0 && performance.now() - askedAt > 2500) {
+        if (askRetries < 2) {
+          askRetries++
+          askedAt = performance.now()
+          const low: [number, number, number] = [Math.round(o.pose.x * M) - 2, Math.round(o.pose.y * M - EYES + LEG), Math.round(o.pose.z * M) - 1]
+          o.send({ figure: { low, size: BODY, motor: numbers(motorOf(can, false)) } })
+          o.wake()
+        } else {
+          // Mover failed to spawn the body after retries: drop back to flying instead of freezing in mid-air.
+          walk(false)
+          return false
+        }
+      }
       if (id) {
         // One who flies rises with Space and sinks with C; a canopy only sinks (the air takes what is told to rise: a touch up as it opens).
         const rise = canopy ? (aloft ? -1 : 0.05) : can.fly > 0 ? (held('Space') ? 1 : 0) - (held('KeyC') ? 1 : 0) : 0

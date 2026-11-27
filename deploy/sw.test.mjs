@@ -31,7 +31,7 @@ function createCacheStorage() {
   }
 }
 
-function loadSw({ version = 'abc123def456', precache = ['/', '/manifest.webmanifest', '/page/core.wasm'], fetchImpl, quota = 2 * 1024 * 1024 * 1024 } = {}) {
+function loadSw({ version = 'abc123def456', precache = ['/', '/manifest.webmanifest', '/page/core.wasm'], fetchImpl, quota = 2 * 1024 * 1024 * 1024, fetchTimeoutMs } = {}) {
   const { stores, caches } = createCacheStorage()
   const listeners = new Map()
   let skipped = false, claimed = false
@@ -45,9 +45,12 @@ function loadSw({ version = 'abc123def456', precache = ['/', '/manifest.webmanif
       listeners.get(type).push(fn)
     },
   }
-  const code = SW_SOURCE
+  let code = SW_SOURCE
     .replace("/*SHELL_VERSION*/'dev'", JSON.stringify(version))
     .replace("/*PRECACHE*/['/', '/manifest.webmanifest', '/favicon.svg']", JSON.stringify(precache))
+  if (fetchTimeoutMs !== undefined) {
+    code = code.replace('const RELEASE_FETCH_TIMEOUT_MS = 12_000', `const RELEASE_FETCH_TIMEOUT_MS = ${Number(fetchTimeoutMs)}`)
+  }
   const context = vm.createContext({
     self: selfObj,
     caches,
@@ -56,6 +59,9 @@ function loadSw({ version = 'abc123def456', precache = ['/', '/manifest.webmanif
     Response,
     Headers,
     URL,
+    AbortController,
+    setTimeout,
+    clearTimeout,
     Date,
     Map,
     Set,
@@ -63,6 +69,7 @@ function loadSw({ version = 'abc123def456', precache = ['/', '/manifest.webmanif
     Number,
     Math,
     JSON,
+    Error,
     console,
   })
   vm.runInContext(code, context, { filename: 'sw.js' })
@@ -222,4 +229,44 @@ test('service worker ignores cross-origin requests, range requests, sw.js itself
   assert.equal((await sw.dispatchFetch('https://voxelwright.world/eggs/rick.mp4')).handled, false)
   assert.equal((await sw.dispatchFetch('https://voxelwright.world/bay/map.bin', { headers: { Range: 'bytes=0-100' } })).handled, false)
   assert.equal((await sw.dispatchFetch('https://voxelwright.world/weather', { method: 'POST' })).handled, false)
+})
+
+test('/releases/* aborts stalled upstream fetches instead of hanging forever', async () => {
+  let aborted = false
+  const sw = loadSw({
+    fetchTimeoutMs: 60,
+    fetchImpl: (_req, init) => new Promise((_, rej) => {
+      init?.signal?.addEventListener('abort', () => { aborted = true; rej(new Error('aborted')) }, { once: true })
+    }),
+  })
+  const t0 = Date.now()
+  await assert.rejects(
+    sw.dispatchFetch('https://voxelwright.world/releases/abcdef0123456789/tiles/0/206_263.bay'),
+    /timeout|aborted/i,
+  )
+  assert.equal(aborted, true, 'AbortController signal fired on timeout')
+  assert.ok(Date.now() - t0 < 1000, 'stalled release fetch rejected promptly')
+})
+
+test('/releases/* without Content-Length caches cleanly and survives cache quota errors', async () => {
+  const payload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+  const sw = loadSw({
+    fetchImpl: async () => new Response(payload, { status: 200 }),
+  })
+  const url = 'https://voxelwright.world/releases/abcdef0123456789/tiles/0/207_264.bay'
+  const first = await sw.dispatchFetch(url)
+  assert.equal(first.response.status, 200)
+  assert.deepEqual(new Uint8Array(await first.response.arrayBuffer()), payload)
+  const bucket = sw.stores.get('vw-release-abcdef012345')
+  assert.ok(bucket?.has(url), 'headerless release tile was cached cleanly')
+
+  // Simulate Safari QuotaExceededError during cache.put — response must still succeed.
+  const origOpen = sw.caches.open
+  sw.caches.open = async (name) => {
+    const c = await origOpen(name)
+    return { ...c, put: async () => { throw new Error('QuotaExceededError') } }
+  }
+  const second = await sw.dispatchFetch('https://voxelwright.world/releases/abcdef0123456789/tiles/0/208_264.bay')
+  assert.equal(second.response.status, 200)
+  assert.deepEqual(new Uint8Array(await second.response.arrayBuffer()), payload)
 })
