@@ -78,17 +78,16 @@ source.
 | Source | Holds | Fetch | Licence and what follows |
 |---|---|---|---|
 | OpenStreetMap | Streets, land use, building tags (`building:levels`, `roof:shape`, `building:colour`, sparse) | Geofabrik extract `download.geofabrik.de/north-america/us/california/norcal-latest.osm.pbf`. Overpass is for small asks and was at capacity when tried. | ODbL: "If you alter or build upon our data, you may distribute the result only under the same license." A served grid of cells that geometry can be pulled back out of is most likely a derivative database: serve that layer under ODbL with "© OpenStreetMap contributors". **read** |
-| Overture Maps (release 2026-10-21.0) | Buildings (outline, `height`, `num_floors`, `roof_shape`, `facade_color`), transportation, base, addresses | Parquet on `overturemaps-us-west-2.s3.amazonaws.com/release/<release>/theme=.../type=.../`, or PMTiles read by byte range from `tiles.overturemaps.org/<release>/<theme>.pmtiles` (what the Earth world on Spawn does). No key. | Buildings, transportation, base: ODbL, as OSM. Credit "© OpenStreetMap contributors, Overture Maps Foundation". **read** |
+| Overture Maps (release 2026-10-21.0) | Buildings (outline, `height`, `num_floors`, `roof_shape`, `facade_color`), transportation, base, addresses | Parquet on `overturemaps-us-west-2.s3.amazonaws.com/release/<release>/theme=.../type=.../`, or PMTiles read by byte range from `tiles.overturemaps.org/<release>/<theme>.pmtiles`. No key. | Buildings, transportation, base: ODbL, as OSM. Credit "© OpenStreetMap contributors, Overture Maps Foundation". **read** |
 | Meta and WRI canopy height | Tree height, 1 m, modelled from Maxar imagery | `https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float/chm/<quadkey>.tif` | CC BY 4.0, credit "Meta and World Resources Institute (WRI) 2024. High Resolution Canopy Height Maps". No share-alike. **read** |
 | Mapterhorn, Mapzen terrain tiles | Ground height, about 30 m world-wide, finer where a country publishes it | `tiles.mapterhorn.com/z/x/y.webp`; `s3.amazonaws.com/elevation-tiles-prod/terrarium/z/x/y.png` | See the verified terms and attribution in [Data licences](../../../DATA-LICENSES.md). **read** |
 | NOAA CUDEM (1/9 arc-second), USGS San Francisco Bay 1 m bathymetry (DOI 10.5066/P9TJTS8M) | The bay's floor | `noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/CA/` | See the verified terms and attribution in [Data licences](../../../DATA-LICENSES.md). **read** |
 
-## Mapillary: a token, given by the owner on November 15
+## Mapillary: a read-only token (November 15)
 
-The owner asked for an account and a key. The account is on the owner's email (its name is in the lane's memory note), the application
-`village-engine` with READ only. The client token is in `~/.village/engine/bay/keys/mapillary.token` (mode 600, outside
-git); it is never printed, logged or put in a URL that is logged: send it as the header `Authorization: OAuth <token>`.
-Nobody holds the account's password; it is reset through the owner's email when wanted.
+The project's Mapillary application is `village-engine`, with READ access only. Its client token is in
+`~/.village/engine/bay/keys/mapillary.token` (mode 600, outside git). Never print it, log it or put it in a URL that
+is logged: send it as the header `Authorization: OAuth <token>`.
 
 - Holds: street photographs with their solved position and rotation (`computed_geometry`, `computed_rotation`,
   camera model), panoramas, a 3D reconstruction per image (`sfm_cluster`, `mesh`), and what its detector found
@@ -113,10 +112,6 @@ Nobody holds the account's password; it is reset through the owner's email when 
     "must be smaller than 0.01 degrees square".
   - The token goes in the header for the API; the vector tiles take `?access_token=`. Only our server or a bake
     holds it: a page asks our server.
-- The Earth world on Spawn uses it the same way: its `photos.js` ("the colour of a wall, from street photographs
-  (Mapillary: posed photos, CC BY-SA 4.0)"), `heights.js` ("from Mapillary's own 3D reconstructions") and the
-  map-feature tiles in `street.js`. Its players' browsers ask Spawn's server
-  (`/api/streetphoto/images?bbox=...`, seen in the guest session's traffic), which adds the key: "NO KEY IN THE BROWSER".
 
 ### A first try at wall colours from it (November 15; an experiment outside the repo, `~/.village/engine/bay/mly/`)
 
@@ -136,8 +131,8 @@ nearest cameras that see it, and keeps the 60th percentile colour; `apply.py` wr
 - What is wrong with it: a side in shade or behind a tree gives a dark or green colour (lifting dark ones to a
   usual lightness is a patch); one colour a building loses trim, doors and shop fronts; an outline with many
   short sides (bay windows) gives few points a side. Next: weigh samples by how head-on and how sunlit, take
-  the colour per side not per building, then per cell near the eye (as Spawn's `photos.js` and the
-  fast-voxels lane both do: each cell from the view that faces it most).
+  the colour per side not per building, then per cell near the eye (each cell from the view that
+  faces it most, as the fast-voxels lane does).
 
 ## Needs a key or an account: not used
 
@@ -147,27 +142,8 @@ nearest cameras that see it, and keeps the 60th percentile colour; `apply.py` wr
 | Mapbox Satellite | Product Terms 1.6, 1.9: no tracing or deriving but for OSM or non-commercial vectors; no caching or storing. **read** (April 2025 terms) |
 | Esri World Imagery | "not intended to be used to export tiles for offline"; Esri Master Licence. Pixels may not be kept or served. **read** (item page) |
 | Cesium ion | "You may not copy, store, or redistribute any portion of Cesium Data Output". **read** |
-| Bing or Azure Maps, Apple Look Around | Not read. **memory**: no. |
-
-## How the Earth world on Spawn is put together (looked at November 15, as a guest)
-
-Ideas only; none of its code is used here.
-
-- The place is made in the player's browser. The page loads about sixty generator scripts and a
-  wasm engine, and reads open data straight from its public hosts by byte range: Overture PMTiles
-  (base, transportation, buildings, places) and Mapterhorn terrain tiles (zoom 9 far, zoom 15
-  near), with hand-written PMTiles, vector-tile and PNG readers. What is fetched is kept in the
-  browser's cache. Generated chunks are also kept on its server, keyed by latitude, longitude,
-  hour and mode.
-- Its cells are about 5.6 cm, drawn in nested levels each 64 cubes a side and four times coarser
-  than the last: cubes of 0.23 m out to 14 m, 0.9 m to 58 m, 3.6 m to 230 m, 14.5 m, 58 m. The
-  ground is drawn as quads beside the cubes.
-- Heights where Overture has none come from Mapillary's 3D reconstructions, baked into grids per
-  map tile. Wall colours come from Mapillary photographs: a point of a wall takes the colour of
-  the nearest, most head-on photo that sees it.
-- Everything else is rules from the data and the region: street-name signs at corners in a
-  bitmap font on the cell grid, road paint by country, parked cars, people, a church's tower from
-  its class and footprint.
+| Bing or Azure Maps | Terms not reviewed. Not used. |
+| Apple Look Around | Terms not reviewed. Used only in the local #450 experiment below; nothing from it is baked, kept in git or shipped. |
 
 ## Tools the bake uses (not shipped: a Python environment outside the repo)
 
