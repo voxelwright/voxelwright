@@ -10,6 +10,8 @@
 // are driven by the street (page/street.ts).
 
 import { COUPE_KINDS, GT_COUPE, sculptCoupe } from '../page/car-sculpt.ts'
+import { OJAI_KINDS, OJAI_SPEC, sculptOjai } from '../page/ojai-sculpt.ts'
+import { ROBOTAXI_HANDLING } from '../page/robotaxi-services.ts'
 
 const STEEL = 12, GLASS = 11, PLASTER = 9, WOOD = 10, ROOFING = 14, LAMP = 15
 const k = (material, colour = 0) => material | (colour << 8)
@@ -148,8 +150,9 @@ export const HANDLING = {
   coupe:  { power: 142, top: 590, grip: 1.24, steer: 0.62, tough: 220 },
   saloon: { power: 112, top: 475, grip: 1.38, steer: 0.58, tough: 210 },
   hatch:  { power: 100, top: 445, grip: 1.42, steer: 0.60, tough: 200 },
-  suv:    { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 280 },
-  van:    { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 360 },
+  suv:      { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 280 },
+  robotaxi: { ...ROBOTAXI_HANDLING },
+  van:      { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 360 },
   truck:  { power: 76,  top: 295, grip: 1.28, steer: 0.42, tough: 500 },
   bus:    { power: 70,  top: 265, grip: 1.35, steer: 0.38, tough: 620 },
 }
@@ -369,4 +372,27 @@ export function cableCar() {
   g.box(0.3, L - 0.3, 2.95, 3.05, 0.4, Wd - 0.4, ROOF)
   for (const x of [0.1, L - 0.2]) { g.box(x, x + 0.1, 2.75, 3.15, 0.7, Wd - 0.7, BLUE); g.box(x - 0.01, x + 0.11, 2.85, 3.05, 0.85, Wd - 0.85, k(PLASTER, grey(0))) }
   return { name: 'cable car', kind: 'cable', per, cells: g.cells, size: [g.W, g.H, g.D], paint: [MAROON, CREAM, BLUE], tyre: [] }
+}
+
+/**
+ * Sculpted Waymo Ojai (Zeekr RT) autonomous electric robotaxi (#57), parameterized by any `RobotaxiService`
+ * from `page/robotaxi-services.ts` so every service shares the exact continuous analytical geometry in `page/ojai-sculpt.ts`.
+ */
+export function robotaxi(service) {
+  const { cells, size } = sculptOjai({ livery: service.livery, badge: service.badge, spec: OJAI_SPEC })
+  const [x0, x1] = OJAI_SPEC.wheels
+  const body = [Math.ceil(size[0] / OJAI_SPEC.per), Math.ceil(size[1] / OJAI_SPEC.per), Math.ceil(size[2] / OJAI_SPEC.per)]
+  return {
+    name: service.name,
+    kind: 'robotaxi',
+    per: OJAI_SPEC.per,
+    cells,
+    size,
+    body,
+    motor: motorOf(body[0], body[2], [x0 * 10, x1 * 10], HANDLING.robotaxi, { awd: true, footY: 3.4, reach: 6.2 }),
+    seats: OJAI_SPEC.seats.map((s) => [...s]),
+    eye: [...OJAI_SPEC.eye],
+    paint: [service.livery.body, service.livery.roof, service.livery.accent, service.livery.text],
+    tyre: [OJAI_KINDS.tyre],
+  }
 }

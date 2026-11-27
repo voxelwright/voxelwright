@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ROBOTAXI_SERVICES } from '../page/robotaxi-services.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const MAGIC = 0x3150414d // 'MAP1'
@@ -44,6 +45,7 @@ const PLACES = [
   ['Coit Tower', 37.80241, -122.40582, 'landmark'],
   ['Lombard Street', 37.80214, -122.41874, 'landmark'],
   ['Pier 39', 37.80867, -122.40982, 'landmark'],
+  ...ROBOTAXI_SERVICES.map((s) => [s.station.name, s.station.lat, s.station.lon, 'landmark']),
   ['Golden Gate Bridge', 37.8078, -122.4748, 'landmark'],
   ['Fort Point', 37.8101, -122.4765, 'landmark'],
   ['Palace of Fine Arts', 37.8029, -122.4484, 'landmark'],
