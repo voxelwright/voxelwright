@@ -154,7 +154,7 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // The page's own core, behind a handle that stays the same when the core is built again and swapped in (#264,
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
   let inner = await open<Core>(new URL('./core.wasm', import.meta.url).href)
@@ -186,7 +186,7 @@ async function main() {
     // Shadows at the thing's own grain are dear where a fine thing fills the view (#372: 47% of the frame against 30% without, a car 5 m off and a house front), so they are for `?finesun=1`; without, a fine thing shades as its cells of 10 cm.
     bricksLater: !BAY_ON && query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
     // Each maker holds its own core and the tiles round what it makes (bay.ts `HOLD`): a phone has two (#450).
-    workers: Number(query.get('workers') ?? (phone ? 2 : Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)))),
+    workers: Number(query.get('workers') ?? (phone ? 2 : Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4) - 2)))),
   })
   const march = await marcher(device, gpu.format, world)
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
@@ -550,6 +550,7 @@ async function main() {
   /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
   let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
+  let playedHud: import('./play-hud.ts').PlayHud | null = null
   // How the picture is drawn, as chosen in the realm's Sky panel (#450) and kept in this browser. Graphics presets
   // control rendering passes (shadows and mirrors) only and never change resolution. What the address says is kept
   // whatever is chosen: shadows or mirrors it turns off (`?shadows=0`, `?mirrors=0`), and a scale it fixes (`?scale=`).
@@ -826,7 +827,7 @@ async function main() {
     device.queue.submit([encoder.finish()])
     telemetry?.onPresented(canvas)
     lap('draw')
-    over.frame(project)
+    over.frame(project, playedHud?.parts())
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
@@ -1182,8 +1183,13 @@ async function main() {
   }
   /** The top of what is under a place, looked for down from `y` (cells): a kerb, a roof, a bridge as well as the ground. */
   const groundUnder = (x: number, y: number, z: number) => {
-    const ix = Math.floor(x), iz = Math.floor(z)
-    for (let at = Math.floor(y), end = at - 40; at > end; at--) if (core.world_kind(ix, at, iz)) return at + 1
+    const ix = Math.floor(x), iz = Math.floor(z), iy = Math.floor(y)
+    if (core.world_under) {
+      const hit = core.world_under(ix, iy, iz, 40)
+      if (hit !== -2147483648) return hit
+      return core.ground_at(Math.round(x), Math.round(z))
+    }
+    for (let at = iy, end = at - 40; at > end; at--) if (core.world_kind(ix, at, iz)) return at + 1
     return core.ground_at(Math.round(x), Math.round(z))
   }
   /** Whether the person was on foot when they got on what they ride: they are set down on foot again. */
@@ -2147,6 +2153,7 @@ async function main() {
     Object.assign((globalThis as unknown as { engine: object }).engine, { pwa, realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
+    playedHud = played
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.

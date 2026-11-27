@@ -118,8 +118,8 @@ html:not(.first)[data-hud]:has(#realm.open) :is(#ask:not(.open), #realm .held),
 html:not(.first)[data-hud].choosing #ask:not(.open) { visibility: hidden !important; }
 
 #realm[data-hud] .help, #realm[data-hud] .stick { display: none !important; }
-/* A thing's cue in the world ("E Take the van", hud.ts) is not drawn over the open Settings panel. */
-html[data-hud]:has(#realm.open) #over > #cues { visibility: hidden; }
+/* A thing's cue in the world ("E Take the van", hud.ts) is not drawn over the open Settings panel or radial wheel. */
+html[data-hud]:is(:has(#realm.open), .choosing) #over > #cues { visibility: hidden; }
 /* The street's name steps aside while the line to say something on is open (on a phone on its side they share the top). */
 html[data-hud]:has(#realm .egg-line:not([hidden])) #where { visibility: hidden; }
 

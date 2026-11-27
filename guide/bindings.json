@@ -670,7 +670,7 @@
       "forwardPorts"
     ],
     "engine/page/keys.ts": "lines:^Key[WEMB]: ",
-    "engine/page/street.ts": "lines:E  Take the",
+    "engine/page/street.ts": "lines:Take the \\$\\{carName",
     "engine/page/connect.ts": "lines:Forget this key",
     "engine/sf/boards.json": "lines:\"text\": \"EXPLORE\""
   },

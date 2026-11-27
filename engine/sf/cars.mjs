@@ -23,7 +23,7 @@ import { read } from '../make/cells.mjs'
 import { coarser } from '../page/car-sculpt.ts'
 import { ROBOTAXI_SERVICES } from '../page/robotaxi-services.ts'
 import { boxTruck, cableCar, cityBus, HANDLING, robotaxi, sportsCoupe, streetcar, trolleybus, van } from './fleet.mjs'
-import { cleanShell } from './sculpt-cars.mjs'
+import { cleanInterior, cleanShell, polishHatch } from './sculpt-cars.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -63,7 +63,28 @@ const hueApart = (a, b) => { const d = Math.abs(a - b) % 24; return Math.min(d, 
  */
 function paintOf(kinds) {
   const n = new Map()
-  for (const k of kinds) if (k && material(k) === STEEL) n.set(k, (n.get(k) ?? 0) + 1)
+  const hueCount = new Map()
+  let steelTotal = 0
+  for (const k of kinds) {
+    if (!k || material(k) !== STEEL) continue
+    steelTotal++
+    n.set(k, (n.get(k) ?? 0) + 1)
+    const h = hueOf(colourOf(k))
+    if (h >= 0) hueCount.set(h, (hueCount.get(h) ?? 0) + 1)
+  }
+  if (!steelTotal) return () => false
+  // If a chromatic hue (plus its two neighbours) accounts for >= 10% of steel, treat it as the body's paint even when
+  // dark-grey interior/underbody steel outnumbers the painted shell (e.g. the blue saloon `hatch`, 12.2% blue steel).
+  let bestHue = -1, bestHueSum = 0
+  for (const [h] of hueCount) {
+    let sum = 0
+    for (const [h2, cnt] of hueCount) if (hueApart(h2, h) <= 1) sum += cnt
+    if (sum > bestHueSum) { bestHueSum = sum; bestHue = h }
+  }
+  if (bestHue >= 0 && bestHueSum >= steelTotal * 0.1) {
+    const hue = bestHue
+    return (k) => [STEEL, PLASTER, ROOFING_].includes(material(k)) && colourOf(k) >= 16 && hueApart(hueOf(colourOf(k)), hue) <= 1
+  }
   const top = [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
   if (top === undefined) return () => false
   const c = colourOf(top)
@@ -122,6 +143,24 @@ function kept(id, file, name, kind, colours) {
     const c = cleanShell(outside.kinds, outside.size, paint)
     console.log(`  ${id}: cleaned its outside look: ${c.specks} specks taken off, ${c.holes} holes and ${c.leaks} leaks between edges sealed, ${c.pimples} pimples smoothed`)
     outside.kinds = c.kinds
+    if (id === 'hatch') {
+      const h = polishHatch(outside.kinds, outside.size)
+      outside.kinds = h.kinds
+      console.log(`  ${id}: polished cabin interior (${h.changed} voxels updated)`)
+    }
+  }
+  for (let i = 1; i < (t.living.look?.length ?? 0); i++) {
+    const l = t.living.look[i]
+    const ci = cleanInterior(l.kinds, l.size)
+    l.kinds = ci.kinds
+    console.log(`  ${id}: cleaned interior look[${i}]: ${ci.specks} specks, ${ci.chromFixed} stray colours, ${ci.smoothed} speckles smoothed`)
+  }
+  let motor = tuneMotor(id, t.living.motor)
+  let eye = t.living.eye
+  if (id === 'hatch') {
+    // Level stance (front wheels had reach 5.38 vs rear 6.10, pitching the hood and dash down) and clear driver eye.
+    if (motor?.feet?.length) motor = { ...motor, feet: motor.feet.map((f) => ({ ...f, reach: 5.75 })) }
+    eye = [23.0, 11.35, 13.75]
   }
   const body = runsOf(t.cells), looks = (t.living.look ?? []).map((l) => ({ size: l.size, per: l.per, low: l.low, ...runsOf(l.kinds) }))
   // The outside look, coarser, for drawing it further off.
@@ -129,7 +168,7 @@ function kept(id, file, name, kind, colours) {
   body.roles = rolesOf(body.palette, paint, darkRubber)
   for (const l of looks) l.roles = rolesOf(l.palette, paint, darkRubber)
   const variants = colours.map((c) => ({ name: c, body: repaint(body.palette, paint, c), looks: looks.map((l) => repaint(l.palette, paint, c)) }))
-  wrote(id, { name, kind, size: t.size, body, motor: tuneMotor(id, t.living.motor), controls: t.living.scheme ?? 'drive', ...(t.living.seats ? { seats: t.living.seats } : {}), ...(t.living.eye ? { eye: t.living.eye } : {}), looks, variants })
+  wrote(id, { name, kind, size: t.size, body, motor, controls: t.living.scheme ?? 'drive', ...(t.living.seats ? { seats: t.living.seats } : {}), ...(eye ? { eye } : {}), looks, variants })
 }
 kept('saloon', join(shelf, '1cb43f52cfc96e74e974e0a7.json'), 'grey saloon', 'car', ['white', 'black', 'red', 'navy', 'silver'])
 kept('suv', join(shelf, '3fa7e950af55009f59480a4c.json'), 'grey SUV', 'car', ['white', 'black', 'green', 'beige', 'navy'])

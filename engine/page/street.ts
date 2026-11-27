@@ -33,7 +33,7 @@ export interface Ground { feet_at(x: number, z: number): number; ground_at(x: nu
 
 type Ring = Float64Array
 interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
-interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number }
+interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number; railShift?: number }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number; lights?: { s: number; node: number; dx: number; dz: number }[] }
 interface Look { size: [number, number, number]; per: number; low: [number, number, number]; palette: number[]; runs: string; roles?: string[] }
@@ -86,6 +86,16 @@ interface Car {
 /** A piece of a bus route in these squares: its roads in order, and its stops as [road index, cells along that road]. */
 interface BusPiece { keys: string[]; stops: [number, number][]; seed: number; apart: number; kind: 'bus' | 'trolley'; hours: [number, number]; ref: string }
 
+/** Leading colour word on a base car name ("grey saloon", "blue saloon", "grey SUV"). */
+const COLOUR_PREFIX = /^(grey|gray|blue|red|white|black|silver|green|beige|navy|yellow|orange|brown|gold|tan)\s+/i
+/** Variant-aware car name (#74): a repainted street car names its paint ("white saloon", "yellow taxi"), not its base model. */
+const carName = (m: Model, paint: number): string => {
+  if (paint < 0 || paint >= m.variants.length) return m.name
+  const v = m.variants[paint].name
+  if (v === 'taxi') return 'yellow taxi'
+  if (COLOUR_PREFIX.test(m.name)) return m.name.replace(COLOUR_PREFIX, `${v} `)
+  return `${v} ${m.name}`
+}
 /** How far off people are worked out and drawn (people.ts REACH), and how far a walk takes anyone from home. */
 const REACH = 1400, WALK_MOST = 1600
 /** How long a pair of steps is (people.ts STRIDE). */
@@ -445,6 +455,7 @@ export function street(o: {
         const seed = mix(idSeed(Number(p.roads[0].split('/')[0])), b.ref.split('').reduce((h, ch) => mix(h, ch.charCodeAt(0)), 7))
         busPieces.push({ keys: p.roads, stops: p.stops, seed, apart: (/muni/i.test(b.operator) ? 8 : 20) * 60 * 70, kind: b.kind === 'trolleybus' ? 'trolley' : 'bus', hours: b.hours, ref: b.ref })
       }
+      for (const r of roads.values()) r.railShift = undefined
       routed = true
     }, () => {})
   }, () => {})
@@ -1369,7 +1380,7 @@ export function street(o: {
     const looks = await Promise.all(parts.map(({ i }) => fineCells(m, c.paint, i)))
     const fine = parts.map(({ l }, k) => { const cells = looks[k]; o.faces?.(cells, l.size, made[k]!); return { size: l.size, per: l.per, low: l.low, cells } })
     const low: [number, number, number] = [Math.round(c.x - m.size[0] / 2), Math.round(c.y) + SKY, Math.round(c.z - m.size[2] / 2)]
-    const thing = await o.alive.spawn({ name: m.name, cells: Int32Array.from(body), size: m.size, low, motor, controls: m.controls ?? 'drive', seats: m.seats, eye: m.eye, fine })
+    const thing = await o.alive.spawn({ name: carName(m, c.paint), cells: Int32Array.from(body), size: m.size, low, motor, controls: m.controls ?? 'drive', seats: m.seats, eye: m.eye, fine })
     c.waking = false
     if (!thing.alive) { pending.delete(c); return false }
     // Turned as it stood: its middle where it was, a little over the road, still.
@@ -1456,7 +1467,37 @@ export function street(o: {
   const holds = new Map<number, Map<Car, { ax: number; az: number; straight: boolean }>>()
   const letGo = (c: Car) => { for (const [n, h] of holds) { h.delete(c); if (!h.size) holds.delete(n) } }
   const P = { x: 0, z: 0, tx: 0, tz: 0 }, Q = { x: 0, z: 0, tx: 0, tz: 0 }
-  const laneOff = (r: Road, lane: number) => (r.flags & 1 ? (lane - (r.lanes - 1) / 2) * 33 : (lane + 0.5) * 33)
+  /**
+   * Runtime fallback clearance for opposing parallel streetcar rails (#72): keeps lane 0 at least 2.8 m clear of
+   * oncoming streetcar tracks even when loading older un-rebuilt life squares (shifted squares evaluate to 0).
+   */
+  const railShiftOf = (r: Road): number => {
+    if (r.railShift !== undefined) return r.railShift
+    if (!tramLines.length) return 0
+    const base0 = (r.flags & 1 ? (0 - (r.lanes - 1) / 2) * 33 : 0.5 * 33)
+    const S0 = { x: 0, z: 0, tx: 0, tz: 0 }
+    let need = 0
+    for (let s = 0; s <= r.len; s += Math.max(40, r.len / 4)) {
+      along(r.p, r.cum, s, S0)
+      const lx = S0.x - S0.tz * base0, lz = S0.z + S0.tx * base0
+      for (const l of tramLines) {
+        for (let i = 0; i + 3 < l.p.length; i += 2) {
+          const ax = l.p[i], az = l.p[i + 1], bx = l.p[i + 2] - ax, bz = l.p[i + 3] - az
+          if (Math.min(ax, ax + bx) - 60 > lx || Math.max(ax, ax + bx) + 60 < lx || Math.min(az, az + bz) - 60 > lz || Math.max(az, az + bz) + 60 < lz) continue
+          const l2 = bx * bx + bz * bz
+          if (l2 < 1) continue
+          const len = Math.sqrt(l2)
+          if ((S0.tx * bx + S0.tz * bz) / len > -0.9) continue
+          const t = Math.max(0, Math.min(1, ((lx - ax) * bx + (lz - az) * bz) / l2))
+          const d = Math.hypot(lx - ax - bx * t, lz - az - bz * t)
+          if (d < 28) need = Math.max(need, 28 - d)
+        }
+      }
+    }
+    r.railShift = Math.min(35, need)
+    return r.railShift
+  }
+  const laneOff = (r: Road, lane: number) => (r.flags & 1 ? (lane - (r.lanes - 1) / 2) * 33 : (lane + 0.5) * 33) + railShiftOf(r)
   /** A lane's middle at a distance along a road. */
   const lanePoint = (r: Road, lane: number, s: number, into: { x: number; z: number; tx: number; tz: number }) => { along(r.p, r.cum, s, into); const off = laneOff(r, Math.min(lane, r.lanes - 1)); into.x -= into.tz * off; into.z += into.tx * off }
   /** Whether cars may go along a road: not where its line runs under a roof (a tunnel, or a building over it: the footing there is the roof's). */
@@ -2547,17 +2588,30 @@ export function street(o: {
   }
 
   // ── Taking a car that stops beside someone (including robotaxis parked/charging at a depot!) ──
-  let cue: { car: Car; remove(): void } | null = null, beside: (() => void) | null = null
+  // On desktop with the play HUD active (#75), KeyE opens the radial tool wheel (or cycles tools): stopped live traffic
+  // cars bind KeyF ("F  Take the …") so nearby traffic never steals E from the tool wheel, while charging depot
+  // robotaxis and woken parked cars (living.ts) keep KeyE.
+  const coarse = matchMedia('(pointer: coarse)')
+  let cue: { car: Car; key: string; remove(): void } | null = null, beside: (() => void) | null = null
+  const dropCue = () => { cue?.remove(); cue = null; beside?.(); beside = null }
   const offer = (feet: readonly number[] | null) => {
-    let best: Car | null = null, far = 45
-    if (feet && !o.alive.riding && !o.alive.near) {
-      for (const c of [...traffic, ...depotCars]) {
-        if (!c.model.motor) continue
+    const wheelOpen = document.documentElement.classList.contains('choosing')
+    let best: Car | null = null, bestDepot = false, far = 45
+    if (on && feet && !o.alive.riding && !o.alive.near && !wheelOpen) {
+      for (const c of depotCars) {
+        if (!c.model.motor || Math.abs(c.y - feet[1]) > 25) continue
         const d = Math.hypot(c.x - feet[0], c.z - feet[2]) - c.model.long / 2
-        if (c.v < 25 && d < far) { far = d; best = c }
+        if (c.v < 25 && d < Math.min(far, 35)) { far = d; best = c; bestDepot = true }
+      }
+      for (const c of traffic) {
+        if (!c.model.motor || Math.abs(c.y - feet[1]) > 25) continue
+        const d = Math.hypot(c.x - feet[0], c.z - feet[2]) - c.model.long / 2
+        if (c.v < 25 && d < Math.min(far, 28)) { far = d; best = c; bestDepot = false }
       }
     }
-    if (cue && cue.car !== best) { cue.remove(); cue = null; beside?.(); beside = null }
+    const useF = !bestDepot && !!document.documentElement.dataset.hud && !coarse.matches
+    const key = useF ? 'KeyF' : 'KeyE'
+    if (cue && (cue.car !== best || cue.key !== key)) dropCue()
     if (!best || cue) return
     const car = best
     const takeIt = () => {
@@ -2570,10 +2624,11 @@ export function street(o: {
       car.rtStuck = undefined
       car.kind = 'parked'
       pending.set(car, { inside: true, then: (thing) => o.alive.mount(thing) })
-      cue?.remove(); cue = null; beside?.(); beside = null
+      dropCue()
     }
-    cue = { car, remove: o.hud.cue(`E  Take the ${car.model.name}`, () => [car.x, car.y + car.model.size[1] + 4, car.z], takeIt).remove }
-    beside = o.input.push({ name: 'take', key: (code) => { if (code !== 'KeyE') return false; takeIt(); return true } })
+    const label = coarse.matches ? `Take the ${carName(car.model, car.paint)}` : `${useF ? 'F' : 'E'}  Take the ${carName(car.model, car.paint)}`
+    cue = { car, key, remove: o.hud.cue(label, () => [car.x, car.y + car.model.size[1] + 4, car.z], takeIt).remove }
+    beside = o.input.push({ name: 'take', key: (code) => { if (code !== key) return false; takeIt(); return true } })
   }
 
   // ── Reactive driving: crash waking on impact, horn reactions, and high-speed near-miss detection ──
@@ -2895,7 +2950,7 @@ export function street(o: {
         crashShocks.push({ at: hitAt, radius: 14 + force * 24, t: o.clock() })
         if (crashShocks.length > 16) crashShocks.shift()
         for (const tCar of traffic) if (Math.hypot(tCar.x - hitAt[0], tCar.z - hitAt[2]) < 260) tCar.shaken = now - 2.5
-        if (m.ridden || closing > 30) o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: c.model.name, woke: true })
+        if (m.ridden || closing > 30) o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: carName(c.model, c.paint), woke: true })
       } else if (m.thing && closing > 0 && now - (c.hitAt ?? -99) > 0.45) {
         // What has no motor does not wake (cable cars, trams, buses): solid. The mover is thrown back off it; whoever
         // drives is dented, with sparks and the sound.
@@ -2906,7 +2961,7 @@ export function street(o: {
           o.alive.hit(m.thing, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 120)
           crashShocks.push({ at: hitAt, radius: 14 + force * 20, t: o.clock() })
           if (crashShocks.length > 16) crashShocks.shift()
-          o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: c.model.name, woke: false })
+          o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: carName(c.model, c.paint), woke: false })
         }
       }
     }
@@ -3147,14 +3202,14 @@ export function street(o: {
       return out
     },
     cars(x, z, r) {
-      return [...parked.values(), ...traffic, ...depotCars, ...cables, ...trams].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ id: c.id, kind: c.kind, model: c.model.kind, service: c.model.serviceId ?? '', x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing, wait: c.wait ?? '', stuck: c.stuck ?? 0 }))
+      return [...parked.values(), ...traffic, ...depotCars, ...cables, ...trams].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ id: c.id, kind: c.kind, model: c.model.kind, service: c.model.serviceId ?? '', x: c.x, y: c.y, z: c.z, heading: c.heading, name: carName(c.model, c.paint), v: c.v, living: !!c.thing, wait: c.wait ?? '', stuck: c.stuck ?? 0 }))
     },
     snapshot(x, z, r) {
       const out: ReturnType<Street['snapshot']> = []
       const push = (c: Car) => {
         if (Math.hypot(c.x - x, c.z - z) >= r) return
         out.push({
-          id: c.id, kind: c.kind, model: c.model.kind, name: c.model.name,
+          id: c.id, kind: c.kind, model: c.model.kind, name: carName(c.model, c.paint),
           x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10, z: Math.round(c.z * 10) / 10,
           heading: Math.round(c.heading * 1000) / 1000, v: Math.round(c.v * 10) / 10,
           long: c.model.long, wide: c.model.wide,
@@ -3194,7 +3249,7 @@ export function street(o: {
       }
       return best
     },
-    get debug() { return { laps: Object.fromEntries(Object.entries(laps).map(([k, v]) => [k, Math.round(v * 100) / 100])), pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, wakeLag, reactive: { sentAway: sentAwayStat, broke: brokeStat, crashes: crashCountStat, nearMisses: nearMissCountStat, hornResponses: hornResponsesStat, crashLiving: activeCrashLiving() }, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
+    get debug() { return { laps: Object.fromEntries(Object.entries(laps).map(([k, v]) => [k, Math.round(v * 100) / 100])), pending: [...pending.keys()].map((c) => ({ name: carName(c.model, c.paint), waking: !!c.waking, thing: !!c.thing })), living: living.size, wakeLag, reactive: { sentAway: sentAwayStat, broke: brokeStat, crashes: crashCountStat, nearMisses: nearMissCountStat, hornResponses: hornResponsesStat, crashLiving: activeCrashLiving() }, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
     get red() { return shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; return q.sig && lightFor(junctionOf(q.sig), q.cdx!, q.cdz!, o.clock()) === 'red' }).map((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }, j = junctionOf(q.sig!); return { seed: p.seed, node: q.sig, u: Math.round(cycleAt(j, o.clock())), phase: phaseOf(j, q.cdx!, q.cdz!), axis: [j.ax, j.az].map((v) => Math.round(v * 100) / 100), dir: [q.cdx!, q.cdz!].map((v) => Math.round(v * 100) / 100), at: [Math.round(p.at[0]), Math.round(p.at[2])], jat: [Math.round(j.x), Math.round(j.z)] } }) },
     lineup(at, heading = 0, gap = 22) {
       for (const c of showcase) hide(c)
@@ -3245,7 +3300,7 @@ export function street(o: {
     get onNearMiss() { return nearMissCb },
     set onNearMiss(fn: ((info: NearMiss) => void) | undefined) { nearMissCb = fn },
     get enabled() { return on },
-    set enabled(v: boolean) { on = v },
+    set enabled(v: boolean) { on = v; if (!v) dropCue() },
     prewarm,
     warmAt(x: number, z: number) {
       pendingWarm = [x, 0, z]
