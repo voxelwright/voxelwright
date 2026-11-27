@@ -39,7 +39,7 @@ export function place(el, trigger, { side = 'bottom', align = 'start', gap = 8, 
   const below = r.bottom + gap + lift, above = r.top - gap - h;
   const belowFits = below + h <= vh - EDGE, aboveFits = above >= EDGE;
   const preferred = side === 'top' ? (aboveFits || !belowFits ? above : below) : belowFits || !aboveFits ? below : above;
-  const top = Math.round(el.matches('.vx-menu, [data-vx-fitting="service"]') ? Math.max(EDGE, Math.min(preferred, vh - EDGE - h)) : preferred);
+  const top = Math.round(el.matches('.vx-menu, [data-vx-fitting="service"]') || (!belowFits && !aboveFits) ? Math.max(EDGE, Math.min(preferred, vh - EDGE - h)) : preferred);
   el.style.margin = '0';
   el.style.inset = `${top}px auto auto ${left}px`;
   const x = Math.abs(left - r.left) < 1 ? 0 : Math.abs(left + w - r.right) < 1 ? w : Math.max(0, Math.min(w, r.left + r.width / 2 - left));

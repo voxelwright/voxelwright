@@ -72,9 +72,9 @@ const look = (page) => page.evaluate(() => {
   const others = [...document.querySelectorAll('#realm > *:not(.fold, .sky), #hud, #aim, #where, #over')].filter(vis).map((el) => el.id ? `#${el.id}` : `.${[...el.classList].join('.')}`)
   return {
     key: vis(key), words: key.textContent.trim(), name: key.getAttribute('aria-label'), glyph: key.dataset.vxIcon, covers, cramped, panelAt: [s.left, s.top, s.width, s.height].map(Math.round), keep: keep.map((b) => `${b.id} ${[b.x0, b.y0, b.x1, b.y1].map(Math.round).join(',')}`), at: [Math.round(k.x0), Math.round(k.y0), Math.round(k.x1 - k.x0), Math.round(k.y1 - k.y0)], vw: innerWidth, vh: innerHeight,
-    over: boards.filter((b) => meets(grown, b)).map((b) => b.id), credits: meets(grown, box(document.querySelector('#first .credits'))),
+    over: boards.filter((b) => meets(grown, b)).map((b) => b.id), credits: !!document.querySelector('#first .credits') && meets(grown, box(document.querySelector('#first .credits'))),
     panel: vis(document.querySelector('#realm .sky')), others,
-    parts: Object.fromEntries(Object.entries({ weather: '#realm .sky .weather', graphics: '#realm .sky .graphics', time: '#realm .sky .vx-slider', say: '#realm .sky .say', reset: '#realm .sky .reset', home: '#realm .sky .home' }).map(([n, s]) => [n, vis(document.querySelector(s))])),
+    parts: Object.fromEntries(Object.entries({ weather: '#realm .sky .weather', graphics: '#realm .sky .graphics', time: '#realm .sky .vx-slider', credits: '#realm .sky .sky-credits-link', say: '#realm .sky .say', reset: '#realm .sky .reset', home: '#realm .sky .home' }).map(([n, s]) => [n, vis(document.querySelector(s))])),
     weather: e.realmControls.sky.weather, preset: e.graphics.preset, resolution: e.graphics.resolution, kept: (() => { try { return localStorage.getItem('village.graphics') } catch { return null } })(),
     checked: document.querySelector('#realm input[name=realm-graphics]:checked')?.value ?? null,
     resAutoShown: vis(document.querySelector('#realm .sky .res-auto')),
@@ -118,7 +118,7 @@ try {
     await page.screenshot({ path: join(shots, `${size}-open.png`) })
     check(open.panel && !open.cramped.length, `every seat's words are inside its key${open.cramped.length ? ` (not ${open.cramped.join(', ')})` : ''}`)
     check(open.panel && !open.covers.length, `the open panel (${open.panelAt.join(', ')}) leaves clear ${open.keep.join('; ')}${open.covers.length ? ` (but covers ${open.covers.join(', ')})` : ''}`)
-    check(open.panel && open.parts.weather && open.parts.graphics && !open.parts.say && !open.parts.reset && !open.parts.home && !open.engaged && open.state === 'idle', `the key opens the panel: ${Object.entries(open.parts).map(([n, v]) => `${n} ${v ? 'shown' : 'hidden'}`).join(', ')}; nobody in, the board ${open.state}`)
+    check(open.panel && open.parts.weather && open.parts.graphics && open.parts.credits && !open.parts.say && !open.parts.reset && !open.parts.home && !open.engaged && open.state === 'idle', `the key opens the panel: ${Object.entries(open.parts).map(([n, v]) => `${n} ${v ? 'shown' : 'hidden'}`).join(', ')}; nobody in, the board ${open.state}`)
 
     await press(page, phone, ...(await middle(page, `#realm .weather label:has(${label('realm-weather', 'fog')})`)))
     await press(page, phone, ...(await middle(page, `#realm .graphics label:has(${label('realm-graphics', 'low')})`)))
