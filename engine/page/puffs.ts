@@ -82,7 +82,11 @@ const NEAR = 1.0;
 const FAR = 100000.0;
 @vertex fn vs(@builtin(vertex_index) v: u32, @location(0) at: vec4f, @location(1) colour: vec4f, @location(2) more: vec4f) -> Out {
   let corner = vec2f(f32(v & 1u), f32((v >> 1u) & 1u)) * 2.0 - 1.0;
-  let world = at.xyz - u.eye + (u.right * corner.x + u.up * corner.y) * at.w;
+  var world = at.xyz - u.eye + (u.right * corner.x + u.up * corner.y) * at.w;
+  if (more.w < 0.0) {
+    // Engine fire grows from the vent along world up, anchored at the bottom of the quad.
+    world = at.xyz - u.eye + u.right * corner.x * at.w + vec3f(0.0, (corner.y + 1.0) * at.w * 1.75, 0.0);
+  }
   let d = dot(world, u.forward);
   var out: Out;
   out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
@@ -110,6 +114,17 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   let heat = in.more.x;
   let age = in.more.z;
   let seed = u32(in.more.y);
+  if (in.more.w < 0.0) {
+    let height = in.uv.y * 0.5 + 0.5;
+    let phase = -in.more.w;
+    let sway = height * (0.17 * sin(phase + height * 6.0) + 0.09 * sin(2.1 * phase - height * 4.0));
+    let width = pow(1.0 - height, 0.72) * (0.58 + 0.12 * sin(phase * 1.4 + height * 9.0));
+    let edge = abs(in.uv.x - sway) / max(width, 0.005);
+    let tongue = (1.0 - smoothstep(0.42, 1.0, edge)) * (1.0 - smoothstep(0.85, 1.0, height));
+    let core = (1.0 - smoothstep(0.04, 0.64, edge)) * (1.0 - smoothstep(0.12, 0.68, height));
+    let colour = mix(vec3f(0.93, 0.19, 0.02), vec3f(1.0, 0.73, 0.22), core);
+    return vec4f(colour * tongue, tongue * 0.44);
+  }
   // A puff is a sculpted curling billow lit with warm sunlight on its sunward folds and cool sky
   // fill in its shadowed undersides, so smoke reads with 3D volume instead of a flat grey smudge.
   let r = length(in.uv);
@@ -194,7 +209,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' },
   })
   const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const instances = device.createBuffer({ size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+  const instances = device.createBuffer({ label: 'puff instances', size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
   // Where each is in the world (as doubles: the world is big), how it moves, and how it changes as it ages.
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3)
@@ -202,7 +217,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
   const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
-  let next = 0, lasting = 0, live = 0
+  let next = 0, lasting = 0, live = 0, flamePhase = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
@@ -351,7 +366,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         const frac = (level - 0.35) / 0.35
         if (Math.random() < dt * (14 + 12 * frac)) {
           const w = rnd(0.84, 0.95)
-          puff(at, 0, rnd(0.6, 1.7), rnd(8, 14), { size: rnd(0.65, 1.0), grow: rnd(1.8, 2.8), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.24 + 0.08 * frac, late: 0.0 })
+          puff(at, 0, rnd(0.6, 1.7), rnd(12, 18), { size: rnd(0.37, 0.59), grow: rnd(2.6, 3.5), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.27 + 0.07 * frac, late: 0.07 })
         }
         return
       }
@@ -365,13 +380,16 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         const grey = rnd(0.30, 0.43)
         puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.32, late: 0.0 })
       }
-      // Burning: compact flickering orange tongues at the vent.
-      if (level > 0.92 && Math.random() < dt * 9) puff(at, 0, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.75, 1.35), grow: rnd(0.8, 1.5), life: rnd(0.28, 0.48), heat: 0.60, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.22, late: 0.0 })
+      // Redraw one attached flame while the engine burns. Smoke alone drifts away.
+      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.12 + 0.18 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
     },
     step(dt) {
+      flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)
       live = 0
       for (let i = 0; i < MOST; i++) {
         if (life[i] <= 0) continue
+        // An attached flame lives for this draw only, including at a paused simulation rate.
+        if (late[i] < 0) { if (--life[i] > 0) live++; continue }
         life[i] -= dt
         live++
         const slow = Math.max(0, 1 - drag[i] * dt)

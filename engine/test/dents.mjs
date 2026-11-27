@@ -156,6 +156,27 @@ await page.evaluate(() => { const e = globalThis.engine; e.off.delete('puffs'); 
 await page.evaluate(() => {
   const e = globalThis.engine, emit = e.smoke.engine.bind(e.smoke)
   e.alive.repair(globalThis.car)
+  // Read the hot instances actually submitted to the renderer. Detached burning puffs
+  // used to drift up even when their spawn position was correct.
+  globalThis.flameDraws = []
+  const draw = e.smoke.draw.bind(e.smoke)
+  const write = GPUQueue.prototype.writeBuffer
+  e.smoke.draw = (encoder, target, view) => {
+    globalThis.puffAnchor = view.eye.map(x => Math.floor(x / 64) * 64)
+    draw(encoder, target, view)
+  }
+  GPUQueue.prototype.writeBuffer = function(buffer, offset, data, start, count) {
+    if (buffer.label === 'puff instances' && globalThis.burningVent && globalThis.flameDraws.length < 24) {
+      const errors = []
+      for (let i = 0; i < count; i += 12) {
+        if (data[i+8] <= 0 || Math.abs(data[i+7] - 0.22) > 0.001) continue
+        const delta = globalThis.burningVent.map((p,j) => data[i+j] + globalThis.puffAnchor[j] - p)
+        errors.push(Math.hypot(...delta))
+      }
+      globalThis.flameDraws.push(errors)
+    }
+    return write.apply(this, arguments)
+  }
   e.smoke.engine = (at, level, dt) => {
     if (level > 0.92) globalThis.burningVent = [...at]
     emit(at, level, dt)
@@ -180,6 +201,9 @@ const ventInBody = () => page.evaluate(async () => {
   const inside=a>=0 && a<size[0] && b>=0 && b<size[1] && c>=0 && c<size[2] && cells[a+size[0]*(c+size[2]*b)]!==0
   return {rest,inside,front:rest[0]/size[0],side:rest[2]/size[2]}
 })
+await page.waitForFunction(() => globalThis.flameDraws.length >= 24, null, {timeout: 8000})
+const flames = await page.evaluate(() => globalThis.flameDraws)
+check(flames.every(frame => frame.length === 1 && frame[0] < 0.015), 'each burning frame draws one flame attached to the vent')
 const vent = await ventInBody()
 check(!vent.inside && vent.front>0.88 && vent.side>0.58, `flame starts in air at the struck nose opening (length ${vent.front.toFixed(2)}, width ${vent.side.toFixed(2)}, inside skin ${vent.inside})`)
 await page.evaluate(() => {
