@@ -328,7 +328,11 @@ export function eggs(page: EggsPage) {
     dress(egg)
     page.hush(true)
     showPlayer()
-    banner(`Now playing: ${v.title}`)
+    if (v.sky ?? true) {
+      banner(null)
+      const plane = page.plane()
+      if (plane) plane.hidden = true
+    } else banner(`Now playing: ${v.title}`)
     say(`Tuning in: ${v.title}…`)
     try {
       const [{ videoPicture }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
@@ -835,6 +839,9 @@ export function eggs(page: EggsPage) {
     else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
     // The boards' own light is off while an egg has the windows, from its start to its end.
     if (!!running !== darkened) { darkened = !!running; page.darkBoards(darkened) }
+    // Keep the tow plane and banner clear of the sky while the drone swarm is active (or starting up for a sky video).
+    const plane = page.plane()
+    if (plane) plane.hidden = !!(march.screen.sky && march.screen.up > 0) || !!(running && running.egg !== 'matrix' && (VIDEOS[running.egg]?.sky ?? true))
     const up = running?.picture ? 1 : 0
     // Up over a second, down over two thirds of one.
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)
