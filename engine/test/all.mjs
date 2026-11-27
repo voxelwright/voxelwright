@@ -40,6 +40,7 @@ let checks = [
   ['keys', 'node', ['test/keys.mjs'], false],
   ['gamepad', 'node', ['test/gamepad.mjs'], false],
   ['pwa', 'node', ['test/pwa.mjs'], false],
+  ['drive-cam', 'node', ['test/drive-cam.mjs'], false],
   ['turns', 'node', ['test/turns.mjs'], false],
   ['hands', 'node', ['test/hands.mjs'], true],
   ['hold', 'node', ['test/hold.mjs'], true],

@@ -224,10 +224,10 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     }
     if (head <= 0.01) { return vec3f(0.0); }
     let hi = clamp(head - 1.0, 0.0, 1.0);
-    let tint = mix(vec3f(1.0, 0.88, 0.66), vec3f(1.0, 0.97, 0.90), hi);
-    return tint * (min(head, 1.0) * 2.8 + hi * 6.5);
+    let tint = mix(vec3f(1.0, 0.90, 0.70), vec3f(1.0, 0.98, 0.92), hi);
+    return tint * (min(head, 1.0) * 3.6 + hi * 7.5);
   }
-  // Rear lamps: dedicated white reverse lenses, deep orange-amber hazard blinkers, inner reverse zone on red clusters when reversing, steady crimson tails, blazing crimson brakes.
+  // Rear lamps: dedicated white reverse lenses, deep orange-amber hazard blinkers, inner reverse zone on red clusters when reversing, vivid ruby-red tails, blazing crimson brakes.
   if (along < -0.35 && faceFwd < 0.5) {
     let whiteLens = albedo.g > albedo.r * 0.65 && albedo.b > albedo.r * 0.55;
     if (whiteLens) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
@@ -238,12 +238,11 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       return vec3f(1.3, 0.10, 0.002) * amp;
     }
     if (rev > 0.05 && across < 0.62) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
-    let tail = min(head, 1.0) * 1.9;
-    let stop = brake * 9.5;
+    let tail = min(head, 1.0) * 4.2;
+    let stop = min(brake, 1.25) * 7.8;
     let redPower = max(tail, stop);
     if (redPower <= 0.01) { return vec3f(0.0); }
-    let hot = clamp(brake, 0.0, 1.0);
-    return vec3f(1.0, 0.004 + hot * 0.003, 0.001 + hot * 0.001) * redPower;
+    return vec3f(1.0, 0.003, 0.001) * redPower;
   }
   // Side-mirror amber hazard repeaters & side/roof marker lamps.
   if (hazard > 0.05 && albedo.r > albedo.g * 1.4 && albedo.g > albedo.b * 2.2) {

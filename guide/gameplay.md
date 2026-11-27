@@ -140,7 +140,7 @@ The street's kept cars get their motors from `HANDLING` in `engine/sf/fleet.mjs`
 
 ### Boost and launch
 
-Hold Shift (Boost on touch, B on a pad) with the throttle on for nitrous: 40% more thrust and 24% more top speed while it lasts. A full reserve burns in about 2.8 s and needs 8% to start again. It refills while you drift, when you land after a quarter second in the air, faster while you cruise cleanly above 45% of top speed, and slowly whenever you roll. The boost bar shows the reserve. Boosting fires blue flames from the exhaust, lights the road behind in cyan, widens the lens by 5.5 degrees (not with reduced motion), and adds a turbo whine to the engine.
+Hold Shift (Boost on touch, B on a pad) with the throttle on for nitrous: 40% more thrust and 24% more top speed while it lasts. A full reserve burns in about 2.8 s and needs 8% to start again. It refills while you drift, when you land after a quarter second in the air, faster while you cruise cleanly above 45% of top speed, and slowly whenever you roll. The boost bar shows the reserve. Boosting fires multi-stage blue-white and amber-tipped plasma jets from the rear tailpipes, lights the road behind in cyan, widens the lens by 5.5 degrees (not with reduced motion), and adds a turbo whine to the engine. Upshifts, launches, high-RPM throttle lift-offs and aggressive drift entries fire fiery orange-gold exhaust backfire flames with a brief warm asphalt light flash from dual rear diffuser tips on sports coupes or the lower-right tailpipe on sedans and SUVs.
 
 A **burnout** builds a launch. Below 6.5 km/h with the throttle and the handbrake both over half, the front brakes hold the car while the rear wheels spin and smoke. The charge fills in 1.15 s and the boost bar turns orange to show it. Let go of the handbrake with the throttle still on and the car launches with up to 45% more thrust, fading over 0.8 s.
 
@@ -150,13 +150,14 @@ In a shared world, both boost (on and off) and rain wetness are forwarded to the
 
 `engine/page/drive-cam.ts` has six views, `DRIVE_CAM_MODES`: Close (the default), Far, Hood, Bumper, Seat and Cinema. C (the touch Cam key, a pad's RB) goes round them all and a toast names the new one. Getting out leaves the seat for the view before it; the other views survive getting out and back in.
 
+- **Close chase**: rides low just above the roofline and tight behind the rear bumper with a nearly level sightline over the roof down the street, pulling back smoothly under hard acceleration and boost, leaning in on braking, and swinging toward the outside rear-quarter with a lateral shoulder offset during hard drifts so the car's flank, tire smoke and the turn ahead stay framed. Portrait phone viewports scale back and elevate cleanly to clear the bottom-right touch keypad.
 - **Look back** (hold X or LB) turns the view 180 degrees and eases back on release.
 - **Air cam**: after 0.35 s airborne at speed, the close, far and cinema views pull wider.
-- **Cinema** cuts between hero, fender, flyby and helicopter shots every 4.5 s, and cuts away early when a shot is blocked.
-- **Speed lens**: the field of view widens with speed, and a streak, colour fringe and vignette grow with it (`engine/page/glow.ts`).
+- **Cinema** cuts between low rear-quarter hero, fender, flyby and helicopter shots every 4.5 s, and cuts away early when a shot is blocked.
+- **Speed and drift lens**: the field of view widens with speed, while `engine/page/glow.ts` adds peripheral radial speed streaks from ~35 km/h (strongest along rushing roadside asphalt and side buildings) plus tangential rotational motion blur during hard drifts that streaks city buildings and streetlights while keeping the lower-center car silhouette and vanishing point sharp.
 - **Seat** puts the eye in the driver's seat ([from the seat](#from-the-seat)). V goes straight into it from any view and back to that view; C goes on from it to Cinema.
 
-Reduced motion makes camera changes instant, turns off the lens effects and holds each cinema shot 6.5 s.
+Reduced motion makes camera changes instant, turns off the speed/drift lens streaks and holds each cinema shot 6.5 s.
 
 ### From the seat
 
@@ -189,7 +190,7 @@ Only lamp cells (material 15) on the car you ride light up (`engine/page/pieces.
 | Reverse | The gear is R |
 | Headlights | They start on auto (on after dusk). L then cycles low, high and off (from auto after dusk it goes straight to high). |
 
-`engine/page/tracks.ts` draws onto the ground after the world's cells. Rear wheels that slide lay **skidmarks**, dark on asphalt and brown off-road. It keeps the last 1024 segments (`MAX_SEGS`), each fading out by 18 s (`LIFE`). It also draws up to 24 **light pools** a frame (`MAX_SPILLS`): the red splash of brake lamps, white reverse light and headlight cones.
+`engine/page/tracks.ts` draws onto the ground after the world's cells. Rear wheels that slide lay **skidmarks**, dark on asphalt and brown off-road. It keeps the last 1024 segments (`MAX_SEGS`), each fading out by 18 s (`LIFE`). It also draws up to 24 **light pools** a frame (`MAX_SPILLS`): vivid crimson taillight/brake road glow, brief fiery orange exhaust pop flashes, cyan nitrous splash, white reverse light, and two-stage near/far warm night headlight cones.
 
 ### Traffic
 

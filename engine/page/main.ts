@@ -323,7 +323,7 @@ async function main() {
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
   const roll = (Number(query.get('roll') ?? (directLL ? 0 : LOCAL?.roll) ?? 0) * Math.PI) / 180
   /** Dynamic driving camera offsets set each frame by living.ts (0 whenever not driving). */
-  let driveFov = 0, driveRoll = 0, driveEnergy = 0
+  let driveFov = 0, driveRoll = 0, driveEnergy = 0, driveDrift = 0
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
@@ -888,7 +888,7 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
     device.queue.submit([encoder.finish()])
     telemetry?.onPresented(canvas)
@@ -1191,14 +1191,14 @@ async function main() {
     world: far, made: () => made,
     ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } },
     dropped: (id) => moving.delete(id),
-    lens: (fovAdd, rollAdd, energy) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy },
+    lens: (fovAdd, rollAdd, energy, driftBlur = 0) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy; driveDrift = driftBlur },
     fx: {
       smoke: (at, vel, intensity, colour) => smoke.tireSmoke(at, vel, intensity, colour),
       exhaust: (at, dir, pop, boost) => smoke.exhaust(at, dir, pop, boost),
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
-      sparks: (at, strength) => { debris.burst(at, 1.5, Math.round(3 + strength * 6), [1.0, 0.57, 0.12], 0.13, 0.34, 0.5 + strength * 0.4, true); smoke.glint(at, 4 + strength * 5) },
+      sparks: (at, strength) => { debris.burst(at, 1.6, Math.round(5 + strength * 9), [1.0, 0.68, 0.16], 0.12, 0.42, 0.6 + strength * 0.45, true); smoke.glint(at, 4.5 + strength * 5.5) },
       // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)
