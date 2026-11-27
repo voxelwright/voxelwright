@@ -1,5 +1,5 @@
-// The block pass (#430): small solids made of cubes. It draws the parts of the Voxelmorphism kit (plant-a-seed,
-// packages/voxelmorphism): a button is about 500 cubes, a dialog about 8,000. Whoever uses it hands over a part's
+// The block pass (#430): small solids made of cubes. It draws the parts of the Voxelmorphism kit (engine/kit):
+// a button is about 500 cubes, a dialog about 8,000. Whoever uses it hands over a part's
 // cubes as the kit keeps them (`Frame`) and says where the part goes (`Place`). Several parts are laid, then drawn
 // together in two passes: every part's depth as the light sees it, then every part's picture.
 //

@@ -191,7 +191,7 @@ async function knock(o: { base: string; id: string; iceServers: RTCIceServer[]; 
   const v: Record<string, unknown> = await asked(r).catch((e: Error) => ({ why: e.message }))
   if (r.status === 404) return fail('that server is gone', false, 'gone')
   if (r.status === 409) return fail(why(v, 'the server refused'), true)
-  // The master's own refusals (master/README.md): each its own word.
+  // The master's own refusals (guide/master.md): each its own word.
   const master: Record<number, Why> = { 429: 'slow', 403: 'slow', 503: 'busy', 504: 'silent' }
   if (!r.ok || typeof v.sdp !== 'string') return fail(why(v, `the master said ${r.status}`), false, master[r.status] ?? 'master', Number(r.headers.get('Retry-After')) || 0)
   const fingerprint = fingerprintOf(v.sdp)

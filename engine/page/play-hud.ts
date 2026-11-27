@@ -55,6 +55,7 @@ const DRIVE_ICONS: Record<string, string> = {
   seat: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="1.6"/><path d="M4 9.5h4.4M11.6 9.5H16M10 11.6V16"/></svg>',
   leave: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4.5v12H8"/><path d="M10 10h6.5"/><path d="M13.5 7l3 3-3 3"/></svg>',
   radio: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="9" rx="1.5"/><path d="M6 7l7-3.5"/><circle cx="7.5" cy="11.5" r="2"/><path d="M12 10h2.5M12 13h2.5"/></svg>',
+  repair: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.8a3.8 3.8 0 0 0-4.9 4.9L4 13.3a1.6 1.6 0 1 0 2.3 2.3l4.6-4.6a3.8 3.8 0 0 0 4.9-4.9l-2.1 2.1-2.3-2.3 2.1-2.1z"/></svg>',
   lights: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6a4 4 0 0 0 0 8H11V6H9.5z"/><path d="M13.5 7l3.5-1M13.5 10H17.5M13.5 13l3.5 1"/></svg>',
   rear: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5L3 11l2.5 2.5"/><path d="M3.5 11h9a3.5 3.5 0 0 0 0-7H9"/></svg>',
   boost: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5L4.5 11h5l-1 6.5L15.5 9h-5l.5-6.5z"/></svg>',
@@ -563,7 +564,7 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
     gap: 2px;
   }
   html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { font: 600 9px/1 var(--hud-font); letter-spacing: 0.02em; opacity: 0.92; }
-  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Seat, Cam, Radio. */
+  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Seat, Cam, Radio, Repair. */
   html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 4; }
   html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 2; grid-row: 3; }
   html[data-hud].driving [data-panel="living"] [data-act="horn"] { grid-column: 2; grid-row: 2; }
@@ -571,6 +572,7 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html[data-hud].driving [data-panel="living"] [data-act="seat"] { grid-column: 1; grid-row: 4; }
   html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 3; }
   html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 2; }
+  html[data-hud].driving [data-panel="living"] [data-act="repair"] { grid-column: 1; grid-row: 1; }
   @media (orientation: landscape) {
     html[data-hud]:not(.driving) [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 10px); inline-size: calc(2 * 96px + 10px); column-gap: 10px; }
     html[data-hud].driving [data-panel="living"] { grid-auto-rows: 44px; gap: 6px; }
@@ -1102,9 +1104,7 @@ export function playHud(o: {
       if (far > 32) { dx *= 32 / far; dy *= 32 / far }
       cap.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`
     }
-    // By touch, held upright, no ring of seven keys fits clear of the body and the top keys (measured at 390 x 844): the
-    // tools hang in a column from where the tool's key is (it is not shown meanwhile), along the right edge, and a slide
-    // down the column picks. While a tool is chosen the body stands: what is held to move it is let go each frame, before
+    // While the radial tool wheel is open, the body stands: what is held to move it is let go each frame, before
     // it is read (person.ts). (Keys only: by touch a thumb on the stick still steers, as one moves while changing a weapon
     // in a game on a phone.)
     if (open) for (const code of MOVES) o.input.hold(code, false)

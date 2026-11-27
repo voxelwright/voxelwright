@@ -64,8 +64,8 @@
   #notices p { margin: 0; padding: 7px 14px; border-radius: 3px; background: rgba(18, 24, 34, 0.82); border: 1.5px solid rgba(94, 114, 146, 0.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32); font: 500 13px/1.3 -apple-system, system-ui, sans-serif; overflow-wrap: anywhere; }
   /* Top left, slim machined controls card when mounted on desktop. */
   #card { position: absolute; left: max(18px, env(safe-area-inset-left)); top: max(18px, env(safe-area-inset-top)); min-width: 148px; padding: 10px 13px 11px; border-radius: 3px; background: rgba(20, 26, 38, 0.72); border: 1.5px solid rgba(94, 114, 146, 0.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34), inset 1px 1px 0 rgba(255, 255, 255, 0.12); }
-  /* The keys of a thing ridden, by touch only (living.ts): a column on the corner under the right thumb, from the bottom up. */
-  [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(110px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: auto; }
+  /* The keys of a thing ridden, by touch only (living.ts): a column on the corner under the right thumb, wrapping into two columns on short screens. */
+  [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(110px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; flex-wrap: wrap-reverse; align-items: flex-end; align-content: flex-end; max-height: calc(100vh - 124px); gap: 8px; pointer-events: auto; }
   @media (pointer: coarse) { html.riding [data-panel="living"] { display: flex; } }
   /* By touch (and while driving a car) the ask bar steps aside unless opened, keeping the car and road clear. */
   @media (pointer: coarse) { html.riding #ask:not(.open) { visibility: hidden; } }

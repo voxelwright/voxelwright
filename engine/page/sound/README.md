@@ -65,4 +65,4 @@ node test/played.mjs    # the instruments in the lab, with real keys and touches
 node test/radio.mjs     # the radio's stations and whooshes in Node, then driving in Chrome (--node-only)
 ```
 
-`npm run check` in `engine/` runs all of these except `radio.mjs`, which is not in `test/all.mjs` yet. A rule's sounds are checked by `node test/sounded.mjs` and `node plugins/sound/check.mjs`. No check can say whether a sound is good to hear: use the lab.
+`npm run check` in `engine/` runs all of these. A rule's sounds are checked by `node test/sounded.mjs` and `node plugins/sound/check.mjs`. No check can say whether a sound is good to hear: use the lab.

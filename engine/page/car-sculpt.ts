@@ -227,8 +227,12 @@ export function sculptCoupe(o: CoupeSpec): { cells: Uint16Array; size: [number, 
       const cap = ((X - mx) / 0.075) ** 2 + ((Y - my) / 0.045) ** 2 + ((u - mu(mx)) / 0.065) ** 2 <= 1
       return !cap ? K.gloss : X < mx - 0.045 ? K.gloss : paint
     }
-    // The wheel wells, lined dark: the cells round the arch's cut, in from the side.
-    if (u > inner - 1 / S && nearArch(X, Y, 1.6 / S)) { const f = facing(x, y, z); if (f.out < 0.6 && f.up < 0.3) return K.liner }
+    // The wheel wells, lined dark (#61): both the inner backing wall and recessed arch ceiling are dark matte liner,
+    // while the outer fender skin stays paint so no dark stair-step rim shows along the arch.
+    if (u > inner - 2.2 / S && u < side(X, Y) - 1.5 / S && nearArch(X, Y, 1.4 / S)) {
+      if (u <= inner + 0.8 / S && nearArch(X, Y, 0.6 / S) && Y > bottom(X) + 1 / S) return K.liner
+      if (u > inner - 1 / S) { const f = facing(x, y, z); if (f.out < 0.6 && f.up < 0.3) return K.liner }
+    }
     // The nose.
     if (X > front(Y, u) - 0.11) {
       const bf = B(L - 0.1), q = u / bf
@@ -365,6 +369,105 @@ export function sculptCoupe(o: CoupeSpec): { cells: Uint16Array; size: [number, 
     const t = c, along = [vx - t * nrm[0], vy - t * nrm[1]]
     return t > 0 && t < 0.32 && Math.hypot(along[0] + t * 0.3 * Math.sin(lean), along[1] + t * 0.3, vz) < 0.028 ? K.dash : 0
   })
+  return { cells: kinds, size: [w, h, d] }
+}
+
+/**
+ * A sculpted racing kart in cells of 2.5 cm (#61): open-wheel chassis matching `KEPT.kart` (2.4 m x 0.85 m x 1.4 m)
+ * with tapered nose cone, twin painted sidepods, carbon undertray and bumpers, bucket seat, steering wheel on its
+ * column, rear engine bay with alloy fins, lamps, and four slick tyres carved out for animated 3D wheels.
+ */
+export function sculptKart(o: { paint: number; per?: number }): { cells: Uint16Array; size: [number, number, number] } {
+  const per = o.per ?? 4, paint = o.paint, K = COUPE_KINDS
+  const L = 2.4, H = 0.85, W = 1.4, S = per * 10
+  const w = Math.ceil(L * S), h = Math.ceil(H * S), d = Math.ceil(W * S), zc = d / (2 * S)
+  const kinds = new Uint16Array(w * h * d)
+  const set = (x: number, y: number, z: number, kind: number) => {
+    if (x >= 0 && y >= 0 && z >= 0 && x < w && y < h && z < d) kinds[x + w * (z + d * y)] = kind
+  }
+  const xr = 0.5, xf = 1.9, wheelY = 0.3, R = 0.3, tyreW = 0.22
+
+  for (let y = 0; y < h; y++) for (let z = 0; z < d; z++) for (let x = 0; x < w; x++) {
+    const X = (x + 0.5) / S, Y = (y + 0.5) / S, Z = (z + 0.5) / S, u = Math.abs(Z - zc)
+    let k0 = 0
+    // Floorpan & tubular carbon chassis tray (above 0.14 m so kerbs pass cleanly under).
+    if (Y >= 0.14 && Y < 0.21 && X >= 0.18 && X <= 2.28 && u <= (X > 1.75 ? 0.34 - (X - 1.75) * 0.22 : X < 0.55 ? 0.34 : 0.42)) k0 = K.carbon
+    // Front & rear wraparound carbon bumpers.
+    if (X >= 2.24 && X <= 2.38 && Y >= 0.17 && Y <= 0.30 && u <= 0.54) k0 = K.carbon
+    if (X >= 0.04 && X <= 0.18 && Y >= 0.18 && Y <= 0.34 && u <= 0.56) k0 = K.carbon
+    // Sculpted tapered nose cone & front fairing with twin headlamps.
+    if (X >= 1.46 && X <= 2.34) {
+      const t = clamp((X - 1.46) / 0.88)
+      const hw = 0.26 * (1 - 0.52 * t * t)
+      const topY = 0.52 - 0.23 * t ** 1.15 - 0.06 * clamp(u / Math.max(hw, 0.05)) ** 2
+      if (u <= hw && Y >= 0.20 && Y <= topY) {
+        const lamp = X > 2.22 && u > hw * 0.42 && Y > 0.22 && Y < 0.31
+        const badge = X > 1.78 && X < 1.96 && u < 0.06 && Y > topY - 0.03
+        k0 = lamp ? K.head : badge ? K.gloss : paint
+      }
+    }
+    // Twin aerodynamic painted sidepods between front and rear wheels, with dark side air intakes.
+    if (X >= 0.86 && X <= 1.56 && u >= 0.32 && u <= 0.64) {
+      const s = (X - 0.86) / 0.70
+      const topY = 0.43 - 0.05 * Math.abs(s - 0.45) - 0.04 * clamp((u - 0.32) / 0.32) ** 2
+      if (Y >= 0.19 && Y <= topY) {
+        const intake = X > 1.44 && u > 0.40 && u < 0.58 && Y > 0.24 && Y < topY - 0.04
+        k0 = Y < 0.23 ? K.carbon : intake ? K.liner : paint
+      }
+    }
+    // Rear engine cowl, alloy cylinder head fins, exhaust pipe, and tail lights.
+    if (X >= 0.16 && X <= 0.64 && u <= 0.32 && Y >= 0.20 && Y <= 0.48) {
+      const fin = X >= 0.26 && X <= 0.54 && u <= 0.20 && Y >= 0.34 && Y <= 0.47 && ((Math.floor(X * S) + Math.floor(Y * S)) & 1) === 0
+      const tail = X <= 0.22 && u >= 0.14 && u <= 0.28 && Y >= 0.30 && Y <= 0.37
+      k0 = tail ? K.tail : fin ? K.alloy : Y < 0.34 ? K.liner : K.gloss
+    }
+    if (X >= 0.06 && X <= 0.32 && Math.hypot(Y - 0.32, Z - (zc + 0.24)) < 0.045) k0 = K.chrome
+    // Contoured racing bucket seat (centered, low bolsters, back leaning slightly aft).
+    if (X >= 0.60 && X <= 1.24 && u <= 0.27) {
+      const bolster = u > 0.17
+      if (X >= 0.80 && X <= 1.22 && Y >= 0.21 && Y <= 0.31 + (bolster ? 0.06 : 0)) k0 = bolster ? K.seat : K.insert
+      const lean = 0.80 - (Y - 0.30) * 0.28
+      if (Y >= 0.26 && Y <= 0.76 && X <= lean + (bolster ? 0.12 : 0.08) && X >= lean - 0.05) {
+        k0 = X <= lean - 0.01 ? paint : bolster ? K.seat : K.insert
+      }
+    }
+    if (k0) set(x, y, z, k0)
+  }
+
+  // Steering column & racing wheel ahead of the driver's seat.
+  const wx = 1.44, wy = 0.56, wr = 0.14, lean = 0.42
+  const e1 = [-Math.sin(lean), Math.cos(lean)], nrm = [Math.cos(lean), Math.sin(lean)]
+  for (let y = Math.floor(0.30 * S); y < Math.ceil(0.74 * S); y++) {
+    for (let z = Math.floor((zc - 0.20) * S); z < Math.ceil((zc + 0.20) * S); z++) {
+      for (let x = Math.floor(1.25 * S); x < Math.ceil(1.85 * S); x++) {
+        const X = (x + 0.5) / S, Y = (y + 0.5) / S, vz = (z + 0.5) / S - zc
+        const vx = X - wx, vy = Y - wy, a = vx * e1[0] + vy * e1[1], c = vx * nrm[0] + vy * nrm[1], r = Math.hypot(a, vz)
+        if (Math.abs(c) < 0.022 && Math.abs(r - wr) < 0.022) set(x, y, z, K.gloss)
+        else if (Math.abs(c) < 0.018 && r < wr && (r < 0.042 || (Math.abs(vz) < 0.016 && a < 0) || Math.abs(a + 0.01) < 0.016)) set(x, y, z, r < 0.042 ? K.dash : K.alloy)
+        else if (c > 0 && c < 0.38 && Math.hypot(vx - c * nrm[0] + c * 0.32 * Math.sin(lean), vy - c * nrm[1] + c * 0.32, vz) < 0.025) set(x, y, z, K.dash)
+      }
+    }
+  }
+
+  // Four racing slick wheels (carved out by wheels.ts for animated 3D wheels when driven).
+  for (const xm of [xr, xf]) for (const left of [true, false]) {
+    const z0 = left ? zc - (W / 2 - 0.005) : zc + (W / 2 - 0.005) - tyreW, z1 = z0 + tyreW
+    for (let y = Math.floor((wheelY - R) * S); y <= Math.ceil((wheelY + R) * S); y++) {
+      for (let z = Math.floor(z0 * S); z < Math.ceil(z1 * S); z++) {
+        for (let x = Math.floor((xm - R) * S); x <= Math.ceil((xm + R) * S); x++) {
+          if (x < 0 || y < 0 || z < 0 || x >= w || y >= h || z >= d) continue
+          const X = (x + 0.5) / S, Y = (y + 0.5) / S, Z = (z + 0.5) / S, r = Math.hypot(X - xm, Y - wheelY)
+          const out = left ? Z - z0 : z1 - Z, shoulder = Math.min(out, tyreW - out)
+          if (r > R - 0.025 + Math.min(0.025, shoulder * 0.6) || r > R) continue
+          const a = Math.atan2(Y - wheelY, X - xm)
+          let kind = K.barrel
+          if (r > R * 0.66) kind = K.tyre
+          else if (out < 0.025) kind = r > R * 0.58 ? K.rim : r < R * 0.16 ? K.chrome : Math.cos(5 * a) > 0.55 ? K.rim : K.barrel
+          set(x, y, z, kind)
+        }
+      }
+    }
+  }
   return { cells: kinds, size: [w, h, d] }
 }
 

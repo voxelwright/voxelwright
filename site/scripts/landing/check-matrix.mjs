@@ -6,13 +6,12 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
-import { startServer } from "../serve.mjs";
+import { join } from "node:path";
+import { serveLanding } from "./serve-landing.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT ?? "playwright");
 const out = process.env.OUT ?? ".shots/matrix";
-const dist = resolve(import.meta.dirname, "../../dist");
 await mkdir(out, { recursive: true });
 
 const LABELS = { "Window map": "map", "Window screen": "screen", "Mood grade": "grade", "Marine layer": "fog" };
@@ -47,9 +46,9 @@ const browser = await chromium.launch({ channel: "chrome", args: ["--enable-unsa
 const errors = [];
 let server;
 try {
-  server = await startServer({ root: dist, port: 0, host: "127.0.0.1" });
-  const base = `http://127.0.0.1:${server.address().port}/`;
-  const home = (await readFile(join(dist, "landing/home.js"), "utf8")) + "\nwindow.__world = () => world;";
+  server = await serveLanding();
+  const base = server.base;
+  const home = (await readFile(join(server.root, "landing/home.js"), "utf8")) + "\nwindow.__world = () => world;";
   async function open({ width = 1440, height = 900, scale = 1, scheme = "dark", preset = "high", motion = "no-preference", mobile = false }) {
     const context = await browser.newContext({
       viewport: { width, height },
@@ -267,5 +266,5 @@ try {
   console.log("matrix checks passed; screenshots in", out);
 } finally {
   await browser.close();
-  server?.close();
+  await server?.close();
 }

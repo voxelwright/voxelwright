@@ -33,4 +33,4 @@ Lead with what the reader can do or understand after this page.
 
 Preview with `npx -y -p node@22 -p mint@4.3.96 -c 'mint dev'` from `guide/`. It writes build files beside the pages, so delete the untracked files `git status` shows afterwards.
 
-Connecting the site to a Mintlify account or a domain makes it public, which is the owner's decision.
+The site is published at `https://voxelwright.mintlify.app/`. Changing its domain or Mintlify account settings stays the owner's decision.

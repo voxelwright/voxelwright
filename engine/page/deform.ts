@@ -179,6 +179,51 @@ export const clearVehicle = defaultTracker.clearVehicle.bind(defaultTracker)
 export const repairVehicle = defaultTracker.repairVehicle.bind(defaultTracker)
 export const getVehicleDamage = defaultTracker.get.bind(defaultTracker)
 
+/** CPU mirror of WGSL `deformPoint` (#61): bends a fine-part local point and normal by the same dent field, so 3D wheels track their crushed fender. */
+export function deformPointCpu(
+  p: readonly [number, number, number],
+  n: readonly [number, number, number],
+  state: DeformState | undefined,
+): { pos: [number, number, number]; norm: [number, number, number] } {
+  let px = p[0], py = p[1], pz = p[2]
+  let nx = n[0], ny = n[1], nz = n[2]
+  if (!state || state.dentCount < 1) return { pos: [px, py, pz], norm: [nx, ny, nz] }
+  const count = Math.min(state.dentCount, MAX_DENTS)
+  for (let i = 0; i < count; i++) {
+    const d = state.dents[i]
+    if (d.radius <= 0.0001) continue
+    const dx = px - d.center[0], dy = py - d.center[1], dz = pz - d.center[2]
+    const dist = Math.hypot(dx, dy, dz)
+    if (dist >= d.radius) continue
+    const t = dist / d.radius
+    const s = 1 - t * t * (3 - 2 * t)
+    const ds = -6 * t * (1 - t)
+    const invD = 1 / Math.max(dist, 0.00001)
+    const rx = dx * invD, ry = dy * invD, rz = dz * invD
+    const phase = 36 * t + (dx * 7 + dy * 3 + dz * 11) / d.radius
+    const wave = Math.sin(phase), slope = Math.cos(phase)
+    const buckle = 1 + 0.18 * t * t * wave
+    const field = s * s * buckle
+    const radScale = 2 * s * ds * buckle + s * s * 0.36 * t * wave
+    const waveScale = s * s * 0.18 * t * t * slope
+    const gScale = d.depth / d.radius
+    const gx = (rx * radScale + waveScale * (rx * 36 + 7)) * gScale
+    const gy = (ry * radScale + waveScale * (ry * 36 + 3)) * gScale
+    const gz = (rz * radScale + waveScale * (rz * 36 + 11)) * gScale
+    const cDotN = d.dir[0] * nx + d.dir[1] * ny + d.dir[2] * nz
+    const denom = 1 + d.dir[0] * gx + d.dir[1] * gy + d.dir[2] * gz
+    if (Math.abs(denom) > 1e-6) {
+      const k = cDotN / denom
+      nx -= gx * k; ny -= gy * k; nz -= gz * k
+      const nl = Math.hypot(nx, ny, nz) || 1
+      nx /= nl; ny /= nl; nz /= nl
+    }
+    const move = d.depth * field
+    px += d.dir[0] * move; py += d.dir[1] * move; pz += d.dir[2] * move
+  }
+  return { pos: [px, py, pz], norm: [nx, ny, nz] }
+}
+
 /** Offset in floats, 16-byte aligned within out. Exactly 52 floats: meta, six posR,
  * then six dirD (NOT interleaved). Missing/healthy state is ALL zero on the GPU;
  * health=1 remains on CPU and is irrelevant to the shader's undamaged branch.

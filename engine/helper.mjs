@@ -8,7 +8,7 @@
 //   --model opus       which of your models makes things and writes rules; --quick sonnet which fleshes an idea out (a short reply, wanted soon)
 //   --first sonnet     which of your models makes a thing at once, as a program (make/best.mjs); --best claude-fable-5-2 which makes it again, better, behind that (minutes; --best none: not at all)
 //   --journal file     where what was made is written down (default ~/.village/engine/made.jsonl)
-//   --page URL --reach URL --only login [--reach-port 5763]    for a phone on the tailnet: see "From a phone" in engine/README.md
+//   --page URL --reach URL --only login [--reach-port 5763]    for a phone on the tailnet: see guide/making.md
 //   --library dir      where what was made is kept, to be made again at once (default ~/.village/engine/library)
 //   --voice sonnet     which of your models answers for the people of the world when a rule asks one to think (#264, mind/voice.mjs);
 //                      --no-voice and nobody is voiced from this machine (nor with --reply: no model is run then); --voice-most 40 is the most answers a minute;

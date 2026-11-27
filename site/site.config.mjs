@@ -11,10 +11,10 @@ export default {
   // "/" builds the whole origin, with the landing at "/".
   base: "/blog/",
 
-  // Answer `Accept: text/markdown` on page routes from src/worker.mjs (site/cloudflare.config.ts).
-  // That config is used only by `npm run dev`, which always negotiates whatever this says; the
-  // deployed zahynailo.dev is deploy/'s assets-only Worker and never runs src/worker.mjs.
-  // The static .md URLs and <link rel="alternate"> work either way and cost nothing.
+  // Answer `Accept: text/markdown` on page routes from src/worker.mjs (wired into both
+  // site/cloudflare.config.ts for `npm run dev` and deploy/cloudflare.config.ts for zahynailo.dev).
+  // Off by default so zahynailo.dev stays an assets-only Worker; the static .md URLs and
+  // <link rel="alternate"> work either way and cost nothing.
   negotiateMarkdown: false,
 
   // Every page is built from the Voxelmorphism kit (generator/pages.mjs, notes/voxelmorphism.md);

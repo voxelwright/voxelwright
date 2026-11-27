@@ -4,8 +4,8 @@ import { pixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
-import { startServer } from "../serve.mjs";
+import { join } from "node:path";
+import { serveLanding } from "./serve-landing.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT ?? "playwright");
@@ -37,9 +37,9 @@ function park(page) {
 
 try {
   if (!process.env.BASE) {
-    server = await startServer({ root: resolve(import.meta.dirname, "../../dist"), port: 0, host: "127.0.0.1" });
+    server = await serveLanding();
   }
-  const base = new URL(process.env.BASE ?? `http://127.0.0.1:${server.address().port}/`).href;
+  const base = new URL(process.env.BASE ?? server.base).href;
   // Start the live checks with a light saved setting so startup on slower test
   // hosts leaves headroom. The test then drives the real graphics controls.
   const context = await browser.newContext({
@@ -333,6 +333,6 @@ try {
   assert.deepEqual(errors, []);
   console.log("Landing smoke passed: live WebGPU, graphics and pause, Support shadow controls, desktop navigation and eggs, reduced-motion still and plain page, offline, touch, and GPU-free phone navigation.");
 } finally {
-  server?.close();
+  await server?.close();
   await browser.close();
 }

@@ -250,7 +250,7 @@ export function createCarSummon(opts: SummonOptions): CarSummon {
         const comY = at ? at.at[1] - low[1] : data.size[1] * 0.42
         opts.alive.place(thing, [spot.x, spot.y + comY + 1, spot.z], q)
         active = thing
-        opts.hud.notice('Car delivered nearby — press E to drive', 4000)
+        opts.hud.notice('Car delivered nearby: press E to drive', 4000)
         return thing
       } finally {
         busy = false
