@@ -2,13 +2,14 @@
 // faces, as a body's are (pieces.ts), each cell a fraction of a world cell. An experiment's way in: the page is
 // handed the cells, nothing is sent anywhere, and the world's own cells know nothing of it.
 import type { Born } from './told.ts'
+import { wasmFaces, wasmFacesWithSmooth } from './fine-core.ts'
 
 /**
  * The outside faces of a block of cells, rows of them merged, in the two words a face is to pieces.ts: where its row
  * starts (ten bits each of x, y, z), then how long it is, which way it looks and its kind. `cells[(y * d + z) * w + x]`.
  */
 export function faces(cells: Uint16Array, size: readonly [number, number, number]): Uint32Array<ArrayBuffer> {
-  return merged(cells, size).faces
+  return wasmFaces(cells, size) ?? merged(cells, size).faces
 }
 
 /** What of a smooth word two faces must share to be one row: its normal to an eighth of its steps each way (a degree or two), its openness to a sixteenth, and its flag and blend. */
@@ -202,6 +203,8 @@ function lookups(W: number, D: number, r: number): Lookups {
  * face, one a corner (0 for a face that keeps its square normal).
  */
 export function facesWithSmooth(cells: Uint16Array, size: readonly [number, number, number], reach = REACH): { faces: Uint32Array<ArrayBuffer>; smooth: Uint32Array<ArrayBuffer> } {
+  const fast = wasmFacesWithSmooth(cells, size, reach)
+  if (fast) return { faces: fast.faces, smooth: fast.smooth }
   const [w, , d] = size, { pad, W, D, out, wall, sum, shut: seamless } = shape(cells, size, reach), sy = W * D, way = lookups(W, D, reach)
   const strides = [1, sy, W], openSize = (2 * OPEN_REACH) ** 3
   // Each corner's normal and openness, worked out once for the faces that meet there: its place in `known` by the

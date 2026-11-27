@@ -1,5 +1,6 @@
 // Ojai robotaxi, sampled at 2.5 cm. Coordinates are metres, +x forward.
 import { mostAround, outsideAir, sealLeaks } from './car-sculpt.ts'
+import { wasmSculptOjai } from './fine-core.ts'
 
 const GLASS = 11, STEEL = 12, ROOFING = 14, LAMP = 15, PLASTER = 9
 const k = (material: number, colour = 0) => material | (colour << 8)
@@ -148,6 +149,8 @@ const through = (pts: readonly (readonly [number, number])[]) => (s: number) => 
  */
 export function sculptOjai(o: { livery: OjaiLivery; badge?: string; spec?: OjaiSpec }): { cells: Uint16Array; size: [number, number, number] } {
   const sp = o.spec ?? OJAI_SPEC
+  const fast = wasmSculptOjai({ livery: o.livery, badge: o.badge, spec: sp })
+  if (fast) return fast
   const { L, H, W, per, wheels: [xr, xf], wheelY, wheelR: R, tyreW } = sp
   const K = OJAI_KINDS, liv = o.livery
   const S = per * 10

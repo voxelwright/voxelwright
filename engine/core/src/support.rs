@@ -127,6 +127,84 @@ const HANGS: u8 = 7;
 /// of all it carried, as before; what is built must be built so that its first paths carry it.
 const AGAIN: usize = 0;
 
+/// Reusable scratch buffers for support analysis (`loose`, `topple`, `adrift`, `taken_from`) so blasts do not
+/// allocate and page-fault ~80 MB of transient arrays on every detonation (#139).
+struct SupportScratch {
+    cost: Vec<u8>,
+    join: Vec<u8>,
+    load: Vec<u32>,
+    torn: Vec<u8>,
+    seen: Vec<bool>,
+    piece_of: Vec<u32>,
+    order: Vec<u32>,
+    waiting: Vec<Vec<u32>>,
+    stack: Vec<u32>,
+    cells: Vec<u32>,
+    levels: Vec<(f64, f64, f64, [usize; 2], [usize; 2], f64)>,
+    feet: Vec<([usize; 2], [usize; 2])>,
+}
+
+impl SupportScratch {
+    fn new() -> Self {
+        SupportScratch {
+            cost: Vec::new(),
+            join: Vec::new(),
+            load: Vec::new(),
+            torn: Vec::new(),
+            seen: Vec::new(),
+            piece_of: Vec::new(),
+            order: Vec::new(),
+            waiting: vec![Vec::new(); 256],
+            stack: Vec::new(),
+            cells: Vec::new(),
+            levels: Vec::new(),
+            feet: Vec::new(),
+        }
+    }
+}
+
+thread_local! {
+    static SUPPORT_SCRATCH: std::cell::RefCell<SupportScratch> = std::cell::RefCell::new(SupportScratch::new());
+}
+
+#[inline]
+fn has_nonzero_kind(slice: &[Kind]) -> bool {
+    let mut chunks = slice.chunks_exact(4);
+    for c in &mut chunks {
+        if (c[0] | c[1] | c[2] | c[3]) != 0 {
+            return true;
+        }
+    }
+    chunks.remainder().iter().any(|&k| k != 0)
+}
+
+/// Highest `y + 1` in `r` that contains any non-air cell: empty sky layers above it need never be scanned.
+#[inline]
+fn active_layers(r: &Region) -> usize {
+    let layer = r.size[0] * r.size[2];
+    if layer == 0 {
+        return 0;
+    }
+    let mut top = r.size[1];
+    while top > 0 {
+        if has_nonzero_kind(&r.cells[(top - 1) * layer..top * layer]) {
+            break;
+        }
+        top -= 1;
+    }
+    top
+}
+
+#[inline]
+fn pack_xyz(x: usize, y: usize, z: usize) -> u32 {
+    (x as u32) | ((z as u32) << 10) | ((y as u32) << 20)
+}
+
+#[inline]
+fn unpack_xyz(q: u32) -> (usize, usize, usize) {
+    ((q & 1023) as usize, (q >> 20) as usize, ((q >> 10) & 1023) as usize)
+}
+
 /// Which solid cells of a region the ground does not hold: one true a cell.
 ///
 /// The ground is reached for outwards, cheapest way first, and each cell is joined to the one it was reached from.
@@ -134,7 +212,7 @@ const AGAIN: usize = 0;
 /// crushes it), and the whole is asked again without it: the load may go another way, and tear that in turn, which
 /// is how a thing gives way bit by bit. When nothing more tears, what the ground no longer reaches is loose.
 pub fn loose(r: &Region) -> Vec<bool> {
-    loose_how(r, None).0
+    loose_inner(r, None, false).0
 }
 
 /// A box of the world taken coarsely: each cell of `region` stands for a block of cells `by` a side, and is of the
@@ -180,141 +258,287 @@ pub(crate) fn rank(k: Kind) -> u32 {
 
 /// As `loose`, and with it how each cell was joined to what holds it and what reaching it cost: for counting.
 /// With `blocks`, the region's cells are blocks (see `Blocks`).
+#[cfg(test)]
 pub(crate) fn loose_how(r: &Region, blocks: Option<(&[u8], usize)>) -> (Vec<bool>, Vec<u8>, Vec<u8>) {
+    loose_inner(r, blocks, true)
+}
+
+fn loose_inner(r: &Region, blocks: Option<(&[u8], usize)>, need_meta: bool) -> (Vec<bool>, Vec<u8>, Vec<u8>) {
     let by = blocks.map_or(1, |b| b.1);
     // How many cells a block is, and how many cells' worth of joins a face of it has.
     let cells_of = |i: usize| blocks.map_or(1, |b| (b.0[i] as u32).max(1));
     let face = |i: usize| blocks.map_or(1, |b| (b.0[i] as u32 / b.1 as u32).max(1));
     let [nx, ny, nz] = r.size;
     let (n, layer) = (r.cells.len(), nx * nz);
-    // The joins that have torn: a bit for each way a cell can be joined (its `how`).
-    let mut torn = vec![0u8; n];
+    let active_ny = active_layers(r);
+    let active_n = active_ny * layer;
     let mut out = vec![false; n];
-    let mut cost = vec![UNREACHED; n];
-    let mut join = vec![NONE; n];
-    for pass in 0..=AGAIN {
-        cost.fill(UNREACHED);
-        join.fill(NONE);
-        let mut order: Vec<u32> = Vec::new();
-        let mut waiting: Vec<Vec<u32>> = vec![Vec::new(); 256];
-        // What is at the bottom of the box, and at its sides, goes on beyond it: the ground's.
-        // So is the ground that lies on it, cell on cell, all the way up: most of what is solid in a box is that, and
-        // none of it need be reached for. Only the ground's cells that something else touches are where reaching starts.
-        for i in 0..n {
-            if r.cells[i] == 0 {
-                continue;
-            }
-            let (x, y, z) = r.place(i);
-            if y == 0 || x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || (is_ground(r.cells[i]) && join[i - layer] == GROUND) {
-                cost[i] = 0;
-                join[i] = GROUND;
-            }
+    if active_n == 0 {
+        return if need_meta { (out, vec![NONE; n], vec![UNREACHED; n]) } else { (out, Vec::new(), Vec::new()) };
+    }
+    let pack = nx <= 1024 && ny <= 4096 && nz <= 1024;
+
+    SUPPORT_SCRATCH.with_borrow_mut(|s| {
+        if s.cost.len() < active_n { s.cost.resize(active_n, UNREACHED); }
+        if s.join.len() < active_n { s.join.resize(active_n, NONE); }
+        if s.load.len() < active_n { s.load.resize(active_n, 0); }
+        if AGAIN > 0 {
+            if s.torn.len() < active_n { s.torn.resize(active_n, 0); }
+            s.torn[..active_n].fill(0);
         }
-        for i in 0..n {
-            if join[i] != GROUND {
-                continue;
+        let cost = &mut s.cost[..active_n];
+        let join = &mut s.join[..active_n];
+        let load = &mut s.load[..active_n];
+        let torn = &mut s.torn;
+        let order = &mut s.order;
+        let waiting = &mut s.waiting;
+        let cells = &r.cells[..active_n];
+
+        for pass in 0..=AGAIN {
+            cost.fill(UNREACHED);
+            join.fill(NONE);
+            order.clear();
+            for q in waiting.iter_mut() {
+                q.clear();
             }
-            let (x, y, z) = r.place(i);
-            let waits = |j: usize| r.cells[j] != 0 && join[j] != GROUND;
-            if (y + 1 < ny && waits(i + layer)) || (x > 0 && waits(i - 1)) || (x + 1 < nx && waits(i + 1)) || (z > 0 && waits(i - nx)) || (z + 1 < nz && waits(i + nx)) || (y > 0 && waits(i - layer)) {
-                waiting[0].push(i as u32);
+
+            // What is at the bottom of the box, and at its sides, goes on beyond it: the ground's.
+            // So is the ground that lies on it, cell on cell, all the way up: most of what is solid in a box is that,
+            // and none of it need be reached for. Nested loops eliminate all integer divisions.
+            for y in 0..active_ny {
+                let y_edge = y == 0;
+                let y_off = y * layer;
+                for z in 0..nz {
+                    let yz_edge = y_edge || z == 0 || z == nz - 1;
+                    let row = y_off + z * nx;
+                    if yz_edge {
+                        for x in 0..nx {
+                            let i = row + x;
+                            if cells[i] != 0 {
+                                cost[i] = 0;
+                                join[i] = GROUND;
+                            }
+                        }
+                    } else {
+                        if cells[row] != 0 {
+                            cost[row] = 0;
+                            join[row] = GROUND;
+                        }
+                        if nx > 1 && cells[row + nx - 1] != 0 {
+                            cost[row + nx - 1] = 0;
+                            join[row + nx - 1] = GROUND;
+                        }
+                        // Interior x: only ground resting on GROUND below.
+                        let mut x = 1usize;
+                        while x + 4 <= nx - 1 {
+                            let i = row + x;
+                            if (cells[i] | cells[i + 1] | cells[i + 2] | cells[i + 3]) != 0 {
+                                for dx in 0..4usize {
+                                    let j = i + dx;
+                                    let k = cells[j];
+                                    if k != 0 && is_ground(k) && join[j - layer] == GROUND {
+                                        cost[j] = 0;
+                                        join[j] = GROUND;
+                                    }
+                                }
+                            }
+                            x += 4;
+                        }
+                        while x + 1 < nx {
+                            let j = row + x;
+                            let k = cells[j];
+                            if k != 0 && is_ground(k) && join[j - layer] == GROUND {
+                                cost[j] = 0;
+                                join[j] = GROUND;
+                            }
+                            x += 1;
+                        }
+                    }
+                }
             }
-        }
-        for c in 0..255usize {
-            let mut at_cost = std::mem::take(&mut waiting[c]);
-            // Resting costs nothing, so cells join this round as it goes.
-            let mut k = 0;
-            while k < at_cost.len() {
-                let i = at_cost[k] as usize;
-                k += 1;
-                if cost[i] as usize != c {
+
+            // Only the ground's cells that something else touches are where reaching starts.
+            for y in 0..active_ny {
+                let y_off = y * layer;
+                let has_up = y + 1 < active_ny;
+                let has_dn = y > 0;
+                for z in 0..nz {
+                    let row = y_off + z * nx;
+                    let has_zn = z > 0;
+                    let has_zp = z + 1 < nz;
+                    for x in 0..nx {
+                        let i = row + x;
+                        if join[i] != GROUND {
+                            continue;
+                        }
+                        let waits = |j: usize| cells[j] != 0 && join[j] != GROUND;
+                        if (has_up && waits(i + layer))
+                            || (x > 0 && waits(i - 1))
+                            || (x + 1 < nx && waits(i + 1))
+                            || (has_zn && waits(i - nx))
+                            || (has_zp && waits(i + nx))
+                            || (has_dn && waits(i - layer))
+                        {
+                            waiting[0].push(if pack { pack_xyz(x, y, z) } else { i as u32 });
+                        }
+                    }
+                }
+            }
+
+            for c in 0..255usize {
+                let mut at_cost = std::mem::take(&mut waiting[c]);
+                // Resting costs nothing, so cells join this round as it goes.
+                let mut k = 0;
+                while k < at_cost.len() {
+                    let raw = at_cost[k];
+                    k += 1;
+                    let (x, y, z, i) = if pack {
+                        let (x, y, z) = unpack_xyz(raw);
+                        (x, y, z, x + nx * (z + nz * y))
+                    } else {
+                        let i = raw as usize;
+                        let (x, y, z) = r.place(i);
+                        (x, y, z, i)
+                    };
+                    if cost[i] as usize != c {
+                        continue;
+                    }
+                    // A cell may be listed twice at one cost: count it once.
+                    if join[i] & 128 != 0 {
+                        continue;
+                    }
+                    join[i] |= 128;
+                    order.push(i as u32);
+                    let src_kind = cells[i];
+                    let src_rubble = rubble(src_kind);
+                    let src_leaves = material(src_kind) == LEAVES;
+                    let mut reach = |j: usize, nx_c: usize, ny_c: usize, nz_c: usize, more: usize, how: u8, list: &mut Vec<u32>, waiting: &mut Vec<Vec<u32>>| {
+                        let kind = cells[j];
+                        if kind == 0 {
+                            return;
+                        }
+                        let to = c + more;
+                        if to >= cost[j] as usize || to > spans(material(kind)) as usize {
+                            return;
+                        }
+                        if AGAIN > 0 && torn[j] & (1 << how) != 0 {
+                            return;
+                        }
+                        // Rubble lies on what is under it and that is all: it is joined to nothing beside it or over it,
+                        // and nothing beside it or under it is joined to it.
+                        if more != 0 && (rubble(kind) || src_rubble) {
+                            return;
+                        }
+                        // Leaves hold on to leaves and to nothing else: a crown that brushes a wall is not hung on it, though it may rest on what is under it.
+                        if more != 0 && (material(kind) == LEAVES) != src_leaves {
+                            return;
+                        }
+                        cost[j] = to as u8;
+                        join[j] = how;
+                        let entry = if pack { pack_xyz(nx_c, ny_c, nz_c) } else { j as u32 };
+                        if more == 0 { list.push(entry) } else { waiting[to].push(entry) }
+                    };
+                    if y + 1 < active_ny { reach(i + layer, x, y + 1, z, 0, RESTS, &mut at_cost, waiting) }
+                    if x > 0 { reach(i - 1, x - 1, y, z, by, LEANS + 1, &mut at_cost, waiting) }
+                    if x + 1 < nx { reach(i + 1, x + 1, y, z, by, LEANS, &mut at_cost, waiting) }
+                    if z > 0 { reach(i - nx, x, y, z - 1, by, LEANS + 3, &mut at_cost, waiting) }
+                    if z + 1 < nz { reach(i + nx, x, y, z + 1, by, LEANS + 2, &mut at_cost, waiting) }
+                    if y > 0 { reach(i - layer, x, y - 1, z, 2 * by, HANGS, &mut at_cost, waiting) }
+                }
+                at_cost.clear();
+                waiting[c] = at_cost;
+            }
+            // The cell each is joined to.
+            let holder = |i: usize, how: u8| match how & 127 {
+                RESTS => i - layer,
+                3 => i - 1,
+                4 => i + 1,
+                5 => i - nx,
+                6 => i + nx,
+                HANGS => i + layer,
+                _ => i,
+            };
+            // What each join carries: the cell and all that is joined on through it. Last joined first.
+            for &i in order.iter().rev() {
+                let i = i as usize;
+                load[i] += cells_of(i);
+                let how = join[i] & 127;
+                if how != GROUND {
+                    let h = holder(i, how);
+                    load[h] += load[i];
+                }
+            }
+            // A sideways or hanging join that carries more than it can tears; what rests on a cell must not be more than
+            // that cell can bear (a house does not stand on a post one cell thick).
+            let last = pass == AGAIN;
+            let mut tore = false;
+            if pass > 0 {
+                out[..active_n].fill(false);
+            }
+            for &i in order.iter() {
+                let i = i as usize;
+                let how = join[i] & 127;
+                if how == GROUND {
                     continue;
                 }
-                // A cell may be listed twice at one cost: count it once.
-                if join[i] & 128 != 0 {
-                    continue;
-                }
-                join[i] |= 128;
-                order.push(i as u32);
-                let (x, y, z) = r.place(i);
-                let mut reach = |j: usize, more: usize, how: u8, list: &mut Vec<u32>, waiting: &mut Vec<Vec<u32>>| {
-                    let kind = r.cells[j];
-                    let to = c + more;
-                    if kind == 0 || to >= cost[j] as usize || to > spans(material(kind)) as usize || torn[j] & (1 << how) != 0 {
-                        return;
-                    }
-                    // Rubble lies on what is under it and that is all: it is joined to nothing beside it or over it,
-                    // and nothing beside it or under it is joined to it.
-                    if more != 0 && (rubble(kind) || rubble(r.cells[i])) {
-                        return;
-                    }
-                    // Leaves hold on to leaves and to nothing else: a crown that brushes a wall is not hung on it, though it may rest on what is under it.
-                    if more != 0 && (material(kind) == LEAVES) != (material(r.cells[i]) == LEAVES) {
-                        return;
-                    }
-                    cost[j] = to as u8;
-                    join[j] = how;
-                    if more == 0 { list.push(j as u32) } else { waiting[to].push(j as u32) }
-                };
-                if y + 1 < ny { reach(i + layer, 0, RESTS, &mut at_cost, &mut waiting) }
-                if x > 0 { reach(i - 1, by, LEANS + 1, &mut at_cost, &mut waiting) }
-                if x + 1 < nx { reach(i + 1, by, LEANS, &mut at_cost, &mut waiting) }
-                if z > 0 { reach(i - nx, by, LEANS + 3, &mut at_cost, &mut waiting) }
-                if z + 1 < nz { reach(i + nx, by, LEANS + 2, &mut at_cost, &mut waiting) }
-                if y > 0 { reach(i - layer, 2 * by, HANGS, &mut at_cost, &mut waiting) }
-            }
-        }
-        // The cell each is joined to.
-        let holder = |i: usize, how: u8| match how & 127 {
-            RESTS => i - layer,
-            3 => i - 1,
-            4 => i + 1,
-            5 => i - nx,
-            6 => i + nx,
-            HANGS => i + layer,
-            _ => i,
-        };
-        // What each join carries: the cell and all that is joined on through it. Last joined first.
-        let mut load = vec![0u32; n];
-        for &i in order.iter().rev() {
-            let i = i as usize;
-            load[i] += cells_of(i);
-            let how = join[i] & 127;
-            if how != GROUND {
                 let h = holder(i, how);
-                load[h] += load[i];
-            }
-        }
-        // A sideways or hanging join that carries more than it can tears; what rests on a cell must not be more than
-        // that cell can bear (a house does not stand on a post one cell thick).
-        let last = pass == AGAIN;
-        let mut tore = false;
-        out.fill(false);
-        for &i in &order {
-            let i = i as usize;
-            let how = join[i] & 127;
-            if how == GROUND {
-                continue;
-            }
-            let h = holder(i, how);
-            let over = if how == RESTS { load[i] > bears(material(r.cells[h])).saturating_mul(face(h)) } else { load[i] > join_carries(material(r.cells[i]), material(r.cells[h])).saturating_mul(face(i).min(face(h))) };
-            if over {
-                torn[i] |= 1 << how;
-                tore = true;
-            }
-            // Asked for the last time, what a torn join carried is loose with it.
-            out[i] = last && (out[h] || over);
-        }
-        if !tore || last {
-            for i in 0..n {
-                if r.cells[i] != 0 && cost[i] == UNREACHED {
+                let over = if how == RESTS {
+                    load[i] > bears(material(cells[h])).saturating_mul(face(h))
+                } else {
+                    load[i] > join_carries(material(cells[i]), material(cells[h])).saturating_mul(face(i).min(face(h)))
+                };
+                if over {
+                    if AGAIN > 0 {
+                        torn[i] |= 1 << how;
+                    }
+                    tore = true;
+                }
+                // Asked for the last time, what a torn join carried is loose with it.
+                if last && (out[h] || over) {
                     out[i] = true;
                 }
             }
-            break;
+            // Sparsely reset `load` back to zero so the next call does not memset 23 MB.
+            for &i in order.iter() {
+                let i = i as usize;
+                load[i] = 0;
+                let how = join[i] & 127;
+                if how != GROUND {
+                    load[holder(i, how)] = 0;
+                }
+            }
+            if !tore || last {
+                let mut i = 0usize;
+                while i + 4 <= active_n {
+                    if (cells[i] | cells[i + 1] | cells[i + 2] | cells[i + 3]) != 0 {
+                        for dx in 0..4usize {
+                            let j = i + dx;
+                            if cells[j] != 0 && cost[j] == UNREACHED {
+                                out[j] = true;
+                            }
+                        }
+                    }
+                    i += 4;
+                }
+                while i < active_n {
+                    if cells[i] != 0 && cost[i] == UNREACHED {
+                        out[i] = true;
+                    }
+                    i += 1;
+                }
+                break;
+            }
         }
-    }
-    (out, join, cost)
+        if need_meta {
+            let mut full_join = vec![NONE; n];
+            full_join[..active_n].copy_from_slice(&s.join[..active_n]);
+            let mut full_cost = vec![UNREACHED; n];
+            full_cost[..active_n].copy_from_slice(&s.cost[..active_n]);
+            (out, full_join, full_cost)
+        } else {
+            (out, Vec::new(), Vec::new())
+        }
+    })
 }
 
 /// The rows a set of cells makes, sorted by y, then z, then x: neighbours along x of one kind are one row.
@@ -336,41 +560,70 @@ fn rows(r: &Region, cells: &mut [u32]) -> Vec<Run> {
 /// top goes on beyond it, and what it is joined to there is not known, so it is left where it is (and comes back empty).
 fn pieces_of(r: &Region, is_loose: &[bool], piece_of: &mut [u32], [sides, top]: [bool; 2]) -> Vec<Vec<u32>> {
     let [nx, ny, nz] = r.size;
-    let (n, layer) = (r.cells.len(), nx * nz);
-    piece_of.fill(0);
+    let layer = nx * nz;
+    let active_ny = active_layers(r);
+    let active_n = active_ny * layer;
+    piece_of[..active_n].fill(0);
     let mut pieces: Vec<Vec<u32>> = Vec::new();
+    if active_n == 0 {
+        return pieces;
+    }
+    let pack = nx <= 1024 && ny <= 4096 && nz <= 1024;
     let mut stack: Vec<u32> = Vec::new();
-    for start in 0..n {
+    let mut start = 0usize;
+    while start < active_n {
+        // Fast skip 8 false bytes at a time (99%+ of a region is not loose).
+        if start + 8 <= active_n {
+            let any8 = is_loose[start] | is_loose[start + 1] | is_loose[start + 2] | is_loose[start + 3]
+                | is_loose[start + 4] | is_loose[start + 5] | is_loose[start + 6] | is_loose[start + 7];
+            if !any8 {
+                start += 8;
+                continue;
+            }
+        }
         if !is_loose[start] || piece_of[start] != 0 {
+            start += 1;
             continue;
         }
         let id = pieces.len() as u32 + 1;
         let mut cells: Vec<u32> = Vec::new();
         let mut edge = false;
         piece_of[start] = id;
-        stack.push(start as u32);
-        while let Some(i) = stack.pop() {
-            let i = i as usize;
+        if pack {
+            let (sx, sy, sz) = r.place(start);
+            stack.push(pack_xyz(sx, sy, sz));
+        } else {
+            stack.push(start as u32);
+        }
+        while let Some(raw) = stack.pop() {
+            let (x, y, z, i) = if pack {
+                let (x, y, z) = unpack_xyz(raw);
+                (x, y, z, x + nx * (z + nz * y))
+            } else {
+                let i = raw as usize;
+                let (x, y, z) = r.place(i);
+                (x, y, z, i)
+            };
             cells.push(i as u32);
-            let (x, y, z) = r.place(i);
             edge |= (sides && (x == 0 || x == nx - 1 || z == 0 || z == nz - 1)) || (top && y == ny - 1);
-            let mut join = |j: usize| {
+            let mut join = |j: usize, nx_c: usize, ny_c: usize, nz_c: usize| {
                 if is_loose[j] && piece_of[j] == 0 {
                     piece_of[j] = id;
-                    stack.push(j as u32);
+                    stack.push(if pack { pack_xyz(nx_c, ny_c, nz_c) } else { j as u32 });
                 }
             };
-            if x > 0 { join(i - 1) }
-            if x + 1 < nx { join(i + 1) }
-            if z > 0 { join(i - nx) }
-            if z + 1 < nz { join(i + nx) }
-            if y > 0 { join(i - layer) }
-            if y + 1 < ny { join(i + layer) }
+            if x > 0 { join(i - 1, x - 1, y, z) }
+            if x + 1 < nx { join(i + 1, x + 1, y, z) }
+            if z > 0 { join(i - nx, x, y, z - 1) }
+            if z + 1 < nz { join(i + nx, x, y, z + 1) }
+            if y > 0 { join(i - layer, x, y - 1, z) }
+            if y + 1 < active_ny { join(i + layer, x, y + 1, z) }
         }
         if edge {
             cells.clear();
         }
         pieces.push(cells);
+        start += 1;
     }
     pieces
 }
@@ -389,89 +642,118 @@ pub(crate) fn is_ground(kind: Kind) -> bool {
 /// higher up as well (a car across a slope, its uphill wheels shorter), that footing is part of the stretch below.
 pub fn topple(r: &Region, is_loose: &mut [bool]) {
     let [nx, ny, nz] = r.size;
-    let (n, layer) = (r.cells.len(), nx * nz);
-    let stands = |i: usize, is_loose: &[bool]| r.cells[i] != 0 && !is_ground(r.cells[i]) && !is_loose[i];
-    let mut seen = vec![false; n];
-    let mut stack: Vec<u32> = Vec::new();
-    let mut cells: Vec<u32> = Vec::new();
-    // For each level: the weight on it and where, the stretch it covers (least and most x and z), how far its stuff leans.
-    let mut levels: Vec<(f64, f64, f64, [usize; 2], [usize; 2], f64)> = Vec::new();
-    // And the stretch of it that stands on the ground at that level.
-    let mut feet: Vec<([usize; 2], [usize; 2])> = Vec::new();
-    for start in 0..n {
-        if seen[start] || !stands(start, is_loose) {
-            continue;
-        }
-        cells.clear();
-        levels.clear();
-        levels.resize(ny, (0.0, 0.0, 0.0, [usize::MAX; 2], [0; 2], 0.0));
-        feet.clear();
-        feet.resize(ny, ([usize::MAX; 2], [0; 2]));
-        let mut edge = false;
-        seen[start] = true;
-        stack.push(start as u32);
-        while let Some(i) = stack.pop() {
-            let i = i as usize;
-            cells.push(i as u32);
-            let (x, y, z) = r.place(i);
-            edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1 || y == 0;
-            let stuff = material(r.cells[i]);
-            let m = weighs(stuff) as f64;
-            let l = &mut levels[y];
-            l.0 += m;
-            l.1 += m * (x as f64 + 0.5);
-            l.2 += m * (z as f64 + 0.5);
-            l.3 = [l.3[0].min(x), l.3[1].min(z)];
-            l.4 = [l.4[0].max(x), l.4[1].max(z)];
-            l.5 = l.5.max(leans(stuff) as f64);
-            if y > 0 && is_ground(r.cells[i - layer]) {
-                let f = &mut feet[y];
-                *f = ([f.0[0].min(x), f.0[1].min(z)], [f.1[0].max(x), f.1[1].max(z)]);
-            }
-            let mut join = |j: usize| {
-                if !seen[j] && stands(j, is_loose) {
-                    seen[j] = true;
-                    stack.push(j as u32);
-                }
-            };
-            if x > 0 { join(i - 1) }
-            if x + 1 < nx { join(i + 1) }
-            if z > 0 { join(i - nx) }
-            if z + 1 < nz { join(i + nx) }
-            if y > 0 { join(i - layer) }
-            if y + 1 < ny { join(i + layer) }
-        }
-        if edge {
-            continue;
-        }
-        // From the top down, the weight at and above each level; the lowest level it is not over is where the thing goes.
-        let (mut mass, mut mx, mut mz) = (0.0f64, 0.0f64, 0.0f64);
-        let mut hinge: Option<usize> = None;
-        // Where it stands on the ground above the level asked about.
-        let (mut low, mut high) = ([usize::MAX; 2], [0usize; 2]);
-        for y in (0..ny).rev() {
-            let l = &levels[y];
-            if l.0 == 0.0 {
+    let layer = nx * nz;
+    let active_ny = active_layers(r);
+    let active_n = active_ny * layer;
+    if active_n == 0 {
+        return;
+    }
+    let pack = nx <= 1024 && ny <= 4096 && nz <= 1024;
+    let rcells = &r.cells[..active_n];
+    let stands = |i: usize, is_loose: &[bool]| rcells[i] != 0 && !is_ground(rcells[i]) && !is_loose[i];
+    SUPPORT_SCRATCH.with_borrow_mut(|s| {
+        if s.seen.len() < active_n { s.seen.resize(active_n, false); }
+        let seen = &mut s.seen[..active_n];
+        seen.fill(false);
+        let stack = &mut s.stack;
+        let cells = &mut s.cells;
+        let levels = &mut s.levels;
+        let feet = &mut s.feet;
+        stack.clear();
+        let mut start = 0usize;
+        while start < active_n {
+            if start + 4 <= active_n && (rcells[start] | rcells[start + 1] | rcells[start + 2] | rcells[start + 3]) == 0 {
+                start += 4;
                 continue;
             }
-            mass += l.0;
-            mx += l.1;
-            mz += l.2;
-            let (cx, cz) = (mx / mass, mz / mass);
-            let (lo, hi) = ([l.3[0].min(low[0]), l.3[1].min(low[1])], [l.4[0].max(high[0]), l.4[1].max(high[1])]);
-            if cx < lo[0] as f64 - l.5 || cx > hi[0] as f64 + 1.0 + l.5 || cz < lo[1] as f64 - l.5 || cz > hi[1] as f64 + 1.0 + l.5 {
-                hinge = Some(y);
+            if seen[start] || !stands(start, is_loose) {
+                start += 1;
+                continue;
             }
-            (low, high) = ([low[0].min(feet[y].0[0]), low[1].min(feet[y].0[1])], [high[0].max(feet[y].1[0]), high[1].max(feet[y].1[1])]);
-        }
-        if let Some(from) = hinge {
-            for &i in &cells {
-                if i as usize / layer >= from {
-                    is_loose[i as usize] = true;
+            cells.clear();
+            levels.clear();
+            levels.resize(active_ny, (0.0, 0.0, 0.0, [usize::MAX; 2], [0; 2], 0.0));
+            feet.clear();
+            feet.resize(active_ny, ([usize::MAX; 2], [0; 2]));
+            let mut edge = false;
+            seen[start] = true;
+            if pack {
+                let (sx, sy, sz) = r.place(start);
+                stack.push(pack_xyz(sx, sy, sz));
+            } else {
+                stack.push(start as u32);
+            }
+            while let Some(raw) = stack.pop() {
+                let (x, y, z, i) = if pack {
+                    let (x, y, z) = unpack_xyz(raw);
+                    (x, y, z, x + nx * (z + nz * y))
+                } else {
+                    let i = raw as usize;
+                    let (x, y, z) = r.place(i);
+                    (x, y, z, i)
+                };
+                cells.push(i as u32);
+                edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1 || y == 0;
+                let stuff = material(rcells[i]);
+                let m = weighs(stuff) as f64;
+                let l = &mut levels[y];
+                l.0 += m;
+                l.1 += m * (x as f64 + 0.5);
+                l.2 += m * (z as f64 + 0.5);
+                l.3 = [l.3[0].min(x), l.3[1].min(z)];
+                l.4 = [l.4[0].max(x), l.4[1].max(z)];
+                l.5 = l.5.max(leans(stuff) as f64);
+                if y > 0 && is_ground(rcells[i - layer]) {
+                    let f = &mut feet[y];
+                    *f = ([f.0[0].min(x), f.0[1].min(z)], [f.1[0].max(x), f.1[1].max(z)]);
+                }
+                let mut join = |j: usize, nx_c: usize, ny_c: usize, nz_c: usize| {
+                    if !seen[j] && stands(j, is_loose) {
+                        seen[j] = true;
+                        stack.push(if pack { pack_xyz(nx_c, ny_c, nz_c) } else { j as u32 });
+                    }
+                };
+                if x > 0 { join(i - 1, x - 1, y, z) }
+                if x + 1 < nx { join(i + 1, x + 1, y, z) }
+                if z > 0 { join(i - nx, x, y, z - 1) }
+                if z + 1 < nz { join(i + nx, x, y, z + 1) }
+                if y > 0 { join(i - layer, x, y - 1, z) }
+                if y + 1 < active_ny { join(i + layer, x, y + 1, z) }
+            }
+            start += 1;
+            if edge {
+                continue;
+            }
+            // From the top down, the weight at and above each level; the lowest level it is not over is where the thing goes.
+            let (mut mass, mut mx, mut mz) = (0.0f64, 0.0f64, 0.0f64);
+            let mut hinge: Option<usize> = None;
+            // Where it stands on the ground above the level asked about.
+            let (mut low, mut high) = ([usize::MAX; 2], [0usize; 2]);
+            for y in (0..active_ny).rev() {
+                let l = &levels[y];
+                if l.0 == 0.0 {
+                    continue;
+                }
+                mass += l.0;
+                mx += l.1;
+                mz += l.2;
+                let (cx, cz) = (mx / mass, mz / mass);
+                let (lo, hi) = ([l.3[0].min(low[0]), l.3[1].min(low[1])], [l.4[0].max(high[0]), l.4[1].max(high[1])]);
+                if cx < lo[0] as f64 - l.5 || cx > hi[0] as f64 + 1.0 + l.5 || cz < lo[1] as f64 - l.5 || cz > hi[1] as f64 + 1.0 + l.5 {
+                    hinge = Some(y);
+                }
+                (low, high) = ([low[0].min(feet[y].0[0]), low[1].min(feet[y].0[1])], [high[0].max(feet[y].1[0]), high[1].max(feet[y].1[1])]);
+            }
+            if let Some(from) = hinge {
+                let min_idx = from * layer;
+                for &i in cells.iter() {
+                    if i as usize >= min_idx {
+                        is_loose[i as usize] = true;
+                    }
                 }
             }
         }
-    }
+    });
 }
 
 /// A piece that has come loose, as it stood: its rows, how many cells, the box round it (high corner exclusive).
@@ -507,7 +789,7 @@ pub fn far_loose(blocks: &Blocks, scars: &[([i32; 3], i32)]) -> Vec<bool> {
     let [nx, ny, nz] = r.size;
     let layer = nx * nz;
     let by = blocks.by as i32;
-    let unheld = loose_how(r, Some((&blocks.count, blocks.by))).0;
+    let unheld = loose_inner(r, Some((&blocks.count, blocks.by)), false).0;
     let mut out = vec![false; unheld.len()];
     let mut seen = vec![false; unheld.len()];
     let (mut stack, mut piece): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
@@ -599,9 +881,14 @@ fn taken(r: &mut Region, is_loose: &[bool]) -> (Vec<Loose>, Vec<Run>) {
 }
 
 fn taken_from(r: &mut Region, is_loose: &[bool], edged: [bool; 2]) -> (Vec<Loose>, Vec<Run>) {
-    let mut piece_of = vec![0u32; r.cells.len()];
+    let pieces = SUPPORT_SCRATCH.with_borrow_mut(|s| {
+        if s.piece_of.len() < r.cells.len() {
+            s.piece_of.resize(r.cells.len(), 0);
+        }
+        pieces_of(r, is_loose, &mut s.piece_of, edged)
+    });
     let (mut out, mut dust) = (Vec::new(), Vec::new());
-    for mut cells in pieces_of(r, is_loose, &mut piece_of, edged) {
+    for mut cells in pieces {
         if cells.is_empty() {
             continue;
         }
@@ -629,46 +916,76 @@ fn taken_from(r: &mut Region, is_loose: &[bool], edged: [bool; 2]) -> (Vec<Loose
 /// knows no difference between standing on the ground and being part of it. `at` is the blast's middle in the world.
 pub fn adrift(r: &Region, at: [i32; 3], radius: i32, is_loose: &mut [bool]) {
     let [nx, ny, nz] = r.size;
-    let (n, layer) = (r.cells.len(), nx * nz);
+    let layer = nx * nz;
+    let active_ny = active_layers(r);
+    let active_n = active_ny * layer;
+    if active_n == 0 {
+        return;
+    }
+    let pack = nx <= 1024 && ny <= 4096 && nz <= 1024;
     let centre = [at[0] - r.low[0], at[1] - r.low[1], at[2] - r.low[2]];
     let reach = (2 * radius as i64).pow(2);
-    let mut seen = vec![false; n];
-    let mut stack: Vec<u32> = Vec::new();
-    let mut cells: Vec<u32> = Vec::new();
-    for start in 0..n {
-        if seen[start] || r.cells[start] == 0 || is_ground(r.cells[start]) || is_loose[start] {
-            continue;
-        }
-        cells.clear();
-        let (mut edge, mut hard, mut near) = (false, 0usize, i64::MAX);
-        seen[start] = true;
-        stack.push(start as u32);
-        while let Some(i) = stack.pop() {
-            let i = i as usize;
-            cells.push(i as u32);
-            let (x, y, z) = r.place(i);
-            edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1 || y == 0;
-            hard += matches!(material(r.cells[i]), STEEL | GLASS | LAMP) as usize;
-            near = near.min((x as i64 - centre[0] as i64).pow(2) + (y as i64 - centre[1] as i64).pow(2) + (z as i64 - centre[2] as i64).pow(2));
-            let mut join = |j: usize| {
-                if !seen[j] && r.cells[j] != 0 && !is_ground(r.cells[j]) && !is_loose[j] {
-                    seen[j] = true;
-                    stack.push(j as u32);
+    let rcells = &r.cells[..active_n];
+    SUPPORT_SCRATCH.with_borrow_mut(|s| {
+        if s.seen.len() < active_n { s.seen.resize(active_n, false); }
+        let seen = &mut s.seen[..active_n];
+        seen.fill(false);
+        let stack = &mut s.stack;
+        let cells = &mut s.cells;
+        stack.clear();
+        let mut start = 0usize;
+        while start < active_n {
+            if start + 4 <= active_n && (rcells[start] | rcells[start + 1] | rcells[start + 2] | rcells[start + 3]) == 0 {
+                start += 4;
+                continue;
+            }
+            if seen[start] || rcells[start] == 0 || is_ground(rcells[start]) || is_loose[start] {
+                start += 1;
+                continue;
+            }
+            cells.clear();
+            let (mut edge, mut hard, mut near) = (false, 0usize, i64::MAX);
+            seen[start] = true;
+            if pack {
+                let (sx, sy, sz) = r.place(start);
+                stack.push(pack_xyz(sx, sy, sz));
+            } else {
+                stack.push(start as u32);
+            }
+            while let Some(raw) = stack.pop() {
+                let (x, y, z, i) = if pack {
+                    let (x, y, z) = unpack_xyz(raw);
+                    (x, y, z, x + nx * (z + nz * y))
+                } else {
+                    let i = raw as usize;
+                    let (x, y, z) = r.place(i);
+                    (x, y, z, i)
+                };
+                cells.push(i as u32);
+                edge |= x == 0 || x == nx - 1 || z == 0 || z == nz - 1 || y == ny - 1 || y == 0;
+                hard += matches!(material(rcells[i]), STEEL | GLASS | LAMP) as usize;
+                near = near.min((x as i64 - centre[0] as i64).pow(2) + (y as i64 - centre[1] as i64).pow(2) + (z as i64 - centre[2] as i64).pow(2));
+                let mut join = |j: usize, nx_c: usize, ny_c: usize, nz_c: usize| {
+                    if !seen[j] && rcells[j] != 0 && !is_ground(rcells[j]) && !is_loose[j] {
+                        seen[j] = true;
+                        stack.push(if pack { pack_xyz(nx_c, ny_c, nz_c) } else { j as u32 });
+                    }
+                };
+                if x > 0 { join(i - 1, x - 1, y, z) }
+                if x + 1 < nx { join(i + 1, x + 1, y, z) }
+                if z > 0 { join(i - nx, x, y, z - 1) }
+                if z + 1 < nz { join(i + nx, x, y, z + 1) }
+                if y > 0 { join(i - layer, x, y - 1, z) }
+                if y + 1 < active_ny { join(i + layer, x, y + 1, z) }
+            }
+            start += 1;
+            if !edge && near <= reach && cells.len() <= 20_000 && hard * 10 >= cells.len() * 7 {
+                for &i in cells.iter() {
+                    is_loose[i as usize] = true;
                 }
-            };
-            if x > 0 { join(i - 1) }
-            if x + 1 < nx { join(i + 1) }
-            if z > 0 { join(i - nx) }
-            if z + 1 < nz { join(i + nx) }
-            if y > 0 { join(i - layer) }
-            if y + 1 < ny { join(i + layer) }
-        }
-        if !edge && near <= reach && cells.len() <= 20_000 && hard * 10 >= cells.len() * 7 {
-            for &i in &cells {
-                is_loose[i as usize] = true;
             }
         }
-    }
+    });
 }
 
 /// Lets everything in a region that is not held fall until it is. At most `rounds` times over: what lands may

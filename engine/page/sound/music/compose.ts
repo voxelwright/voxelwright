@@ -240,12 +240,13 @@ export function dice(seed: number) {
 }
 
 function best<T>(make: () => T, list: Rule<T>[], around: Around, tries: number) {
-  let top = -1, kept: T | null = null, each: number[] = [], sum = 0
+  let top = -1, kept: T | null = null, sum = 0
   for (let i = 0; i < tries; i++) {
-    const c = make(), j = R.judge(list, c, around)
-    sum += j.total
-    if (j.total > top) { top = j.total; kept = c; each = j.each }
+    const c = make(), total = R.judgeTotal(list, c, around)
+    sum += total
+    if (total > top) { top = total; kept = c }
   }
+  const each = R.judge(list, kept!, around).each
   return { kept: kept!, total: top, mean: sum / tries, rules: list.map((r, i) => ({ name: r.name, why: r.why, source: r.source, read: r.read, weight: r.weight, score: each[i] })) }
 }
 

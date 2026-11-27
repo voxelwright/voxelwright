@@ -1010,7 +1010,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     var low = vec3i(0);
     var kind = 0u;
     var cell = vec3i(0);
-    if (!skipping) {
+    if (!FAR_MODEL || !skipping) {
     let q = q0 + rd * (t * lv.scale);
     let c = clamp(vec3i(floor(q)), vec3i(0), last);
     // Which of the kept nodes still hold this cell: the highest bit in which it differs from the last one says.
@@ -1183,8 +1183,8 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       if (kind == 0u) { t += eps; continue; }
     }
     }
-    if ((skipping || kind != 0u) && !through) {
-      if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
+    if (((FAR_MODEL && skipping) || kind != 0u) && !through) {
+      if (FAR_MODEL && eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
         let p = ro + rd * (t + 0.25 * eps);
         let reach = select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u);
         if (t > reach && farHeld(p) && !edited(p)) {
@@ -1197,7 +1197,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
           continue;
         }
       }
-      if (skipping) { skipping = false; continue; }
+      if (FAR_MODEL && skipping) { skipping = false; continue; }
       hit.t = t;
       hit.kind = kind & 0xffffu;
       hit.n = n;
@@ -1643,7 +1643,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   let ci = (hit.kind >> 8u) & 255u;
   let sign = stuff == 15u && ci != 46u;
   var col = shade(albedo, n, rd, g.sun, direct, open, m.rough, select(m.glow, 0.0, sign));
-  if (g.weather.z > 0.0) {
+  if (NIGHT && g.weather.z > 0.0) {
     // Windows, lamps and signs are lit well before the day has gone, and in rain.
     let dark = g.weather.z;
     // Its light is its colour made strong: a pale tint by day is a coloured tube by night.
@@ -1874,6 +1874,13 @@ override MIRRORS: bool = true;
 // text: a dry clear day costs what it did (the same text behind a test of the fog's thickness read 8 to 12% dearer).
 // The pipelines with fog are made the first time there is any.
 override FOGGY: bool = false;
+// Night lights, lit windows, landmarks and window screens (#139): stripped from clear daytime pipelines so
+// every inlined copy of lit() avoids carrying 100+ lines of night code and its register pressure.
+override NIGHT: bool = false;
+// Far-model tile handover in march() (#139): stripped from pipelines when no far model is active (town or near-only).
+override FAR_MODEL: bool = false;
+// Underwater shading (deep(), #139): stripped above the sea so fs() does not inline a third copy of lit().
+override UNDERWATER: bool = false;
 
 @fragment fn fs(@builtin(position) at: vec4f) -> Drawn {
   let uv = (at.xy / g.res) * 2.0 - 1.0;
@@ -1910,7 +1917,7 @@ override FOGGY: bool = false;
     var hit = trace(g.eye, rd, t0, level0, most, select(0.0, t0 * spread, i > 0u), spread, false, false, true);
     if (i == 0u) {
       // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
-      if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
+      if (UNDERWATER && (g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
       first = hit.t;
       if ((g.flags & 16u) != 0u) {
         // Asked what is under one point: how far (in eighths of a cell), what it is made of, what colour.
@@ -1919,7 +1926,7 @@ override FOGGY: bool = false;
         if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
         return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, vec4f(0.0), depth);
       }
-      if ((g.flags & 128u) != 0u) {
+      if (UNDERWATER && (g.flags & 128u) != 0u) {
         if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
         col = deep(rd, hit, shadows, fract(52.9829189 * fract(dot(at.xy, vec2f(0.06711056, 0.00583715)))));
         break;
@@ -1966,9 +1973,9 @@ override FOGGY: bool = false;
       // A window with someone home at night is lit from within: its blind is drawn and its light shows, not the room.
       let fine = hit.cell * i32(1u << hit.level);
       let lot = inBlock(fine);
-      if (g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
+      if (NIGHT && g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
       // A pane on the window screen (eggs.ts) shows its pixel, not what it mirrors.
-      if (g.air.z > 0.0) { lamp = max(lamp, screenOf(g.eye + rd * hit.t).a); }
+      if (NIGHT && g.air.z > 0.0) { lamp = max(lamp, screenOf(g.eye + rd * hit.t).a); }
       mirror = glassMirror(rd, n);
       // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
       if (polished) { mirror = max(mirror, 0.62); }
@@ -2076,9 +2083,9 @@ override FOGGY: bool = false;
     roomLit = 0.0;
     skyLit = mix(INDOORS, 1.0, g.weather.w);
   }
-  if ((g.flags & 128u) == 0u && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
+  if ((!UNDERWATER || (g.flags & 128u) == 0u) && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
   // The fog, over everything as far as the first thing met, and over the sky (a look that met nothing goes on for ever).
-  if (FOGGY && (g.flags & 128u) == 0u) {
+  if (FOGGY && (!UNDERWATER || (g.flags & 128u) == 0u)) {
     col = inFog(col, rd, select(1e7, first, first >= 0.0));
   }
   if ((g.flags & 4u) != 0u) {
@@ -2220,23 +2227,58 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The sun stands in the south-west, two fifths of the way up.
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
-  // The pipelines of a shader module: the march with mirrors and without (MIRRORS), and the sun's maps. Made in the background: nothing waits on them but whoever asked (`reshade` makes them again while the old ones go on drawing).
-  // One layout for both, so that one binding serves either.
+  // The pipelines of a shader module: specialised by pipeline-overridable constants (MIRRORS, FOGGY, NIGHT, FAR_MODEL,
+  // UNDERWATER) so daytime / above-water / non-far draws compile without dead code bloating register pressure.
+  // One explicit layout for all march pipelines and one for sun maps, so one bind group serves every variant.
   const F = GPUShaderStage.FRAGMENT
-  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }] })] })
-  const marchingAs = (module: GPUShaderModule, mirrors: boolean, foggy = false) => device.createRenderPipelineAsync({ label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}`, layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
-  const marching = (module: GPUShaderModule, defer = false) => Promise.all([defer ? null : marchingAs(module, true), marchingAs(module, false)])
-  const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
-  let [pipeline, plainPipeline] = await marching(module, deferMirrors)
+  const marchLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }] })
+  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [marchLayout0] })
+  const sunLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }] })
+  const sunLayout1 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }] })
+  const sunLayout = device.createPipelineLayout({ bindGroupLayouts: [sunLayout0, sunLayout1] })
+  const keyOf = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean) =>
+    (mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (far ? 8 : 0) | (isUnder ? 16 : 0)
+  const marchDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false): GPURenderPipelineDescriptor => ({
+    label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${far ? ' far' : ''}${isUnder ? ' under' : ''}`,
+    layout: marchLayout,
+    vertex: { module: mod, entryPoint: 'vs' },
+    fragment: {
+      module: mod,
+      entryPoint: 'fs',
+      constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, FAR_MODEL: far ? 1 : 0, UNDERWATER: isUnder ? 1 : 0 },
+      targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }],
+    },
+    depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' },
+  })
+  const marchingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false) =>
+    device.createRenderPipelineAsync(marchDesc(mod, mirrors, foggy, night, far, isUnder))
+  const marching = (mod: GPUShaderModule, defer = false) => Promise.all([defer ? null : marchingAs(mod, true), marchingAs(mod, false)])
+  const sunning = (mod: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: sunLayout, vertex: { module: mod, entryPoint: 'vs' }, fragment: { module: mod, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
+  const [initMirrors, initPlain] = await marching(module, deferMirrors)
+  let shaderNow = module
+  const pipelines = new Map<number, GPURenderPipeline>([[0, initPlain]])
+  if (initMirrors) pipelines.set(1, initMirrors)
+  const making = new Map<number, Promise<unknown>>()
   let mirrorsStarted = !deferMirrors
-  // The same in fog (FOGGY), made the first time there is fog, and made again with the shader: until they are made a
-  // look is drawn as without it, which is the fog's first moment as it comes in (it comes in over seconds).
-  let shaderNow = module, foggy: GPURenderPipeline[] | null = null, makingFoggy: Promise<unknown> | null = null
-  const fogPipelines = () => {
-    if (foggy || makingFoggy) return foggy
+  let mirrorsReady = !deferMirrors
+  const warm = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, onReady?: () => void) => {
+    const k = keyOf(mirrors, foggy, night, far, isUnder)
+    if (pipelines.has(k) || making.has(k)) return
     const of = shaderNow
-    makingFoggy = Promise.all([marchingAs(of, true, true), marchingAs(of, false, true)]).then((made) => { if (of === shaderNow) foggy = made }).finally(() => { makingFoggy = null })
-    return null
+    const p = marchingAs(of, mirrors, foggy, night, far, isUnder).then(
+      (ready) => { if (of === shaderNow) { pipelines.set(k, ready); onReady?.() } },
+      (error: unknown) => { console.error('The march pipeline could not be compiled', error) },
+    ).finally(() => { if (making.get(k) === p) making.delete(k) })
+    making.set(k, p)
+  }
+  const requirePipeline = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean) => {
+    const k = keyOf(mirrors, foggy, night, far, isUnder)
+    let p = pipelines.get(k)
+    if (!p) {
+      p = device.createRenderPipeline(marchDesc(shaderNow, mirrors, foggy, night, far, isUnder))
+      pipelines.set(k, p)
+    }
+    return p
   }
   // The panes beside each size of picture the march draws (a few: the page's, a measure's, the one pixel a pick asks).
   const panesKept = new Map<string, GPUTexture>()
@@ -2265,18 +2307,17 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The road's marks (marks.ts), empty until `marks` is told them.
   let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   const binding = () => device.createBindGroup({
-    layout: plainPipeline.getBindGroupLayout(0),
+    layout: marchLayout0,
     entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }],
   })
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
   let sunPipeline = await sunning(module)
-  // (looks too: trace reads the far model's map, farHeld, though a sun's look never hands over.)
-  const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }] })
+  const sunBinding = () => device.createBindGroup({ layout: sunLayout0, entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }] })
   let sunBind = sunBinding()
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-    return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
+    return { buffer, bind: device.createBindGroup({ layout: sunLayout1, entries: [{ binding: 0, resource: { buffer } }] }) }
   })
   const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192 + 512 + 16), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
@@ -2337,17 +2378,41 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let farEdits: readonly (readonly number[])[] = []
   /** The lettering boards' own light (letters): world cells, as `Looks.letters` lays it out; null for none. */
   let lit: Float32Array | null = new Float32Array((2 + 2 * LIT_LETTERS) * 4)
+  const farBuf = new Float32Array(4), wedgeBuf = new Float32Array(8), keepBuf = new Float32Array(8), editsBuf = new Float32Array(EDITS * 8)
+  const litBuf = new Float32Array((2 + 2 * LIT_LETTERS) * 4)
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
       const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
       // The far model's map is measured from the same corner (farCover).
-      if (farMap[3] > 0) device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, new Float32Array([farMap[0] - anchor[0], farMap[1] - anchor[2], farMap[2], farMap[3]]))
-      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, farWedge ? new Float32Array([farWedge[0] - anchor[0], farWedge[1] - anchor[2], farWedge[2], farWedge[3], farWedge[4], farWedge[5], 0, 0]) : new Float32Array(8))
-      if (lit) { const r = lit.slice(); for (let i = 0; i < r.length; i += 4) { r[i] -= anchor[0]; r[i + 1] -= anchor[1]; r[i + 2] -= anchor[2] } device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 64, r) }
-      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, farKeep ? new Float32Array([farKeep[0] - anchor[0], farKeep[1] - anchor[1], farKeep[2] - anchor[2], 0, farKeep[3] - anchor[0], farKeep[4] - anchor[1], farKeep[5] - anchor[2], 1]) : new Float32Array(8))
-      const edits = new Float32Array(EDITS * 8)
-      for (const [i, b] of farEdits.slice(0, EDITS).entries()) edits.set([b[0] - anchor[0], b[1] - anchor[1], b[2] - anchor[2], 0, b[3] - anchor[0], b[4] - anchor[1], b[5] - anchor[2], 1], i * 8)
-      device.queue.writeBuffer(looks, EDITS_AT, edits)
+      if (farMap[3] > 0) {
+        farBuf[0] = farMap[0] - anchor[0]; farBuf[1] = farMap[1] - anchor[2]; farBuf[2] = farMap[2]; farBuf[3] = farMap[3]
+        device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, farBuf)
+      }
+      if (farWedge) {
+        wedgeBuf[0] = farWedge[0] - anchor[0]; wedgeBuf[1] = farWedge[1] - anchor[2]
+        wedgeBuf[2] = farWedge[2]; wedgeBuf[3] = farWedge[3]; wedgeBuf[4] = farWedge[4]; wedgeBuf[5] = farWedge[5]
+        wedgeBuf[6] = 0; wedgeBuf[7] = 0
+      } else wedgeBuf.fill(0)
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, wedgeBuf)
+      if (lit) {
+        for (let i = 0; i < lit.length; i += 4) {
+          litBuf[i] = lit[i] - anchor[0]; litBuf[i + 1] = lit[i + 1] - anchor[1]; litBuf[i + 2] = lit[i + 2] - anchor[2]; litBuf[i + 3] = lit[i + 3]
+        }
+        device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 64, litBuf.subarray(0, lit.length))
+      }
+      if (farKeep) {
+        keepBuf[0] = farKeep[0] - anchor[0]; keepBuf[1] = farKeep[1] - anchor[1]; keepBuf[2] = farKeep[2] - anchor[2]; keepBuf[3] = 0
+        keepBuf[4] = farKeep[3] - anchor[0]; keepBuf[5] = farKeep[4] - anchor[1]; keepBuf[6] = farKeep[5] - anchor[2]; keepBuf[7] = 1
+      } else keepBuf.fill(0)
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, keepBuf)
+      editsBuf.fill(0)
+      const nEdits = Math.min(farEdits.length, EDITS)
+      for (let i = 0; i < nEdits; i++) {
+        const b = farEdits[i], o = i * 8
+        editsBuf[o] = b[0] - anchor[0]; editsBuf[o + 1] = b[1] - anchor[1]; editsBuf[o + 2] = b[2] - anchor[2]; editsBuf[o + 3] = 0
+        editsBuf[o + 4] = b[3] - anchor[0]; editsBuf[o + 5] = b[4] - anchor[1]; editsBuf[o + 6] = b[5] - anchor[2]; editsBuf[o + 7] = 1
+      }
+      device.queue.writeBuffer(looks, EDITS_AT, editsBuf)
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
       f.set([...view.right, size[0] / size[1]], 4)
       f.set([...view.up, time], 8)
@@ -2498,30 +2563,47 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       farKeep = keep
       farEdits = edits
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
+      if (reach > 0) {
+        const wantNight = lightsNow() > 0 || screen.up > 0
+        warm(false, false, wantNight, true, under)
+        if (mirrorsReady) warm(true, false, wantNight, true, under)
+      }
     },
     async reshade(change) {
       const began = performance.now(), next = await shader(device, 'march', change(code(world, behind)))
       const compiled = performance.now() - began, [[a, plain], b] = await Promise.all([marching(next), sunning(next)])
       // Between two frames: the pipelines, and everything bound by their layouts.
-      pipeline = a; plainPipeline = plain; sunPipeline = b; bind = binding(); sunBind = sunBinding()
-      shaderNow = next; foggy = null
-      for (const t of sunTiles) t.bind = device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: t.buffer } }] })
+      shaderNow = next
+      pipelines.clear()
+      making.clear()
+      pipelines.set(0, plain)
+      if (a) pipelines.set(1, a)
+      mirrorsStarted = true
+      mirrorsReady = true
+      sunPipeline = b; bind = binding(); sunBind = sunBinding()
       return { compiled, ms: performance.now() - began }
     },
     draw(encoder, to, view, flags, time, timing, only, starts) {
       tell(view, to.size, flags, time, starts)
       // With mirrors off no pane is looked through, and the march writes no panes (writing them was 1 to 2% of its time with mirrors off).
       const wantsMirrors = (flags & MIRRORS) !== 0
-      if (wantsMirrors && !mirrorsStarted && !pipeline) {
+      const wantNight = lightsNow() > 0 || screen.up > 0
+      const wantFar = farMap[3] > 0
+      const wantUnder = under || (flags & UNDER) !== 0
+      const wantFog = fog > 0
+      if (wantsMirrors && !mirrorsStarted) {
         mirrorsStarted = true
-        // A reshade can finish first. Keep its pipeline if it did.
-        void marchingAs(module, true).then((ready) => { pipeline ??= ready }, (error: unknown) => {
-          console.error('The march with mirrors could not be compiled', error)
-        })
+        // A reshade can finish first; warm() checks shaderNow before storing.
+        warm(true, false, wantNight, wantFar, wantUnder, () => { mirrorsReady = true })
       }
-      const inFog = fog > 0 ? fogPipelines() : null
-      const reflected = wantsMirrors ? inFog?.[0] ?? pipeline : null
-      const mirrors = !!reflected, panes = panesFor(to.size)
+      const mirrors = wantsMirrors && mirrorsReady
+      let useFog = false
+      if (wantFog) {
+        if (pipelines.has(keyOf(mirrors, true, wantNight, wantFar, wantUnder))) useFog = true
+        else warm(mirrors, true, wantNight, wantFar, wantUnder)
+      }
+      const active = requirePipeline(mirrors, useFog, wantNight, wantFar, wantUnder)
+      const panes = panesFor(to.size)
       glassReady = !wantsMirrors || mirrors
       if (mirrors) panesWritten.add(panes)
       else if (panesWritten.has(panes)) { encoder.beginRenderPass({ colorAttachments: [{ view: panesView(to.size), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end(); panesWritten.delete(panes) }
@@ -2531,7 +2613,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         ...(timing ? { timestampWrites: timing } : {}),
       })
       // With mirrors off, the pipeline that has none of their text (MIRRORS): its bindings are the same.
-      pass.setPipeline(reflected ?? inFog?.[1] ?? plainPipeline)
+      pass.setPipeline(active)
       pass.setBindGroup(0, bind)
       if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
       pass.draw(3)

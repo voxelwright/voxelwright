@@ -16,13 +16,14 @@ WebAssembly JS API, and the probes below.
 - `rustup target add wasm32-unknown-unknown` is the only thing added to the machine. No
   wasm-bindgen, wasm-pack, wasm-opt or emscripten: nothing generates glue.
 - `engine/core/.cargo/config.toml` turns on `+simd128,+bulk-memory` for the wasm target.
-  The probe page found 128-bit SIMD in every browser it met. Nothing in the core uses SIMD
-  by hand yet: what there is comes from the compiler.
+  The probe page found 128-bit SIMD in every browser it met. `fine.rs` uses `core::arch::wasm32`
+  SIMD (`i32x4_add`) for 3D prefix sums in `facesWithSmooth`; the rest comes from the compiler.
 - `npm run core` (in `engine/`) builds release wasm and copies it to `engine/page/core.wasm`,
   which is ignored by git. A fresh checkout needs it before the city page works.
 - The build passes `--remap-path-prefix` through `cargo --config`, which adds to the target's flags in
   `.cargo/config.toml`. Do not move it to `RUSTFLAGS`: an environment variable replaces those flags and SIMD goes with them.
-- Release profile: `opt-level 3`, `lto`, one codegen unit, `panic = "abort"`. The wasm is 79 kB.
+- Release profile: `opt-level 3`, `lto`, one codegen unit, `panic = "abort"`. With SF packs, heroes,
+  living vehicles, and `fine.rs` meshing/sculpting, `engine/page/core.wasm` is ~983 kB raw.
 
 ## How it is called
 
@@ -56,17 +57,17 @@ WebAssembly JS API, and the probes below.
 
 | What | Cost |
 |---|---|
-| Make one sector of the city (64 cells a side) and encode its tree | 0.4 to 1.6 ms |
+| Make one sector of the city (64 cells a side) and encode its tree | 0.78 to 1.61 ms (lod 0..8) |
 | A sector's tree | 19 to 72 kB mean by coarseness, 204 kB at most |
 | Which sectors of a column are worth making (`sector_span`) | 0.03 to 0.26 ms |
+| Fine meshing (`facesWithSmooth`, coupe / Ojai) & sculptors (`fine.rs`) | 32–48 ms smooth, 46–100 ms sculpt |
 
-`node test/core-time.mjs` prints these.
+`node test/core-time.mjs` prints the sector figures.
 
 ## Not verified
 
 - wasm threads and shared memory (the probe says the browsers have them; the core does not
   use them).
-- Hand-written SIMD.
 - Anything on a real iPhone.
 
 Refresh this when the Rust toolchain or edition changes, when a dependency is added, or when

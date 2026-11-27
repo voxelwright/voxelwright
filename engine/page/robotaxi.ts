@@ -4,6 +4,7 @@
 // (page/ojai-sculpt.ts), roof LiDAR turret, and illuminated depot architecture.
 import { coarser } from './car-sculpt.ts'
 import { faces as facesOf } from './fine.ts'
+import { wasmBuildOjaiLods } from './fine-core.ts'
 import type { Foot, Making, Motor } from './living.ts'
 import { FONT_5X7, OJAI_KINDS, OJAI_SPEC, sculptOjai } from './ojai-sculpt.ts'
 import { ROBOTAXI_HANDLING, type RobotaxiService } from './robotaxi-services.ts'
@@ -184,22 +185,31 @@ export function buildRobotaxiModel(service: RobotaxiService): RobotaxiModel {
   const existing = modelCache.get(service.id)
   if (existing) return existing
 
-  const sculpted = sculptOjai({ livery: service.livery, badge: service.badge, spec: OJAI_SPEC })
   const paintKinds = new Set([service.livery.body, service.livery.roof, service.livery.accent, service.livery.text])
 
-  // Build 2.5 cm (per=4), 5 cm (per=2), and 10 cm (per=1) shell-preserving LODs via car-sculpt.ts `coarser`.
-  const look4 = encodeRuns(sculpted.cells)
-  const c2 = coarser(sculpted.cells, sculpted.size, 2)
-  const look2 = encodeRuns(c2.kinds)
-  const c1 = coarser(sculpted.cells, sculpted.size, 4)
-  const look1 = encodeRuns(c1.kinds)
+  // Build 2.5 cm (per=4), 5 cm (per=2), and 10 cm (per=1) shell-preserving LODs (zero-copy in core.wasm when loaded).
+  const fast = wasmBuildOjaiLods({ livery: service.livery, badge: service.badge, spec: OJAI_SPEC })
+  let size4: [number, number, number], size2: [number, number, number], bSize: [number, number, number]
+  let look4: { palette: number[]; runs: string }, look2: { palette: number[]; runs: string }, look1: { palette: number[]; runs: string }
+  if (fast) {
+    ;({ size4, look4, size2, look2, size1: bSize, look1 } = fast)
+  } else {
+    const sculpted = sculptOjai({ livery: service.livery, badge: service.badge, spec: OJAI_SPEC })
+    size4 = sculpted.size
+    look4 = encodeRuns(sculpted.cells)
+    const c2 = coarser(sculpted.cells, sculpted.size, 2)
+    size2 = c2.size
+    look2 = encodeRuns(c2.kinds)
+    const c1 = coarser(sculpted.cells, sculpted.size, 4)
+    bSize = c1.size
+    look1 = encodeRuns(c1.kinds)
+  }
 
   const looks: RobotaxiLook[] = [
-    { size: sculpted.size, per: 4, low: [0, 0, 0], ...look4, roles: rolesOf(look4.palette, paintKinds) },
-    { size: c2.size, per: 2, low: [0, 0, 0], ...look2, roles: rolesOf(look2.palette, paintKinds) },
-    { size: c1.size, per: 1, low: [0, 0, 0], ...look1, roles: rolesOf(look1.palette, paintKinds) },
+    { size: size4, per: 4, low: [0, 0, 0], ...look4, roles: rolesOf(look4.palette, paintKinds) },
+    { size: size2, per: 2, low: [0, 0, 0], ...look2, roles: rolesOf(look2.palette, paintKinds) },
+    { size: bSize, per: 1, low: [0, 0, 0], ...look1, roles: rolesOf(look1.palette, paintKinds) },
   ]
-  const bSize = c1.size
   const body = { ...look1, roles: rolesOf(look1.palette, paintKinds) }
 
   // Electric AWD motor matched to Ojai 3.00 m wheelbase (`wheels: [0.84, 3.84]` -> x = 8.4 and 38.4 in 10 cm body cells).

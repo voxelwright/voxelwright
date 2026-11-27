@@ -113,6 +113,11 @@ impl Scratch {
 
     pub fn start(&mut self, sx: i32, sy: i32, sz: i32, lod: u32) {
         self.cells.fill(0);
+        self.start_raw(sx, sy, sz, lod);
+    }
+
+    /// As `start`, without zero-filling `cells`: for callers (`Ground::fill`) that immediately overwrite every cell.
+    pub fn start_raw(&mut self, sx: i32, sy: i32, sz: i32, lod: u32) {
         // What a sector of many finer cells took is given back: only a little is kept for the next.
         if self.fine.capacity() > KEPT_BLOCKS {
             self.fine = Vec::new();
@@ -944,7 +949,7 @@ mod tests {
             buried += deep.is_some() as u32;
             fill(&mut s, sx, sy, sz, lod, &[Edit::Runs(sorted(dug))]);
             assert_eq!(s.cells[at(c[0], c[1], c[2])], 0, "{lod} times coarser: the ground's top cell emptied whole is not air");
-            for c in deep {
+            if let Some(c) = deep {
                 assert_eq!(s.cells[at(c[0], c[1], c[2])], 0, "{lod} times coarser: a cell under the ground emptied but for one sheet is not air");
             }
             assert_eq!(s.cells.iter().zip(&none.cells).filter(|(a, b)| a != b).count(), 1 + deep.is_some() as usize, "{lod} times coarser: emptying cells changed others");
