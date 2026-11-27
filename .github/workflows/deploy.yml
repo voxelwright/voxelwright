@@ -58,7 +58,7 @@ jobs:
           tar -xf "$overlay/egg-media.tar" -C "$overlay/media"
           printf 'VOXELWRIGHT_EGG_MEDIA=%s\n' "$overlay/media" >> "$GITHUB_ENV"
 
-      # The site, under /blog/.
+      # The site (personal front page at / and blog under /blog/).
       - run: npm ci
         working-directory: site
       - run: npm test
