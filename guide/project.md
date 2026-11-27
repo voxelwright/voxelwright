@@ -25,7 +25,7 @@ flowchart LR
 | Master | `master/` | A Rust server that lists player-hosted lobbies and passes one WebRTC offer and one answer per join. It never carries game traffic. | [README](https://github.com/voxelwright/voxelwright/blob/main/master/README.md), [the master server](/master) |
 | Site | `site/` | A static generator for the owner's front page and blog. Every page is written as HTML and as Markdown. | [README](https://github.com/voxelwright/voxelwright/blob/main/site/README.md), [the site](/site) |
 | Deploy | `deploy/` | Two Cloudflare Workers: `voxelwright` serves the realm at voxelwright.world, `zahynailo` serves the site at zahynailo.dev. | [README](https://github.com/voxelwright/voxelwright/blob/main/deploy/README.md), [deploy](/deploy) |
-| Guide | `guide/` | These pages, published with Mintlify, and the bindings that keep them true. | [Keeping a page current](/documentation) |
+| Guide | `guide/` | These pages, published with Mintlify at [voxelwright.mintlify.app](https://voxelwright.mintlify.app/), and the bindings that keep them true. | [Keeping a page current](/documentation) |
 | Village (paused) | `home/`, `host/`, `street/` | The first prototype: a three.js family home with villagers and the Elder, and a shared street. Some of its checks still run in the root gate. | [Village](/village) |
 
 ## Names

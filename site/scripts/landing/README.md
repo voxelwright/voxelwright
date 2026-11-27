@@ -120,6 +120,4 @@ PLAYWRIGHT=/path/to/node_modules/playwright node scripts/landing/check-video.mjs
 PLAYWRIGHT=/path/to/node_modules/playwright node scripts/check-lost.mjs               # the 404 page
 ```
 
-**These five landing checks expect the landing at the root of `dist/`.** Today's `npm run build` mounts the site at
-`/blog/` and puts the front page there instead, so they need a build with `base: "/"`. `check-lost.mjs` works on
-today's build.
+The five landing checks serve `dist/` when it already holds the landing (`base: "/"`), and otherwise build a temporary `base: "/"` copy automatically (`serve-landing.mjs`). `check-lost.mjs` works on today's build.

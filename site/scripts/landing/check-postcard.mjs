@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
-import { startServer } from "../serve.mjs";
+import { serveLanding } from "./serve-landing.mjs";
 import { cardLayout } from "../../static/landing/postcard.js";
 
 const require = createRequire(import.meta.url);
@@ -78,8 +78,8 @@ async function take(page, trigger, name, expect) {
 }
 
 try {
-  server = await startServer({ root: resolve(import.meta.dirname, "../../dist"), port: 0, host: "127.0.0.1" });
-  const base = `http://127.0.0.1:${server.address().port}/`;
+  server = await serveLanding();
+  const base = server.base;
 
   // 1. The live city with a light saved graphics setting, as in check-eggs.
   const context = await browser.newContext({
@@ -180,6 +180,6 @@ try {
   await writeFile(join(out, "README.txt"), "Postcards and screenshots from scripts/landing/check-postcard.mjs.\n");
   console.log("Postcard check passed: live night and day, share, still on a phone by touch, plain page by keyboard.");
 } finally {
-  server?.close();
+  await server?.close();
   await browser.close();
 }

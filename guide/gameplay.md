@@ -79,7 +79,7 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 
 While you drive, the car's mode is solid. Keys the page hears before any mode still work (Enter, `/`, O, M and Shift+M among them), but the hour, rain, reset, K, G and Backquote wait until you are out; F repairs the car you are driving instead of lighting a fire.
 
-Riding something other than a car (a flying or hovering thing, or one that jumps) uses the schemes in `SCHEMES` in `engine/page/living.ts`: W and S, A and D, then Space and C to rise and sink, Q to roll over (hover) or Space to jump (ride). The wand registers Q as a key heard before any mode (`always` in `engine/page/wand.ts`), so on a hover vehicle Q takes up the wand and the roll never arrives; the touch key **Roll over** works. The ray marcher draws mirrors, shadows and glass; [the engine](/engine#glass) explains how.
+Riding something other than a car (a flying or hovering thing, or one that jumps) uses the schemes in `SCHEMES` in `engine/page/living.ts`: W and S, A and D, then Space and C to rise and sink, Q to roll over (hover) or Space to jump (ride). The wand ignores Q while `mounted` is live (`engine/page/wand.ts`), so on a hover vehicle Q rolls it over (and the touch key **Roll over** works too). The ray marcher draws mirrors, shadows and glass; [the engine](/engine#glass) explains how.
 
 ## The first view and EXPLORE
 
@@ -142,7 +142,7 @@ Hold Shift (Boost on touch, B on a pad) with the throttle on for nitrous: 40% mo
 
 A **burnout** builds a launch. Below 6.5 km/h with the throttle and the handbrake both over half, the front brakes hold the car while the rear wheels spin and smoke. The charge fills in 1.15 s and the boost bar turns orange to show it. Let go of the handbrake with the throttle still on and the car launches with up to 45% more thrust, fading over 0.8 s.
 
-In a shared world the world process gets boost but not the rain, so wet roads grip fully there. Letting go of boost is not passed on yet: once asked, boost stays on while the throttle is held.
+In a shared world, both boost (on and off) and rain wetness are forwarded to the world process (`POST /world/drive` → `living_drive_aux`), matching local driving.
 
 ### Cameras
 

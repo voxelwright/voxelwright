@@ -110,6 +110,7 @@ let checks = [
   ['rulewrite', 'node', ['test/rulewrite.mjs'], false],
   ['sound', 'node', ['test/sound.mjs'], false],
   ['music', 'node', ['test/music.mjs'], false],
+  ['radio', 'node', ['test/radio.mjs'], true],
   ['heard', 'node', ['test/heard.mjs'], true],
   ['played', 'node', ['test/played.mjs'], true],
   ['flight', 'node', ['test/flight.mjs'], true],

@@ -550,7 +550,7 @@ export function createStuntEngine(o: {
       }
     }
 
-    // 4. J-Turn / 180° / 360° rapid yaw spin during a slide
+    // 4. J-Turn / 180° / 360° rapid yaw spin during a slide (awarded at 150° / 320° so slides feel generous)
     const slidingSpin = (sample.drifting || sample.slip > 0.2 || Math.abs(yawRate) > 1.7) && horizKmh > 12
     if (slidingSpin && Math.abs(yawRate) > 0.9) {
       if (spinRad !== 0 && Math.sign(dyaw) !== Math.sign(spinRad) && Math.abs(dyaw) > 0.08) {

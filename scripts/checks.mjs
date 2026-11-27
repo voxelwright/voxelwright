@@ -2,7 +2,7 @@
 //
 // Fields
 //   name      what you pass to --only
-//   cwd       'home' or 'host'
+//   cwd       'home', 'host', or 'street'
 //   run       argv. Any {name} other than {base} and {scratch} becomes a free port the runner picked (the same
 //             port for the same name within a check), {base} the shared dev
 //             server's URL (needs: 'devServer'), {scratch} a private empty folder.

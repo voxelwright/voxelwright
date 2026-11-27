@@ -1,21 +1,21 @@
 // What the kit's renderer on the engine costs (#430, step 5): bytes as a host would send them, how long until the
 // page stage can draw, and what a browser with no WebGPU gets. Needs `npm run player` and
-// `node blocks/serve.mjs --port 5991 --as kit`.
+// `node blocks/serve.mjs --port 5990`.
 //
-//   node blocks/proof/cost.mjs [--only chrome,webkit] [--port 5991]
+//   node blocks/proof/cost.mjs [--only chrome,webkit] [--port 5990]
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { arg, browsers, here, quiet } from '../../test/kit.mjs'
 
-const port = arg('port', '5991'), only = arg('only', 'chrome,webkit').split(',')
+const port = arg('port', '5990'), only = arg('only', 'chrome,webkit').split(',')
 const weigh = (files) => { let raw = 0, gz = 0, br = 0; for (const f of files) { const b = readFileSync(f); raw += b.length; gz += gzipSync(b, { level: 9 }).length; br += brotliCompressSync(b).length } return `${(raw / 1024).toFixed(1)} KB as written, ${(gz / 1024).toFixed(1)} gzip, ${(br / 1024).toFixed(1)} brotli` }
 const dist = (...names) => names.map((n) => join(here, 'dist', n))
 console.log(`the kit's renderer on the engine (renderer, stage, pass, gpu): ${weigh(dist('blocks/renderer.js', 'blocks/stage.js', 'blocks/pass.js', 'probe/gpu.js'))}`)
 console.log(`  of which the block pass: ${weigh(dist('blocks/pass.js'))}`)
 console.log(`standing parts in the world, more (world.js): ${weigh(dist('blocks/world.js'))}`)
-console.log(`the kit's WebGL2 renderer it replaces (gl.js): ${weigh([join(arg('kit', join(homedir(), 'Developer', 'plant-a-seed')), 'packages/voxelmorphism/src/core/gl.js')])}`)
+console.log(`the kit's WebGL2 renderer it replaces (gl.js): ${weigh([join(here, 'kit', 'src', 'core', 'gl.js')])}`)
 
 // Its timings are quoted: no other thread's check may draw beside it (test/kit.mjs).
 const back = await quiet()
@@ -25,9 +25,9 @@ for (const name of only) {
   const ready = [], first = []
   for (let i = 0; i < 5; i++) {
     const browser = await browsers[name](), page = await (await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 })).newPage()
-    await page.goto(`http://127.0.0.1:${port}/showcase/seam.html?gl`)
+    await page.goto(`http://127.0.0.1:${port}/kit/showcase/seam.html?gl`)
     const t = await page.evaluate(async () => {
-      const { pageStage } = await import('/engine/blocks/stage.js'), { LIGHTS } = await import('/packages/voxelmorphism/src/core/materials.js'), a = performance.now()
+      const { pageStage } = await import('/blocks/stage.ts'), { LIGHTS } = await import('/kit/src/core/materials.js'), a = performance.now()
       const stage = await pageStage(), b = performance.now()
       if (!stage) return null
       // one part: a cube, into a canvas in the page
@@ -48,8 +48,8 @@ for (const name of only) {
     await page.addInitScript(init)
     const errors = []
     page.on('pageerror', (e) => errors.push(e.message))
-    await page.goto(`http://127.0.0.1:${port}/showcase/`)
-    const said = await page.evaluate(async () => { const kit = await import('/packages/voxelmorphism/src/index.js'); const stage = await kit.ready(); await new Promise((r) => setTimeout(r, 400)); return { stage: !!stage, plain: kit.plain(), live: document.querySelectorAll('[data-vx-live]').length, canvases: document.querySelectorAll('canvas.vx-canvas').length, button: getComputedStyle(document.querySelector('.vx-button')).backgroundColor } })
+    await page.goto(`http://127.0.0.1:${port}/kit/showcase/`)
+    const said = await page.evaluate(async () => { const kit = await import('/kit/src/index.js'); const stage = await kit.ready(); await new Promise((r) => setTimeout(r, 400)); return { stage: !!stage, plain: kit.plain(), live: document.querySelectorAll('[data-vx-live]').length, canvases: document.querySelectorAll('canvas.vx-canvas').length, button: getComputedStyle(document.querySelector('.vx-button')).backgroundColor } })
     await page.screenshot({ path: join(homedir(), '.village', 'engine', 'blocks', 'showcase', `${name}-${what.replace(/\W+/g, '-')}.png`) })
     console.log(`${name}, ${what}: ${said.plain && !said.stage && said.live === 0 ? 'the page is plain CSS' : 'NOT PLAIN'} (${JSON.stringify(said)})${errors.length ? ` errors: ${errors.join(' | ')}` : ''}`)
     await context.close()

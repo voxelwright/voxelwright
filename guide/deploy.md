@@ -29,7 +29,7 @@ flowchart TD
   ZR -- otherwise --> ZA[static assets in dist]
 ```
 
-Cloudflare runs a zone's Single Redirect rules before either Worker. Then each Worker answers from its static assets, except for the three path patterns that `runWorkerFirst` hands to `worker.mjs`. Every one of those calls counts against the Workers Free plan's 100,000 requests a day. The `zahynailo` Worker runs no code, so it never counts.
+Cloudflare runs a zone's Single Redirect rules before either Worker. Then each Worker answers from its static assets, except for the three path patterns that `runWorkerFirst` hands to `worker.mjs`. Every one of those calls counts against the Workers Free plan's 100,000 requests a day. With `negotiateMarkdown: false` (the default in `site/site.config.mjs`), the `zahynailo` Worker runs no code, so it never counts; setting `negotiateMarkdown: true` wires `site/src/worker.mjs` in for page routes.
 
 ## Assembly
 
@@ -141,6 +141,17 @@ Changing the workflow, the environment or the redirects changes what the public 
 3. For voxelwright.world, the manifest arrives with `Content-Encoding: br` and the same length as its `.br` file in `dist-world`.
 
 If a check fails after the upload, the script runs `wrangler rollback` for that Worker and stops. Each outcome, and the traffic status after an error, goes to the Actions summary. A failure on `zahynailo` leaves `voxelwright` on its new version. `publish.sh` reads `GITHUB_SHA` and `GITHUB_STEP_SUMMARY` and uses GNU `stat`, so it runs only in Actions.
+
+## Releases
+
+Once `publish.sh` succeeds for both Workers, the workflow runs [release.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/release.mjs) to record the deploy as a GitHub Release. A failed or rolled-back deploy never publishes a release.
+
+- **Tagging.** Deploy releases use `vYYYY.MM.DD.N` in UTC (for example `v2026.11.26.1`, incrementing `N` for multiple deploys in one day) and set `make_latest: "true"`. This keeps live deploy releases clearly separated from `sf-data-*` data bundles and `eggs-overlay-*` media overlays.
+- **Change range.** Each release covers every first-parent change on `main` since the previous deploy release tag. If a docs-only PR landed between deploys, or an earlier deploy failed before a fix merged, all newly live changes appear in the next release's notes.
+- **Release notes.** Changes are grouped by area (`San Francisco Realm & Engine`, `Site & Blog`, `Deploy`, `Master Server`, `Documentation`, `Other`). When a pull request includes a `## Release notes` section (prompted by [the PR template](https://github.com/voxelwright/voxelwright/blob/main/.github/pull_request_template.md)), that prose is used verbatim; otherwise `release.mjs` distills the PR's summary and change bullets while stripping check logs, bot footers and local paths. Each release ends with live URLs, commit link, pinned SF city release and data bundle tag, changed areas, workflow run link and a full compare link.
+- **Idempotency.** Re-running the workflow on a commit that already has a deploy release logs the existing release and exits cleanly without creating a duplicate.
+
+Preview release notes locally before merging with `npm --prefix deploy run release -- --dry-run`.
 
 ## Roll back by hand
 

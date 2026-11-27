@@ -68,7 +68,7 @@ scripts/hygiene.sh --install     # copy to ~/.village/bin and run it hourly with
 scripts/hygiene.sh               # remove finished worktrees, prune, check the disk
 ```
 
-It looks in `~/.t3/worktrees/Village` for worktrees of the checkout at `~/Developer/Village`. Set `VILLAGE_WORKTREES` and `VILLAGE_REPO` to point it elsewhere. A worktree is removed only when all of these hold:
+It looks in `~/.t3/worktrees/Voxelwright` for worktrees of the checkout at `~/Developer/voxelwright`. Set `VILLAGE_WORKTREES` and `VILLAGE_REPO` to point it elsewhere. A worktree is removed only when all of these hold:
 
 - It has no modified files, and no untracked files apart from `node_modules`, `dist`, `target`, `.venv` and `__pycache__`.
 - Its HEAD is merged into origin/main, or its branch is gone on the remote, or it is on a pushed branch and nothing in it changed for 3 days.

@@ -1036,13 +1036,13 @@ function open(of) {
       const now = Date.now()
       if (now - drivenSince > 1000) { drivenSince = now; driven = 0 }
       if (++driven > DRIVES_A_SECOND) return send(res, 429, 'too many: say what a thing is to do four times a second, not more')
-      const b = await body(req, 1024), axis = (v) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0)
+      const b = await body(req, 1024), axis = (v) => (Number.isFinite(v) ? Math.max(-1, Math.min(1, v)) : 0), unit = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0)
       if (!b || typeof b.id !== 'string' || !ID.test(b.id)) return send(res, 400, 'what a thing is told is {by, id, go, turn, rise, roll, jump}')
       if (!living.has(b.id)) return send(res, 409, 'no living thing of that id is in the world')
       ridden.add(b.id)
       // Getting on or off (`on`), said once; or what the thing is to do.
       if (typeof b.on === 'boolean') { if (typeof b.by !== 'string' || b.by.length > 64) return send(res, 400, 'who gets on or off is {by, id, on}'); thread.postMessage({ drive: { id: b.id, by: b.by, on: b.on } }) }
-      else thread.postMessage({ drive: { id: b.id, go: axis(b.go), turn: axis(b.turn), rise: axis(b.rise), roll: b.roll === true, jump: b.jump === true } })
+      else thread.postMessage({ drive: { id: b.id, go: axis(b.go), turn: axis(b.turn), rise: axis(b.rise), roll: b.roll === true, jump: b.jump === true, ...(typeof b.boost === 'boolean' ? { boost: b.boost } : {}), ...(Number.isFinite(b.wetness) ? { wetness: unit(b.wetness) } : {}) } })
       send(res, 202, '{}', TYPES['.json'])
     },
   }
