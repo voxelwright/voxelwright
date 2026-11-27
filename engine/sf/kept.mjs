@@ -5,7 +5,7 @@
 // The page sets it down where the realm says (local.ts `kept`) and it is driven as any living thing is: in the page's
 // own solver, with no world's process and no helper.
 //
-//   node sf/kept.mjs <record.json> <out.json> [--name "red saloon"]
+//   node sf/kept.mjs <record.json> <out.json> [--name "a grey saloon"]
 import { readFileSync, writeFileSync } from 'node:fs'
 import { read } from '../make/cells.mjs'
 

@@ -61,7 +61,7 @@ try {
   // The realm's parked saloon, as sf/build.mjs keeps it.
   const record = join(shelf, '1cb43f52cfc96e74e974e0a7.json')
   if (existsSync(record)) {
-    const kept = spawnSync(process.execPath, [join(here, 'sf/kept.mjs'), record, join(made, 'kept.json'), '--name', 'red saloon'], { encoding: 'utf8' })
+    const kept = spawnSync(process.execPath, [join(here, 'sf/kept.mjs'), record, join(made, 'kept.json'), '--name', 'grey saloon'], { encoding: 'utf8' })
     if (kept.status !== 0) throw new Error(`sf/kept.mjs: ${kept.stderr}`)
     const m = JSON.parse(readFileSync(join(made, 'kept.json'), 'utf8'))
     cars.push({ id: 'kept-saloon', name: m.name, size: m.size, cells: cells(m.body, m.size), motor: m.motor, controls: m.controls, seats: m.seats, eye: m.eye, fine: (m.fine ?? []).map((f) => ({ size: f.size, per: f.per, low: f.low, cells: cells(f, f.size) })) })

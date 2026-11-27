@@ -231,8 +231,8 @@ try {
   const driving = page.evaluate(async () => {
     const e = globalThis.engine
     // Set down after the tiles round it came (main.ts `kerbside`): waited for, as a visitor would walk to it.
-    for (let i = 0; i < 100 && !e.alive.things.some((t) => t.alive && t.name === 'red saloon' && e.alive.where(t)); i++) await new Promise((r) => setTimeout(r, 100))
-    const thing = e.alive.things.find((t) => t.alive && t.name === 'red saloon' && e.alive.where(t))
+    for (let i = 0; i < 100 && !e.alive.things.some((t) => t.alive && t.name === 'grey saloon' && e.alive.where(t)); i++) await new Promise((r) => setTimeout(r, 100))
+    const thing = e.alive.things.find((t) => t.alive && t.name === 'grey saloon' && e.alive.where(t))
     if (!thing) return { missing: { mended: e.mended, things: e.alive.things.map((t) => ({ name: t.name, alive: t.alive, where: !!e.alive.where(t) })) } }
     const w0 = e.alive.where(thing), at = w0.at, low = thing.low, size = thing.size
     // Where it stands: what the ground is under its middle, and whether anything of the world is in its box.
@@ -295,7 +295,7 @@ try {
     for (let i = 0; i < 300 && (e.world.stats.wanted || e.world.stats.stale); i++) await new Promise((r) => setTimeout(r, 100))
     await new Promise((r) => setTimeout(r, 1000))
     // The billboards are laid as edits again by reset (boards.ts): what is left beyond them.
-    return { ms: Math.round(ms), edits: e.world.done().length - (e.boards?.edits ?? 0), boards: e.boards?.edits ?? 0, things: e.alive.things.filter((t) => t.alive && t.name === 'red saloon').length }
+    return { ms: Math.round(ms), edits: e.world.done().length - (e.boards?.edits ?? 0), boards: e.boards?.edits ?? 0, things: e.alive.things.filter((t) => t.alive && t.name === 'grey saloon').length }
   })
   reset.solidWithin3m = hit ? await solid(hit.at) : null
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, { ...p, x: p.x - 25 * Math.sin(p.yaw), z: p.z + 25 * Math.cos(p.yaw), pitch: -0.1 }), aim)
@@ -332,7 +332,7 @@ try {
     const hired = e.mended.movers, edits = e.world.done().length
     e.strike(at, 10)
     await new Promise((r) => setTimeout(r, 4000))
-    return { hired, editsAfter: e.world.done().length - edits, things: e.alive.things.filter((t) => t.alive && t.name === 'red saloon').length }
+    return { hired, editsAfter: e.world.done().length - edits, things: e.alive.things.filter((t) => t.alive && t.name === 'grey saloon').length }
   }, hit?.at ?? [Math.round(aim.x * M), Math.round(aim.y * M), Math.round(aim.z * M)])
   check(ff.mover.hired === 1 && ff.mover.editsAfter > 0 && ff.mover.things === 1, `a mover that died was hired again (${ff.mover.hired}): a blast after made ${ff.mover.editsAfter} edits, the kept car set down again (${ff.mover.things})`)
   await page.evaluate(() => globalThis.engine.reset())

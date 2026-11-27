@@ -67,9 +67,7 @@ export interface DriveCam {
   readonly mode: DriveCamMode
   readonly label: string
   readonly fovAdd: number
-  /** Cycles to the next camera mode (C) and returns it. */
-  cycle(): DriveCamMode
-  /** Directly selects a camera mode. */
+  /** Selects a camera mode (C goes to `nextDriveCam` of the one it is in). */
   setMode(mode: DriveCamMode): void
   /** Resets transient camera dynamics when mounting/unmounting. */
   reset(): void
@@ -311,14 +309,6 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
     get mode() { return mode },
     get label() { return DRIVE_CAM_LABELS[mode] },
     get fovAdd() { return camFov },
-    cycle() {
-      const prev = mode
-      const next = nextDriveCam(mode)
-      mode = next
-      if (next === 'cinema') { exitTransition = 0; startCinema(true) }
-      else if (prev === 'cinema') leaveCinema()
-      return mode
-    },
     setMode(next) {
       if (next === mode) return
       const prev = mode

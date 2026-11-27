@@ -227,7 +227,7 @@ for (const file of EGG_VIDEOS) copyFileSync(join(eggOverlay, file), join(out, 's
 // ── Kept living things ──
 for (const k of realm.kept ?? []) {
   mkdirSync(dirname(join(out, 'sf', k.file)), { recursive: true })
-  const kept = spawnSync(process.execPath, [join(root, 'sf/kept.mjs'), arg('car', join(SHELF, '1cb43f52cfc96e74e974e0a7.json')), join(out, 'sf', k.file), '--name', 'red saloon'], { encoding: 'utf8' })
+  const kept = spawnSync(process.execPath, [join(root, 'sf/kept.mjs'), arg('car', join(SHELF, '1cb43f52cfc96e74e974e0a7.json')), join(out, 'sf', k.file), '--name', 'grey saloon'], { encoding: 'utf8' })
   if (kept.status !== 0) fail(kept.stderr)
 }
 
