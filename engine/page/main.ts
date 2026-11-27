@@ -65,7 +65,7 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
-import { BREAK, HIT, WORLD as WORLD_SOUND } from './sound/kinds.ts'
+import { WORLD as WORLD_SOUND } from './sound/kinds.ts'
 import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
@@ -238,7 +238,7 @@ async function main() {
     const radio = ears.radio
     void (radioPickerPromise ??= import('./radio-ui.ts').then(({ createRadioPicker }) => createRadioPicker({ radio, input: controls }), (e) => { radioPickerPromise = null; throw e })).then((p) => p.open(tab)).catch(() => {})
   }
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)); pwa.bindRadio(ears.radio) }).catch(() => {})
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, person: (id) => id !== 0 && id === me.id, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)); pwa.bindRadio(ears.radio) }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -2009,9 +2009,7 @@ async function main() {
       onCrash: (info) => {
         debris.burst(info.at, 2.5, Math.round(8 + info.force * 16), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + info.force * 0.5)
         smoke.glint(info.at, 4 + info.force * 6)
-        ears?.carEvent('thump', Math.min(1, 0.45 + info.force * 0.55))
-        ears?.voice.play(HIT.steel, { at: info.at, force: info.force, size: 1.8, reach: 20, travels: false })
-        if (info.speed > 65) ears?.voice.play(BREAK.glass, { at: info.at, force: Math.min(0.85, (info.speed - 55) / 90), size: 0.95, reach: 16, travels: false })
+        ears?.carCrash(info.at, info.force, info.speed)
         window.dispatchEvent(new CustomEvent('voxelwright:crash', { detail: info }))
       },
       onHorn: (info) => {

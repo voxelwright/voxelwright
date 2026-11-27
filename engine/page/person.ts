@@ -92,6 +92,8 @@ const EYES = 16.5, WALK = 0.32
 export interface Me {
   /** Whether the person is on their feet (and not flying as an eye). */
   readonly on: boolean
+  /** The body's id in the core while on foot, or 0 otherwise. */
+  readonly id: number
   /** Gets down onto the feet where the eye is, or back up to fly. */
   walk(on: boolean): void
   /** Where the eye rides: behind the body, or in its head. */
@@ -240,6 +242,7 @@ export function person(o: {
   }
   return {
     get on() { return on },
+    get id() { return id },
     walk,
     get view() { return view },
     set view(v) { view = v },

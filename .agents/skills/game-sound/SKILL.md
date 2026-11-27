@@ -321,7 +321,9 @@ whether the mix is right. The owner chose recorded foley over synthesised wood a
 - Not heard by its makers. Not run on an iPhone: first touch, the ringer switch, glitches and cost there are
   all unproved.
 - A loose body's blow is read from its change of speed between two tellings (late by one, misses a glance). The
-  core does report a living thing's impacts (`told.struck`: cars against walls, kerbs, props or each other).
+  core does report a living thing's impacts (`told.struck`: people bumping cars/walls and cars hitting walls, kerbs,
+  props or each other); `world.ts` keeps player brushes silent under 2.2 m/s, plays a muted `bodyBump` on harder foot
+  bumps, and layers damped `carBump` / `carCrunch` (never ringing `HIT.steel`) for vehicle impacts and `carCrash()`.
 - A hammer was first heard as an explosion too (the engine calls it a small blast): blasts under 8 cells are
   now blows only, and a check compares the two.
 - The picture never waits for sound: `main.ts` starts it and goes on; a worklet that never loads leaves a silent
