@@ -499,7 +499,9 @@ const fromFirst = async () => {
         const played = await page.evaluate(() => globalThis.playedIn)
         check(player.playing && !player.muted && player.sound > 0 && played[0] === 'click', `${kind}: ${egg} plays with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${played.join(', ')}; muted ${player.muted}, ${player.sound} bytes of sound decoded; Chrome, not Safari)`)
         await page.screenshot({ path: join(dir, `${kind}-${egg === 'matrix' ? 'line-matrix-on' : egg}.png`) })
-        if (egg === 'apple') {
+        if (egg === 'apple' || egg === 'rickroll') {
+          const planeHidden = await page.evaluate(() => { const p = globalThis.engine.boards?.plane; return !p || (p.hidden && p.cloth.hidden && p.box === null) })
+          check(planeHidden, `${kind}: while ${egg}'s sky drone swarm is up, the tow plane and banner stay hidden`)
           const stop = player.keys.find((k) => k.text === 'Stop')
           await press(stop.x, stop.y)
           await page.waitForTimeout(500)
@@ -507,6 +509,8 @@ const fromFirst = async () => {
           check(l.eggs.running === null, `${kind}: Stop on the player ${touch ? 'tapped' : 'clicked'} ends ${egg}`)
           stillFirst(l, `after ${egg}`)
           await still(page)
+          const planeBack = await page.evaluate(() => { const p = globalThis.engine.boards?.plane; return !p || (!p.hidden && !p.cloth.hidden) })
+          check(planeBack, `${kind}: after ${egg} stops and drones land, the tow plane returns`)
           continue
         }
       }
@@ -834,17 +838,17 @@ try {
   check(s.running === null && !s.playing, 'Esc ends it')
   await still(page)
 
-  // ── The Rickroll, with sound, and its title on the banner ──
+  // ── The Rickroll, with sound, and the tow plane clear of its sky drones ──
   console.log('\nthe Rickroll')
   await sayTo(page, 'never gonna give you up')
   await started(page, 'rickroll')
   await begun()
-  seen = await bannerSeen(page)
-  results.rickroll = { banner: seen }
-  check(seen.seen, `the banner's plane brings "${(await state(page)).signs.banner}" into the picture: ${JSON.stringify(seen)}`)
   await page.waitForTimeout(2500)
   s = await state(page)
-  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0 && s.dark === true, `Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"; the boards' light off (${s.dark})`)
+  const planeClear = await page.evaluate(() => { const p = globalThis.engine.boards?.plane; return p ? { hidden: p.hidden, clothHidden: p.cloth.hidden, box: p.box } : null })
+  results.rickroll = { planeClear }
+  check(planeClear && planeClear.hidden && planeClear.clothHidden && planeClear.box === null, `while Rickroll's sky drone swarm is up, the tow plane and banner stay hidden: ${JSON.stringify(planeClear)}`)
+  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0 && s.dark === true, `Rick is on every window, with his sound (${s.sound} bytes decoded); the boards' light off (${s.dark})`)
   await still(page)
   await page.evaluate(() => globalThis.engine.eggs.hold(20))
   await page.waitForTimeout(1200)
@@ -856,6 +860,8 @@ try {
   await page.waitForTimeout(300)
   check((await state(page)).running === null, '"stop" ends it')
   await still(page)
+  const planeReturned = await page.evaluate(() => { const p = globalThis.engine.boards?.plane; return !p || (!p.hidden && !p.cloth.hidden) })
+  check(planeReturned, 'after Rickroll stops and the sky drones land, the tow plane returns')
 
   // ── The memes: each one's file built, each started by a phrase and heard; the shortest played to its end, the sky back; “meme”, any one ──
   console.log('\nthe memes')
