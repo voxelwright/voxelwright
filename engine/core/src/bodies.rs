@@ -374,7 +374,15 @@ impl Ground {
     fn store(&mut self, key: [i32; 3]) {
         let first = self.scratch.cells[0];
         self.charged |= self.scratch.cells.iter().any(|&k| charged(k));
-        let kept = if self.scratch.cells.iter().all(|&k| k == first) { Kept::Same(first) } else { Kept::Cells(self.scratch.cells.clone().into_boxed_slice()) };
+        let uniform = self.scratch.cells.iter().all(|&k| k == first);
+        if !uniform {
+            if let Some((Kept::Cells(existing), stamp)) = self.kept.get_mut(&key) {
+                existing.copy_from_slice(&self.scratch.cells);
+                *stamp = self.asked;
+                return;
+            }
+        }
+        let kept = if uniform { Kept::Same(first) } else { Kept::Cells(self.scratch.cells.clone().into_boxed_slice()) };
         self.kept.insert(key, (kept, self.asked));
         while self.kept.values().filter(|k| matches!(k.0, Kept::Cells(_))).count() > KEEPS {
             let oldest = *self.kept.iter().filter(|(_, k)| matches!(k.0, Kept::Cells(_))).min_by_key(|(_, k)| k.1).unwrap().0;
@@ -390,7 +398,7 @@ impl Ground {
     /// One sector as the world stands, in the scratch.
     fn fill(&mut self, key: [i32; 3]) {
         self.keep(key);
-        self.scratch.start(key[0], key[1], key[2], 0);
+        self.scratch.start_raw(key[0], key[1], key[2], 0);
         match &self.kept[&key].0 {
             Kept::Same(kind) => self.scratch.cells.fill(*kind),
             Kept::Cells(cells) => self.scratch.cells.copy_from_slice(cells),

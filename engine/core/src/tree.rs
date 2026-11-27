@@ -54,19 +54,81 @@ struct Leaf {
 }
 
 /// The kind most of `kinds` are (the first such, so the answer does not depend on anything but the cells).
+#[inline]
 fn most(kinds: &[Kind]) -> Kind {
-    let (mut best, mut best_n) = (0, 0);
-    for (i, &k) in kinds.iter().enumerate() {
-        if k == best || kinds[..i].contains(&k) {
-            continue;
+    debug_assert!(kinds.len() <= 64);
+    let mut uniq = [(0 as Kind, 0u8); 64];
+    let mut ulen = 0usize;
+    for &k in kinds {
+        let mut found = false;
+        for slot in &mut uniq[..ulen] {
+            if slot.0 == k {
+                slot.1 += 1;
+                found = true;
+                break;
+            }
         }
-        let n = kinds[i..].iter().filter(|&&o| o == k).count();
-        if n > best_n {
+        if !found {
+            uniq[ulen] = (k, 1);
+            ulen += 1;
+        }
+    }
+    let (mut best, mut best_n) = (0, 0u8);
+    for &(k, cnt) in &uniq[..ulen] {
+        if cnt > best_n {
             best = k;
-            best_n = n;
+            best_n = cnt;
         }
     }
     best
+}
+
+/// Computes the inclusive `[lo, hi]` 0..=3 bounding box of set bits in a 4x4x4 node mask (`c = x + 4*z + 16*y`) in O(1).
+#[inline]
+fn bounds_from_mask(mask: u64) -> ([u8; 3], [u8; 3]) {
+    debug_assert_ne!(mask, 0);
+    let lo_y = (mask.trailing_zeros() >> 4) as u8;
+    let hi_y = ((63 - mask.leading_zeros()) >> 4) as u8;
+    let mz = (mask | (mask >> 16) | (mask >> 32) | (mask >> 48)) as u16;
+    let lo_z = (mz.trailing_zeros() >> 2) as u8;
+    let hi_z = ((15 - mz.leading_zeros()) >> 2) as u8;
+    let mx = ((mz | (mz >> 4) | (mz >> 8) | (mz >> 12)) & 0xF) as u8;
+    let lo_x = mx.trailing_zeros() as u8;
+    let hi_x = (7 - mx.leading_zeros()) as u8;
+    ([lo_x, lo_y, lo_z], [hi_x, hi_y, hi_z])
+}
+
+#[inline]
+fn row4_le(cells: &[Kind], base: usize) -> u64 {
+    #[cfg(target_endian = "little")]
+    {
+        debug_assert!(base + 4 <= cells.len());
+        // SAFETY: `base + 4 <= cells.len()` gives 8 valid bytes for an unaligned u64 read.
+        unsafe { (cells.as_ptr().add(base) as *const u64).read_unaligned() }
+    }
+    #[cfg(not(target_endian = "little"))]
+    {
+        (cells[base] as u64)
+            | ((cells[base + 1] as u64) << 16)
+            | ((cells[base + 2] as u64) << 32)
+            | ((cells[base + 3] as u64) << 48)
+    }
+}
+
+struct TreeScratch {
+    leaves: Vec<Leaf>,
+    kinds_out: Vec<u32>,
+    blocks_out: Vec<u32>,
+    pointers: Vec<usize>,
+}
+
+thread_local! {
+    static TREE_SCRATCH: std::cell::RefCell<TreeScratch> = std::cell::RefCell::new(TreeScratch {
+        leaves: vec![Leaf::default(); 4096],
+        kinds_out: Vec::new(),
+        blocks_out: Vec::new(),
+        pointers: Vec::new(),
+    });
 }
 
 /// Writes a sector's cells as a tree into `out` (cleared first).
@@ -89,190 +151,305 @@ pub fn encode_fine(cells: &[Kind], fine_of: &std::collections::HashMap<u32, u32>
     let fine_mark = crate::kinds::FINE;
     assert_eq!(cells.len(), CELLS);
     out.clear();
-    // A cell's block, where it has the mark and a block that is not empty.
-    let block_of = |i: usize| -> Option<&[Kind; 512]> {
-        if cells[i] & fine_mark == 0 {
-            return None;
+    TREE_SCRATCH.with_borrow_mut(|scratch| {
+        let leaves = &mut scratch.leaves;
+        // A cell's block, where it has the mark and a block that is not empty.
+        let block_of = |i: usize| -> Option<&[Kind; 512]> {
+            if cells[i] & fine_mark == 0 {
+                return None;
+            }
+            fine_of.get(&(i as u32)).and_then(|&b| fine.get(b as usize)).filter(|b| b.iter().any(|&k| k != 0))
+        };
+        // A cell's kind as the tree says it.
+        let kind_of = |i: usize| -> Kind {
+            let k = cells[i];
+            if k & fine_mark != 0 && block_of(i).is_none() { k & !fine_mark } else { k }
+        };
+        // Leaves: 16 a side, each 4 cells a side.
+        let mut any = false;
+        let plain_fast = fine_of.is_empty();
+        if plain_fast {
+            let clear_fine4 = !((fine_mark as u64) * 0x0001_0001_0001_0001u64);
+            for ly in 0..16usize {
+                let y_base = (ly * 4) * (SIDE * SIDE);
+                for lz in 0..16usize {
+                    let yz_base = y_base + (lz * 4) * SIDE;
+                    let leaf_row = 16 * (lz + 16 * ly);
+                    for lx in 0..16usize {
+                        let base0 = yz_base + lx * 4;
+                        let mut rows = [0u64; 16];
+                        let mut any_bits = 0u64;
+                        for dy in 0..4usize {
+                            let by = base0 + dy * (SIDE * SIDE);
+                            let r0 = row4_le(cells, by) & clear_fine4;
+                            let r1 = row4_le(cells, by + SIDE) & clear_fine4;
+                            let r2 = row4_le(cells, by + 2 * SIDE) & clear_fine4;
+                            let r3 = row4_le(cells, by + 3 * SIDE) & clear_fine4;
+                            rows[dy * 4] = r0;
+                            rows[dy * 4 + 1] = r1;
+                            rows[dy * 4 + 2] = r2;
+                            rows[dy * 4 + 3] = r3;
+                            any_bits |= r0 | r1 | r2 | r3;
+                        }
+                        if any_bits == 0 {
+                            leaves[leaf_row + lx] = Leaf::default();
+                            continue;
+                        }
+                        any = true;
+                        let first = rows[0] as Kind;
+                        if first != 0 {
+                            let rep = (first as u64) * 0x0001_0001_0001_0001u64;
+                            let mut diff = 0u64;
+                            for &r in &rows {
+                                diff |= r ^ rep;
+                            }
+                            if diff == 0 {
+                                leaves[leaf_row + lx] = Leaf {
+                                    mask: u64::MAX,
+                                    kind: first,
+                                    uniform: true,
+                                    lo: [0, 0, 0],
+                                    hi: [3, 3, 3],
+                                };
+                                continue;
+                            }
+                        }
+                        let mut mask = 0u64;
+                        let mut kinds = [0 as Kind; 64];
+                        let mut n = 0usize;
+                        for (ri, &r) in rows.iter().enumerate() {
+                            if r == 0 {
+                                continue;
+                            }
+                            let c0 = ri * 4;
+                            let k0 = r as Kind;
+                            if k0 != 0 { mask |= 1u64 << c0; kinds[n] = k0; n += 1; }
+                            let k1 = (r >> 16) as Kind;
+                            if k1 != 0 { mask |= 1u64 << (c0 + 1); kinds[n] = k1; n += 1; }
+                            let k2 = (r >> 32) as Kind;
+                            if k2 != 0 { mask |= 1u64 << (c0 + 2); kinds[n] = k2; n += 1; }
+                            let k3 = (r >> 48) as Kind;
+                            if k3 != 0 { mask |= 1u64 << (c0 + 3); kinds[n] = k3; n += 1; }
+                        }
+                        let (lo, hi) = bounds_from_mask(mask);
+                        leaves[leaf_row + lx] = Leaf { mask, kind: most(&kinds[..n]), uniform: false, lo, hi };
+                    }
+                }
+            }
+        } else {
+            for ly in 0..16usize {
+                for lz in 0..16usize {
+                    for lx in 0..16usize {
+                        let mut mask = 0u64;
+                        let mut kinds = [0 as Kind; 64];
+                        let mut n = 0;
+                        for c in 0..64usize {
+                            let k = kind_of(at(lx * 4 + (c & 3), ly * 4 + (c >> 4), lz * 4 + ((c >> 2) & 3)));
+                            if k != 0 {
+                                mask |= 1 << c;
+                                kinds[n] = k;
+                                n += 1;
+                            }
+                        }
+                        let idx = lx + 16 * (lz + 16 * ly);
+                        if n == 0 {
+                            leaves[idx] = Leaf::default();
+                            continue;
+                        }
+                        any = true;
+                        let (lo, hi) = bounds_from_mask(mask);
+                        let uniform = n == 64 && kinds.iter().all(|&k| k == kinds[0]) && kinds[0] & fine_mark == 0;
+                        leaves[idx] = Leaf { mask, kind: if uniform { kinds[0] } else { most(&kinds[..n]) & !fine_mark }, uniform, lo, hi };
+                    }
+                }
+            }
         }
-        fine_of.get(&(i as u32)).and_then(|&b| fine.get(b as usize)).filter(|b| b.iter().any(|&k| k != 0))
-    };
-    // A cell's kind as the tree says it.
-    let kind_of = |i: usize| -> Kind {
-        let k = cells[i];
-        if k & fine_mark != 0 && block_of(i).is_none() { k & !fine_mark } else { k }
-    };
-    // Leaves: 16 a side, each 4 cells a side.
-    let mut leaves = vec![Leaf::default(); 4096];
-    let mut any = false;
-    for ly in 0..16 {
-        for lz in 0..16 {
-            for lx in 0..16 {
-                let mut mask = 0u64;
-                let mut kinds = [0 as Kind; 64];
-                let mut n = 0;
-                let (mut lo, mut hi) = ([3u8; 3], [0u8; 3]);
-                for c in 0..64usize {
-                    let k = kind_of(at(lx * 4 + (c & 3), ly * 4 + (c >> 4), lz * 4 + ((c >> 2) & 3)));
-                    if k != 0 {
-                        mask |= 1 << c;
-                        kinds[n] = k;
-                        n += 1;
-                        for (a, v) in [c & 3, c >> 4, (c >> 2) & 3].into_iter().enumerate() {
-                            lo[a] = lo[a].min(v as u8);
-                            hi[a] = hi[a].max(v as u8);
+        if !any {
+            return Whole::Empty;
+        }
+        // Mids: 4 a side, each 4 leaves a side.
+        let leaf_of = |mid: usize, c: usize| {
+            let (mx, mz, my) = (mid & 3, (mid >> 2) & 3, mid >> 4);
+            (mx * 4 + (c & 3)) + 16 * ((mz * 4 + ((c >> 2) & 3)) + 16 * (my * 4 + (c >> 4)))
+        };
+        let mut mids = [Leaf::default(); 64];
+        for (mid, slot) in mids.iter_mut().enumerate() {
+            let mut mask = 0u64;
+            let mut kinds = [0 as Kind; 64];
+            let mut n = 0;
+            let mut uniform = true;
+            let (mut lo, mut hi) = ([15u8; 3], [0u8; 3]);
+            let (mx, mz, my) = ((mid & 3) * 4, ((mid >> 2) & 3) * 4, (mid >> 4) * 4);
+            for c in 0..64usize {
+                let (cx, cz, cy) = (c & 3, (c >> 2) & 3, c >> 4);
+                let leaf = leaves[(mx + cx) + 16 * ((mz + cz) + 16 * (my + cy))];
+                if leaf.mask != 0 {
+                    mask |= 1 << c;
+                    kinds[n] = leaf.kind;
+                    n += 1;
+                    let (vx, vy, vz) = (cx as u8 * 4, cy as u8 * 4, cz as u8 * 4);
+                    lo[0] = lo[0].min(vx + leaf.lo[0]);
+                    lo[1] = lo[1].min(vy + leaf.lo[1]);
+                    lo[2] = lo[2].min(vz + leaf.lo[2]);
+                    hi[0] = hi[0].max(vx + leaf.hi[0]);
+                    hi[1] = hi[1].max(vy + leaf.hi[1]);
+                    hi[2] = hi[2].max(vz + leaf.hi[2]);
+                }
+                uniform &= leaf.uniform;
+            }
+            if n > 0 {
+                let uniform = uniform && n == 64 && kinds.iter().all(|&k| k == kinds[0]);
+                *slot = Leaf { mask, kind: if uniform { kinds[0] } else { most(&kinds[..n]) }, uniform, lo, hi };
+            }
+        }
+        // The root's box, in leaves.
+        let (mut root_lo, mut root_hi) = ([15u8; 3], [0u8; 3]);
+        let mut root_mask = 0u64;
+        let mut root_kinds = [0 as Kind; 64];
+        let mut root_n = 0usize;
+        let mut root_uniform = true;
+        let mut leaf_count = 0usize;
+        for (i, mid) in mids.iter().enumerate() {
+            if mid.mask == 0 {
+                root_uniform = false;
+                continue;
+            }
+            root_mask |= 1u64 << i;
+            root_kinds[root_n] = mid.kind;
+            root_n += 1;
+            root_uniform &= mid.uniform && mid.kind == mids[0].kind;
+            if !mid.uniform {
+                leaf_count += mid.mask.count_ones() as usize;
+            }
+            let (vx, vy, vz) = ((i & 3) as u8 * 4, (i >> 4) as u8 * 4, ((i >> 2) & 3) as u8 * 4);
+            root_lo[0] = root_lo[0].min(vx + (mid.lo[0] >> 2));
+            root_lo[1] = root_lo[1].min(vy + (mid.lo[1] >> 2));
+            root_lo[2] = root_lo[2].min(vz + (mid.lo[2] >> 2));
+            root_hi[0] = root_hi[0].max(vx + (mid.hi[0] >> 2));
+            root_hi[1] = root_hi[1].max(vy + (mid.hi[1] >> 2));
+            root_hi[2] = root_hi[2].max(vz + (mid.hi[2] >> 2));
+        }
+        if root_mask == u64::MAX && root_uniform {
+            return Whole::Uniform(mids[0].kind);
+        }
+        // Laid out as: the root, the mids present, the leaves of each mid that is not uniform, then the cells' kinds.
+        let mid_count = root_n;
+        // `fine` is a leaf, whose box is 2 bits a number, all in the kind word.
+        let node = |out: &mut Vec<u32>, mask: u64, child: usize, n: &Leaf, fine: bool| {
+            let (lo, hi) = (n.lo.map(|v| v as u32), n.hi.map(|v| v as u32));
+            let flag = if n.uniform { UNIFORM } else { 0 };
+            if fine {
+                let bounds = lo[0] | lo[1] << 2 | lo[2] << 4 | hi[0] << 6 | hi[1] << 8 | hi[2] << 10;
+                out.extend_from_slice(&[mask as u32, (mask >> 32) as u32, child as u32, n.kind as u32 | bounds << 16 | flag]);
+            } else {
+                assert!(child as u32 <= CHILD);
+                let (low, high) = (lo[0] | lo[1] << 4 | lo[2] << 8, hi[0] | hi[1] << 4 | hi[2] << 8);
+                out.extend_from_slice(&[mask as u32, (mask >> 32) as u32, child as u32 | high << 20, n.kind as u32 | low << 16 | flag]);
+            }
+        };
+        out.reserve(4 + 4 * mid_count + 4 * leaf_count);
+        node(out, root_mask, 4, &Leaf { mask: root_mask, kind: most(&root_kinds[..root_n]), uniform: false, lo: root_lo, hi: root_hi }, false);
+        let mut next_leaf = 4 + 4 * mid_count;
+        for mid in mids.iter().filter(|m| m.mask != 0) {
+            node(out, mid.mask, if mid.uniform { 0 } else { next_leaf }, mid, false);
+            if !mid.uniform {
+                next_leaf += 4 * mid.mask.count_ones() as usize;
+            }
+        }
+        let header_words = 4 + 4 * mid_count + 4 * leaf_count;
+        let mut next_kinds = header_words;
+        let kinds_out = &mut scratch.kinds_out;
+        let blocks_out = &mut scratch.blocks_out;
+        let pointers = &mut scratch.pointers;
+        kinds_out.clear();
+        blocks_out.clear();
+        pointers.clear();
+        for (m, mid) in mids.iter().enumerate() {
+            if mid.mask == 0 || mid.uniform {
+                continue;
+            }
+            let mut mm = mid.mask;
+            while mm != 0 {
+                let c = mm.trailing_zeros() as usize;
+                mm &= mm - 1;
+                let i = leaf_of(m, c);
+                let leaf = leaves[i];
+                node(out, leaf.mask, if leaf.uniform { 0 } else { next_kinds }, &leaf, true);
+                if leaf.uniform {
+                    continue;
+                }
+                let (lx, lz, ly) = (i & 15, (i >> 4) & 15, i >> 8);
+                let (bx, by, bz) = (lx * 4, ly * 4, lz * 4);
+                let (mut word, mut half) = (0u32, 0u32);
+                let mut any_fine = false;
+                let mut lm = leaf.mask;
+                if plain_fast {
+                    while lm != 0 {
+                        let cell = lm.trailing_zeros() as usize;
+                        lm &= lm - 1;
+                        let k = (cells[at(bx + (cell & 3), by + (cell >> 4), bz + ((cell >> 2) & 3))] & !fine_mark) as u32;
+                        word |= k << (16 * half);
+                        half ^= 1;
+                        if half == 0 {
+                            kinds_out.push(word);
+                            word = 0;
+                        }
+                    }
+                } else {
+                    while lm != 0 {
+                        let cell = lm.trailing_zeros() as usize;
+                        lm &= lm - 1;
+                        let k = kind_of(at(bx + (cell & 3), by + (cell >> 4), bz + ((cell >> 2) & 3))) as u32;
+                        any_fine |= k as Kind & fine_mark != 0;
+                        word |= k << (16 * half);
+                        half ^= 1;
+                        if half == 0 {
+                            kinds_out.push(word);
+                            word = 0;
                         }
                     }
                 }
-                if n == 0 {
-                    continue;
-                }
-                any = true;
-                let uniform = n == 64 && kinds.iter().all(|&k| k == kinds[0]) && kinds[0] & fine_mark == 0;
-                leaves[lx + 16 * (lz + 16 * ly)] = Leaf { mask, kind: if uniform { kinds[0] } else { most(&kinds[..n]) & !fine_mark }, uniform, lo, hi };
-            }
-        }
-    }
-    if !any {
-        return Whole::Empty;
-    }
-    // Mids: 4 a side, each 4 leaves a side.
-    let leaf_of = |mid: usize, c: usize| {
-        let (mx, mz, my) = (mid & 3, (mid >> 2) & 3, mid >> 4);
-        (mx * 4 + (c & 3)) + 16 * ((mz * 4 + ((c >> 2) & 3)) + 16 * (my * 4 + (c >> 4)))
-    };
-    let mut mids = [Leaf::default(); 64];
-    for (mid, slot) in mids.iter_mut().enumerate() {
-        let mut mask = 0u64;
-        let mut kinds = [0 as Kind; 64];
-        let mut n = 0;
-        let mut uniform = true;
-        let (mut lo, mut hi) = ([15u8; 3], [0u8; 3]);
-        for c in 0..64usize {
-            let leaf = leaves[leaf_of(mid, c)];
-            if leaf.mask != 0 {
-                mask |= 1 << c;
-                kinds[n] = leaf.kind;
-                n += 1;
-                for (a, v) in [c & 3, c >> 4, (c >> 2) & 3].into_iter().enumerate() {
-                    lo[a] = lo[a].min(v as u8 * 4 + leaf.lo[a]);
-                    hi[a] = hi[a].max(v as u8 * 4 + leaf.hi[a]);
-                }
-            }
-            uniform &= leaf.uniform;
-        }
-        if n > 0 {
-            let uniform = uniform && n == 64 && kinds.iter().all(|&k| k == kinds[0]);
-            *slot = Leaf { mask, kind: if uniform { kinds[0] } else { most(&kinds[..n]) }, uniform, lo, hi };
-        }
-    }
-    // The root's box, in leaves.
-    let (mut root_lo, mut root_hi) = ([15u8; 3], [0u8; 3]);
-    for (i, mid) in mids.iter().enumerate().filter(|(_, m)| m.mask != 0) {
-        for (a, v) in [i & 3, i >> 4, (i >> 2) & 3].into_iter().enumerate() {
-            root_lo[a] = root_lo[a].min(v as u8 * 4 + mid.lo[a] / 4);
-            root_hi[a] = root_hi[a].max(v as u8 * 4 + mid.hi[a] / 4);
-        }
-    }
-    let root_mask = mids.iter().enumerate().fold(0u64, |m, (i, mid)| if mid.mask != 0 { m | (1 << i) } else { m });
-    if root_mask == u64::MAX && mids.iter().all(|m| m.uniform && m.kind == mids[0].kind) {
-        return Whole::Uniform(mids[0].kind);
-    }
-    let root_kinds: Vec<Kind> = mids.iter().filter(|m| m.mask != 0).map(|m| m.kind).collect();
-    // Laid out as: the root, the mids present, the leaves of each mid that is not uniform, then the cells' kinds.
-    let mid_count = root_mask.count_ones() as usize;
-    let leaf_count: usize = mids.iter().filter(|m| m.mask != 0 && !m.uniform).map(|m| m.mask.count_ones() as usize).sum();
-    // `fine` is a leaf, whose box is 2 bits a number, all in the kind word.
-    let node = |out: &mut Vec<u32>, mask: u64, child: usize, n: &Leaf, fine: bool| {
-        let (lo, hi) = (n.lo.map(|v| v as u32), n.hi.map(|v| v as u32));
-        let flag = if n.uniform { UNIFORM } else { 0 };
-        if fine {
-            let bounds = lo[0] | lo[1] << 2 | lo[2] << 4 | hi[0] << 6 | hi[1] << 8 | hi[2] << 10;
-            out.extend_from_slice(&[mask as u32, (mask >> 32) as u32, child as u32, n.kind as u32 | bounds << 16 | flag]);
-        } else {
-            assert!(child as u32 <= CHILD);
-            let (low, high) = (lo[0] | lo[1] << 4 | lo[2] << 8, hi[0] | hi[1] << 4 | hi[2] << 8);
-            out.extend_from_slice(&[mask as u32, (mask >> 32) as u32, child as u32 | high << 20, n.kind as u32 | low << 16 | flag]);
-        }
-    };
-    node(out, root_mask, 4, &Leaf { mask: root_mask, kind: most(&root_kinds), uniform: false, lo: root_lo, hi: root_hi }, false);
-    let mut next_leaf = 4 + 4 * mid_count;
-    for mid in mids.iter().filter(|m| m.mask != 0) {
-        node(out, mid.mask, if mid.uniform { 0 } else { next_leaf }, mid, false);
-        if !mid.uniform {
-            next_leaf += 4 * mid.mask.count_ones() as usize;
-        }
-    }
-    let mut next_kinds = 4 + 4 * mid_count + 4 * leaf_count;
-    let mut kinds_out: Vec<u32> = Vec::new();
-    // The blocks of fine cells, and where in `kinds_out` each is pointed to from (counted from the blocks' start until all are written).
-    let (mut blocks_out, mut pointers): (Vec<u32>, Vec<usize>) = (Vec::new(), Vec::new());
-    for (m, mid) in mids.iter().enumerate() {
-        if mid.mask == 0 || mid.uniform {
-            continue;
-        }
-        for c in 0..64 {
-            if mid.mask & (1 << c) == 0 {
-                continue;
-            }
-            let i = leaf_of(m, c);
-            let leaf = leaves[i];
-            node(out, leaf.mask, if leaf.uniform { 0 } else { next_kinds }, &leaf, true);
-            if leaf.uniform {
-                continue;
-            }
-            let (lx, lz, ly) = (i & 15, (i >> 4) & 15, i >> 8);
-            let (mut word, mut half) = (0u32, 0);
-            let mut any_fine = false;
-            for cell in 0..64usize {
-                if leaf.mask & (1 << cell) == 0 {
-                    continue;
-                }
-                let k = kind_of(at(lx * 4 + (cell & 3), ly * 4 + (cell >> 4), lz * 4 + ((cell >> 2) & 3))) as u32;
-                any_fine |= k as Kind & fine_mark != 0;
-                word |= k << (16 * half);
-                half += 1;
-                if half == 2 {
+                if half == 1 {
                     kinds_out.push(word);
-                    word = 0;
-                    half = 0;
                 }
-            }
-            if half == 1 {
-                kinds_out.push(word);
-            }
-            if any_fine {
-                for cell in (0..64usize).filter(|c| leaf.mask & (1 << c) != 0) {
-                    let i = at(lx * 4 + (cell & 3), ly * 4 + (cell >> 4), lz * 4 + ((cell >> 2) & 3));
-                    let Some(block) = block_of(i) else {
-                        kinds_out.push(0);
-                        continue;
-                    };
-                    pointers.push(kinds_out.len());
-                    let (coarse, began) = (alike_in_twos(block), blocks_out.len());
-                    kinds_out.push(blocks_out.len() as u32 | if coarse { 0 } else { 1 << 31 });
-                    let cells: Vec<Kind> = if coarse { (0..64).map(|c| block[(c & 3) * 2 + 8 * ((c >> 2) & 3) * 2 + 64 * (c >> 4) * 2]).collect() } else { block.to_vec() };
-                    for part in cells.chunks(32) {
-                        blocks_out.push(part.iter().enumerate().fold(0u32, |m, (c, &k)| if k != 0 { m | 1 << c } else { m }));
+                if any_fine {
+                    let mut fm = leaf.mask;
+                    while fm != 0 {
+                        let cell = fm.trailing_zeros() as usize;
+                        fm &= fm - 1;
+                        let ci = at(bx + (cell & 3), by + (cell >> 4), bz + ((cell >> 2) & 3));
+                        let Some(block) = block_of(ci) else {
+                            kinds_out.push(0);
+                            continue;
+                        };
+                        pointers.push(kinds_out.len());
+                        let (coarse, began) = (alike_in_twos(block), blocks_out.len());
+                        kinds_out.push(blocks_out.len() as u32 | if coarse { 0 } else { 1 << 31 });
+                        let bcells: Vec<Kind> = if coarse { (0..64).map(|c| block[(c & 3) * 2 + 8 * ((c >> 2) & 3) * 2 + 64 * (c >> 4) * 2]).collect() } else { block.to_vec() };
+                        for part in bcells.chunks(32) {
+                            blocks_out.push(part.iter().enumerate().fold(0u32, |m, (c, &k)| if k != 0 { m | 1 << c } else { m }));
+                        }
+                        let present: Vec<Kind> = bcells.iter().copied().filter(|&k| k != 0).collect();
+                        if present.iter().all(|&k| k == present[0]) {
+                            blocks_out.push(present[0] as u32 | UNIFORM);
+                        } else {
+                            blocks_out.push(0);
+                            blocks_out.extend(present.chunks(2).map(|p| p[0] as u32 | (*p.get(1).unwrap_or(&0) as u32) << 16));
+                        }
+                        debug_assert_eq!(blocks_out.len() - began, block_words(block));
                     }
-                    let present: Vec<Kind> = cells.iter().copied().filter(|&k| k != 0).collect();
-                    if present.iter().all(|&k| k == present[0]) {
-                        blocks_out.push(present[0] as u32 | UNIFORM);
-                    } else {
-                        blocks_out.push(0);
-                        blocks_out.extend(present.chunks(2).map(|p| p[0] as u32 | (*p.get(1).unwrap_or(&0) as u32) << 16));
-                    }
-                    debug_assert_eq!(blocks_out.len() - began, block_words(block));
                 }
+                next_kinds = header_words + kinds_out.len();
             }
-            next_kinds = 4 + 4 * mid_count + 4 * leaf_count + kinds_out.len();
         }
-    }
-    for at in pointers {
-        kinds_out[at] += (4 + 4 * mid_count + 4 * leaf_count + kinds_out.len()) as u32;
-    }
-    out.extend_from_slice(&kinds_out);
-    out.extend_from_slice(&blocks_out);
-    Whole::Tree(out.len())
+        let blocks_base = (header_words + kinds_out.len()) as u32;
+        for &at in pointers.iter() {
+            kinds_out[at] += blocks_base;
+        }
+        out.extend_from_slice(kinds_out);
+        out.extend_from_slice(blocks_out);
+        Whole::Tree(out.len())
+    })
 }
 
 /// Whether every two cells each way of a block are alike: it is then written 4 a side.
@@ -628,5 +805,31 @@ pub(crate) mod tests {
         let mut cells = vec![2 as Kind; CELLS];
         cells[at(5, 60, 9)] = 0;
         assert!(matches!(round_trip(&cells), Whole::Tree(_)));
+    }
+
+    #[test]
+    fn bounds_from_mask_matches_naive_on_samples() {
+        for seed in 0..64 {
+            let mut m = 0u64;
+            for bit in 0..64usize {
+                if hash3(bit as i32, seed, 19, 7) % 11 == 0 {
+                    m |= 1u64 << bit;
+                }
+            }
+            if m == 0 {
+                continue;
+            }
+            let (mut lo, mut hi) = ([3u8; 3], [0u8; 3]);
+            for c in 0..64usize {
+                if m & (1 << c) != 0 {
+                    let coords = [(c & 3) as u8, (c >> 4) as u8, ((c >> 2) & 3) as u8];
+                    for a in 0..3 {
+                        lo[a] = lo[a].min(coords[a]);
+                        hi[a] = hi[a].max(coords[a]);
+                    }
+                }
+            }
+            assert_eq!(bounds_from_mask(m), (lo, hi), "mask {m:#x}");
+        }
     }
 }

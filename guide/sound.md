@@ -42,7 +42,7 @@ These hold everywhere in the sound code:
 - The page suspends the context while it is hidden.
 - The picture never waits for sound. [main.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/main.ts) defers starting `sound()` until right after the first picture is drawn so `AudioContext` creation never blocks cold launch; a worklet that fails to load leaves a silent page, not a broken one.
 
-`dsp.ts` has no runtime imports, so the same file runs in Node as `new Synth(rate).render(left, right)`. The checks and the benchmark render the exact code the page plays.
+`dsp.ts` has no runtime imports, so the same file runs in Node as `new Synth(rate).render(left, right)`. Sample-rate filter and envelope coefficients are precomputed in the constructor, and undriven modal resonators and unity-cutoff voices take fast paths. The checks and the benchmark render the exact code the page plays.
 
 ## A patch
 
@@ -184,7 +184,7 @@ The world's own patches are in [kinds.ts](https://github.com/voxelwright/voxelwr
 
 The place's music is off unless the page has `?music=1` (the car radio below is separate). It follows the place the ears are in, and is composed as it plays. [music/](https://github.com/voxelwright/voxelwright/tree/main/engine/page/sound/music) has four parts:
 
-- `rules.ts`: named rules, each scoring a candidate pattern from 0 to 1 for one thing (a groove's syncopation, a melody's steps, coming back to a figure), each with its source.
+- `rules.ts`: named rules, each scoring a candidate pattern from 0 to 1 for one thing (a groove's syncopation, a melody's steps, coming back to a figure), each with its source. Cached Euclid/metre tables, per-candidate note-list reuse, and zero-allocation `judgeTotal` scoring keep candidate search fast without changing candidate selection.
 - `compose.ts`: the moods (`town`, `coast`, `sea`, `snow`, `night`, `danger`, `making`), and the radio's three in `RADIO_MOODS`, all on the tonic D, so a change of place is a change of mode, never of key. For each voice it makes `TRIES` random patterns, scores them against that voice's rules and keeps the best.
 - `worker.ts`: composes off the main thread, because a section takes several frames.
 - `conductor.ts` and `perform.ts`: play sections on the audio clock a third of a second ahead, bring a piece in a layer at a time, and at a change of place hand over at the next bar line. No piece is played twice; calm places rest between pieces.

@@ -76,11 +76,27 @@ export class Synth {
   private bed = new Float64Array(96)
   // The room.
   private rLen: Int32Array; private rBuf: Float32Array[]; private rAt = new Int32Array(4); private rZ = new Float32Array(4); private rPre: Float32Array; private rPreAt = 0
+  // Precomputed sample-rate constants (eliminates repeated Math.exp / Math.pow per 128-sample block, #139).
+  private readonly c80: number; private readonly c300: number; private readonly c1200: number; private readonly c3500: number; private readonly c7000: number
+  private readonly toneFade: number; private readonly limRelease: number; private readonly limAttack: number; private readonly duckEase: number; private readonly dcHold: number; private readonly glueDown: number
+  private lastRoomTime = -1; private rG0 = 0; private rG1 = 0; private rG2 = 0; private rG3 = 0
+  private lastMuffle = -1; private lastMuffleCut = 1
   // The ceiling.
   private look: number; private lBuf: Float32Array[]; private lAt = 0; private lEnv = 0; private lGain = 1; private mfl = new Float32Array(4); private duck = 0; private dc = new Float64Array(4); private glue = 0
 
   constructor(sr: number) {
     this.sr = sr
+    this.c80 = 1 - Math.exp((-TAU * 80) / sr)
+    this.c300 = 1 - Math.exp((-TAU * 300) / sr)
+    this.c1200 = 1 - Math.exp((-TAU * 1200) / sr)
+    this.c3500 = 1 - Math.exp((-TAU * 3500) / sr)
+    this.c7000 = 1 - Math.exp((-TAU * 7000) / sr)
+    this.toneFade = Math.exp(-1 / (0.06 * sr))
+    this.limRelease = Math.exp(-1 / (0.12 * sr))
+    this.limAttack = 1 - Math.exp(-1 / (0.0008 * sr))
+    this.duckEase = Math.exp(-1 / (0.5 * sr))
+    this.dcHold = 1 - (TAU * 20) / sr
+    this.glueDown = Math.exp(-1 / (0.08 * sr))
     this.sLen = Math.ceil(sr / 25) + 8
     this.sBuf = new Float32Array(SV * this.sLen)
     this.rLen = Int32Array.from([0.0317, 0.0379, 0.0443, 0.0521].map((s) => Math.round(s * sr)))
@@ -323,11 +339,39 @@ export class Synth {
   private mix(s: number, len: number, gl: number, gr: number, c: number, z: number, send: number, bus: number): number {
     const t = this.tmp, l = this.bus[bus * 2], r = this.bus[bus * 2 + 1], room = this.send
     let peak = 0
-    for (let i = s; i < len; i++) {
-      z += c * (t[i] - z)
-      const a = z < 0 ? -z : z
-      if (a > peak) peak = a
-      l[i] += z * gl; r[i] += z * gr; room[i] += z * send
+    if (c === 1) {
+      if (send === 0) {
+        for (let i = s; i < len; i++) {
+          const v = t[i]
+          const a = v < 0 ? -v : v
+          if (a > peak) peak = a
+          l[i] += v * gl; r[i] += v * gr
+        }
+      } else {
+        for (let i = s; i < len; i++) {
+          const v = t[i]
+          const a = v < 0 ? -v : v
+          if (a > peak) peak = a
+          l[i] += v * gl; r[i] += v * gr; room[i] += v * send
+        }
+      }
+      this.z = len > s ? t[len - 1] : z
+      return peak
+    }
+    if (send === 0) {
+      for (let i = s; i < len; i++) {
+        z += c * (t[i] - z)
+        const a = z < 0 ? -z : z
+        if (a > peak) peak = a
+        l[i] += z * gl; r[i] += z * gr
+      }
+    } else {
+      for (let i = s; i < len; i++) {
+        z += c * (t[i] - z)
+        const a = z < 0 ? -z : z
+        if (a > peak) peak = a
+        l[i] += z * gl; r[i] += z * gr; room[i] += z * send
+      }
     }
     this.z = z
     return peak
@@ -379,13 +423,38 @@ export class Synth {
       const up = 2 ** off
       for (let k = 0; k < n; k++) this.mA1[at + k] = 2 * this.mR[at + k] * Math.cos(Math.min(3, (TAU * this.mF[at + k] * up) / sr))
     }
-    t.fill(0, 0, len)
+    const mA1 = this.mA1, mA2 = this.mA2, mB = this.mB, mY1 = this.mY1, mY2 = this.mY2
+    const end2 = len - 1
     for (let k = 0; k < n; k++) {
-      const a1 = this.mA1[at + k], a2 = this.mA2[at + k], b = this.mB[at + k]
-      let y1 = this.mY1[at + k], y2 = this.mY2[at + k]
-      if (driven) for (let i = s; i < len; i++) { const y = b * x[i] + a1 * y1 + a2 * y2; y2 = y1; y1 = y; t[i] += y }
-      else for (let i = s; i < len; i++) { const y = a1 * y1 + a2 * y2; y2 = y1; y1 = y; t[i] += y }
-      this.mY1[at + k] = y1; this.mY2[at + k] = y2
+      const idx = at + k
+      const a1 = mA1[idx], a2 = mA2[idx]
+      let y1 = mY1[idx], y2 = mY2[idx]
+      if (k === 0) {
+        if (driven) {
+          const b = mB[idx]
+          for (let i = s; i < len; i++) { const y = b * x[i] + a1 * y1 + a2 * y2; y2 = y1; y1 = y; t[i] = y }
+        } else {
+          let i = s
+          for (; i < end2; i += 2) {
+            const ya = a1 * y1 + a2 * y2; t[i] = ya
+            const yb = a1 * ya + a2 * y1; t[i + 1] = yb
+            y2 = ya; y1 = yb
+          }
+          if (i < len) { const y = a1 * y1 + a2 * y2; y2 = y1; y1 = y; t[i] = y }
+        }
+      } else if (driven) {
+        const b = mB[idx]
+        for (let i = s; i < len; i++) { const y = b * x[i] + a1 * y1 + a2 * y2; y2 = y1; y1 = y; t[i] += y }
+      } else {
+        let i = s
+        for (; i < end2; i += 2) {
+          const ya = a1 * y1 + a2 * y2; t[i] += ya
+          const yb = a1 * ya + a2 * y1; t[i + 1] += yb
+          y2 = ya; y1 = yb
+        }
+        if (i < len) { const y = a1 * y1 + a2 * y2; y2 = y1; y1 = y; t[i] += y }
+      }
+      mY1[idx] = y1; mY2[idx] = y2
     }
     const peak = this.mix(s, len, this.mGl[v], this.mGr[v], this.mLp[v], this.mZ[v], this.mSend[v], this.mBus[v])
     this.mZ[v] = this.z
@@ -436,7 +505,7 @@ export class Synth {
     const dt = (this.tF[v] * (1 + waver * 0.012 * Math.sin(TAU * 5.2 * age) * Math.min(1, age * 4))) / sr
     // Breath is not steady: the loudness trembles with the pitch, a little, once the tone has been held.
     const swell = 1 + waver * 0.22 * Math.sin(TAU * 5.2 * age + 1.3) * Math.min(1, age * 4)
-    const a = 1 / (1 + g * (g + 1.4)), ba = 1 / (1 + bg * (bg + 0.5)), att = this.tAtt[v], rel = this.tRel[v], fade = Math.exp(-1 / (0.06 * sr))
+    const a = 1 / (1 + g * (g + 1.4)), ba = 1 / (1 + bg * (bg + 0.5)), att = this.tAtt[v], rel = this.tRel[v], fade = this.toneFade
     let ph = this.tPh[v], env = this.tEnv[v], stage = this.tStage[v], hold = this.tHold[v], z1 = this.t1[v], z2 = this.t2[v], b1 = this.tB1[v], b2 = this.tB2[v], chiff = this.tChiff[v]
     for (let i = s; i < len; i++) {
       if (stage === 0) { env += att; if (env >= 1) { env = 1; stage = 1 } }
@@ -503,8 +572,8 @@ export class Synth {
     const rain = now[SET.rain], wind = now[SET.wind], fire = now[SET.fire], surf = now[SET.surf], under = now[SET.under], rumble = now[SET.rumble]
     // What is over your head keeps the weather out: under a roof, under the sea.
     const open = 1 - Math.min(1, Math.max(0, now[SET.cover]))
-    // One-pole low-passes at fixed pitches, for this rate.
-    const c80 = 1 - Math.exp((-TAU * 80) / sr), c300 = 1 - Math.exp((-TAU * 300) / sr), c1200 = 1 - Math.exp((-TAU * 1200) / sr), c3500 = 1 - Math.exp((-TAU * 3500) / sr), c7000 = 1 - Math.exp((-TAU * 7000) / sr)
+    // One-pole low-passes at fixed pitches, precomputed for this rate.
+    const c80 = this.c80, c300 = this.c300, c1200 = this.c1200, c3500 = this.c3500, c7000 = this.c7000
 
     if (rain * open > 0.003) {
       // Rain is a hiss with its top and bottom off, a lower wash of it on the ground, and drops that can be told apart.
@@ -676,32 +745,47 @@ export class Synth {
     const now = this.now, sr = this.sr, [wl, wr, ml, mr, pl, pr] = this.bus, send = this.send
     // The room: what was sent waits 12 ms, then goes round four lines that feed each other, losing their top as they go.
     const time = Math.min(8, Math.max(0.1, now[SET.roomTime])), back = now[SET.roomGain], pre = this.rPre, rb = this.rBuf, rl = this.rLen, rz = this.rZ, ra = this.rAt
-    const g0 = 10 ** ((-3 * rl[0]) / (time * sr)), g1 = 10 ** ((-3 * rl[1]) / (time * sr)), g2 = 10 ** ((-3 * rl[2]) / (time * sr)), g3 = 10 ** ((-3 * rl[3]) / (time * sr))
+    if (time !== this.lastRoomTime) {
+      this.lastRoomTime = time
+      this.rG0 = 10 ** ((-3 * rl[0]) / (time * sr))
+      this.rG1 = 10 ** ((-3 * rl[1]) / (time * sr))
+      this.rG2 = 10 ** ((-3 * rl[2]) / (time * sr))
+      this.rG3 = 10 ** ((-3 * rl[3]) / (time * sr))
+    }
+    const g0 = this.rG0, g1 = this.rG1, g2 = this.rG2, g3 = this.rG3
     let pa = this.rPreAt
+    const rb0 = rb[0], rb1 = rb[1], rb2 = rb[2], rb3 = rb[3]
+    const rl0 = rl[0], rl1 = rl[1], rl2 = rl[2], rl3 = rl[3], preLen = pre.length
+    let ra0 = ra[0], ra1 = ra[1], ra2 = ra[2], ra3 = ra[3]
+    let rz0 = rz[0], rz1 = rz[1], rz2 = rz[2], rz3 = rz[3]
     for (let i = 0; i < len; i++) {
       const x = pre[pa]
       pre[pa] = send[i]
-      if (++pa === pre.length) pa = 0
-      const a = rb[0][ra[0]], b = rb[1][ra[1]], c = rb[2][ra[2]], d = rb[3][ra[3]], half = 0.5 * (a + b + c + d)
-      rz[0] += 0.45 * ((a - half) * g0 - rz[0]); rz[1] += 0.45 * ((b - half) * g1 - rz[1]); rz[2] += 0.45 * ((c - half) * g2 - rz[2]); rz[3] += 0.45 * ((d - half) * g3 - rz[3])
-      rb[0][ra[0]] = x + rz[0]; rb[1][ra[1]] = x + rz[1]; rb[2][ra[2]] = x + rz[2]; rb[3][ra[3]] = x + rz[3]
-      if (++ra[0] === rl[0]) ra[0] = 0
-      if (++ra[1] === rl[1]) ra[1] = 0
-      if (++ra[2] === rl[2]) ra[2] = 0
-      if (++ra[3] === rl[3]) ra[3] = 0
+      if (++pa === preLen) pa = 0
+      const a = rb0[ra0], b = rb1[ra1], c = rb2[ra2], d = rb3[ra3], half = 0.5 * (a + b + c + d)
+      rz0 += 0.45 * ((a - half) * g0 - rz0); rz1 += 0.45 * ((b - half) * g1 - rz1); rz2 += 0.45 * ((c - half) * g2 - rz2); rz3 += 0.45 * ((d - half) * g3 - rz3)
+      rb0[ra0] = x + rz0; rb1[ra1] = x + rz1; rb2[ra2] = x + rz2; rb3[ra3] = x + rz3
+      if (++ra0 === rl0) ra0 = 0
+      if (++ra1 === rl1) ra1 = 0
+      if (++ra2 === rl2) ra2 = 0
+      if (++ra3 === rl3) ra3 = 0
       wl[i] += (a - c) * back; wr[i] += (b - d) * back
     }
+    ra[0] = ra0; ra[1] = ra1; ra[2] = ra2; ra[3] = ra3
+    rz[0] = rz0; rz[1] = rz1; rz[2] = rz2; rz[3] = rz3
     this.rPreAt = pa
     // The music gives way to the world when the world is loud, and comes back slowly.
     const world = now[SET.world], music = now[SET.music], play = now[SET.play], master = now[SET.master]
-    const cut = this.lpCoef(now[SET.muffle]), m = this.mfl, la = this.lBuf, look = this.look, release = Math.exp(-1 / (0.12 * sr)), attack = 1 - Math.exp(-1 / (0.0008 * sr)), ease = Math.exp(-1 / (0.5 * sr))
+    const muffleHz = now[SET.muffle]
+    if (muffleHz !== this.lastMuffle) { this.lastMuffle = muffleHz; this.lastMuffleCut = this.lpCoef(muffleHz) }
+    const cut = this.lastMuffleCut, m = this.mfl, la = this.lBuf, look = this.look, release = this.limRelease, attack = this.limAttack, ease = this.duckEase
     let duck = this.duck, env = this.lEnv, gain = this.lGain, lat = this.lAt, bad = false, peak = this.stats.peak, held = this.stats.held
     // A blow is a push one way, and what is left of it under 20 Hz is not heard: it only moves the cone and eats the room under the ceiling.
-    const dc = this.dc, hold = 1 - (TAU * 20) / sr
+    const dc = this.dc, hold = this.dcHold
     // The music is held together as a mix is on its way out of a studio: what stands over -26 dB is brought back by
     // a little over half of how far it stands over, at once, and let go over 80 ms; and the whole is made up for it. (Slower
     // to take hold, it let each blow through and pulled down what rang after it: the blows stood out more, not less.)
-    const glueDown = Math.exp(-1 / (0.08 * sr))
+    const glueDown = this.glueDown
     let glue = this.glue
     for (let i = 0; i < len; i++) {
       const w = Math.abs(wl[i]) + Math.abs(wr[i])

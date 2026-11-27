@@ -35,6 +35,7 @@ import { under } from './under.ts'
 import { tracks } from './tracks.ts'
 import { wheels, type WheelVehicle } from './wheels.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
+import { useFineCore } from './fine-core.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -194,6 +195,7 @@ async function main() {
   type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // Open GPU and the page's WASM core in parallel so core compilation overlaps adapter/device creation (#83).
   const [gpu, innerInit] = await Promise.all([openGpu(), open<Core>(new URL('./core.wasm', import.meta.url).href)])
+  useFineCore(innerInit)
   // The device lost (#81: a GPU reset, a phone short of memory, a long while in the background): the frames stop and
   // the visitor is told, with a key that opens the realm again, rather than a picture that silently stands still.
   gpu.onLost((info) => {
@@ -1158,7 +1160,7 @@ async function main() {
   // pieces wearing it are drawn square; then they are given them (pieces.ts `refit`), and so is every later one.
   const smoothing = new Map<Born, Piece[]>()
   let smoother: Worker | null = null
-  type FaceAnswer = { key: number; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; cells?: Uint16Array; filled?: number }
+  type FaceAnswer = { key: number; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; cells?: Uint16Array; size?: [number, number, number]; coarseKinds?: Uint16Array; coarseSize?: [number, number, number]; filled?: number }
   const smoothPending = new Map<number, (ans: FaceAnswer) => void>()
   const ensureSmoother = () => {
     if (!smoother) {
@@ -2412,7 +2414,28 @@ async function main() {
     origin: () => { const f = me.feet; return f ? { x: f.at[0], z: f.at[2], yaw: f.yaw } : { x: pose.x * M, z: pose.z * M, yaw: pose.yaw } },
     street: () => streetLife,
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
-    onPrewarm: (data) => {
+    bakeCoupe: async (spec, coarserBy) => {
+      const ans = await askSmoother({ sculptCoupe: spec, coarserBy, reach: 5 })
+      return {
+        cells: ans.cells!, size: ans.size!,
+        coarseKinds: ans.coarseKinds!, coarseSize: ans.coarseSize!,
+        faces: ans.faces, smooth: ans.smooth, filled: ans.filled,
+      }
+    },
+    onPrewarm: (data, prebaked) => {
+      const f0 = data.fine?.[0]
+      if (prebaked?.faces && f0 && f0.cells instanceof Uint16Array) {
+        const born: Born = {
+          id: 0, cells: prebaked.filled ?? 0, low: [0, 0, 0],
+          size: [f0.size[0], f0.size[1], f0.size[2]],
+          com: [f0.size[0] / 2, f0.size[1] / 2, f0.size[2] / 2],
+          faces: prebaked.faces,
+          ...(prebaked.smooth ? { smooth: prebaked.smooth } : {}),
+        }
+        let by = lookFaces.get(f0.cells); if (!by) lookFaces.set(f0.cells, by = new Map())
+        by.set(f0.size.join(), born)
+        return
+      }
       (data.fine ?? []).forEach((f, i) => {
         if (!(f.cells instanceof Uint16Array)) return
         void prebakeLook(f.cells, f.size, !(i > 0 && f.per > 4))
