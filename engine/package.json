@@ -8,6 +8,7 @@
   "scripts": {
     "core": "node core/build.mjs",
     "serve": "node serve.mjs",
+    "studio": "node studio/bridge.mjs",
     "player": "npm run -s core && node player/build.mjs",
     "landing": "npm run -s player && node player/serve.mjs --port 5950",
     "check": "node test/all.mjs",

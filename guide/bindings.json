@@ -357,6 +357,15 @@
     "engine/bay/transport.py": "lines:\"0\" if k == \"layer\"|allWay=|cli.add_argument",
     "engine/sf/life.py": "lines:^ap.add_argument"
   },
+  "engine/studio/README.md": {
+    "engine/studio/bridge.mjs": "lines:^export async function createStudioBridge|flag\\('(port|game|secret)'|--no-auto-t3",
+    "engine/studio/mcp.mjs": "lines:name: 'game_",
+    "engine/studio/t3-client.mjs": "lines:^export const (ORCHESTRATION_PROTOCOL_VERSION|SOCKET_FRAME_PART_PREFIX|STUDIO_DEFAULT_SCOPES)",
+    "engine/page/studio/index.ts": "lines:^export async function bootStudio",
+    "engine/package.json": [
+      "scripts.studio"
+    ]
+  },
   "engine/workshop/README.md": {
     "engine/workshop/route.mjs": "lines:^//   (GET|POST) |^export const briefFor|const branch = `feature/264-plugin-|execFile\\(t3, \\['thread', 'start'|if \\(door !== 'near'\\)|^const timer = setInterval",
     "engine/page/workshop.ts": "lines:^interface Sent",
@@ -719,6 +728,13 @@
     "engine/page/sound/radio.ts": "lines:^\\{ id: '|^(click|static|whoosh|whooshTail): \\{ how|^const (MIN_WHOOSH_KMH|TOAST_MS) =|^const (targetGain|amt) =|^let remembered =|^autoStartDelay = 0\\.|^for \\(const lateral of|^if \\(absSide > |^nearCarCool\\.set|^if \\(scanAcc <|^if \\(s [<>] 0\\) whooshCool",
     "engine/page/sound/music/conductor.ts": "lines:^cut\\(mood|^const \\[lo, hi\\] = steady",
     "engine/test/radio.mjs": "lines:^b?check\\("
+  },
+  "guide/studio.md": {
+    "engine/studio/bridge.mjs": "lines:^export async function createStudioBridge|url\\.pathname === '/(mcp|studio/)",
+    "engine/studio/mcp.mjs": "lines:name: 'game_",
+    "engine/studio/session-control.mjs": "lines:^export class SessionControl",
+    "engine/page/studio/index.ts": "lines:^export async function bootStudio",
+    "engine/page/studio/ext.ts": "lines:^export class StudioExtensionRegistry"
   },
   "guide/village.md": {
     "scripts/checks.mjs": "lines:cwd: '(home|host|street)'",

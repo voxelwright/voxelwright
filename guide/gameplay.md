@@ -332,6 +332,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `haze`, `clouds` | Realm | Scale the realm's haze and clouds |
 | `hud=wheel`, `context`, `quiet`, `classic` | Realm | The style of play controls |
 | `debug=1` | Realm | Show the line of numbers |
+| `studio=1` | Server | Load the native in-game T3 Studio IDE and Game-Use runtime ([Studio & Game-Use IDE](/studio)); ignored on public static builds |
 | `telemetry=1` | Realm | Enable posting `/api/feedback` and `/api/session` traces on a local realm build |
 | `status=1` | Both | Show the status line on a phone |
 | `boards=0`, `boards=edit` | Realm | No signs, or the sign editor |
@@ -382,6 +383,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Eggs, lockers | `engine/page/eggs.ts`, `engine/page/lockers.ts` | `engine/test/sf-eggs.mjs`, `engine/test/sf-lockers.mjs` |
 | Wand, spells | `engine/page/wand.ts`, `engine/page/spells.ts` | `engine/test/wand.mjs`, `engine/test/spells.mjs` |
 | Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
+| Native T3 Studio & Game-Use MCP | `engine/studio/*`, `engine/page/studio/*` | `engine/test/studio.mjs` |
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 

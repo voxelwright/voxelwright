@@ -69,16 +69,16 @@ async function file(res, path, host = '') {
   // a wish and a picture cannot be sent anywhere a made-up address says.
   if (extname(rel) === '.html' && rel === join('page', 'index.html') && realms.size) body = pageWith(body)
   if (extname(rel) === '.html') {
-    const local = tailnet(host) ? ` https://${host}:*` : ''
+    const local = tailnet(host) ? ` https://${host}:* wss://${host}:*` : ''
     // The loading template contains one bundled inline script. Allow its exact bytes.
     const loading = rel === join('page', 'loading.html') && /<script>([\s\S]*?)<\/script>/.exec(body.toString())
     const hash = loading ? ` 'sha256-${createHash('sha256').update(loading[1]).digest('base64')}'` : ''
     const policy = [
       "default-src 'self'", "frame-ancestors 'self'", "base-uri 'none'", "object-src 'none'",
       `script-src 'self' 'wasm-unsafe-eval'${hash} https://www.youtube.com https://s.ytimg.com https://sdk.scdn.co https://js-cdn.music.apple.com`,
-      "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "worker-src 'self' blob:",
+      "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*", "worker-src 'self' blob:",
       "frame-src 'self' https://www.youtube.com https://sdk.scdn.co",
-      `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*${local}`,
+      `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*${local}`,
     ]
     res.writeHead(200, { ...HEADERS, 'Content-Type': TYPES['.html'], 'Content-Security-Policy': policy.join('; ') })
     return res.end(body)
