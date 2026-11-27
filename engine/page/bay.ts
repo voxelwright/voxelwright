@@ -504,6 +504,8 @@ const markedSquares = () => (squaring ??= (async () => {
 export const marks = () => markFile('marks.bin', 'the roads are bare asphalt until they come')
 /** The 3D minimap and road navigation graph (map.bin, sf/map.mjs): fetched lazily once the visitor engages so cold load stays lean. */
 export const mapData = () => markFile('map.bin', 'the 3D minimap and GPS map are unavailable until loaded')
+/** Neighborhood storefronts, GTA-style parody brands, and civic plazas (places.json, sf/places.mjs): fetched lazily after first view. */
+export const placesData = () => markFile('places.json', 'neighborhood storefronts and plazas are unavailable until loaded')
 
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {

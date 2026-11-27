@@ -106,6 +106,7 @@ let checks = [
   ['kept-car', 'node', ['test/kept-car.mjs'], true],
   ['smooth-cars', 'node', ['test/smooth-cars.mjs', '--page'], true],
   ['street', 'node', ['test/street.mjs'], true],
+  ['neighborhood', 'node', ['test/neighborhood.mjs'], false],
   ['made-cars', 'node', ['test/made-cars.mjs'], true],
   ['drawn', 'node', ['test/drawn.mjs'], true],
   ['drivable', 'node', ['test/drivable.mjs'], false],
