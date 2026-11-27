@@ -118,7 +118,7 @@ npm --prefix deploy run ship
     Refuses a dirty working tree (unless `--allow-dirty`). Fails fast if `npx cf accounts list` fails, which means the local `cf` CLI is not signed in.
   </Step>
   <Step title="Build">
-    `npm --prefix engine run core`, `node engine/sf/build.mjs`, `npm --prefix site run build` and `node deploy/assemble.mjs`. The eggs are procedural unless media is asked for: `--egg-media` takes `~/.village/engine/sf/eggs/media` (and fails when it is missing), and `VOXELWRIGHT_EGG_MEDIA` names a folder. `--public` overrides both.
+    `npm --prefix engine run core`, `node engine/sf/build.mjs`, `npm --prefix site run build` and `node deploy/assemble.mjs`. It uses `VOXELWRIGHT_EGG_MEDIA`, or `~/.village/engine/sf/eggs/media` when that folder exists, unless `--public` is passed.
   </Step>
   <Step title="Deploy">
     `npx cf deploy --mode world --message <HEAD sha>` for voxelwright.world, then `npx cf deploy --message <HEAD sha>` for zahynailo.dev.
@@ -131,8 +131,7 @@ npm --prefix deploy run ship
 | Flag | Effect |
 | --- | --- |
 | `--world-only`, `--site-only` | Deploy one Worker. |
-| `--egg-media` | Build the private egg clips in, from `~/.village/engine/sf/eggs/media`. |
-| `--public` | Procedural eggs only, even when `VOXELWRIGHT_EGG_MEDIA` is set. The default already is procedural. |
+| `--public` | Build with procedural eggs only. |
 | `--skip-build` | Deploy whatever the last assembly left in the two folders. |
 | `--skip-live` | Skip the live checks. |
 | `--allow-dirty` | Ship uncommitted changes. The message still names `HEAD`. |

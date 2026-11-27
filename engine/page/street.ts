@@ -38,6 +38,8 @@ interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: numbe
 interface Line { p: Ring; cum: Ring; len: number; seed: number; lights?: { s: number; node: number; dx: number; dz: number }[] }
 interface Look { size: [number, number, number]; per: number; low: [number, number, number]; palette: number[]; runs: string; roles?: string[] }
 interface Model { id: string; name: string; kind: string; serviceId?: string; domeOffset?: readonly [number, number, number]; size: [number, number, number]; body: { palette: number[]; runs: string }; motor?: Motor; controls?: Making['controls']; seats?: [number, number, number][]; eye?: [number, number, number]; looks: Look[]; variants: { name: string; body: number[]; looks: number[][] }[]; front: number; long: number; wide: number }
+/** How a drawn car comes to life (`wake`): with its inside, the speed it is given, when it was struck, and what to do with it then. */
+interface Waking { inside: boolean; push?: [number, number, number]; asked?: number; then?: (t: Thing) => void }
 interface Car {
   id: number; model: Model; paint: number; kind: 'parked' | 'traffic' | 'cable' | 'tram'; seed: number
   /** A streetcar's line. */
@@ -57,6 +59,11 @@ interface Car {
   crashed?: number
   /** Last non-waking contact timestamp (seconds), for cooldown on rail/non-motorized vehicles. */
   hitAt?: number
+  /** Alive, and still drawn where it stood: until the solver's answers show its body on the road (`wake`). And what is done with it then. */
+  landing?: boolean
+  then?: (t: Thing) => void
+  /** Alive and thrown: where it was last seen to have moved to, how fast it goes on the ground (cells a second), and the seconds since. */
+  going?: { x: number; z: number; vx: number; vz: number; dt: number }
   /** When the player honked near this traffic car (seconds), nudging it to pull forward or yield. */
   honked?: number
   /** Last time this traffic car honked back (seconds), so it never spams. */
@@ -162,8 +169,12 @@ export interface Street {
   }
   /** The roads near a place, for a driver to follow (the checks). */
   roads(x: number, z: number, r: number): { key: string; name: number; lanes: number; flags: number; next: string[]; line: number[]; open: boolean | null }[]
-  /** Vehicles near a place: where each stands, which way it heads, and what it is. */
-  cars(x: number, z: number, r: number): { kind: Car['kind']; model: string; service: string; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean; wait: string; stuck: number }[]
+  /** Vehicles near a place: where each stands, which way it heads, and what it is (`id` is its own for as long as it is there). */
+  cars(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; service: string; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean; wait: string; stuck: number }[]
+  /** Full vehicle state snapshot within `r` cells for black-box telemetry, overlap detection, and replay. */
+  snapshot(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; name: string; x: number; y: number; z: number; heading: number; v: number; long: number; wide: number; road: string; lane: number; s: number; wait: string; stuck: number; blocked: boolean; living: boolean }[]
+  /** Deterministic xorshift32 PRNG state for traffic replay. */
+  rng: number
   /** Seconds from now on the clock people walk by until a cable car is nearest a place, and how near it comes (cells); null with no line. */
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
@@ -981,7 +992,7 @@ export function street(o: {
     const d = Math.hypot(c.x - view.eye[0], c.y - view.eye[1], c.z - view.eye[2])
     const lod = lods(c.model)
     let want = -1
-    if (d < DRAWN && !c.thing) {
+    if (d < DRAWN && (!c.thing || c.landing)) {
       // In view, or so near that its back may be: the eye's cone, widened by the car's own length.
       const dx = c.x - view.eye[0], dy = c.y - view.eye[1], dz = c.z - view.eye[2], ahead = dx * view.forward[0] + dy * view.forward[1] + dz * view.forward[2]
       const side = Math.hypot(dx - view.forward[0] * ahead, dy - view.forward[1] * ahead, dz - view.forward[2] * ahead)
@@ -1203,9 +1214,16 @@ export function street(o: {
    * Makes a car a living thing where it stands (the solver's, living.ts). Its look's faces are made first, off the
    * page's thread, and handed to the page's keeping (`faces`), so that coming to life makes none on it: until they
    * are, it is asked again later (false). `inside`: with the look of its inside, for whoever will sit in it; `push`:
-   * the speed it is given once it lives (thrown by a blast).
+   * the speed it is given once it lives (thrown by a blast, struck by a car); `asked`: when it was struck.
+   *
+   * The solver makes a body square to the world at a low corner, and only its next message turns and places it: steps
+   * may run between the two, with the car lying across the street in whatever is there. So it is born `SKY` over its
+   * place, where nothing is, and comes down in one move with its push. And where it was drawn is by then where
+   * whatever struck it is: the solver's `place` moves it clear of every vehicle standing there (core hull.rs
+   * `clear`), by where they are in that step, which the page learns only an answer later.
    */
-  const wake = async (c: Car, o2: { inside: boolean; push?: readonly [number, number, number]; sep?: readonly [number, number]; then?: (t: Thing) => void }): Promise<boolean> => {
+  const SKY = 3000
+  const wake = async (c: Car, o2: Waking): Promise<boolean> => {
     const motor = c.model.motor
     if (c.thing || c.waking || !motor) return !!c.thing
     const m = c.model, outside = new Set(lods(m).map((x) => x.i))
@@ -1218,25 +1236,37 @@ export function street(o: {
     // Its looks' cells, decoded off the page's thread.
     const looks = await Promise.all(parts.map(({ i }) => fineCells(m, c.paint, i)))
     const fine = parts.map(({ l }, k) => { const cells = looks[k]; o.faces?.(cells, l.size, made[k]!); return { size: l.size, per: l.per, low: l.low, cells } })
-    const low: [number, number, number] = [Math.round(c.x - m.size[0] / 2), Math.round(c.y) + 4, Math.round(c.z - m.size[2] / 2)]
+    const low: [number, number, number] = [Math.round(c.x - m.size[0] / 2), Math.round(c.y) + SKY, Math.round(c.z - m.size[2] / 2)]
     const thing = await o.alive.spawn({ name: m.name, cells: Int32Array.from(body), size: m.size, low, motor, controls: m.controls ?? 'drive', seats: m.seats, eye: m.eye, fine })
     c.waking = false
     if (!thing.alive) { pending.delete(c); return false }
     // Turned as it stood: its middle where it was, a little over the road, still.
     const at = o.alive.where(thing), com = at ? [at.at[0] - low[0], at.at[1] - low[1], at.at[2] - low[2]] : [m.size[0] / 2, m.size[1] / 3, m.size[2] / 2]
     const q = turnOf(m, c.heading, c.pitch), off = rotate(q, [com[0] - m.size[0] / 2, com[1], com[2] - m.size[2] / 2])
-    const sx = o2.sep?.[0] ?? 0, sz = o2.sep?.[1] ?? 0
-    o.alive.place(thing, [c.x + off[0] + sx, c.y + off[1] + 1, c.z + off[2] + sz], q)
-    if (o2.push) { o.alive.kick(thing, o2.push); c.thrown = true }
+    o.alive.place(thing, [c.x + off[0], c.y + off[1] + 1, c.z + off[2]], q)
+    // (Where the solver put it is not known yet, `followed`: it goes as it was pushed.)
+    if (o2.push) { o.alive.kick(thing, o2.push); c.thrown = true; c.going = { x: NaN, z: NaN, vx: o2.push[0], vz: o2.push[2], dt: 0 } }
+    if (o2.asked !== undefined) { wakeLags.push(Math.min(0.15, Math.max(0.02, performance.now() / 1000 - o2.asked))); if (wakeLags.length > 4) wakeLags.shift(); wakeLag = Math.min(...wakeLags) }
     c.thing = thing
     pending.delete(c)
-    hide(c)
+    // (Still drawn where it stood until its body is seen on the road, `landed`: the page sees it in the sky for an
+    // answer or two yet, and put away now the car was not there at all for those frames.)
+    c.landing = true
+    c.then = o2.then
     living.add(c)
-    o2.then?.(thing)
     return true
   }
   /** Cars on their way to life, drawn where they stand meanwhile, and asked again each frame. */
-  const pending = new Map<Car, { inside: boolean; push?: readonly [number, number, number]; sep?: readonly [number, number]; then?: (t: Thing) => void }>()
+  const pending = new Map<Car, Waking>()
+  /**
+   * How long a car takes to come to life once it is struck (seconds): the faces, the solver's answer. Measured at each
+   * waking (66 to 150 ms and more in one pileup, in Chrome on the M1 Pro), and the shortest of the last four kept: a
+   * touch is looked for this far ahead of whatever moves (`reaches`), so that the car lives as it is reached. The
+   * shortest, because a car that wakes late is put clear ahead of what is in its place by the solver, exactly, while
+   * one that wakes early leaps away before it is touched (by 2.6 and 3.7 m, when the mean was looked ahead by).
+   */
+  let wakeLag = 0.05
+  const wakeLags: number[] = []
   /** A look's cells in a colour, made once and kept: the page's faces for a look are kept by its cells (main.ts), so a second car of a kind makes nothing. */
   const fineKept = new Map<string, Promise<Uint16Array>>(), cellsAsked = new Map<string, (cells: Uint16Array) => void>()
   const fineCells = (m: Model, paint: number, i: number): Promise<Uint16Array> => {
@@ -1254,13 +1284,27 @@ export function street(o: {
     if (!c.thing) return
     o.alive.vanish(c.thing)
     c.thing = null
+    c.landing = false; c.then = undefined
     living.delete(c)
+  }
+  /** Draws each car that has just come to life where it stood, until its body is seen on the road: then it is the body that is drawn. */
+  const landed = (view: View) => {
+    for (const c of living) {
+      if (!c.landing) continue
+      const w = c.thing?.alive ? o.alive.where(c.thing) : null
+      if (w && w.at[1] - c.y > SKY / 2) { show(c, view); continue }
+      // (What was to be done with it, now that it is where it is: whoever took it is sat in it on the road, not in the sky.)
+      const then = c.then
+      c.landing = false; c.then = undefined
+      hide(c)
+      if (w && c.thing) then?.(c.thing)
+    }
   }
   const reachable = (feet: readonly number[] | null) => {
     for (const c of living) {
       if (!c.thing) { living.delete(c); continue }
       const w = c.thing.alive ? o.alive.where(c.thing) : null
-      if (!w) { c.thing = null; living.delete(c); if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot) } continue }
+      if (!w) { if (c.crashed !== undefined) brokeStat++; if (c.landing) { c.landing = false; hide(c) } c.thing = null; living.delete(c); if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot) } continue }
       if (c.thrown) { if (lastEye && Math.hypot(w.at[0] - lastEye[0], w.at[2] - lastEye[2]) > (c.crashed ? 1800 : DRIVEN * 1.5)) sleep(c); continue }
       const moved = Math.hypot(w.at[0] - c.x, w.at[2] - c.z) > 25
       if (moved || o.alive.riding === c.thing) { if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined } continue }
@@ -1399,6 +1443,22 @@ export function street(o: {
     return ahead < -60 || Math.abs(dx * view.forward[2] - dz * view.forward[0]) / (Math.hypot(view.forward[0], view.forward[2]) || 1) > ahead * view.tanHalf * 2 + 80
   }
   let filled = false, lastEye: number[] | null = null
+  /**
+   * Whether a vehicle set down at a place, heading a way, half so long and so wide, would be within `room` cells of
+   * any vehicle that drives or lives there. Traffic was set down clear only of the cars in its own lane and streetcars
+   * of other streetcars, and on the first frame after the street was filled a streetcar stood 2.6 m into a car that
+   * waited behind another. (Parked
+   * cars are not asked about: they stand beside the lanes, some a little into them, and a bus has 35 cm to spare
+   * each side.)
+   */
+  const taken = (x: number, z: number, hx: number, hz: number, halfL: number, halfW: number, room: number, cars = true) => {
+    const far = halfL + 160
+    const near = (cx: number, cz: number, fx: number, fz: number, long: number, wide: number) => Math.abs(cx - x) < far && Math.abs(cz - z) < far && obbOverlap(x, z, hx, hz, halfL, halfW, cx, cz, fx, fz, long / 2, wide / 2) < room
+    for (const list of cars ? [traffic, depotCars, trams, cables] : [depotCars, trams, cables]) for (const c of list) if (near(c.x, c.z, Math.cos(c.heading), Math.sin(c.heading), c.model.long, c.model.wide)) return true
+    for (const c of pending.keys()) if (near(c.x, c.z, Math.cos(c.heading), Math.sin(c.heading), c.model.long, c.model.wide)) return true
+    for (const t of o.alive.things) { const w = o.alive.where(t); if (w && near(w.at[0], w.at[2], w.front[0], w.front[2], Math.max(t.size[0], t.size[2]), Math.min(t.size[0], t.size[2]))) return true }
+    return false
+  }
   const spawn = (view: View, any: boolean) => {
     const eye = view.eye, near: Road[] = [], seen = new Set<Road>()
     for (let gx = Math.floor((eye[0] - DRIVEN) / GRID); gx <= Math.floor((eye[0] + DRIVEN) / GRID); gx++) for (let gz = Math.floor((eye[2] - DRIVEN) / GRID); gz <= Math.floor((eye[2] + DRIVEN) / GRID); gz++) for (const r of roadGrid.get(cell(gx, gz)) ?? []) if (!seen.has(r)) { seen.add(r); near.push(r) }
@@ -1426,6 +1486,7 @@ export function street(o: {
       if (traffic.some((c) => c.road === r && c.lane === lane && Math.abs(c.s! - s) < 120)) continue
       const m = cars.length ? mixOf(r, cars) : firstRobotaxi!
       const paint = !m.variants.length || random() < 0.3 ? -1 : Math.floor(random() * m.variants.length)
+      if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 40, m.wide / 2, 2)) continue
       const c: Car = { id: ids++, model: m, paint, kind: 'traffic', seed: ids, x: P.x, y: 0, z: P.z, heading: 0, pitch: 0, v: limit(r) * (0.5 + random() * 0.4), piece: null, shown: '', road: r, prev: null, next: null, lane, s, hold: null, stuck: 0, lidarAngle: random() * Math.PI * 2 }
       c.next = choose(r, m.kind)
       pose(c)
@@ -1487,6 +1548,8 @@ export function street(o: {
         if (d > DRIVEN || (!any && (d < 1200 || !unseen(P.x, P.z, view)))) continue
         if (traffic.some((c) => c.route?.piece === p && Math.hypot(c.x - P.x, c.z - P.z) < p.apart / 2)) continue
         if (traffic.some((c) => c.road === on.r && Math.abs(c.s! - s) < 150)) continue
+        // (Clear of streetcars, cable cars and what lives; of the traffic by the rule above, as it was: a bus comes where its rule says, and is not tried elsewhere.)
+        if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 40, m.wide / 2, 2, false)) continue
         const c: Car = { id: ids++, model: m, paint: -1, kind: 'traffic', seed: ids, x: P.x, y: 0, z: P.z, heading: 0, pitch: 0, v: limit(on.r) * 0.5, piece: null, shown: '', road: on.r, prev: null, next: null, lane, s, hold: null, stuck: 0, route: { piece: p, i: on.i, served: s } }
         c.next = nextOf(c, on.r)
         pose(c)
@@ -1826,7 +1889,31 @@ export function street(o: {
   }
 
   /** The things in the way of cars: other cars, people on crossings and anyone standing in a lane, living things, cable cars. */
-  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; car?: Car }[] = []
+  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; car?: Car; alive?: boolean }[] = []
+  /**
+   * Whether any of an obstacle's outline lies in the path straight ahead of a vehicle at a place heading a way, a
+   * path `half` wide each side of its middle line; and if so how far ahead of the vehicle's middle that part of it
+   * begins (`PATH.near`). By its sides, not its middle: each of its four edges cut to the path.
+   */
+  const PATH = { near: 0 }
+  const inPath = (x: number, z: number, hx: number, hz: number, half: number, ob: (typeof obstacles)[number]) => {
+    // The obstacle in the vehicle's own frame: ahead and to its left, and the obstacle's heading there.
+    const dx = ob.x - x, dz = ob.z - z, a0 = dx * hx + dz * hz, l0 = dz * hx - dx * hz, ca = ob.hx * hx + ob.hz * hz, sa = ob.hz * hx - ob.hx * hz
+    let near = Infinity
+    for (let k = 0; k < 4; k++) {
+      const s0 = k === 0 || k === 3 ? 1 : -1, t0 = k < 2 ? 1 : -1, s1 = k === 3 || k === 2 ? 1 : -1, t1 = k === 0 || k === 3 ? 1 : -1
+      const pa = a0 + s0 * ob.long * ca - t0 * ob.wide * sa, pl = l0 + s0 * ob.long * sa + t0 * ob.wide * ca
+      const qa = a0 + s1 * ob.long * ca - t1 * ob.wide * sa, ql = l0 + s1 * ob.long * sa + t1 * ob.wide * ca
+      // The stretch of this edge within the path's two sides.
+      let from = 0, to = 1
+      if (Math.abs(ql - pl) < 1e-9) { if (Math.abs(pl) > half) continue } else { const u = (-half - pl) / (ql - pl), v = (half - pl) / (ql - pl); from = Math.max(0, Math.min(u, v)); to = Math.min(1, Math.max(u, v)); if (from > to) continue }
+      near = Math.min(near, pa + (qa - pa) * from, pa + (qa - pa) * to)
+    }
+    PATH.near = near
+    return near < Infinity
+  }
+  /** How long a vehicle is, halved, from which it is a streetcar, a cable car or a bus (cells): in the way by where its sides are (`inPath`), not its middle. */
+  const LONG = 40
   const drive = (dt: number, view: View, t: number) => {
     obstacles.length = 0
     for (const c of traffic) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
@@ -1835,7 +1922,7 @@ export function street(o: {
     for (const c of parked.values()) if (!c.thing) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: Math.cos(c.heading), hz: Math.sin(c.heading) })
     for (const h of craters) obstacles.push({ x: h.x, z: h.z, long: h.r, wide: h.r, v: 0, hx: 1, hz: 0 })
     for (const c of [...cables, ...trams]) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
-    for (const t of o.alive.things) { const w = o.alive.where(t); if (w) obstacles.push({ x: w.at[0], z: w.at[2], long: Math.max(t.size[0], t.size[2]) / 2, wide: Math.min(t.size[0], t.size[2]) / 2, v: t.state ? Math.abs(t.state.speed ?? 0) : 0, hx: w.front[0], hz: w.front[2] }) }
+    for (const t of o.alive.things) { const w = o.alive.where(t); if (w) obstacles.push({ x: w.at[0], z: w.at[2], long: Math.max(t.size[0], t.size[2]) / 2, wide: Math.min(t.size[0], t.size[2]) / 2, v: t.state ? Math.abs(t.state.speed ?? 0) : 0, hx: w.front[0], hz: w.front[2], alive: true }) }
     for (const [x, z] of crossing) obstacles.push({ x, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
     for (const b of o.bodies()) obstacles.push({ x: b[0], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
     for (let i = traffic.length - 1; i >= 0; i--) {
@@ -1845,13 +1932,25 @@ export function street(o: {
         if (ob.car === c) continue
         const dx = ob.x - c.x, dz = ob.z - c.z
         if (Math.abs(dx) > 450 || Math.abs(dz) > 450) continue
-        const ahead = dx * hx + dz * hz, across = Math.abs(dx * hz - dz * hx)
-        // Whatever stands in its way: across from its middle line by less than the two of them are wide.
-        const ext = Math.abs(ob.hx * hz - ob.hz * hx) * ob.long + Math.abs(ob.hx * hx + ob.hz * hz) * ob.wide
-        if (ahead <= 0 || ahead > 400 || across > c.model.wide / 2 + ext * 0.9 + 2) continue
-        // A vehicle coming the other way keeps to its own lane: waited for, two meeting at a corner would wait for ever.
-        if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
-        const g = ahead - c.model.long / 2 - (Math.abs(ob.hx * hx + ob.hz * hz) * ob.long + Math.abs(ob.hx * hz - ob.hz * hx) * ob.wide)
+        let g: number
+        if (ob.long > LONG) {
+          // A streetcar, a cable car or a bus is in the way by its sides, not its middle (`inPath`): whichever way it
+          // heads, and wherever its middle is. Its lane is its rails, which turn across the traffic's; and a body 12 or
+          // 14 m long that stands across the lane has its middle beside or behind what its end is in front of. Left
+          // out for coming the other way, or for its middle being behind, it was driven through (a bus 3.9 m into a
+          // standing streetcar for 1.1 s). Not waited for when the part of it in the path begins behind this one's own
+          // middle: then it is alongside, and going on leaves it.
+          if (!inPath(c.x, c.z, hx, hz, c.model.wide / 2 + 1, ob) || PATH.near <= 0 || PATH.near > 400) continue
+          g = PATH.near - c.model.long / 2
+        } else {
+          const ahead = dx * hx + dz * hz, across = Math.abs(dx * hz - dz * hx)
+          // Whatever stands in its way: across from its middle line by less than the two of them are wide.
+          const ext = Math.abs(ob.hx * hz - ob.hz * hx) * ob.long + Math.abs(ob.hx * hx + ob.hz * hz) * ob.wide
+          if (ahead <= 0 || ahead > 400 || across > c.model.wide / 2 + ext * 0.9 + 2) continue
+          // A vehicle coming the other way keeps to its own lane: waited for, two meeting at a corner would wait for ever.
+          if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
+          g = ahead - c.model.long / 2 - (Math.abs(ob.hx * hx + ob.hz * hz) * ob.long + Math.abs(ob.hx * hz - ob.hz * hx) * ob.wide)
+        }
         if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz); why = ob.car ? 'car' : ob.long === 3 ? 'person' : 'vehicle' }
       }
       // At a junction of three ways or more: as its lights say, after a full stop at a sign, or by turns where nothing
@@ -2149,6 +2248,38 @@ export function street(o: {
     if (squares.size && [...squares.values()].every((v) => v === 'held')) lightsDone.add(l)
     return l.lights
   }
+  /**
+   * How far a streetcar may go along its rails before its body would be in a vehicle's (cells; Infinity if it never
+   * is within 40 m): the streetcar as it will stand every 2.4 m of the way, a cell wider each side, against the
+   * vehicle's outline. Its path is its rails, not the line straight ahead of its middle, and they turn across the
+   * lanes of the traffic: so whatever drives or lives is looked for along them whichever way it heads. (Left out
+   * for coming the other way, as cars leave each other out, cars were driven through: of eight found in a streetcar
+   * in twelve fillings of the street, 0.5 to 3.5 m deep, three headed the other way to it; the other five were in
+   * one that stood, from the first frames after the street was filled. test/crash-stack.mjs.) One already in it that
+   * it would leave by going on is not waited for.
+   */
+  const RAIL_STEP = 24, RAIL_AHEAD = 400
+  const rail: { x: number; z: number; tx: number; tz: number }[] = []
+  /** Where a streetcar will stand along its rails from here, every `RAIL_STEP`: made once for it, for every vehicle near (`railGap`). */
+  const railAhead = (c: Car) => {
+    const l = c.track!
+    let n = 0
+    for (let d = 0; d <= RAIL_AHEAD && c.s! + d <= l.len; d += RAIL_STEP, n++) { along(l.p, l.cum, c.s! + d, Q); (rail[n] ??= { x: 0, z: 0, tx: 1, tz: 0 }); rail[n].x = Q.x; rail[n].z = Q.z; rail[n].tx = Q.tx; rail[n].tz = Q.tz }
+    return n
+  }
+  const railGap = (c: Car, n: number, ob: (typeof obstacles)[number]) => {
+    const halfL = c.model.long / 2, halfW = c.model.wide / 2 + 1
+    if (Math.hypot(ob.x - c.x, ob.z - c.z) > RAIL_AHEAD + halfL + ob.long + ob.wide) return Infinity
+    const within = (k: number) => obbOverlap(rail[k].x, rail[k].z, rail[k].tx, rail[k].tz, halfL, halfW, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide) < 0
+    const inNow = n > 0 && within(0)
+    for (let k = 1; k < n; k++) {
+      if (!within(k)) continue
+      // In it already and behind its middle: going on leaves it.
+      if (k === 1 && inNow && (ob.x - c.x) * rail[0].tx + (ob.z - c.z) * rail[0].tz < 0) return Infinity
+      return (k - 1) * RAIL_STEP
+    }
+    return Infinity
+  }
   const tramsDrive = (dt: number, view: View, t: number, any: boolean) => {
     const m = ready.get('streetcar') ?? ready.get('cable-car')
     if (!m) return
@@ -2162,6 +2293,7 @@ export function street(o: {
         const s = random() * l.len
         along(l.p, l.cum, s, P)
         if (Math.hypot(P.x - eye[0], P.z - eye[2]) > DRIVEN || (!any && !unseen(P.x, P.z, view)) || trams.some((c) => c.track === l && Math.abs(c.s! - s) < 400)) continue
+        if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 60, m.wide / 2, 3)) continue
         const c: Car = { id: ids++, model: m, paint: -1, kind: 'tram', seed: ids, x: P.x, y: 0, z: P.z, heading: Math.atan2(P.tz, P.tx), pitch: 0, v: TRAM_SPEED * 0.6, piece: null, shown: '', track: l, s, stuck: 0 }
         settle(c); trams.push(c); k++
       }
@@ -2169,13 +2301,18 @@ export function street(o: {
     for (let i = trams.length - 1; i >= 0; i--) {
       const c = trams[i], l = c.track!, hx = Math.cos(c.heading), hz = Math.sin(c.heading)
       let gap = Infinity, lead = 0, held = false
+      const poses = railAhead(c)
       for (const ob of obstacles) {
         if (ob.car === c) continue
         const dx = ob.x - c.x, dz = ob.z - c.z
         if (Math.abs(dx) > 500 || Math.abs(dz) > 500) continue
+        // What drives or lives is looked for along the rails (`railGap`), whichever way it heads: where the rails turn
+        // across the traffic, what comes the other way is in the streetcar's path. What stands (a parked car, a
+        // person, a hole) straight ahead, as it was.
+        if (ob.car || ob.alive) { const g = railGap(c, poses, ob); if (g < gap) { gap = g; lead = Math.max(0, ob.v * (ob.hx * hx + ob.hz * hz)) } continue }
+        if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
         const ahead = dx * hx + dz * hz, across = Math.abs(dx * hz - dz * hx)
         if (ahead <= 0 || ahead > 500 || across > c.model.wide / 2 + ob.wide + 2) continue
-        if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
         const g = ahead - c.model.long / 2 - ob.long
         if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz) }
       }
@@ -2303,6 +2440,7 @@ export function street(o: {
   const NEAR_MISS_MIN_KMH = 65
   const NEAR_MISS_MAX_GAP = 20 // 2.0 m clearance on any axis (cells)
   const NEAR_MISS_COOL = 3.0 // seconds per car
+  const ROLLS = 60 // a thrown car closing on a drawn one slower than this (cells a second: 22 km/h) is stopped by it, and wakes nothing
   let nearMissCb = o.onNearMiss
   let prevRideId = 0, prevRideAt: [number, number, number] | null = null, rideDt = 0
   const rideVel: [number, number, number] = [0, 0, 0]
@@ -2310,6 +2448,8 @@ export function street(o: {
   const nearMissAt = new Map<number, number>()
   const hornQueue: { at: [number, number, number]; pitch: number; annoyed: boolean; when: number }[] = []
   let crashCountStat = 0, nearMissCountStat = 0, hornResponsesStat = 0
+  /** Of the cars a crash woke: how many were sent away to make room, and how many broke or were lost (for the checks). */
+  let sentAwayStat = 0, brokeStat = 0
   const OBB = { gap: 0, nx: 1, nz: 0 }
   const testAxis = (dx: number, dz: number, ux: number, uz: number, afx: number, afz: number, arx: number, arz: number, ahl: number, ahw: number, bfx: number, bfz: number, brx: number, brz: number, bhl: number, bhw: number) => {
     const d = dx * ux + dz * uz
@@ -2333,22 +2473,80 @@ export function street(o: {
     for (const c of pending.keys()) if (c.crashed !== undefined) n++
     return n
   }
-  const makeCrashRoom = (rx: number, rz: number, riding: Thing, now: number) => {
+  /**
+   * Room for one more car woken by a crash (`MAX_CRASH_LIVING` live at once): one goes back to nothing, but for
+   * `spare` (the one that is striking). One that has come to rest before any still thrown, and of those the one
+   * furthest from a place and longest awake. False if none can go.
+   */
+  const makeCrashRoom = (rx: number, rz: number, riding: Thing | null, spare: Thing | null, now: number) => {
     while (activeCrashLiving() >= MAX_CRASH_LIVING) {
       let victim: Car | null = null, worst = -Infinity
       for (const c of living) {
-        if (c.crashed === undefined || !c.thing || c.thing === riding) continue
+        if (c.crashed === undefined || !c.thing || c.thing === riding || c.thing === spare) continue
         const w = o.alive.where(c.thing)
         const d = w ? Math.hypot(w.at[0] - rx, w.at[2] - rz) : 9999
-        const score = d * 0.05 + (now - c.crashed)
+        const still = !c.going || Number.isNaN(c.going.x) ? 0 : Math.hypot(c.going.vx, c.going.vz) < 5 ? 1000 : 0
+        const score = still + d * 0.05 + (now - c.crashed)
         if (score > worst) { worst = score; victim = c }
       }
-      if (victim) { sleep(victim); continue }
+      if (victim) { sleep(victim); sentAwayStat++; continue }
       let pendVictim: Car | null = null, oldest = Infinity
       for (const c of pending.keys()) if (c.crashed !== undefined && c.crashed < oldest) { oldest = c.crashed; pendVictim = c }
-      if (pendVictim) { pending.delete(pendVictim); hide(pendVictim); continue }
-      break
+      if (pendVictim) { pending.delete(pendVictim); hide(pendVictim); sentAwayStat++; continue }
+      return false
     }
+    return true
+  }
+  /**
+   * Whatever may strike a drawn car: the vehicle ridden, every car a crash or a blast threw (the solver moves those),
+   * and every car struck and still on its way to life, which will leave where it is drawn with its push. A thrown
+   * car went through the drawn cars round it and came to rest in one, and the next struck came to life inside it:
+   * so each is looked at as the ridden one is, and what it reaches comes to life before it is in it.
+   */
+  interface Mover { thing: Thing | null; car: Car | null; how: Waking | null; ridden: boolean; x: number; y: number; z: number; fx: number; fz: number; halfL: number; halfW: number; vx: number; vz: number; mass: number }
+  const movers: Mover[] = []
+  /**
+   * How fast a thrown car goes over the ground, from where it was last seen (the solver answers some frames and not
+   * others). One just come to life goes as it was pushed until it has been seen twice where the solver put it: that
+   * is not where it was drawn (the solver moves it clear, `wake`), and taken for a move, those two or three metres
+   * in a frame were 2,000 cells a second. Nor is any move a car cannot make taken for its speed.
+   */
+  const followed = (c: Car, x: number, z: number, dt: number) => {
+    const g = (c.going ??= { x, z, vx: 0, vz: 0, dt: 0 })
+    if (Number.isNaN(g.x)) { g.x = x; g.z = z; g.dt = 0; return g }
+    g.dt += dt
+    const mx = x - g.x, mz = z - g.z
+    if (Math.hypot(mx, mz) > 1e-3 && g.dt > 1e-4) { if (Math.hypot(mx, mz) / g.dt < 900) { g.vx = mx / g.dt; g.vz = mz / g.dt } g.x = x; g.z = z; g.dt = 0 }
+    else if (g.dt > 0.08) { g.vx = 0; g.vz = 0 }
+    return g
+  }
+  /**
+   * How near a mover's outline is to a drawn car's now (cells; `OBB` then says which way the car is from it), and
+   * whether it touches it now or will within `ahead` seconds as the two are going: looked for every ten cells of the
+   * way, since a car at 200 km/h covers nine in a frame.
+   */
+  const TOUCH = { gap: 0, touches: false, nx: 1, nz: 0 }
+  const reaches = (m: Mover, c: Car, cfx: number, cfz: number, cHalfL: number, cHalfW: number, ahead: number) => {
+    TOUCH.gap = obbOverlap(m.x, m.z, m.fx, m.fz, m.halfL, m.halfW, c.x, c.z, cfx, cfz, cHalfL, cHalfW)
+    TOUCH.touches = TOUCH.gap <= 1.0
+    TOUCH.nx = OBB.nx; TOUCH.nz = OBB.nz
+    if (TOUCH.touches) return
+    const vx = m.vx - cfx * c.v, vz = m.vz - cfz * c.v, far = Math.hypot(vx, vz) * ahead
+    // (Only what closes on it: the way it is from the mover, and the mover's way.)
+    if (far <= 1 || vx * OBB.nx + vz * OBB.nz <= 0) return
+    const steps = Math.min(8, Math.ceil(far / 10))
+    for (let k = 1; k <= steps; k++) {
+      const t = (ahead * k) / steps
+      if (obbOverlap(m.x + vx * t, m.z + vz * t, m.fx, m.fz, m.halfL, m.halfW, c.x, c.z, cfx, cfz, cHalfL, cHalfW) <= 1.0) { TOUCH.touches = true; TOUCH.nx = OBB.nx; TOUCH.nz = OBB.nz; return }
+    }
+  }
+  /** A push on a mover: on the solver's body, or on the push a car on its way to life will be given. */
+  const shove = (m: Mover, x: number, y: number, z: number) => {
+    if (m.thing) o.alive.kick(m.thing, [x, y, z])
+    else if (m.how?.push) { m.how.push[0] += x; m.how.push[2] += z }
+    m.vx += x; m.vz += z
+    // (Until the solver's answers show it: its next touch this frame or the next is reckoned from what it has left.)
+    if (m.car?.going) { m.car.going.vx = m.vx; m.car.going.vz = m.vz }
   }
   const reactiveDrive = (dt: number) => {
     const now = performance.now() / 1000
@@ -2359,190 +2557,232 @@ export function street(o: {
       hornResponsesStat++
       o.onHorn?.({ at: h.at, pitch: h.pitch, annoyed: h.annoyed })
     }
-    const riding = o.alive.riding
-    if (!riding) {
-      if (prevRideId) { prevRideId = 0; prevRideAt = null; rideDt = 0; rideVel[0] = 0; rideVel[1] = 0; rideVel[2] = 0; hornWas = false }
-      return
-    }
-    const rw = o.alive.where(riding)
-    if (!rw) return
-    const rx = rw.at[0], ry = rw.at[1], rz = rw.at[2]
-    const rfx = rw.front[0], rfz = rw.front[2]
-    const rHalfL = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
-    const rHalfW = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
-    // Track driven vehicle velocity smoothly across 60/120 Hz frames and async solver ticks.
-    if (riding.id !== prevRideId || !prevRideAt) {
-      prevRideId = riding.id; prevRideAt = [rx, ry, rz]; rideDt = 0
-      const sp = riding.state?.speed ?? 0
-      rideVel[0] = rfx * sp; rideVel[1] = 0; rideVel[2] = rfz * sp
-    } else {
-      rideDt += dt
-      const mx = rx - prevRideAt[0], my = ry - prevRideAt[1], mz = rz - prevRideAt[2], moved = Math.hypot(mx, my, mz)
-      if (moved > 1e-3 && rideDt > 1e-4) {
-        if (moved / rideDt < 2500) {
-          const k = Math.min(1, rideDt * 18)
-          rideVel[0] += (mx / rideDt - rideVel[0]) * k
-          rideVel[1] += (my / rideDt - rideVel[1]) * k
-          rideVel[2] += (mz / rideDt - rideVel[2]) * k
+    movers.length = 0
+    const riding = o.alive.riding, rw = riding && o.alive.where(riding)
+    if (!riding && prevRideId) { prevRideId = 0; prevRideAt = null; rideDt = 0; rideVel[0] = 0; rideVel[1] = 0; rideVel[2] = 0; hornWas = false }
+    let speedKmh = 0, vDirX = 1, vDirZ = 0
+    if (riding && rw) {
+      const rx = rw.at[0], ry = rw.at[1], rz = rw.at[2]
+      const rfx = rw.front[0], rfz = rw.front[2]
+      // Track driven vehicle velocity smoothly across 60/120 Hz frames and async solver ticks.
+      if (riding.id !== prevRideId || !prevRideAt) {
+        prevRideId = riding.id; prevRideAt = [rx, ry, rz]; rideDt = 0
+        const sp = riding.state?.speed ?? 0
+        rideVel[0] = rfx * sp; rideVel[1] = 0; rideVel[2] = rfz * sp
+      } else {
+        rideDt += dt
+        const mx = rx - prevRideAt[0], my = ry - prevRideAt[1], mz = rz - prevRideAt[2], moved = Math.hypot(mx, my, mz)
+        if (moved > 1e-3 && rideDt > 1e-4) {
+          if (moved / rideDt < 2500) {
+            const k = Math.min(1, rideDt * 18)
+            rideVel[0] += (mx / rideDt - rideVel[0]) * k
+            rideVel[1] += (my / rideDt - rideVel[1]) * k
+            rideVel[2] += (mz / rideDt - rideVel[2]) * k
+          }
+          prevRideAt[0] = rx; prevRideAt[1] = ry; prevRideAt[2] = rz; rideDt = 0
+        } else if (rideDt > 0.08) {
+          const decay = Math.exp(-dt * 12)
+          rideVel[0] *= decay; rideVel[1] *= decay; rideVel[2] *= decay
         }
-        prevRideAt[0] = rx; prevRideAt[1] = ry; prevRideAt[2] = rz; rideDt = 0
-      } else if (rideDt > 0.08) {
-        const decay = Math.exp(-dt * 12)
-        rideVel[0] *= decay; rideVel[1] *= decay; rideVel[2] *= decay
       }
-    }
-    let rvx = rideVel[0], rvz = rideVel[2]
-    const stateSp = riding.state?.speed ?? 0
-    if (Math.hypot(rvx, rvz) < 5 && Math.abs(stateSp) > 5) { rvx = rfx * stateSp; rvz = rfz * stateSp }
-    const speedCells = Math.max(Math.hypot(rvx, rvz), Math.abs(stateSp))
-    const speedKmh = Math.max(speedCells * 0.36, o.alive.telemetry?.kmh ?? 0)
-    const vLen = Math.hypot(rvx, rvz)
-    const vDirX = vLen > 8 ? rvx / vLen : rfx, vDirZ = vLen > 8 ? rvz / vLen : rfz
-    const rMass = Math.max(1, riding.size[0] * riding.size[1] * riding.size[2])
-    const isDrive = (riding.controls ?? 'drive') === 'drive'
+      let rvx = rideVel[0], rvz = rideVel[2]
+      const stateSp = riding.state?.speed ?? 0
+      if (Math.hypot(rvx, rvz) < 5 && Math.abs(stateSp) > 5) { rvx = rfx * stateSp; rvz = rfz * stateSp }
+      const speedCells = Math.max(Math.hypot(rvx, rvz), Math.abs(stateSp))
+      speedKmh = Math.max(speedCells * 0.36, o.alive.telemetry?.kmh ?? 0)
+      const vLen = Math.hypot(rvx, rvz)
+      vDirX = vLen > 8 ? rvx / vLen : rfx; vDirZ = vLen > 8 ? rvz / vLen : rfz
+      const isDrive = (riding.controls ?? 'drive') === 'drive'
+      movers.push({ thing: riding, car: null, how: null, ridden: true, x: rx, y: ry - riding.size[1] * 0.5, z: rz, fx: rfx, fz: rfz, halfL: (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5, halfW: (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5, vx: rvx, vz: rvz, mass: Math.max(1, riding.size[0] * riding.size[1] * riding.size[2]) })
 
-    // 1. Horn reactions (H): scatter/startle nearby pedestrians & nudge/elicit horn from traffic ahead.
-    if (isDrive) {
-      const honking = o.input.held('KeyH')
-      if (honking && (!hornWas || now - lastHornPulse >= 1.15)) {
-        lastHornPulse = now
-        hornPulse = { x: rx, y: ry - riding.size[1] * 0.5, z: rz, fx: rfx, fz: rfz, t: now }
-        let responder: Car | null = null, bestScore = Infinity
-        for (const c of traffic) {
-          if (c.thing || c.waking) continue
-          const dx = c.x - rx, dz = c.z - rz
-          if (Math.abs(dx) > HORN_CAR_REACH || Math.abs(dz) > HORN_CAR_REACH) continue
-          const d = Math.hypot(dx, dz)
-          if (d > HORN_CAR_REACH || Math.abs(c.y - (ry - riding.size[1] * 0.5)) > 35) continue
-          const ahead = dx * rfx + dz * rfz, across = Math.abs(dx * (-rfz) + dz * rfx)
-          // Nudge stopped or slow traffic ahead to gently pull forward / clear shake.
-          if (ahead > -10 && ahead < 240 && across < 50 && c.v < 22) c.honked = now
-          // Candidate for a rate-limited friendly/annoyed horn response within ~18 m.
-          if (d < 185 && now - (c.honkedBack ?? -99) > 4.0) {
-            const score = d - (c.v < 12 ? 35 : 0) - (ahead > 0 && across < 45 ? 25 : 0)
-            if (score < bestScore) { bestScore = score; responder = c }
+      // 1. Horn reactions (H): scatter/startle nearby pedestrians & nudge/elicit horn from traffic ahead.
+      if (isDrive) {
+        const honking = o.input.held('KeyH')
+        if (honking && (!hornWas || now - lastHornPulse >= 1.15)) {
+          lastHornPulse = now
+          hornPulse = { x: rx, y: ry - riding.size[1] * 0.5, z: rz, fx: rfx, fz: rfz, t: now }
+          let responder: Car | null = null, bestScore = Infinity
+          for (const c of traffic) {
+            if (c.thing || c.waking) continue
+            const dx = c.x - rx, dz = c.z - rz
+            if (Math.abs(dx) > HORN_CAR_REACH || Math.abs(dz) > HORN_CAR_REACH) continue
+            const d = Math.hypot(dx, dz)
+            if (d > HORN_CAR_REACH || Math.abs(c.y - (ry - riding.size[1] * 0.5)) > 35) continue
+            const ahead = dx * rfx + dz * rfz, across = Math.abs(dx * (-rfz) + dz * rfx)
+            // Nudge stopped or slow traffic ahead to gently pull forward / clear shake.
+            if (ahead > -10 && ahead < 240 && across < 50 && c.v < 22) c.honked = now
+            // Candidate for a rate-limited friendly/annoyed horn response within ~18 m.
+            if (d < 185 && now - (c.honkedBack ?? -99) > 4.0) {
+              const score = d - (c.v < 12 ? 35 : 0) - (ahead > 0 && across < 45 ? 25 : 0)
+              if (score < bestScore) { bestScore = score; responder = c }
+            }
+          }
+          if (responder && now - lastTrafficHorn >= 1.6) {
+            lastTrafficHorn = now
+            responder.honkedBack = now
+            const heavy = responder.model.kind === 'bus' || responder.model.kind === 'trolley' || responder.model.kind === 'truck'
+            const pitch = heavy ? 235 + chance(responder.seed, 41) * 65 : 345 + chance(responder.seed, 41) * 145
+            const annoyed = responder.v < 12 || (responder.held ?? 0) > 2
+            hornQueue.push({ at: [responder.x, responder.y + 8, responder.z], pitch, annoyed, when: now + 0.22 + chance(responder.seed, 42) * 0.26 })
           }
         }
-        if (responder && now - lastTrafficHorn >= 1.6) {
-          lastTrafficHorn = now
-          responder.honkedBack = now
-          const heavy = responder.model.kind === 'bus' || responder.model.kind === 'trolley' || responder.model.kind === 'truck'
-          const pitch = heavy ? 235 + chance(responder.seed, 41) * 65 : 345 + chance(responder.seed, 41) * 145
-          const annoyed = responder.v < 12 || (responder.held ?? 0) > 2
-          hornQueue.push({ at: [responder.x, responder.y + 8, responder.z], pitch, annoyed, when: now + 0.22 + chance(responder.seed, 42) * 0.26 })
-        }
+        hornWas = honking
       }
-      hornWas = honking
-    }
 
-    // 2. Proximity check (<= 12 m): crash waking on OBB contact + high-speed near-miss detection.
-    const rFloorY = ry - riding.size[1] * 0.5
-    const checkSwept = speedCells * dt > 12
-    const midX = rx - rvx * dt * 0.5, midZ = rz - rvz * dt * 0.5
+    }
+    // Thrown cars the solver moves, and struck cars about to be: each goes on as the ridden one does.
+    for (const c of living) {
+      if (!c.thing || c.thing === riding || !c.thrown) continue
+      const w = o.alive.where(c.thing)
+      if (!w) continue
+      // (Born in the sky and put down a message later: until the solver's answers show it on the road, it is not looked at.)
+      if (w.at[1] - c.y > SKY / 2) continue
+      const g = followed(c, w.at[0], w.at[2], dt)
+      if (Math.hypot(g.vx, g.vz) < 3) continue
+      movers.push({ thing: c.thing, car: c, how: null, ridden: false, x: w.at[0], y: w.at[1] - c.model.size[1] * 0.5, z: w.at[2], fx: w.front[0], fz: w.front[2], halfL: c.model.long * 0.5, halfW: c.model.wide * 0.5, vx: g.vx, vz: g.vz, mass: Math.max(1, c.model.size[0] * c.model.size[1] * c.model.size[2]) })
+    }
+    for (const [c, how] of pending) {
+      if (!how.push || Math.hypot(how.push[0], how.push[2]) < 3) continue
+      movers.push({ thing: null, car: null, how, ridden: false, x: c.x, y: c.y, z: c.z, fx: Math.cos(c.heading), fz: Math.sin(c.heading), halfL: c.model.long * 0.5, halfW: c.model.wide * 0.5, vx: how.push[0], vz: how.push[2], mass: Math.max(1, c.model.size[0] * c.model.size[1] * c.model.size[2]) })
+    }
+    if (!movers.length) return
+
+    // 2. What each reaches (within 12 m and the way it goes while a car wakes): crash waking, and the ridden one's near misses.
     const nearMissEligible = speedKmh > NEAR_MISS_MIN_KMH
-    const tryNearMiss = (id: number, cx: number, cy: number, cz: number, cfx: number, cfz: number, cHalfL: number, cHalfW: number, gap: number) => {
+    const tryNearMiss = (m: Mover, id: number, cx: number, cy: number, cz: number, cfx: number, cfz: number, cHalfL: number, cHalfW: number, gap: number) => {
       if (!nearMissEligible || gap <= 1.0 || gap > NEAR_MISS_MAX_GAP) return
       if (now - (nearMissAt.get(id) ?? -99) < NEAR_MISS_COOL) return
-      const dx = cx - rx, dz = cz - rz
+      const dx = cx - m.x, dz = cz - m.z
       const alongDist = dx * vDirX + dz * vDirZ
       const cAlongHalf = cHalfL * Math.abs(cfx * vDirX + cfz * vDirZ) + cHalfW * Math.abs(-cfz * vDirX + cfx * vDirZ)
       // Fire right as the player passes alongside/past the car (never ahead of a head-on collision).
-      if (alongDist > rHalfL + cAlongHalf * 0.45 || alongDist < -(rHalfL + cAlongHalf + 10)) return
+      if (alongDist > m.halfL + cAlongHalf * 0.45 || alongDist < -(m.halfL + cAlongHalf + 10)) return
       nearMissAt.set(id, now)
       if (nearMissAt.size > 128) for (const [k, atT] of nearMissAt) if (now - atT > 10) nearMissAt.delete(k)
       nearMissCountStat++
-      nearMissCb?.({ speedKmh: Math.round(speedKmh * 10) / 10, clearance: Math.round((gap / 10) * 100) / 100, at: [(rx + cx) * 0.5, Math.max(ry, cy + 8), (rz + cz) * 0.5] })
+      const top = m.y + (m.thing?.size[1] ?? 0) * 0.5
+      nearMissCb?.({ speedKmh: Math.round(speedKmh * 10) / 10, clearance: Math.round((gap / 10) * 100) / 100, at: [(m.x + cx) * 0.5, Math.max(top, cy + 8), (m.z + cz) * 0.5] })
     }
-    const checkCar = (c: Car) => {
+    const checkCar = (m: Mover, c: Car) => {
       if (c.thing || c.waking || pending.has(c)) return
-      const dx = c.x - rx, dz = c.z - rz
-      if (Math.abs(dx) > CRASH_SCAN || Math.abs(dz) > CRASH_SCAN) return
-      if (Math.abs(c.y - rFloorY) > 35) return
+      const speed = Math.hypot(m.vx, m.vz), scan = CRASH_SCAN + speed * wakeLag
+      const dx = c.x - m.x, dz = c.z - m.z
+      if (Math.abs(dx) > scan || Math.abs(dz) > scan) return
+      if (Math.abs(c.y - m.y) > 35) return
       const dist = Math.hypot(dx, dz)
-      if (dist > CRASH_SCAN) return
+      if (dist > scan) return
       // Pre-warm finest look faces before impact so waking (with interior, drivable) is instant (#61).
-      if (c.model.motor && dist < 110) {
+      if (c.model.motor && dist < scan - 10) {
         for (let i = 0; i < c.model.looks.length; i++) if (c.model.looks[i].per >= 4) bornOf(c.model, c.paint, i)
       }
       const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
       const cHalfL = c.model.long * 0.5, cHalfW = c.model.wide * 0.5
-      let gap = obbOverlap(rx, rz, rfx, rfz, rHalfL, rHalfW, c.x, c.z, cfx, cfz, cHalfL, cHalfW)
-      if (gap > 1.0 && checkSwept) {
-        const midGap = obbOverlap(midX, midZ, rfx, rfz, rHalfL, rHalfW, c.x, c.z, cfx, cfz, cHalfL, cHalfW)
-        if (midGap <= 1.0) gap = midGap
-        else obbOverlap(rx, rz, rfx, rfz, rHalfL, rHalfW, c.x, c.z, cfx, cfz, cHalfL, cHalfW)
+      // A car that wakes is looked for as far ahead as waking takes, when what comes is fast: it then lives, and is
+      // pushed, as it is reached. Slowly (under 6 m/s, and by degrees up to 18) it is looked for a frame ahead only: a
+      // car nudged at walking pace would leap away half a metre before it was touched, and a slow one a few cells
+      // into its place is put clear by the solver. One that only throws the mover back, a frame ahead.
+      const frame = dt * 1.5, far = wakeLag * Math.max(0, Math.min(1, (speed - 60) / 120))
+      reaches(m, c, cfx, cfz, cHalfL, cHalfW, c.model.motor ? (m.thing ? Math.max(frame, far) : far || wakeLag) : m.thing ? frame : 0)
+      const gap = TOUCH.gap
+      if (!TOUCH.touches) { if (m.ridden && now - (c.hitAt ?? -99) > 3.0) tryNearMiss(m, c.id, c.x, c.y, c.z, cfx, cfz, cHalfL, cHalfW, gap); return }
+      const nx = TOUCH.nx, nz = TOUCH.nz
+      const cvx = cfx * c.v, cvz = cfz * c.v
+      const relVx = m.vx - cvx, relVz = m.vz - cvz
+      const relSpeed = Math.hypot(relVx, relVz)
+      const closing = relVx * nx + relVz * nz
+      const cMass = Math.max(1, c.model.size[0] * c.model.size[1] * c.model.size[2])
+      const top = m.y + (m.thing?.size[1] ?? c.model.size[1]) * 0.5
+      const hitAt: [number, number, number] = [(m.x + c.x) * 0.5, Math.max(top, c.y + c.model.size[1] * 0.4), (m.z + c.z) * 0.5]
+      const force = Math.min(1, Math.max(0.18, relSpeed / 150))
+      const hitSpeed = Math.max(closing, relSpeed * 0.6)
+      // A thrown car that rolls against a drawn one slowly (under `ROLLS`) is stopped by it and wakes nothing: the
+      // blow that woke a row would otherwise run on down it, a car a link, long after it was spent (13 woke in one
+      // pileup, with room for six). Unless it is pressed 2 cells into it already, by the pile behind: then nothing
+      // but waking it keeps them apart.
+      if (c.model.motor && !m.ridden && closing < ROLLS && TOUCH.gap > -2) {
+        if (closing > 0 && now - (c.hitAt ?? -99) > 0.1) { c.hitAt = now; shove(m, -nx * closing, 0, -nz * closing) }
+        return
       }
-      if (gap <= 1.0) {
-        const nx = OBB.nx, nz = OBB.nz
-        const cvx = cfx * c.v, cvz = cfz * c.v
-        const relVx = rvx - cvx, relVz = rvz - cvz
-        const relSpeed = Math.hypot(relVx, relVz)
-        const closing = relVx * nx + relVz * nz
-        const cMass = Math.max(1, c.model.size[0] * c.model.size[1] * c.model.size[2])
-        const massShare = Math.max(0.24, Math.min(0.85, (rMass / (rMass + cMass)) * 1.4))
-        const hitAt: [number, number, number] = [(rx + c.x) * 0.5, Math.max(ry, c.y + c.model.size[1] * 0.4), (rz + c.z) * 0.5]
-        const force = Math.min(1, Math.max(0.18, relSpeed / 150))
-        if (c.model.motor) {
-          makeCrashRoom(rx, rz, riding, now)
-          if (c.kind === 'traffic') { const idx = traffic.indexOf(c); if (idx >= 0) traffic.splice(idx, 1); letGo(c); c.kind = 'parked' }
-          const di = depotCars.indexOf(c)
-          if (di >= 0) { depotCars.splice(di, 1); c.depot = undefined; c.kind = 'parked' }
-          c.rtStuck = undefined
-          if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined }
-          c.crashed = now
-          c.thrown = true
-          // Momentum transfer: normal impulse + tangential carry + dramatic pop on hard hits.
-          const jNorm = Math.max(18, Math.max(closing, relSpeed * 0.45) * 1.15 * massShare)
-          const relTx = relVx - closing * nx, relTz = relVz - closing * nz
-          let px = cvx + nx * jNorm + relTx * 0.35 * massShare
-          let pz = cvz + nz * jNorm + relTz * 0.35 * massShare
-          const ph = Math.hypot(px, pz)
-          if (ph > 420) { px = (px * 420) / ph; pz = (pz * 420) / ph }
-          const py = Math.min(55, Math.max(6, (relSpeed - 28) * 0.24))
-          const sepDist = Math.min(6, Math.max(0, 1.5 - gap))
-          const hitSpeed = Math.max(closing, relSpeed * 0.6)
-          // Both the driven vehicle and the woken street car dent immediately on impact, and the woken car is drivable (#61).
-          o.alive.hit(riding, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 80)
-          const how = { inside: true, push: [px, py, pz] as const, sep: [nx * sepDist, nz * sepDist] as const, then: (thing: Thing) => o.alive.hit(thing, hitAt, [-nx, 0, -nz], hitSpeed, hitSpeed * 80) }
-          pending.set(c, how)
-          void wake(c, how)
-          // Immediate tactile recoil on the player's vehicle.
-          const recoil = Math.max(0, closing) * (1 - massShare) * 0.5
-          if (recoil > 4) o.alive.kick(riding, [-nx * recoil, Math.min(12, recoil * 0.08), -nz * recoil])
-          crashCountStat++
-          // Scatter nearby pedestrians & briefly alert nearby traffic.
-          crashShocks.push({ at: hitAt, radius: 14 + force * 24, t: o.clock() })
-          if (crashShocks.length > 16) crashShocks.shift()
-          for (const tCar of traffic) if (Math.hypot(tCar.x - hitAt[0], tCar.z - hitAt[2]) < 260) tCar.shaken = now - 2.5
-          o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: c.model.name, woke: true })
-        } else if (now - (c.hitAt ?? -99) > 0.45) {
-          // Non-motorized heavy street vehicles (cable cars, trams): solid bounce recoil, dent on the driven car, sparks/audio.
-          c.hitAt = now
-          const hitSpeed = Math.max(closing, relSpeed * 0.6)
-          o.alive.hit(riding, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 120)
-          const bounce = Math.max(24, Math.max(closing, relSpeed * 0.5) * 1.25)
-          o.alive.kick(riding, [-nx * bounce, Math.min(18, 4 + bounce * 0.1), -nz * bounce])
+      // Whatever has a motor wakes, whoever reaches it: the ridden car, a thrown one, one about to be. A drawn car
+      // cannot be made solid by pushes: thrown back off one for want of room, a car pressed on by the pile behind it
+      // went into it all the same, and stayed (0.66 s and 5.6 s, 2 m deep, in two runs of test/crash-stack.mjs). Room is
+      // made by sending away a car that has come to rest, the furthest and oldest, before any still thrown.
+      if (c.model.motor) {
+        const by = movers[0].ridden ? movers[0] : m
+        makeCrashRoom(by.x, by.z, riding, m.thing, now)
+        if (c.kind === 'traffic') { const idx = traffic.indexOf(c); if (idx >= 0) traffic.splice(idx, 1); letGo(c); c.kind = 'parked' }
+        const di = depotCars.indexOf(c)
+        if (di >= 0) { depotCars.splice(di, 1); c.depot = undefined; c.kind = 'parked' }
+        c.rtStuck = undefined
+        if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined }
+        c.crashed = now
+        c.thrown = true
+        const relTx = relVx - closing * nx, relTz = relVz - closing * nz
+        let jNorm: number, recoil: number, carry: number
+        if (m.ridden) {
+          // Whoever drives ploughs on: the struck car is sent ahead at least as fast as the driver still goes, so the
+          // two part and the solver has no second blow to give for the same touch.
+          const massShare = Math.max(0.24, Math.min(0.85, (m.mass / (m.mass + cMass)) * 1.4))
+          recoil = Math.max(0, closing) * (1 - massShare) * 0.5
+          if (recoil <= 4) recoil = 0
+          jNorm = Math.max(18, Math.max(closing, relSpeed * 0.45) * 1.15 * massShare, closing - recoil + 4)
+          carry = 0.35 * massShare
+        } else {
+          // Car on car with nobody driving: what one gives the other it loses, by their weights, with a little spring.
+          // (No least push: a car that rolls against the next at walking pace gives it that much, and the row beyond it stands.)
+          const share = m.mass / (m.mass + cMass), spring = 1.15
+          jNorm = Math.max(0, closing) * spring * share
+          recoil = Math.max(0, closing) * spring * (1 - share)
+          carry = 0.2 * share
+        }
+        let px = cvx + nx * jNorm + relTx * carry
+        let pz = cvz + nz * jNorm + relTz * carry
+        const ph = Math.hypot(px, pz)
+        if (ph > 420) { px = (px * 420) / ph; pz = (pz * 420) / ph }
+        // A little off the road, not a car's height: at 55 cells a second up it came down on the next car's roof.
+        const py = Math.min(12, Math.max(3, (relSpeed - 28) * 0.06))
+        // Both the striking vehicle and the woken street car dent immediately on impact, and the woken car is drivable (#61).
+        if (m.thing) o.alive.hit(m.thing, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 80)
+        pending.set(c, { inside: true, push: [px, py, pz], asked: now, then: (thing: Thing) => o.alive.hit(thing, hitAt, [-nx, 0, -nz], hitSpeed, hitSpeed * 80) })
+        void wake(c, pending.get(c)!)
+        // Immediate tactile recoil on the striking vehicle.
+        if (recoil > 0) shove(m, -nx * recoil, m.ridden ? Math.min(12, recoil * 0.08) : 0, -nz * recoil)
+        crashCountStat++
+        // Scatter nearby pedestrians & briefly alert nearby traffic.
+        crashShocks.push({ at: hitAt, radius: 14 + force * 24, t: o.clock() })
+        if (crashShocks.length > 16) crashShocks.shift()
+        for (const tCar of traffic) if (Math.hypot(tCar.x - hitAt[0], tCar.z - hitAt[2]) < 260) tCar.shaken = now - 2.5
+        if (m.ridden || closing > 30) o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: c.model.name, woke: true })
+      } else if (m.thing && closing > 0 && now - (c.hitAt ?? -99) > 0.45) {
+        // What has no motor does not wake (cable cars, trams, buses): solid. The mover is thrown back off it; whoever
+        // drives is dented, with sparks and the sound.
+        c.hitAt = now
+        const bounce = m.ridden ? Math.max(24, Math.max(closing, relSpeed * 0.5) * 1.25) : closing * 1.15
+        shove(m, -nx * bounce, m.ridden ? Math.min(18, 4 + bounce * 0.1) : 0, -nz * bounce)
+        if (m.ridden || closing > 30) {
+          o.alive.hit(m.thing, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 120)
           crashShocks.push({ at: hitAt, radius: 14 + force * 20, t: o.clock() })
           if (crashShocks.length > 16) crashShocks.shift()
           o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: c.model.name, woke: false })
         }
-        return
       }
-      if (now - (c.hitAt ?? -99) > 3.0) tryNearMiss(c.id, c.x, c.y, c.z, cfx, cfz, cHalfL, cHalfW, gap)
     }
-    for (const c of [...parked.values()]) checkCar(c)
-    for (let i = traffic.length - 1; i >= 0; i--) checkCar(traffic[i])
-    for (let i = depotCars.length - 1; i >= 0; i--) checkCar(depotCars[i])
-    for (const c of cables) checkCar(c)
-    for (const c of trams) checkCar(c)
+    for (const m of movers) {
+      for (const c of [...parked.values()]) checkCar(m, c)
+      for (let i = traffic.length - 1; i >= 0; i--) if (traffic[i]) checkCar(m, traffic[i])
+      for (let i = depotCars.length - 1; i >= 0; i--) if (depotCars[i]) checkCar(m, depotCars[i])
+      for (const c of cables) checkCar(m, c)
+      for (const c of trams) checkCar(m, c)
+    }
     // Also detect high-speed near-misses past already-awake street cars (excluding the player's own vehicle).
-    if (nearMissEligible) {
+    const rider = movers[0]?.ridden ? movers[0] : null
+    if (rider && nearMissEligible) {
       for (const c of living) {
         if (!c.thing || c.thing === riding) continue
         const cw = o.alive.where(c.thing)
-        if (!cw || Math.abs(cw.at[0] - rx) > CRASH_SCAN || Math.abs(cw.at[2] - rz) > CRASH_SCAN || Math.abs(cw.at[1] - ry) > 35) continue
-        const gap = obbOverlap(rx, rz, rfx, rfz, rHalfL, rHalfW, cw.at[0], cw.at[2], cw.front[0], cw.front[2], c.model.long * 0.5, c.model.wide * 0.5)
-        tryNearMiss(c.id, cw.at[0], cw.at[1], cw.at[2], cw.front[0], cw.front[2], c.model.long * 0.5, c.model.wide * 0.5, gap)
+        if (!cw || Math.abs(cw.at[0] - rider.x) > CRASH_SCAN || Math.abs(cw.at[2] - rider.z) > CRASH_SCAN || Math.abs(cw.at[1] - c.model.size[1] * 0.5 - rider.y) > 35) continue
+        const gap = obbOverlap(rider.x, rider.z, rider.fx, rider.fz, rider.halfL, rider.halfW, cw.at[0], cw.at[2], cw.front[0], cw.front[2], c.model.long * 0.5, c.model.wide * 0.5)
+        tryNearMiss(rider, c.id, cw.at[0], cw.at[1], cw.at[2], cw.front[0], cw.front[2], c.model.long * 0.5, c.model.wide * 0.5, gap)
       }
     }
   }
@@ -2602,6 +2842,7 @@ export function street(o: {
       for (const c of showcase) show(c, view)
       lap('showcase')
       for (const c of pending.keys()) show(c, view)
+      landed(view)
       lap('showPending')
       showHeads(view, o.clock())
       lap('heads')
@@ -2619,7 +2860,8 @@ export function street(o: {
       lastCrowdShout = -99; crowdShoutsStat = 0; rtFilmersStat = 0; rtYellersStat = 0; stuckHonksStat = 0; lastStuckHorn = -99
       watching.clear()
       for (const depot of depots) { depot.inGateLift = 0; depot.outGateLift = 0; depot.lastSpawn = -99; depot.arrivals = 0; depot.departures = 0 }
-      crashCountStat = 0; nearMissCountStat = 0; hornResponsesStat = 0
+      crashCountStat = 0; nearMissCountStat = 0; hornResponsesStat = 0; sentAwayStat = 0; brokeStat = 0
+      for (const c of living) hide(c)
       traffic.length = 0; depotCars.length = 0; trams.length = 0; parked.clear(); gone.clear(); holds.clear(); living.clear(); cables.length = 0; pending.clear(); heard = o.shocks.length
       cue?.remove(); cue = null; beside?.(); beside = null
       rng = 0x2545f491; filled = false
@@ -2762,8 +3004,31 @@ export function street(o: {
       return out
     },
     cars(x, z, r) {
-      return [...parked.values(), ...traffic, ...depotCars, ...cables, ...trams].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ kind: c.kind, model: c.model.kind, service: c.model.serviceId ?? '', x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing, wait: c.wait ?? '', stuck: c.stuck ?? 0 }))
+      return [...parked.values(), ...traffic, ...depotCars, ...cables, ...trams].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ id: c.id, kind: c.kind, model: c.model.kind, service: c.model.serviceId ?? '', x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing, wait: c.wait ?? '', stuck: c.stuck ?? 0 }))
     },
+    snapshot(x, z, r) {
+      const out: ReturnType<Street['snapshot']> = []
+      const push = (c: Car) => {
+        if (Math.hypot(c.x - x, c.z - z) >= r) return
+        out.push({
+          id: c.id, kind: c.kind, model: c.model.kind, name: c.model.name,
+          x: Math.round(c.x * 10) / 10, y: Math.round(c.y * 10) / 10, z: Math.round(c.z * 10) / 10,
+          heading: Math.round(c.heading * 1000) / 1000, v: Math.round(c.v * 10) / 10,
+          long: c.model.long, wide: c.model.wide,
+          road: c.road?.key ?? '', lane: c.lane ?? 0, s: Math.round((c.s ?? 0) * 10) / 10,
+          wait: c.wait ?? '', stuck: Math.round((c.stuck ?? 0) * 10) / 10,
+          blocked: !!c.road?.blocked, living: !!c.thing,
+        })
+      }
+      for (const c of parked.values()) push(c)
+      for (const c of traffic) push(c)
+      for (const c of depotCars) push(c)
+      for (const c of cables) push(c)
+      for (const c of trams) push(c)
+      return out
+    },
+    get rng() { return rng },
+    set rng(v: number) { if (Number.isInteger(v) && v !== 0) rng = v | 0 },
     cable(x, z) {
       let best: { in: number; near: number } | null = null
       const t = o.clock()
@@ -2786,7 +3051,7 @@ export function street(o: {
       }
       return best
     },
-    get debug() { return { laps: Object.fromEntries(Object.entries(laps).map(([k, v]) => [k, Math.round(v * 100) / 100])), pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, reactive: { crashes: crashCountStat, nearMisses: nearMissCountStat, hornResponses: hornResponsesStat, crashLiving: activeCrashLiving() }, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
+    get debug() { return { laps: Object.fromEntries(Object.entries(laps).map(([k, v]) => [k, Math.round(v * 100) / 100])), pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, wakeLag, reactive: { sentAway: sentAwayStat, broke: brokeStat, crashes: crashCountStat, nearMisses: nearMissCountStat, hornResponses: hornResponsesStat, crashLiving: activeCrashLiving() }, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
     get red() { return shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; return q.sig && lightFor(junctionOf(q.sig), q.cdx!, q.cdz!, o.clock()) === 'red' }).map((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }, j = junctionOf(q.sig!); return { seed: p.seed, node: q.sig, u: Math.round(cycleAt(j, o.clock())), phase: phaseOf(j, q.cdx!, q.cdz!), axis: [j.ax, j.az].map((v) => Math.round(v * 100) / 100), dir: [q.cdx!, q.cdz!].map((v) => Math.round(v * 100) / 100), at: [Math.round(p.at[0]), Math.round(p.at[2])], jat: [Math.round(j.x), Math.round(j.z)] } }) },
     lineup(at, heading = 0, gap = 22) {
       for (const c of showcase) hide(c)

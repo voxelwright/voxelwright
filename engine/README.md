@@ -31,6 +31,7 @@ The controls and every address option are on [gameplay](../guide/gameplay.md).
 | --- | --- | --- |
 | `--port` | 5740 | The port, on 127.0.0.1 only |
 | `--reports` | `~/.village/engine/reports.jsonl` | Where device reports from pages are kept |
+| `--inbox` | `~/.village/engine/inbox` | Where in-game feedback (`/api/feedback`), play-session traces (`/api/session`) and inbox summaries (`/api/inbox`) are kept |
 | `--world` | none | A file that keeps one shared world across restarts |
 | `--realms` | beside the world file | A folder of realms, each a world with its own process |
 | `--idle` | 300 | Seconds before a realm nobody uses is stopped |
@@ -79,6 +80,10 @@ The servers and tools at the top level:
 | `plugins.mjs`, `plug.mjs` | Load engine plugins; have a running world pick them up again |
 | `about.mjs` | How a body the world moves finds its way round things |
 | `text.mjs` | The one rule for showing text people or models wrote |
+| `inbox.mjs` | Same-origin `/api/feedback`, `/api/session` and `/api/inbox` storage: writes feedback bundles, sibling canvas screenshots and session traces under `~/.village/engine/inbox` |
+| `scan.mjs` | Scans recent feedback and play sessions in the local inbox, clusters anomalies by root signature and prints prompt-injection-hardened agent briefs (`--brief <id>`) |
+| `replay.mjs` | Replays a saved feedback or session bundle in Chrome with WebGPU, restoring world edits, exact camera pose, foot/driving inputs and traffic PRNG |
+| `playtest.mjs` | Automated & AI-scriptable (`--script actions.json`) open-world GTA-style playtester (destroying buildings, stealing/driving/crashing cars, rubble parkour) that flushes telemetry to the inbox |
 | `live.mjs` | Serves main from a checkout of its own after each merge |
 
 ## Checks and tools
@@ -97,6 +102,9 @@ node test/drive-smooth.mjs --curve    # what going at 0, 60, 120 and 180 km/h co
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march, A and B measured turn about
 node test/look.mjs --out file.png --at 0,40,0 --look 20,-8   # one picture with given settings
 node test/read.mjs                # the device reports the server kept
+node playtest.mjs --scenarios all # automated GTA-style playtest into the local inbox
+node scan.mjs --since 24h         # cluster recent feedback & session anomalies (add --brief <id>)
+node replay.mjs <bundle.json>     # deterministically replay a saved feedback or session bundle
 ```
 
 Iterate with `--changed`, then run everything once on the head you report. `test/changed.mjs` maps files to checks. Every module of the page comes in through `page/main.ts`, so a change there or in the core runs everything.

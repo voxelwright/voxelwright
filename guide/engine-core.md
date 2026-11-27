@@ -20,6 +20,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 - **Edit** (`Edit` in `engine/core/src/lib.rs`). `Ball`, `Runs`, `Rows` or `Fine`. `fill_of` makes a sector by running the place's rules (`city::make`), then applying the edits that reach it in order.
 - **Level** (`lod` in the code). The core makes a sector at any coarseness. At level `lod` a cell stands for 2^lod finest cells each way.
 - **Bodies** (`engine/core/src/bodies.rs`). Boxes of cells that came loose. They fall, collide and turn back into world cells when they come to rest. Living things and people's bodies are bodies with a motor (`engine/core/src/bodies/living.rs`).
+- **Hull** (`engine/core/src/bodies/hull.rs`). What one rolling vehicle is to another: the rectangle round its cells at each height, so the cabin and the boot are in it and the air over the bonnet is not. Other pairs of bodies meet cell by cell. A car is a hollow shell, so two cars meet as hulls and are pushed apart one way: the way their boxes overlap least, or, when one is more than 0.5 m inside the other (`INSIDE`), back the way it came in. Up and down only when they share under 40% of the lower one's height (`OVER`), so a car is not lifted onto the one it rear-ends.
 
 ## Modules
 
@@ -34,6 +35,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `kinds.rs` | Materials, flags, palette, what a material weighs and how it breaks. |
 | `support.rs` | What stands and what falls after an edit. |
 | `bodies.rs`, `bodies/living.rs` | Loose bodies, living things, people's bodies. |
+| `bodies/hull.rs` | How two rolling vehicles meet and part, and where a vehicle put into another's place ends up. |
 | `fire.rs`, `water.rs` | Fire spreading from cell to cell. Water as depths over columns, not cells. |
 | `hash.rs` | Whole-number hashes and smooth noise that give the same result on every machine. |
 
@@ -58,7 +60,7 @@ The exports fall into groups by prefix:
 | `ground_at`, `feet_at`, `paving_at`, `top_at`, `world_kind` | Questions about the world. `world_kind(x, y, z)` returns the kind of one cell, edits included, as the solver's copy holds it (0 for air). `top_at(x, z)` answers from the land's rule alone, before any edit. |
 | `world_edit`, `world_regrow`, `world_forget` | The solver's copy of the world, which loose bodies collide with. |
 | `bodies_*` | Blasts, fire, thrown balls, moving what is loose. |
-| `living_*` | Living things and people's bodies: spawn, drive, `living_drive_aux` (boost, rain wetness, surface grip), walk, place. |
+| `living_*` | Living things and people's bodies: spawn, drive, `living_drive_aux` (boost, rain wetness, surface grip), walk, place. `living_place` moves a rolling vehicle out of any vehicle that is coming into the place it is put, ahead of it, and moves on the vehicles standing where it lands. |
 | `material_weighs` | Sets a material's weight while the core runs. |
 
 ## The edit format

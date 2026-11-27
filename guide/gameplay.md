@@ -74,6 +74,7 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Hour back or forward 30 minutes | [ and ] | Hour fader, in settings | - |
 | Rain on or off | R | Rain, in settings | - |
 | Reset the world | Backspace | Reset world, in settings | - |
+| Report an issue (canvas + last 30 s trace) | F8, `/bug <note>` on the ask bar, or Report in settings | Report, in settings | - |
 | Mirrors, shadows, traced shadows, heat view | Shift+M, L, K, H (on foot) | - | - |
 | In a [shared world](/multiplayer): pick up, throw, portal, realm wheel | G, T, P, Tab | - | - |
 
@@ -194,9 +195,12 @@ Only lamp cells (material 15) on the car you ride light up (`engine/page/pieces.
 
 Traffic cars are drawn and steered by the page, not simulated as bodies (`engine/page/street.ts`). They drive within 260 m of the eye at speeds set by the street's size, follow the car ahead, slow for turns and obey signals (`CYCLE`, `GREEN`, `AMBER`), stop signs and turn order. How many there are follows the hour (`TRAFFIC`). They stop for a few seconds after a blast nearby.
 
+No vehicle is set down on another. A car, a bus or a streetcar is placed only where its outline is clear of every vehicle that drives or lives there (`taken`). A streetcar's path is its rails, which turn across the traffic's lanes. So it looks for whatever drives or lives along its rails, as its 14 m body will stand there every 2.4 m for 40 m (`railGap`), whichever way that vehicle heads, and stops short of it. A car takes another car coming the other way to keep to its own lane. A streetcar, cable car or bus is in a car's way by where its sides are (`inPath`), whichever way it heads and wherever its middle is.
+
 They react to you:
 
-- **Crashes.** Hit a car and it wakes as a real drivable body with its interior, is knocked by the impact, and both vehicles dent immediately, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams bounce you off and dent your car. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
+- **Crashes.** Hit a car and it wakes as a real drivable body with its interior, is knocked ahead by the impact, and both vehicles dent immediately, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars, trams and buses bounce you off and dent your car. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
+- **Pileups.** Waking a car takes a few frames, and at 150 km/h a car covers 0.7 m a frame. So above 65 km/h the street looks for the touch as far ahead as the quickest of the last four wakings took (`wakeLag`, 20 to 150 ms), and the car wakes as it is reached. Under 22 km/h it looks one frame ahead, so a car you nudge does not jump before you touch it. If the striker is in its place by then, the solver puts the woken car clear ahead of it and shoves on the row it lands in ([the core](/engine-core)). A car thrown by a crash or a blast wakes the drawn cars it reaches in its turn at 22 km/h or more (`ROLLS`) and loses to each what it gives. Slower, the drawn car stops it and stays asleep. When six already live, one that has come to rest is sent away to make room, the furthest and oldest first. The blow lifts the struck car 7 cm at most, never a car's height.
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
 - **PayMo robotaxis.** Open the map, select **PayMo Station** and choose **Visit** to reach the six charging bays on Stockton Street between Beach and North Point. More PayMos drive nearby as cars leave and return to the depot. Look for the short nose, white roof and wide sensor bar above the Ojai’s windshield. A PayMo occasionally stalls at an intersection or on a narrow street. Its amber hazards flash, drivers behind it honk, and pedestrians stop at the curb to yell or hold up phones to film. When the car clears, they resume their walk. Press **E** beside a stopped car to drive it.
@@ -274,7 +278,7 @@ SF now also asks `/weather` every 10 minutes. On the public site a Worker answer
 
 `engine/page/weather.ts` eases between weathers: rain over 5 s, cloud over 6 s, fog over 12 s. Fog rolls in from the west as a bank whose top is 140 m up. Rain, fog and cloud turn more windows and lamps on.
 
-The panel also has an hour fader, weather buttons, graphics presets (Low, Medium, High), a dynamic resolution switch with a target frame rate, and Reset world. Moving the fader, choosing a weather or pressing [ or ] takes the sky out of its mode. The choice is kept in the browser. `?hour=` or `?rain=` pins the sky instead.
+The panel also has an hour fader, weather buttons, graphics presets (Low, Medium, High), a dynamic resolution switch with a target frame rate, Reset world, and a Report… key beside Credits that opens the F8 feedback dialog. Moving the fader, choosing a weather or pressing [ or ] takes the sky out of its mode. The choice is kept in the browser. `?hour=` or `?rain=` pins the sky instead.
 
 ## Signs and the banner plane
 
@@ -328,6 +332,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `haze`, `clouds` | Realm | Scale the realm's haze and clouds |
 | `hud=wheel`, `context`, `quiet`, `classic` | Realm | The style of play controls |
 | `debug=1` | Realm | Show the line of numbers |
+| `telemetry=1` | Realm | Enable posting `/api/feedback` and `/api/session` traces on a local realm build |
 | `status=1` | Both | Show the status line on a phone |
 | `boards=0`, `boards=edit` | Realm | No signs, or the sign editor |
 | `face=zakon`, `face=block` | Realm | The typeface for signs and keys |
@@ -368,7 +373,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Seat, wheels, summoning | `engine/page/cockpit.ts`, `engine/page/wheels.ts`, `engine/page/summon.ts` | `engine/test/seat-view.mjs` (the seat) |
 | Radio, pass-by whooshes | `engine/page/sound/radio.ts` | `engine/test/radio.mjs` |
 | Stunts | `engine/page/stunts.ts` | `engine/test/stunts.mjs` |
-| Traffic & robotaxis | `engine/page/street.ts`, `engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts` | `engine/test/street.mjs`, `engine/test/sf-robotaxi.mjs` |
+| Traffic & robotaxis | `engine/page/street.ts`, `engine/page/robotaxi-services.ts`, `engine/page/ojai-sculpt.ts`, `engine/page/robotaxi.ts` | `engine/test/street.mjs`, `engine/test/crash-stack.mjs`, `engine/test/sf-robotaxi.mjs` |
 | HUD | `engine/page/hud.ts`, `engine/page/play-hud.ts`, `engine/page/radial.ts` | `engine/test/sf-hud.mjs` |
 | Map and GPS | `engine/page/minimap.ts`, `engine/page/gps.ts` | `engine/test/sf-map.mjs` |
 | Gamepad | `engine/page/gamepad.ts` | `engine/test/gamepad.mjs` |
@@ -376,6 +381,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Signs | `engine/page/boards.ts`, `engine/page/signs.ts` | `engine/test/sf-boards.mjs`, `engine/test/sf-leaving.mjs`, `engine/test/sf-type.mjs` |
 | Eggs, lockers | `engine/page/eggs.ts`, `engine/page/lockers.ts` | `engine/test/sf-eggs.mjs`, `engine/test/sf-lockers.mjs` |
 | Wand, spells | `engine/page/wand.ts`, `engine/page/spells.ts` | `engine/test/wand.mjs`, `engine/test/spells.mjs` |
+| Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 

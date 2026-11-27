@@ -119,6 +119,32 @@ export function place(lat: number, lon: number): { frame: string; x: number; z: 
   const E = 0.9996 * A * east, N = 0.9996 * A * north + (lat < 0 ? 10_000_000 : 0), top = Math.ceil(N / 250_000) * 250
   return { frame: `${zone}${lat < 0 ? 's' : 'n'}${top}`, x: Math.round(E * 10), z: Math.round((top * 1000 - N) * 10) }
 }
+/** Inverse of `place`: world cell coordinates (x, z) in `frame` (default `FRAME`) back to WGS84 latitude & longitude. */
+export function latLon(x: number, z: number, frame = FRAME): { lat: number; lon: number } | null {
+  const m = /^(\d{1,2})([ns])(\d+)$/.exec(frame)
+  if (!m) return null
+  const zone = Number(m[1]), south = m[2] === 's', top = Number(m[3])
+  const E = x / 10, N = top * 1000 - z / 10 - (south ? 10_000_000 : 0)
+  const a = 6378137, f = 1 / 298.257223563, n = f / (2 - f), k0 = 0.9996
+  const A = (a / (1 + n)) * (1 + n ** 2 / 4 + n ** 4 / 64)
+  const beta = [n / 2 - (2 * n ** 2) / 3 + (37 * n ** 3) / 96, n ** 2 / 48 + n ** 3 / 15, (17 * n ** 3) / 480]
+  const delta = [2 * n - (2 * n ** 2) / 3 - 2 * n ** 3, (7 * n ** 2) / 3 - (8 * n ** 3) / 5, (56 * n ** 3) / 15]
+  const xi = N / (k0 * A), eta = E / (k0 * A)
+  let xiP = xi, etaP = eta
+  beta.forEach((b, j) => { const k = 2 * (j + 1); xiP -= b * Math.sin(k * xi) * Math.cosh(k * eta); etaP -= b * Math.cos(k * xi) * Math.sinh(k * eta) })
+  const chi = Math.asin(Math.max(-1, Math.min(1, Math.sin(xiP) / Math.cosh(etaP))))
+  let phi = chi
+  delta.forEach((d, j) => { phi += d * Math.sin(2 * (j + 1) * chi) })
+  const lam = Math.atan2(Math.sinh(etaP), Math.cos(xiP))
+  return { lat: Math.round((phi * 180 / Math.PI) * 1e6) / 1e6, lon: Math.round(((zone * 6 - 183) + lam * 180 / Math.PI) * 1e6) / 1e6 }
+}
+/** Level-0 tile key (`tx_tz`) and SF 1 km square name (`E_N`) for a cell coordinate in the Bay frame. */
+export function tileOf(x: number, z: number, tileSize = 2500): { tile: string; square: string } {
+  const tx = Math.floor(x / tileSize), tz = Math.floor(z / tileSize)
+  const eKm = Math.floor((500000 + x / 10) / 1000 * 10) / 10
+  const nKm = Math.floor((4250000 - z / 10) / 1000 * 10) / 10
+  return { tile: `0/${tx}_${tz}`, square: `${eKm.toFixed(1)}_${nKm.toFixed(1)}` }
+}
 /** `&ll=latitude,longitude`: where on Earth the page starts; the Bay where it does not say. */
 const asked_ll = ll?.split(',').map(Number)
 const there = STREAM && asked_ll?.length === 2 && asked_ll.every(Number.isFinite) ? place(asked_ll[0], asked_ll[1]) : null
