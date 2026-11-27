@@ -204,6 +204,7 @@ They react to you:
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
 - **PayMo robotaxis.** Open the map, select **PayMo Station** and choose **Visit** to reach the six charging bays on Stockton Street between Beach and North Point. More PayMos drive nearby as cars leave and return to the depot. Look for the short nose, white roof and wide sensor bar above the Ojai’s windshield. A PayMo occasionally stalls at an intersection or on a narrow street. Its amber hazards flash, drivers behind it honk, and pedestrians stop at the curb to yell or hold up phones to film. When the car clears, they resume their walk. Press **E** beside a stopped car to drive it.
+- **Neighborhood storefronts, town squares and gathering crowds.** Commercial corridors and neighborhood squares across San Francisco stream from `/bay/places.json` (`engine/page/neighborhood.ts`, `?neighborhood=0` to disable). Storefronts wear fascia signboards, projecting blade signs and category-matched sidewalk life (café patio umbrellas, flower stands, bookstore racks, produce crates, A-frame menu boards). Big trademarked chains use configurable GTA-style parody names and sign themes from `engine/sf/brands.json` (for example, Whole Moods Market, Bullseye Mart, Starbuxx, Wallgreens). Community squares and civic plazas (`engine/sf/plazas.json`, such as Noe Valley Town Square, Patricia's Green, Jane Warner Plaza and Washington Square) feature timber pergola pavilions, overhead string lights, plaza entrance archways, benches at real OSM coordinates, Little Free Libraries, daytime farmers-market stalls, and seated/chatting crowds that follow the hour and weather.
 
 ### Stunts
 
@@ -291,7 +292,7 @@ The site's navigation stands in the city as things you would see from the park (
 
 Click or tap a board and the eye flies to it, then opens its link. A link to another site shows a card asking to open it in a new tab (`engine/page/leaving.ts`). O opens the board ahead. Every board is also a link in the page for keyboards and screen readers.
 
-What a sign shows is set through `realm.signs` (`engine/page/signs.ts`): `realm.signs.set(id, content)` takes `{ text }`, `{ image }`, `{ video }`, or `null` for its own. Lettering takes text only. When the realm runs in a frame, `engine/page/host.ts` lists the messages it sends the host page (`ready`, `error`, `navigate`, `engaged`, `back`) and the ones it takes (`fly`, `open`, `signs.set`, `explore`).
+What a sign shows is set through `realm.signs` (`engine/page/signs.ts`): `realm.signs.set(id, content)` takes `{ text }`, `{ image }`, `{ video }`, or `null` for its own. Lettering takes text only. When the realm runs in a frame, `engine/page/host.ts` lists the messages it sends the host page (`ready`, `error`, `navigate`, `engaged`, `back`) and the ones it takes (`fly`, `open`, `signs.set`, `explore`). It hears and tells only a host on a trusted origin, and a sign's `{ image }` must be this site's, `https:` or a raster picture drawn in the page ([what the page refuses](/engine-page#what-the-page-refuses)).
 
 The words are set in the kit's faces (`engine/page/typeface.ts`): `?face=zakon` (the default) or `?face=block`, each with a display and a compact set.
 
@@ -302,6 +303,7 @@ Eggs are surprises started by a phrase on the eggs' line (`/`), by a thing in th
 - **Things in the city** (`SPOTS` in `engine/page/eggs-things.ts`): a jukebox, a toy plane and a coin viewer on the EXPLORE roof, a fruit cart on the plaza below, an arcade cabinet on the BLOG roof, and a ringing payphone, a golden shield and an old TV in the park. Walk up and press E, or tap the cue.
 - **The first view** (`engine/page/eggs-first.ts`): between showings of the site's name, the banner shows a line for an egg. Tap it to start that egg. Blinking aircraft lamps on the Pyramid and the Salesforce Tower start eggs too.
 - **Window lockers** (`engine/page/eggs-lockers.ts`, `engine/sf/lockers.json`): in the first view some of the city's windows each hold an egg. A new one flickers like a television, an opened one glows green, a locked one is dim red. What you have opened is kept in the browser under `village.sf.lockers`.
+- **Sky-gap drone swarm & fog halo** (`engine/page/eggs-sky.ts`, `engine/page/eggs-pictures.ts`): video eggs play uncropped across both the city's lit windows and any open sky gaps (such as the upper half of a portrait phone or spaces between towers). An instanced GPU drone swarm lifts off in staggered curved waves from behind the skyline with an atmospheric fog halo, and smoothly re-forms over ~1 s when the camera turns or rotates; each egg opts in via `sky` (The Matrix stays windows-only).
 
 The public build has the procedural eggs only, including a silent code rain. The Rickroll, Bad Apple!!, the memes and the things that play them (jukebox, fruit cart, TV) appear only in a build with the private media. See [Private egg media](https://github.com/voxelwright/voxelwright/blob/main/deploy/README.md#private-egg-media).
 
@@ -317,14 +319,14 @@ A click casts the spell in hand, Fireball at first. Typing a spell's words on th
 
 ## Query parameters
 
-Add these to the page's address. "Realm" means the San Francisco realm, as `./world` serves it. "Server" means `/city` from the engine's page server, `engine/serve.mjs`.
+Add these to the page's address. "Realm" means the San Francisco realm, as `./world` serves it. "Server" means `/city` from the engine's page server, `engine/serve.mjs`. A number outside its range is kept to the nearest end of it, and one that is not a number is ignored ([what the page refuses](/engine-page#what-the-page-refuses)).
 
 | Parameter | Where | Does |
 | --- | --- | --- |
 | `at=x,y,z` | Both | Start the eye there, in metres, instead of the arrival |
 | `look=yaw,pitch` | Both | Start looking that way, in degrees |
 | `fov`, `roll` | Both | Lens width and roll, in degrees |
-| `ll=lat,lon` | Both | Start at that place on Earth in a Bay world (not in a shared world) |
+| `ll=lat,lon` | Both | Start at that place on Earth in a Bay world (not in a shared world). Two finite numbers, or it is ignored |
 | `first=0` | Realm | Skip the first view |
 | `walk=1` | Both | Start on foot |
 | `living=car`, `living=finecar` | Both | A test car in the street ahead |
@@ -353,10 +355,10 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `lobbies=1`, `master=`, `lobby=` | Both | Find and join lobbies through a master server |
 | `fly=1`, `breaks=0`, `seconds=` | Server | The measuring flight (the default at `/`) and its settings |
 | `shadows=0`, `mirrors=0`, `maps=0`, `heat=1`, `flat=1` | Both | Drawing switches, as the keys give |
-| `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale, march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
-| `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring |
+| `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale (0.25 to 1.5), march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
+| `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring (`fine` 0 to 2, `workers` 1 to 8, `pool` 16 to 2048 MiB) |
 | `panes`, `through`, `tries`, `fog`, `walk=loop` | Both | Glass, finer-cell and sea-fog settings, and a march variant, for measuring |
-| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring |
+| `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring. `far` and `farlanding` must be paths on this site; `farfaces` is 100,000 to 20,000,000 |
 | `portalworkers`, `portalkeeps` | Server | Workers and keep time for a portal's world |
 
 ## Where it lives and how it is checked

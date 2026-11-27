@@ -207,6 +207,7 @@ A face is five `u32` words, as the vertex shader in `far.ts` reads them:
 | `<out>/bay/marks.bin` | `int32` words: `MARK` (`0x4b52414d`), square count, segment count, each square as x0, z0, x1, z1, each segment as x0, z0, x1, z1, style | `bay.rs` `marks` and `page/marks.ts`: lane lines, crossings and rails |
 | `<out>/bay/marks-squares.bin` | The same with no segments | Every core, before it makes a sector |
 | `<out>/bay/map.bin` | `MAP1` (`0x3150414d`), version 1 or 2 | `parseMap` in `page/nav-data.ts`: the minimap and GPS. Written by `sf/map.mjs`. |
+| `<out>/bay/places.json` | JSON (served Brotli-compressed via `worker.mjs`) | `page/neighborhood.ts`: street-snapped storefronts (with configurable parody brands from `sf/brands.json`) and civic plazas (`sf/plazas.json`). Written by `sf/places.mjs`. |
 | `<out>/bay/heroes.json` | JSON | Landmarks made by rule in the core |
 
 ## How a release stays fixed

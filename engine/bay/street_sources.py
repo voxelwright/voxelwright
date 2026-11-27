@@ -19,6 +19,11 @@ SEMANTIC_BUILDING_TAGS = (
     "roof:material", "height", "building:levels", "historic", "tourism", "amenity", "wikidata",
 )
 SEMANTIC_PLACE_TAGS = ("name", "natural", "water", "leisure", "landuse", "amenity", "garden:type", "surface", "wikidata")
+KEEP_POI = set(
+    "name brand operator shop amenity cuisine leisure place area outdoor_seating addr:housenumber addr:street".split()
+)
+FURNITURE_AMENITIES = {"bench", "public_bookcase", "drinking_water", "fountain", "marketplace"}
+POI_AMENITIES = {"restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "bank", "cinema", "theatre", "marketplace"}
 
 
 def extract_semantics(items):
@@ -89,6 +94,9 @@ def acquire(name, path):
     ways = {}
     relations = []
     nodes = set()
+    pois = []
+    plazas = []
+    furniture = []
     for (kind, id_), item in items.items():
         tags = item.get("tags", {})
         if kind == "way" and ("highway" in tags or "railway" in tags):
@@ -97,6 +105,50 @@ def acquire(name, path):
                 "tags": {k: v for k, v in tags.items() if k in KEEP},
             }
             nodes.update(item["nodes"])
+        if kind == "way" and (
+            tags.get("place") == "square"
+            or (tags.get("highway") == "pedestrian" and tags.get("area") == "yes")
+            or (tags.get("leisure") in ("park", "garden", "common") and tags.get("name"))
+        ):
+            pts = [
+                [items["node", nid]["lon"], items["node", nid]["lat"]]
+                for nid in item.get("nodes", [])
+                if ("node", nid) in items
+            ]
+            if len(pts) >= 3:
+                plazas.append({
+                    "id": id_,
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                    "points": pts,
+                })
+        if kind == "node":
+            if tags.get("amenity") in FURNITURE_AMENITIES:
+                furniture.append({
+                    "id": id_,
+                    "amenity": tags["amenity"],
+                    "lon": item["lon"],
+                    "lat": item["lat"],
+                })
+            if tags.get("name") and (tags.get("shop") or tags.get("amenity") in POI_AMENITIES):
+                pois.append({
+                    "id": id_,
+                    "lon": item["lon"],
+                    "lat": item["lat"],
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                })
+        if kind == "way" and tags.get("name") and (tags.get("shop") or tags.get("amenity") in POI_AMENITIES):
+            pts = [
+                [items["node", nid]["lon"], items["node", nid]["lat"]]
+                for nid in item.get("nodes", [])
+                if ("node", nid) in items
+            ]
+            if pts:
+                pois.append({
+                    "id": id_,
+                    "lon": sum(p[0] for p in pts) / len(pts),
+                    "lat": sum(p[1] for p in pts) / len(pts),
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                })
         if kind == "relation" and (
             tags.get("type") == "restriction" or tags.get("route") == "tram"
         ):
@@ -141,6 +193,9 @@ def acquire(name, path):
                 "relations": relations,
                 "businesses": businesses,
                 "semantics": semantics,
+                "pois": pois,
+                "plazas": plazas,
+                "furniture": furniture,
             },
             stream,
             separators=(",", ":"),

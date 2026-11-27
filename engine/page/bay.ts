@@ -103,8 +103,14 @@ export const SQUARES: readonly string[] = !asked || asked === '0' || STREAM ? []
 export let ON = STREAM || SQUARES.length > 0
 /** Where on Earth the address says the page starts (`&ll=`): never in a world the server keeps, whose frame is its release's. */
 const ll = WORLD ? null : query.get('ll')
+/** `&ll=latitude,longitude` as two finite numbers on Earth, or null (#81: nothing else of the address reaches a worker's). */
+export const llAsked = (said: string | null): [number, number] | null => {
+  const v = said?.split(',').map((p) => (p.trim() === '' ? NaN : Number(p)))
+  return v?.length === 2 && v.every(Number.isFinite) && Math.abs(v[0]) <= 90 && Math.abs(v[1]) <= 180 ? [v[0], v[1]] : null
+}
+const asked_ll = llAsked(ll)
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = (STREAM ? `?bay=${asked}${ll ? `&ll=${ll}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
+export const BAY = (STREAM ? `?bay=${encodeURIComponent(asked!)}${asked_ll ? `&ll=${encodeURIComponent(asked_ll.join(','))}` : ''}` : SQUARES.length ? `?bay=${SQUARES.map(encodeURIComponent).join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
@@ -148,8 +154,7 @@ export function tileOf(x: number, z: number, tileSize = 2500): { tile: string; s
   return { tile: `0/${tx}_${tz}`, square: `${eKm.toFixed(1)}_${nKm.toFixed(1)}` }
 }
 /** `&ll=latitude,longitude`: where on Earth the page starts; the Bay where it does not say. */
-const asked_ll = ll?.split(',').map(Number)
-const there = STREAM && asked_ll?.length === 2 && asked_ll.every(Number.isFinite) ? place(asked_ll[0], asked_ll[1]) : null
+const there = STREAM && asked_ll ? place(asked_ll[0], asked_ll[1]) : null
 /** The frame this page's cells are counted in, and where it starts in it (the Bay's own start where null). */
 export const FRAME = LOCAL?.release ? '10n4250' : (there?.frame ?? '10n4250')
 export const START: [number, number] | null = there ? [there.x, there.z] : WORLD?.release && WORLD.arrive ? [WORLD.arrive.at[0], WORLD.arrive.at[2]] : null
@@ -263,10 +268,30 @@ export const water = () => ({ sea: seaKeys, unlisted })
 /** Where the tiles come from, read once: in the page only (a worker is told what it needs by the page). */
 export const where = (): Promise<Source> => (source ??= WORLD?.pointer ? released(new URL(WORLD.pointer, location.href)) : LOCAL?.release ? released(new URL(LOCAL.release, location.href)) : served())
 
-/** How much a device may hold (#450): a phone's tab is killed long before a laptop's. */
-export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4) < 600 ? 'phone' : 'desktop'
-/** What one device class may hold: tiles kept by each core, at each level, and tile bytes the page keeps for its workers. */
-export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } : { keep: [28, 12, 8], bytes: 96 << 20 }
+/**
+ * How much a device may hold (#450, #81): a phone's tab is killed long before a laptop's, and a tablet's (a touch
+ * screen under 900 points on its short side, or a touch device that says it has 4 GB or less) in between. Read from
+ * what the browser says: a worker, which has no screen, says desktop, and is told what to hold by its page.
+ */
+export function tierOf(d: { touch: number; short: number; memory?: number }): 'phone' | 'tablet' | 'desktop' {
+  if (!(d.touch > 0)) return 'desktop'
+  if (d.short < 600) return 'phone'
+  return d.short < 900 || (d.memory !== undefined && d.memory <= 4) ? 'tablet' : 'desktop'
+}
+export const TIER = typeof navigator === 'undefined' ? 'desktop' : tierOf({ touch: navigator.maxTouchPoints ?? 0, short: Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4), memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory })
+/** The device class most of the page asks about: a tablet draws as a desktop does, and holds less (`HOLD`, `BUDGET`). */
+export const DEVICE: 'phone' | 'desktop' = TIER === 'phone' ? 'phone' : 'desktop'
+/**
+ * What one device class may hold: tiles kept by each core, at each level, and tile bytes the page keeps for its
+ * workers; the pool of the world's cells on the GPU (MiB), how many makers of sectors, and the far model's faces.
+ */
+export const BUDGETS = {
+  phone: { keep: [12, 4, 4], bytes: 24 << 20, pool: 128, workers: 2, faces: 3_000_000 },
+  tablet: { keep: [20, 8, 6], bytes: 48 << 20, pool: 192, workers: 3, faces: 6_000_000 },
+  desktop: { keep: [28, 12, 8], bytes: 96 << 20, pool: 256, workers: 6, faces: 12_000_000 },
+} as const
+export const BUDGET = BUDGETS[TIER]
+export const HOLD: { keep: number[]; bytes: number } = { keep: [...BUDGET.keep], bytes: BUDGET.bytes }
 
 /** The tiles the page holds for its cores: each fetched once, the last wanted kept up to `HOLD.bytes`. */
 const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number; hits: number }>()
@@ -484,6 +509,8 @@ const markedSquares = () => (squaring ??= (async () => {
 export const marks = () => markFile('marks.bin', 'the roads are bare asphalt until they come')
 /** The 3D minimap and road navigation graph (map.bin, sf/map.mjs): fetched lazily once the visitor engages so cold load stays lean. */
 export const mapData = () => markFile('map.bin', 'the 3D minimap and GPS map are unavailable until loaded')
+/** Neighborhood storefronts, GTA-style parody brands, and civic plazas (places.json, sf/places.mjs): fetched lazily after first view. */
+export const placesData = () => markFile('places.json', 'neighborhood storefronts and plazas are unavailable until loaded')
 
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {
@@ -698,6 +725,23 @@ export const names = async (nearAt?: readonly [number, number], margin = 1200): 
   return (await Promise.all(wanted.map((e) => loadNames(e.url)))).filter((n): n is Names => !!n)
 }
 
+/** How many squares' names `whereabouts` keeps (#81): the nearest; a drive across the city does not hold all 155. */
+export const NAMES_KEPT = 32
+/**
+ * Lets the squares furthest from (x, z) go once more than `NAMES_KEPT` are held, never one the eye is near (the
+ * margin `whereabouts` fetches by): `gone` is told each one's square and address, to forget it was asked.
+ */
+export function forgetFar<T extends { box: readonly [number, number, number, number] | null }>(held: Map<string, T>, x: number, z: number, gone: (square: string, url: string) => void, entries: readonly { square: string; url: string }[], most = NAMES_KEPT): void {
+  if (held.size <= most) return
+  const far = (b: T['box']) => (b ? Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) : 0)
+  const order = [...held].filter(([, v]) => !nearBox(v.box, x, z, 600)).sort((a, b) => far(b[1].box) - far(a[1].box))
+  for (const [square] of order) {
+    if (held.size <= most) break
+    held.delete(square)
+    gone(square, entries.find((e) => e.square === square)?.url ?? '')
+  }
+}
+
 /**
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the
  * place is made from. `at` is the eye's place in cells. Nothing here says who lives anywhere: the data does not.
@@ -742,6 +786,7 @@ export async function whereabouts(at: () => [number, number], /** Whose else the
   const update = () => {
     const [x, z] = at()
     ensure(x, z)
+    forgetFar(loaded, x, z, (square, url) => { asked.delete(square); namedCache.delete(url) }, entries)
     let street = '', least = 400 ** 2
     let address: Names['addresses'][number] | null = null, best = 300 ** 2
     for (const s of loaded.values()) {

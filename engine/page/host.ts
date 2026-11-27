@@ -16,7 +16,43 @@
 //
 // A realm run as a page of its own has no host: nothing is sent, and a board opened takes the page there itself.
 
+// Only a host on an origin this realm trusts is heard or told (#81): this site itself, zahynailo.dev, and on a page
+// served from this machine, this machine's own pages on any port. Anything else framing the realm is neither heard
+// nor told what it does.
+
 export const embedded = typeof window !== 'undefined' && window.parent !== window
-export const tell = (type: 'ready' | 'error' | 'navigate' | 'engaged' | 'back', more: Record<string, unknown> = {}) => { if (embedded) window.parent.postMessage({ village: 'realm', type, ...more }, '*') }
-/** What the host asks: only the page that holds this one is heard. */
-export const hear = (each: (message: { type?: unknown; [key: string]: unknown }) => void) => addEventListener('message', (e) => { if (e.source === window.parent && e.data && e.data.village === 'realm') each(e.data) })
+const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])$/
+/** The origins a host may be on, for a realm whose own address is `here`. */
+export function allowed(origin: string, here: { origin: string; hostname: string }): boolean {
+  if (!origin || origin === 'null') return false
+  if (origin === here.origin || origin === 'https://zahynailo.dev') return true
+  if (!LOOPBACK.test(here.hostname)) return false
+  try { const u = new URL(origin); return u.protocol === 'http:' && LOOPBACK.test(u.hostname) && u.origin === origin } catch { return false }
+}
+/** The page that holds this one's origin, where it is one this realm trusts: from the browser's own list of them, or the address it came from. */
+const parentOrigin = (): string | null => {
+  if (!embedded) return null
+  // A host on this origin can be asked directly (and Firefox has no list of ancestors); another throws here.
+  try { if (window.parent.location.origin === location.origin) return location.origin } catch { /* another origin */ }
+  const here = { origin: location.origin, hostname: location.hostname }
+  const listed = (location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins?.[0]
+  if (listed) return allowed(listed, here) ? listed : null
+  try { const from = document.referrer && new URL(document.referrer).origin; if (from && allowed(from, here)) return from } catch { /* no address */ }
+  return null
+}
+let host = parentOrigin()
+/** What was to be told before the host's origin was known (a browser that says neither): told once a trusted host speaks. A few at most. */
+const owed: Record<string, unknown>[] = []
+export const tell = (type: 'ready' | 'error' | 'navigate' | 'engaged' | 'back', more: Record<string, unknown> = {}) => {
+  if (!embedded) return
+  const message = { village: 'realm', type, ...more }
+  if (host) window.parent.postMessage(message, host)
+  else if (owed.length < 16) owed.push(message)
+}
+/** What the host asks: only the page that holds this one is heard, and only from an origin this realm trusts. */
+export const hear = (each: (message: { type?: unknown; [key: string]: unknown }) => void) => addEventListener('message', (e) => {
+  if (e.source !== window.parent || !e.data || e.data.village !== 'realm') return
+  if (host ? e.origin !== host : !allowed(e.origin, { origin: location.origin, hostname: location.hostname })) return
+  if (!host) { host = e.origin; for (const m of owed.splice(0)) window.parent.postMessage(m, host) }
+  each(e.data)
+})

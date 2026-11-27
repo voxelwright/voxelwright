@@ -210,7 +210,7 @@ function readBay(buf) {
  * Compiles the San Francisco map binary (MAP1) from a release directory (`manifest.json` + `tiles/`),
  * the city street graphs (`packs/graph/`), `sf/street-tags.json` and `sf/heroes.json`.
  */
-export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-tags.json'), heroesPath = join(HERE, 'heroes.json') }) {
+export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-tags.json'), heroesPath = join(HERE, 'heroes.json'), extraPlaces = [] }) {
   const manifest = JSON.parse(readFileSync(join(releaseDir, 'manifest.json'), 'utf8'))
   const levels = [...manifest.levels].sort((a, b) => a.level - b.level)
   // Determine map extent: on full-city SF releases (>= 20 squares in manifest.names, where L2 spans 88x64 km out to
@@ -496,6 +496,14 @@ export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-t
     const [px, pz] = place(lat, lon)
     if (px >= x0 && px <= x1 && pz >= z0 && pz <= z1 && hasSquare(px, pz)) {
       if (!landmarks.some((l) => l.name === name)) landmarks.push({ name, x: px, z: pz, kind })
+    }
+  }
+  for (const ep of extraPlaces ?? []) {
+    if (!ep?.name || !Number.isFinite(ep.x) || !Number.isFinite(ep.z)) continue
+    if (ep.x < x0 || ep.x > x1 || ep.z < z0 || ep.z > z1 || !hasSquare(ep.x, ep.z)) continue
+    const lower = ep.name.toLowerCase()
+    if (!landmarks.some((l) => l.name.toLowerCase() === lower && Math.hypot(l.x - ep.x, l.z - ep.z) < 4000)) {
+      landmarks.push({ name: ep.name, x: ep.x, z: ep.z, kind: ep.kind === 'park' || ep.kind === 'hood' ? ep.kind : 'landmark' })
     }
   }
 

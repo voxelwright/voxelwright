@@ -35,6 +35,17 @@
   #loading.failed { z-index: 19; cursor: default; }
   #loading.failed canvas { filter: brightness(0.38) saturate(0.6); transition: filter 0.4s ease-out; }
   #loading.failed .card { display: none; }
+  /* Why the realm is not shown and what to do (#81, main.ts `failCard`): a card in the middle, over the dimmed view. */
+  .vw-fail { position: fixed; inset: 0; z-index: 46; box-sizing: border-box; margin: auto; height: fit-content; width: min(26rem, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; display: grid; gap: 10px; padding: 22px 22px 18px; border-radius: 14px; background: rgba(12, 16, 22, 0.82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: #e8ecf1; box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 12px 40px rgba(8, 12, 18, 0.45), 0 0 0 200vmax rgba(6, 9, 13, 0.4); font: 400 16px/1.45 -apple-system, system-ui, sans-serif; text-align: left; animation: loading-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .vw-fail h2 { margin: 0 0 4px; font: 400 21px/1.3 "Vox Zakon", system-ui, sans-serif; letter-spacing: 0.05em; text-transform: uppercase; }
+  .vw-fail p { margin: 0; color: #cfd6df; }
+  .vw-fail .keys { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .vw-fail button { min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; font: 600 16px/1 -apple-system, system-ui, sans-serif; color: #e8ecf1; background: rgba(232, 236, 241, 0.14); cursor: pointer; }
+  .vw-fail button.main { color: #10151c; background: #e8ecf1; }
+  .vw-fail button:focus-visible, .vw-fail a:focus-visible { outline: 2px solid #8cc4ff; outline-offset: 2px; }
+  .vw-fail .links { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
+  .vw-fail a { color: #a9d0ff; text-underline-offset: 3px; }
+  @media (max-width: 420px) { .vw-fail .keys button { flex: 1 1 100%; } }
   @keyframes loading-in { from { opacity: 0; translate: 0 8px; } }
   @keyframes loading-say { from { opacity: 0.35; translate: 0 2px; } }
   @keyframes loading-breathe { from { background: rgba(232, 236, 241, 0.2); } to { background: rgba(232, 236, 241, 0.55); } }
@@ -350,6 +361,8 @@
     // The view it would have opened on, clear and dimmed, under the page's own words.
     fail() {
       if (over) return
+      // (The site's notices read this, #81: nothing else is shown over why the realm did not open.)
+      document.documentElement.dataset.failed = '1'
       root.classList.add('failed'); root.removeAttribute('aria-valuenow'); root.setAttribute('aria-valuetext', 'Could not open')
       size()
     },

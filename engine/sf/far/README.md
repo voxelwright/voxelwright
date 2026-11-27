@@ -80,7 +80,7 @@ To put new far tiles or a new first-view cut into a release, restock it ([releas
 | `?farnear=` | 100 | Metres from the eye where faces begin inside the wedge |
 | `?farlight=fill,gain` | the listing's `light` | The faces' light |
 | `?fardetail=` | 0.75 | How many pixels across a face must be to be drawn |
-| `?farfaces=` | 12000000 | The most faces held |
+| `?farfaces=` | 12000000 (6M tablet, 3M phone) | The most faces held (clamped to 100,000–20,000,000) |
 | `?farlanding=URL` | | A first-view cut's listing, for a release without one |
 | `?farcutfit=` | 1.6 | How much taller than its tallest picture the first-view cut is still trusted |
 

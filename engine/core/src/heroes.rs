@@ -2426,17 +2426,17 @@ fn valley_planting(u: f32, y: f32, w: f32, s: f32) -> Option<Kind> {
     let dz = w - (pw as f32 + 0.20 + 0.60 * rnd(2)) * STEP;
     let radius = dx.hypot(dz);
     let leaf = kind(LEAVES, colour(6, 8));
-    // The central display grades from a low edging to taller flowering drifts.
+    // The central display grades smoothly over the front 17 m from a low manicured edging to taller flowering drifts.
     let margin = if w > 56.0 && (u - 0.8).abs() < 2.2 {
-        ((95.7 - w) * 0.11).clamp(0.0, 1.0) * (2.1 - (u - 0.8).abs()).clamp(0.15, 1.0)
+        ((95.7 - w) * 0.058).clamp(0.0, 1.0) * (2.1 - (u - 0.8).abs()).clamp(0.15, 1.0)
     } else { 1.0 };
-    // Plant leaves overlap into a bank with an uneven top. Small rosettes
-    // emerge above it, giving the sparse spikes a leafy silhouette at the foot.
+    // Plant leaves overlap into a softly mounded cushion. Small rosettes emerge above it
+    // without tall jagged foreground cubes near the camera.
     let ground_cover = crate::hash::noise((u * 10.0).floor() as i32, (w * 10.0).floor() as i32, 5, 41);
-    let bank = 0.09 + 0.15 * ground_cover + (0.11 + 0.10 * margin) * (1.0 - radius / 0.28).max(0.0);
+    let bank = 0.09 + 0.08 * ground_cover + (0.09 + 0.09 * margin) * (1.0 - radius / 0.28).max(0.0);
     if y < bank {
-        let hue = if ground_cover > 0.63 { 6 } else { 7 };
-        return Some(kind(LEAVES, colour(hue, if y < bank - 0.10 { 6 } else { 5 })));
+        let hue = if ground_cover > 0.63 { 7 } else { 8 };
+        return Some(kind(LEAVES, colour(hue, if y < bank - 0.09 { 7 } else { 6 })));
     }
     let height = 0.14 + margin * (0.47 + 0.69 * rnd(3));
     if y > height { return None; }
@@ -2445,12 +2445,12 @@ fn valley_planting(u: f32, y: f32, w: f32, s: f32) -> Option<Kind> {
     // A slightly leaning spike ends in a green bud. Each coloured band is at
     // most one fine cell high; occasional paired cells stay part of the spike.
     let stem = (dx - (rnd(4) - 0.5) * 0.20 * t).hypot(dz - (rnd(5) - 0.5) * 0.14 * t);
-    if y < bank + 0.16 * margin && (dx + 0.65 * (y - bank)).abs() + dz.abs() < 0.14 {
-        return Some(kind(LEAVES, colour(6, 6)));
+    if y < bank + 0.14 * margin && (dx + 0.65 * (y - bank)).abs() + dz.abs() < 0.14 {
+        return Some(kind(LEAVES, colour(7, 7)));
     }
     let bells = margin > 0.25 && t > 0.47 && t < 0.95 && (height - y).rem_euclid(0.21) < 0.095;
     if bells && stem < 0.085 {
-        let bloom = [colour(21, 2), colour(22, 8), grey(2), colour(17, 8), WHITE][(drift % 5) as usize];
+        let bloom = [colour(21, 4), colour(22, 7), colour(20, 4), colour(17, 7), colour(18, 3)][(drift % 5) as usize];
         return Some(kind(LEAVES, bloom));
     }
     (stem < (0.044 + 0.032 * (1.0 - t)).max((s * 0.45).min(0.06))).then_some(leaf)

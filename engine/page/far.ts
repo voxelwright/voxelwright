@@ -30,10 +30,24 @@
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 //   ?farcutfit=1.6       how many times taller than the cut's tallest picture it is still trusted as the whole of the landing's
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
+import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, bounded, type Marcher, type View } from './march.ts'
+import { BUDGET as HELD } from './bay.ts'
 import { LOCKERS, SLOTS } from './lockers.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
+
+/**
+ * A path an address names for the far model or its landing cut (`?far=`, `?farlanding=`), where it is one of this
+ * site's own: a path from here with no scheme, no `//`, no `..` and no backslash, that stays on this origin. Else null
+ * (#81): a link must not swap the skyline for someone else's, or have the page tell another server who is looking.
+ */
+export function samePath(said: string | null | undefined, here: string = globalThis.location?.href ?? 'https://invalid/'): string | null {
+  if (typeof said !== 'string' || !said || said.length > 512) return null
+  let plain: string
+  try { plain = decodeURIComponent(said) } catch { return null }
+  for (const s of [said, plain]) if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.includes('//') || s.includes('\\') || /(^|\/)\.\.(\/|$)/.test(s) || /[\u0000-\u001f]/.test(s)) return null
+  try { const u = new URL(said, here); return u.origin === new URL(here).origin ? u.href : null } catch { return null }
+}
 
 const CODE = /* wgsl */ `
 struct V {
@@ -429,7 +443,7 @@ export interface Far {
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
   const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity, covers: () => false, onFallback: null }
-  const reachAsked = Number(query.get('farreach') ?? 500)
+  const reachAsked = bounded(query.get('farreach'), 500, 0, 20_000)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
   const file = base.endsWith('.json') ? base : `${base}far.json`
@@ -437,7 +451,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const listing = await fetch(file).then((r) => (r.ok ? (r.json() as Promise<Listing & { far?: Listing }>) : null)).then((l) => l?.far ?? l).catch(() => null)
   if (!listing || !Object.keys(listing.tiles).length) return none
   // The landing's cut: the release's, or one asked for by address (its own landing.json, its paths from there).
-  const landingAt = query.get('farlanding')
+  const landingAt = samePath(query.get('farlanding'))
   const landing: (Landing & { base: string }) | null = landingAt
     ? await fetch(landingAt).then((r) => (r.ok ? (r.json() as Promise<Landing>) : null)).then((l) => (l ? { ...l, base: new URL('.', new URL(landingAt, location.href)).href } : null)).catch(() => null)
     : listing.landing ? { ...listing.landing, base } : null
@@ -471,7 +485,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
 
   // ── Tiles ──
   const size = listing.size, bands = listing.bands, lods = listing.lods
-  interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; bind: GPUBindGroup; mid: number[] }[]; used: number }
+  interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; own: GPUBuffer; bind: GPUBindGroup; mid: number[] }[]; used: number }
+  /** Lets a band's buffers go: its faces and each of its sections' own uniforms. */
+  const drop = (h: Held) => { h.buffer.destroy(); for (const s of h.sections) s.own.destroy() }
   // A tile's slots: its bands, then (last) the landing's cut of it.
   interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; recs: (Rec | null)[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[]; full: boolean }
   const C = bands.length
@@ -528,7 +544,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
         // The tile's box is what its faces fill, once any are here (a face may reach past its tile).
         if (!t.bounded) { t.lo = [...s.lo]; t.hi = [...s.hi]; t.bounded = true }
         for (let a = 0; a < 3; a++) { t.lo[a] = Math.min(t.lo[a], s.lo[a]); t.hi[a] = Math.max(t.hi[a], s.hi[a]) }
-        return { s, bind: device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: own } }] }), mid: [0, 1, 2].map((a) => (s.lo[a] + s.hi[a]) / 2) }
+        return { s, own, bind: device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: own } }] }), mid: [0, 1, 2].map((a) => (s.lo[a] + s.hi[a]) / 2) }
       })
       t.held[band] = { band, buffer, bytes: faces.byteLength, sections, used: frame }
       stats.fetched++
@@ -588,8 +604,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   }
   /** The bands a tile `d` cells off needs: band k holds faces from bands[k] metres, which are `detail` pixels across out to bands[k] * focal / detail. */
   const needs = (d: number, focal: number, detail: number) => bands.map((least, k) => k === 0 || (d / 10) * detail < bands[k - 1] * focal)
-  /** Faces held at most: past this the furthest tiles' finer bands are let go. */
-  const BUDGET = Number(query.get('farfaces') ?? 12_000_000)
+  /** Faces held at most, by device class (bay.ts `BUDGETS`: 20 bytes each, 60 MiB on a phone): past this the furthest tiles' finer bands are let go. */
+  const BUDGET = bounded(query.get('farfaces'), HELD.faces, 100_000, 20_000_000, true)
   /** The lens (half its height's tangent) the wedge's faces begin nearer through: under 50 degrees, where at 720 pixels tall a cell of the march is over 3 pixels across (the realm's is 25). Not by the picture's own pixels: the page's scale moves with its load, and the foreground would flip between cells and faces. */
   const NARROW = Math.tan((50 * Math.PI) / 360)
   /** The faces' light (Listing `light`, or `?farlight=fill,gain`): the engine's own where neither says. */
@@ -604,7 +620,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   /** The tallest picture the cut is trusted for, pixels: its own tallest (sf/far/landing.mjs `--heights`) and some, `?farcutfit` times (a 1350 px picture of the cut was the bands' but for slivers at the edges, #523); a taller one draws finer faces than it kept. */
   const cutTall = landing?.heights?.length ? Math.max(...landing.heights) * Number(query.get('farcutfit') ?? 1.6) : 0
   /** How far past the reach a tile is still drawn, metres. */
-  const FURTHEST = Number(query.get('farthest') ?? 16_000)
+  const FURTHEST = bounded(query.get('farthest'), 16_000, 100, 50_000)
   let frame = 0
   let whole = true
   /** Until `shown` only the landing's cut of the view is fetched (`ready` says when it is here); then what the view needs; after `left`, the rest. */
@@ -619,7 +635,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   let kept: readonly number[] | null = null
 
   const self: Far = {
-    listing, reach: reachAsked, near: Number(query.get('farnear') ?? 100), detail: Number(query.get('fardetail') ?? 0.75), stats,
+    listing, reach: reachAsked, near: bounded(query.get('farnear'), 100, 0, 5_000), detail: bounded(query.get('fardetail'), 0.75, 0.05, 16), stats,
     get whole() { return whole },
     get ready() { return ready },
     shown() { first = false },
@@ -726,7 +742,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       t.full = all
       // The landing's cut is let go once every band the tile needs is here and the view is not the cut's own, or the eye has left the landing.
       const cut = t.held[C]
-      if (((all && !exact) || !there) && cut && cut !== 'coming') { cut.buffer.destroy(); t.held[C] = null }
+      if (((all && !exact) || !there) && cut && cut !== 'coming') { drop(cut); t.held[C] = null }
       const cutHeld = (!all || exact) && there && !!cut && cut !== 'coming'
       if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes; onCut = true }
       const cutting = there && t.listed[C]
@@ -763,7 +779,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     if (held > BUDGET) {
       const loose = tiles.flatMap((t) => t.held.map((h, k) => ({ t, h, k }))).filter((e) => e.k < C && e.h && e.h !== 'coming' && e.h.used < frame - 120) as { t: Tile; h: Held; k: number }[]
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
-      for (const e of loose) { if (held <= BUDGET * 0.9) break; e.h.buffer.destroy(); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
+      for (const e of loose) { if (held <= BUDGET * 0.9) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
     }
     // The faces' light was read off a clear afternoon: it is theirs as far as the day is clear (the march's own overcast).
     const fair = Math.max(0, Math.min(1, march.day)) * (1 - Math.max(march.rain, march.cloud, 0.2 * march.fog))
