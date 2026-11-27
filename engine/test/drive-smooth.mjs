@@ -12,6 +12,9 @@
 //
 // It fails where going fast costs more than standing does by more than the bounds below (other checks draw on this
 // GPU too, so a bound in milliseconds alone would be theirs to break), or where the world round the eye falls behind.
+// Then, in the town, it drives the coupe with every answer of the mover held until the next frame is drawn, as a mover
+// slow to answer does (San Francisco's is, of itself): drawn as the mover last said it the car stands in one frame and
+// jumps in the next, and drawn on to the frame's own time (main.ts `drawAhead`) it must go evenly.
 //   --curve   the same street at 0, 60, 120 and 180 km/h (`--speeds`), each twice in turn, then a stop: what each speed costs
 //   --car     the summoned coupe got into and driven flat out along the street by a pilot that only steers
 //   --ahead   that car four times in one session, drawn as the mover last said it and drawn on to the frame's time in turn
@@ -101,7 +104,8 @@ await page.addInitScript(() => {
   globalThis.Worker = class extends W {
     constructor(url, o) { super(url, o); this.__k = `from ${String(url).split('/').pop().split('?')[0].replace(/\.(ts|js)$/, '')}` }
     get onmessage() { return heard.get.call(this) }
-    set onmessage(f) { const k = this.__k, timed = wrap(k, f); heard.set.call(this, k === 'from mover' ? function (e) { P.heard.push(performance.now()); return timed.call(this, e) } : timed) }
+    // (The mover's answers can be held until the next frame has been drawn, `P.late`: what a mover slow to answer does.)
+    set onmessage(f) { const k = this.__k, timed = wrap(k, f); heard.set.call(this, k === 'from mover' ? function (e) { if (P.late) return void raf(() => setTimeout(() => { P.heard.push(performance.now()); timed.call(this, e) }, 0)); P.heard.push(performance.now()); return timed.call(this, e) } : timed) }
   }
   const port = Object.getOwnPropertyDescriptor(MessagePort.prototype, 'onmessage')
   Object.defineProperty(MessagePort.prototype, 'onmessage', { get: port.get, set(f) { port.set.call(this, wrap('tile asks', f)) } })
@@ -200,6 +204,16 @@ try {
     // What a busy GPU slows is measured once more with every turn on it held, and fails only if it is missed again (kit.mjs `timed`).
     const timings = reportOnly ? first : await timed({ check, first, firstAlone: !!rest, measure: async () => judged(await pass(how), false), passes: (j) => j.timings.every((c) => c.ok), say: (j) => j.timings.map((c) => `${c.ok ? '' : 'MISSED '}${c.what}`).join('; '), idle: (on) => page.evaluate((on) => { globalThis.engine.resting = on }, on) })
     results.pass = timings.summary
+    // A car whose mover answers late (every answer held until the next frame is drawn): drawn as the mover last said it,
+    // it stands in one frame and jumps in the next; drawn on to the frame's time (`drawAhead`), it goes evenly. In the
+    // town, whose own mover never answers late; in San Francisco it does of itself (`--ahead`).
+    if (!car && !sf && !reportOnly) {
+      const shownWith = async (ahead) => { const r = await pass({ mode: 'car', kmh: 80, seconds: 5, stand: 0, hold: 0, ahead, late: true }); return { ...evenness(r.frames), why: r.why } }
+      const said = await shownWith(false), on = await shownWith(true), uneven = (v) => (v.stood + v.jumped) / Math.max(1, v.frames)
+      results.late = { said, on }
+      check(!said.why && said.frames > 100 && uneven(said) > 0.3, `with the mover's answers held a frame late, a car drawn as last said stood in ${said.stood} and jumped in ${said.jumped} of ${said.frames} frames${said.why ? ` (${said.why})` : ''}`)
+      check(!on.why && on.frames > 100 && uneven(on) < 0.03, `and drawn on to the frame's time it stood in ${on.stood} and jumped in ${on.jumped} of ${on.frames} (off by ${on.off95} of a frame's way at the 95th of a hundred)${on.why ? ` (${on.why})` : ''}`)
+    }
   }
   if (arg('json', null)) writeFileSync(arg('json'), JSON.stringify(results))
 } finally {
@@ -264,7 +278,7 @@ async function sfRoute(page) {
  * In the page: the eye (or the coupe with the eye behind it) along the line. It stands at the start `stand` seconds
  * first; then goes `seconds` (a car: once it is above `kmh`), every frame kept; then stays where it stopped `hold` seconds.
  */
-async function run({ line, mode, kmh, seconds, stand, hold, scale, sunMost, freeze, ahead }) {
+async function run({ line, mode, kmh, seconds, stand, hold, scale, sunMost, freeze, ahead, late }) {
   const e = globalThis.engine, P = globalThis.__prof
   const dx = line.to[0] - line.from[0], dz = line.to[1] - line.from[1], length = Math.hypot(dx, dz), ux = dx / length, uz = dz / length
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -307,6 +321,7 @@ async function run({ line, mode, kmh, seconds, stand, hold, scale, sunMost, free
   let began = mode === 'eye' ? t0 : 0, done = null, stopAt = mode === 'eye' ? began + seconds * 1000 : Infinity, slow = 0, stopped = 0
   const finished = new Promise((r) => (done = r))
   P.cat = {}; P.loaf.length = 0; P.heard.length = 0; P.buffers = {}
+  P.late = !!late
   const stop = e.watch((gap) => {
     const now = performance.now()
     let at, speed = kmh
@@ -351,6 +366,7 @@ async function run({ line, mode, kmh, seconds, stand, hold, scale, sunMost, free
   if (thing) requestAnimationFrame(after)
   const why = await finished
   watching = false
+  P.late = false
   stop()
   release()
   return { why, still, buffers: P.buffers, frames, loaf: P.loaf.filter((l) => l.at >= began), heard: P.heard.filter((t) => t >= began).map((t) => t - began), tiles: e.tiles ? { ...e.tiles.tally } : null, crashed: e.world.stats.crashed, full: e.world.stats.full }
@@ -451,13 +467,14 @@ function judged(r, say) {
     { ok: moving.length > 0 && drew * tile <= share * BOUND.share, what: moving.length ? `the sun's tiles kept to their share of a moving frame: ${round(drew, 2)} a frame, ${moving.reduce((n, f) => Math.max(n, f.room.drew), 0)} at most, at ${round(tile, 2)} ms of the GPU a tile (${round(drew * tile, 2)} ms a frame; the share is ${round(share, 2)} ms)` : `the page gives the sun's tiles no share of a frame: ${s.tiles} a frame on average, ${going.reduce((n, f) => Math.max(n, f.cat.tiles ?? 0), 0)} at most` },
     // (The eye alone stops where it is told to. A car is another matter, and is not held to it.)
     ...(stopped.length ? [{ ok: drawn !== null, what: `stopped, every tile of the sun's maps was drawn and the world made in ${drawn ?? `more than ${BOUND.drawn}`} s (${stopped[0].sun} tiles were not when it stopped)` }] : []),
-    // (In San Francisco the makers fall behind from about 180 km/h, before this check and after: said, and held to nothing there.)
-    { ok: sf || s.wantedEnd <= BOUND.wanted, what: `${sf && s.wantedEnd > BOUND.wanted ? 'the makers fell behind' : 'the makers kept up'}: ${s.wanted} sectors wanted on average, ${s.wantedEnd} over the last third${sf ? '' : ` (${BOUND.wanted} allowed)`}` },
   ]
   const timings = [
     { ok: s.late - rest.late <= BOUND.late, what: `frames over 33 ms going at ${median} km/h: ${round(s.late * 100)}% (${s.over33} of ${s.frames}), standing ${round(rest.late * 100)}% (no more than ${BOUND.late * 100} points over)` },
     { ok: s.thread99 <= BOUND.thread99 && s.threadMost <= BOUND.threadMost, what: `the page's thread ${s.thread} ms a frame, ${s.thread99} at the 99th of a hundred (${BOUND.thread99} allowed), ${s.threadMost} at most (${BOUND.threadMost})` },
     { ok: s.march <= Math.max(rest.march * BOUND.march, rest.march + 1), what: `the march ${s.march} ms going, ${rest.march} standing (no more than ${BOUND.march} times it)` },
+    // (The makers are six threads of this machine, which other checks' work slows as it slows the GPU. In San Francisco
+    // they fall behind from about 180 km/h, before this check and after: said, and held to nothing there.)
+    { ok: sf || s.wantedEnd <= BOUND.wanted, what: `${s.wantedEnd > BOUND.wanted ? 'the makers fell behind' : 'the makers kept up'}: ${s.wanted} sectors wanted on average, ${s.wantedEnd} over the last third${sf ? '' : ` (${BOUND.wanted} allowed)`}` },
   ]
   return { held, timings, summary: { standing: rest, going: s, kmh: median, tiles: round(drew, 2), tileMs: round(tile, 2), drawn, why: r.why } }
 }
