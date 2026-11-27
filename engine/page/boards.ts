@@ -445,9 +445,12 @@ export async function boards(o: Needs): Promise<Boards> {
       // (Each frame, as a far face is made again when its size changes and a reset lays the boards again.)
       if (s.screen) s.screen.unlit = dark
       if (s.far) s.far.unlit = dark
-      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s, true); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
+      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face) { const cell = o.cell(s.shape.middle[0], s.shape.middle[1], s.shape.middle[2]); s.far.push = Number.isFinite(cell) ? cell * 1.8 : 0 } if (face && s.stale) paintFar(s, true); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
       if (!s.screen) continue
-      if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
+      if (s.b.type === 'digital') {
+        s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
+        if (!s.screen.hidden) { const cell = o.cell(s.shape.middle[0], s.shape.middle[1], s.shape.middle[2]); s.screen.push = Number.isFinite(cell) ? cell * 1.8 : 0 }
+      }
       else if (s.b.type === 'logo') { seat(s, view.eye); sharpen(s, view, to.size) }
     }
     if (turned) keep()
