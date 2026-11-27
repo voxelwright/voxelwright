@@ -190,6 +190,11 @@ check(lk0x === 0 && lk0y === 0 && approx(lk1x, 1) && approx(lk1y, 0), 'lookCurve
   gp.poll(1 / 60)
   check(keysFired.at(-1) === 'KeyV', 'D-pad Up edge-triggers KeyV (driver seat)')
 
+  // D-pad Right (15) -> KeyF (repair vehicle) while mounted.
+  currentPads = [makePad({ buttons: { 15: true } }).pad]
+  gp.poll(1 / 60)
+  check(keysFired.at(-1) === 'KeyF', 'D-pad Right edge-triggers KeyF (repair vehicle) while mounted')
+
   // Full reverse on LT alone.
   currentPads = [makePad({ buttons: { 6: 0.9 } }).pad]
   gp.poll(1 / 60)

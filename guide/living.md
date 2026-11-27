@@ -43,7 +43,7 @@ There are five ways a thing comes alive:
 | Made from words or a picture | The maker works out wheels, front, seat and motor from the thing's own cells. A car's 0 to 100 km/h is tried in the solver until it matches what was asked. | `engine/make/drivable.mjs` |
 | A reply of living cells | A reply of cells with `living`: scheme, motor, seats, eye, look and figures | `engine/make/alive.mjs` |
 | "make it drivable" | Words that point at the asker's own made thing bring it to life in place, on one ask that takes the old thing out | `asksToDrive` in `living.ts`, `aimed` in `engine/make/maker.mjs` |
-| A rule brings one | `world.thing(id, {like, at, yaw, colour})` sets down a kart, a car, a broom or a craft at once, with no model | `engine/rules/kept.mjs` |
+| A rule brings one | `world.thing(id, {like, at, yaw, colour})` sets down a kart, a car, a broom or a craft at once, with no model; `car` and `kart` carry 2.5 cm sculpted looks stored in `/world/fine/<kept>` | `engine/rules/kept.mjs`, `engine/page/car-sculpt.ts` |
 | Imported | `node make/import.mjs <build.json> --twin <twin.json>` (in `engine/`) turns a living car from the fast-voxels bench into a reply of living cells on the asker's own shelf (never `engine/make/kept/`), so typing its name makes it at once | `engine/make/import.mjs` |
 
 A rule drives a living thing as a rider does (`world.drive`), gives it a course to follow, seats people on it (`world.seat`) and tunes its motor for a while (`world.thing(id, {tough, top, power, ...})`). The world process steers a course and sets back on its wheels a thing that is wedged (`engine/rules/things.mjs`). Anything that can send a request drives one through `POST /world/drive`.
