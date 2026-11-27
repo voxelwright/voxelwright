@@ -24,10 +24,14 @@ export interface SummonOptions {
   street(): Street | null
   /** Optional citywide OSM street ways lookup (bay.ts `names`) for all 155 squares of San Francisco. */
   ways?(at: readonly [number, number], radius: number): Promise<{ ways: { line: readonly (readonly [number, number])[] }[] }[]>
+  /** Optional hook called once when the sculpted sports coupe data is pre-warmed (lets caller pre-build smooth faces off-thread). */
+  onPrewarm?(data: Omit<Making, 'low'>): void
 }
 
 export interface CarSummon {
   summon(): Promise<Thing | null>
+  /** Pre-sculpts and caches the sports coupe on an idle tick so the first summon has zero stutter. */
+  prewarm(): void
   clear(): void
   readonly car: Thing | null
 }
@@ -207,8 +211,22 @@ export function createCarSummon(opts: SummonOptions): CarSummon {
     return null
   }
 
+  let prewarmed = false
+  const prewarm = () => {
+    if (prewarmed) return
+    prewarmed = true
+    const run = () => {
+      const data = sportsCoupeData()
+      opts.onPrewarm?.(data)
+    }
+    const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    if (ric) ric(run, { timeout: 600 })
+    else setTimeout(run, 120)
+  }
+
   return {
     get car() { return active && active.alive ? active : null },
+    prewarm,
     clear() {
       if (active && active.alive && opts.alive.riding !== active) opts.alive.vanish(active)
       active = null

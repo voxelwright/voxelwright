@@ -27,6 +27,7 @@ import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { marksBytes, marksIn, said, squaresBytes } from './marks.mjs'
 import { buildMap } from './map.mjs'
+import { buildPlaces } from './places.mjs'
 import { releaseCredits } from '../page/release-credits.ts'
 import { seated } from './boards.mjs'
 
@@ -193,7 +194,10 @@ writeFileSync(join(out, 'bay/marks.bin'), marks)
 // The squares they cover alone, for every core at once (page/bay.ts); the marks come after the first picture.
 writeFileSync(join(out, 'bay/marks-squares.bin'), squaresBytes(marksMade))
 console.log(`  road marks: ${said(marks)}`)
-const mapMade = buildMap({ releaseDir: join(out, 'sf', dirname(pointer.manifest)), graphDir: GRAPHS })
+const placesMade = buildPlaces()
+writeFileSync(join(out, 'bay/places.json'), placesMade.bytes)
+console.log(`  neighborhoods: ${placesMade.summary}`)
+const mapMade = buildMap({ releaseDir: join(out, 'sf', dirname(pointer.manifest)), graphDir: GRAPHS, extraPlaces: placesMade.mapPlaces })
 writeFileSync(join(out, 'bay/map.bin'), mapMade.bytes)
 console.log(`  3D map & GPS: ${mapMade.summary}`)
 // The loader (page/loading.html): the realm's name and its first view under fog, there from the first byte (just after
@@ -265,7 +269,7 @@ put('sf/CREDITS.txt', [
   ...(farApart ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
   ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos and music (sf/eggs/), used as parody on the owner\'s ruling, for these eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira; music from the soundtrack of "The Matrix" (1999, the Wachowskis, Warner Bros.), as WMG / The Orchard Music. The meme clips, each as its uploader posted it on YouTube, its rights its makers\': ' + MEMES.filter((m) => EGG_VIDEOS.includes(`${m.id}.mp4`)).map((m) => `"${m.source}" (${m.by}, youtu.be/${m.youtube})`).join('; ') + '.'] : []),
   '',
-  'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0.',
+  'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0. Neighborhood places & plazas: Overture Maps Foundation (CDLA-Permissive-2.0), OpenStreetMap contributors (ODbL 1.0), and DataSF Recreation & Parks (PDDL 1.0).',
   '',
 ].join('\n'))
 

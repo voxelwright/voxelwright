@@ -22,6 +22,7 @@ export const RULES = [
   [/^engine\/test\/(.+)$/, "data a check reads", (m) => readers(m[1])],
   [/^engine\/page\/(boards|boards-edit|eggs|eggs-pictures|logos|first|explore)\.ts$/, 'a module only the SF realm runs (the city page imports it, so it must still come up)', (m) => ['types', 'city', ...REALM, ...[PART[m[1]]].flat()]],
   [/^engine\/sf\/marks\.mjs$/, "the road's marks, which the page server makes", EVERY],
+  [/^engine\/sf\/(places|brands|plazas)/, "neighborhood storefronts, parody brands and plazas", ['types', 'neighborhood', ...REALM]],
   [/^engine\/sf\/(boards|heroes|street|cars|life|pilot-life|far|landmark)/, "the SF realm's build and data", (m) => ['street', ...REALM, ...[PART[m[1]]].flat()]],
   [/^engine\/sf\//, "the SF realm's build and data", ['street', ...REALM]],
   [/^engine\/player\//, 'the static host and player', ['types', ...REALM]],

@@ -482,6 +482,12 @@ pub extern "C" fn world_kind(x: i32, y: i32, z: i32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).ground.kind(x, y, z) as u32)
 }
 
+/// Top solid cell + 1 at or below `y` within `depth` cells (edits and all), or `i32::MIN` if none.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ground.under(x, y, z, depth))
+}
+
 /// Whether water is flowing, or may: 1 while the page should keep asking for time.
 #[unsafe(no_mangle)]
 pub extern "C" fn bodies_flowing() -> usize {

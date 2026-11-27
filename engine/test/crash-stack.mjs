@@ -217,9 +217,18 @@ if (!parts.includes('sf')) {
       await page.evaluate(() => globalThis.engine.first?.engage())
       await settle()
     }
-    // Each kept vehicle's half length and width by its name, from the library the page itself reads.
+    // Each kept vehicle's half length and width by its base and variant-painted names (#74), from the library the page itself reads.
     const realm = JSON.parse(readFileSync(join(dist, 'sf/index.html'), 'utf8').match(/<script type="application\/json" id="realm">([^<]+)<\/script>/)[1])
-    const sizes = Object.fromEntries(JSON.parse(readFileSync(join(dist, 'sf', realm.street.cars, 'index.json'), 'utf8')).cars.map((c) => [c.name, (c.front ?? 0) < 2 ? [c.size[0] / 2, c.size[2] / 2] : [c.size[2] / 2, c.size[0] / 2]]))
+    const COLOUR_PREFIX = /^(grey|gray|blue|red|white|black|silver|green|beige|navy|yellow|orange|brown|gold|tan)\s+/i
+    const sizes = {}
+    for (const c of JSON.parse(readFileSync(join(dist, 'sf', realm.street.cars, 'index.json'), 'utf8')).cars) {
+      const dim = (c.front ?? 0) < 2 ? [c.size[0] / 2, c.size[2] / 2] : [c.size[2] / 2, c.size[0] / 2]
+      sizes[c.name] = dim
+      for (const v of c.variants ?? []) {
+        const vn = v === 'taxi' ? 'yellow taxi' : COLOUR_PREFIX.test(c.name) ? c.name.replace(COLOUR_PREFIX, `${v} `) : `${v} ${c.name}`
+        sizes[vn] ??= dim
+      }
+    }
     await page.evaluate((sizes) => {
       const e = globalThis.engine
       /** Every vehicle near a place as an outline: the solver's (alive), by where they are, and the street's drawn ones by their kind. */

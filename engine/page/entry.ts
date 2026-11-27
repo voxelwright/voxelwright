@@ -1,15 +1,20 @@
-// World-entry & 3D Map fast-travel transition (#23): 3D Map-to-Reality Optical Dive.
+// World-entry & 3D Map fast-travel transition (#23): Instant 3D Map Picker + Optical Dive.
 //
-// From Ina Coolbrith Park's first view, the EXPLORE board arms on click 1 (letters light, eye leans in, quiet hint,
-// Financial District tiles pre-warm; Esc / click away / pointer away / timeout disarms cleanly so accidental clicks
-// never enter). Click 2 (or host `explore` / `explore.go()`) lifts smoothly off the park into the stylized 3D WebGPU
-// map of San Francisco, locks the live voxel + farModel camera pixel-for-pixel behind it (0-frame parallax lag),
-// optically dissolves the 3D map straight into sunlit 10 cm streets, and swings behind the character's shoulder.
+// From Ina Coolbrith Park's first view, clicking, tapping, or pressing Enter on the EXPLORE board immediately opens
+// the fullscreen interactive 3D WebGPU map of San Francisco with an iconic default scenic spot pre-selected (North Beach,
+// Columbus Ave looking straight at the Transamerica Pyramid). The visitor can confirm Start immediately or click any
+// landmark/street on the map before starting, or press Esc / Back to return cleanly to the park first view.
 //
-// Clicking `Visit` in the fullscreen 3D Map runs the exact same optical dive starting directly from the user's current
-// map camera with zero jump. Pressing Backquote (`) or `Back to the view` arcs smoothly back to Ina Coolbrith Park.
+// The moment the map opens, location-independent resources (MAP1, citywide far model, road marks, off-thread vehicle
+// smooth faces, sculpted sports coupe) and the currently selected spot's tiles, 10 cm voxel sectors, and street-life
+// graph start preloading in the background so landing is smooth and stutter-free.
 //
-// Fetched lazily after `seen.near`, adding zero bytes to cold load and zero `/bay/map.bin` fetches before click 2.
+// Confirming Start (or clicking `Visit` in the in-game map) runs the 3D Map-to-Reality Optical Dive starting directly
+// from the user's current map camera with zero jump, optically dissolving the 3D map straight into sunlit 10 cm streets
+// and swinging behind the character's shoulder. Pressing Backquote (`) or `Back to the view` arcs smoothly back to
+// Ina Coolbrith Park.
+//
+// Fetched lazily after `seen.near`, adding zero bytes to cold load and zero `/bay/map.bin` fetches before EXPLORE click.
 import type { Explore, Needs as ExploreNeeds } from './explore.ts'
 import { LENS, footing, stand as findStand, type Ground } from './arrival.ts'
 import { behindAt } from './person.ts'
@@ -20,18 +25,13 @@ import type { MapCameraSnapshot, MapSystem } from './minimap.ts'
 const M = 10
 const EYES = 16.5
 const DOWN = -0.1
-/** How long an EXPLORE arming prompt stands (ms), how far the eye leans, and its lens push. */
-const STANDS = 6000
-const LEAN = 0.08
-const PUSH = 0.965
-/** Guard against accidental double-clicks or held key repeats counting as two distinct asks (ms). */
-const AGAIN = 300
-/** Default Financial District street landing target (metres, facing the skyline/canyon). */
-const DEFAULT_TARGET: Required<EntryTarget> = {
-  x: 52420,
-  z: 66920,
-  name: 'Financial District',
-  yaw: 2.18,
+/** Default iconic scenic landing spot: Columbus Ave in North Beach framing the Transamerica Pyramid & painted facades. */
+const DEFAULT_TARGET: Required<EntryTarget> & { subtitle: string } = {
+  x: 52125,
+  z: 66340,
+  name: 'North Beach',
+  subtitle: 'Columbus Ave · Transamerica Pyramid view',
+  yaw: 2.35,
 }
 type V3 = [number, number, number]
 
@@ -51,6 +51,10 @@ export interface EntryNeeds extends ExploreNeeds {
   ensureMap(): Promise<boolean>
   /** Unlocks full 155-square farModel immediately. */
   leaveFar(): void
+  /** Preloads location-independent gameplay resources once the map opens (far model, vehicle faces, road marks, coupe). */
+  prewarmShared?(): void
+  /** Preloads location-dependent street-life graph & helpers for the currently chosen map spot (metres). */
+  prewarmSpot?(xM: number, zM: number): void
   /** Ground & voxel queries for guaranteed dry street placement (arrival.ts). */
   ground: Ground
   /** Bare terrain elevation in cells (`core.ground_at`). */
@@ -63,8 +67,8 @@ export interface EntryNeeds extends ExploreNeeds {
 
 export interface EntryController {
   readonly state: Explore['state']
-  /** Enters San Francisco via 3D Map-to-Reality Optical Dive (defaults to Financial District). */
-  enter(target?: EntryTarget): Promise<void>
+  /** Enters San Francisco via 3D Map-to-Reality Optical Dive (defaults to the iconic scenic spot). */
+  enter(target?: EntryTarget, fromMap?: MapCameraSnapshot): Promise<void>
   /** Fast-travels from the 3D Map via optical dive from the user's current map camera. */
   visit(x: number, z: number, name: string, cam?: MapCameraSnapshot): Promise<void>
   /** Cancels an active Map Dive cleanly (e.g. if the player re-opens the map mid-dive with M). */
@@ -76,36 +80,6 @@ export interface EntryController {
 }
 
 const STYLE = /* css */ `
-/* Quiet arming line under EXPLORE on click 1. */
-#explore-hint {
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 7;
-  margin: 0;
-  padding: 5px 11px 6px;
-  border-radius: 999px;
-  font: 500 13px/1.25 var(--vx-font, system-ui, sans-serif);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  color: #fff;
-  background: rgb(14 16 20 / 0.62);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  pointer-events: none;
-  opacity: 0;
-  scale: 0.97;
-  transform-origin: 50% 0;
-  transition: opacity 0.12s cubic-bezier(0.23, 1, 0.32, 1), scale 0.12s cubic-bezier(0.23, 1, 0.32, 1);
-  will-change: transform, opacity;
-}
-#explore-hint.on { opacity: 1; scale: 1; transition-duration: 0.16s; }
-#explore-hint.keys { transition: none; }
-#explore-hint i { font-style: normal; opacity: 0.62; }
-@media (prefers-reduced-transparency: reduce) {
-  #explore-hint { background: rgb(14 16 20 / 0.94); -webkit-backdrop-filter: none; backdrop-filter: none; }
-}
-
 /* Keep HUD cues, minimap, and corner buttons clear while diving. */
 html.entry-going #realm .cue,
 html.entry-going #minimap { opacity: 0 !important; pointer-events: none !important; }
@@ -178,7 +152,7 @@ html.map-dive #realm .fold { opacity: 0 !important; pointer-events: none !import
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #explore-hint, #entry-title, #entry-still { transition: none !important; scale: 1; }
+  #entry-title, #entry-still { transition: none !important; scale: 1; }
 }
 `
 
@@ -199,15 +173,11 @@ const mix3 = (a: readonly number[], b: readonly number[], t: number): V3 => [
 ]
 
 export function createEntry(o: EntryNeeds): EntryController {
-  const { board, boards, pose } = o
+  const { board, pose } = o
   const still = matchMedia('(prefers-reduced-motion: reduce)')
   const style = document.createElement('style')
   style.textContent = STYLE
   document.head.append(style)
-
-  const hint = Object.assign(document.createElement('p'), { id: 'explore-hint' })
-  hint.setAttribute('role', 'status')
-  document.body.append(hint)
 
   let state: Explore['state'] = o.first.engaged ? 'in' : 'idle'
   const times = { armed: 0, went: 0, loaded: 0, settled: 0, waited: 0 }
@@ -215,6 +185,8 @@ export function createEntry(o: EntryNeeds): EntryController {
   let activeRun: Promise<void> | null = null
   let cancelRun: (() => void) | null = null
   let furnished = false
+  let warmSpotKey = ''
+  let warmSpotPromise: Promise<boolean> | null = null
 
   // ── Fleeting Arrival Title ──
   const titleEl = document.createElement('div')
@@ -234,101 +206,65 @@ export function createEntry(o: EntryNeeds): EntryController {
     titleTimer = window.setTimeout(() => titleEl.classList.remove('on'), ms)
   }
 
-  // ── Click-1 Arming on EXPLORE Board (accidental-click guard + tile pre-warm) ──
-  const sign = board.at
-  let rest: { at: V3; yaw: number; pitch: number; fov: number } | null = null
-  let lean = 0
-  let lit = 0
-  let armTimer = 0
-  let pointerType = 'mouse'
-  let warmDefault: Promise<boolean> | null = null
-
-  addEventListener('pointerdown', (e) => { pointerType = e.pointerType }, true)
-  const boardWhere = () => boards.where(board.id)
-  const placeHint = () => {
-    const w = boardWhere()
-    if (!w) return
-    const half = hint.offsetWidth / 2
-    const x = Math.max(8 + half, Math.min(innerWidth - 8 - half, w.x))
-    const y = Math.min(innerHeight - 40, w.y + w.high / 2 + 9)
-    hint.style.transform = `translate(${Math.round(x - half)}px, ${Math.round(y)}px)`
+  // ── 1-Click EXPLORE → Instant Map Picker + Background Resource Preloading ──
+  const warmSpot = (xM: number, zM: number): Promise<boolean> => {
+    const key = `${Math.round(xM / 5)},${Math.round(zM / 5)}`
+    const gx = Math.round(xM * M), gz = Math.round(zM * M)
+    o.focus([gx, 1800, gz])
+    if (key === warmSpotKey && warmSpotPromise) return warmSpotPromise
+    warmSpotKey = key
+    o.prewarmSpot?.(xM, zM)
+    const p = streamTarget(xM, zM, 180).then((ok) => {
+      if (!ok && warmSpotKey === key) warmSpotPromise = null
+      return ok
+    })
+    warmSpotPromise = p
+    return p
   }
 
-  const clearArmLean = () => {
-    clearTimeout(armTimer)
-    hint.classList.remove('on')
-    rest = null
-    lean = 0
-    if (lit > 0) { lit = 0; boards.light(board.id, 0) }
-  }
-
-  const disarm = () => {
-    if (state !== 'armed') return
-    state = 'idle'
+  const cancelPicker = () => {
+    if (state !== 'picking') return
+    o.map?.closeEntry()
+    o.focus(null)
     times.armed = 0
-    clearTimeout(armTimer)
-    hint.classList.remove('on')
+    state = 'idle'
   }
 
-  const arm = () => {
+  const openPicker = () => {
     if (state !== 'idle' || o.first.engaged) return
-    state = 'armed'
+    if ((document.activeElement as HTMLElement | null)?.dataset?.board === board.id) {
+      ;(document.activeElement as HTMLElement).blur()
+    }
+    if (!o.map) {
+      void enter()
+      return
+    }
+    state = 'picking'
     times.armed = performance.now()
-    rest ??= { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw, pitch: pose.pitch, fov: o.fov() }
-    const keys = (document.activeElement as HTMLElement | null)?.dataset?.board === board.id
-    hint.classList.toggle('keys', keys)
-    hint.innerHTML = keys
-      ? 'Press Enter again to explore <i>· Esc to stay</i>'
-      : pointerType === 'mouse'
-        ? 'Click again to explore <i>· Esc to stay</i>'
-        : 'Tap again to explore'
-    placeHint()
-    hint.classList.add('on')
-    // Pre-warm Financial District tiles quietly on click 1 (zero /bay/map.bin bytes until click 2).
-    warmDefault ??= Promise.resolve(o.near(Math.round(DEFAULT_TARGET.x * M), Math.round(DEFAULT_TARGET.z * M)))
-      .then(Boolean, () => false)
-      .then((had) => { if (!had) warmDefault = null; return had })
-    clearTimeout(armTimer)
-    armTimer = window.setTimeout(disarm, STANDS)
+    // Start loading location-independent resources + MAP1 + default scenic spot tiles/sectors immediately!
+    void o.ensureMap()
+    o.prewarmShared?.()
+    void warmSpot(DEFAULT_TARGET.x, DEFAULT_TARGET.z)
+    o.map.openForEntry({
+      initial: {
+        x: DEFAULT_TARGET.x,
+        z: DEFAULT_TARGET.z,
+        name: DEFAULT_TARGET.name,
+        subtitle: DEFAULT_TARGET.subtitle,
+        yaw: DEFAULT_TARGET.yaw,
+      },
+      onSelect: (picked) => {
+        void warmSpot(picked.x, picked.z)
+      },
+      onStart: (picked, cam) => {
+        const fromMap = o.map?.ready ? cam : undefined
+        void enter({ x: picked.x, z: picked.z, name: picked.name, yaw: picked.yaw }, fromMap)
+      },
+      onCancel: () => {
+        cancelPicker()
+      },
+    })
   }
-
-  o.watch((gap) => {
-    if (state !== 'idle' && state !== 'armed') return
-    const dt = Math.min(0.1, gap / 1000)
-    const on = state === 'armed' ? 1 : 0
-    const quick = still.matches
-    const was = lit
-    lit = quick ? on : Math.max(0, Math.min(1, lit + (on ? dt / 0.16 : -dt / 0.26)))
-    if (lit !== was) boards.light(board.id, Math.round(smooth(lit) * 8) / 8)
-    if (rest && Math.hypot(pose.x * M - rest.at[0], pose.y * M - rest.at[1], pose.z * M - rest.at[2]) > 1) {
-      o.setFov(rest.fov)
-      rest = null
-      lean = 0
-      disarm()
-    }
-    if (rest && !quick) {
-      lean += (on - lean) * (1 - Math.exp(-dt * (on ? 7 : 4.5)))
-      if (!on && lean < 0.002) lean = 0
-      const to = [sign[0] - rest.at[0], sign[1] + 60 - rest.at[1], sign[2] - rest.at[2]]
-      const k = LEAN * lean
-      pose.yaw = rest.yaw + turnTo(rest.yaw, Math.atan2(to[0], -to[2])) * k
-      pose.pitch = rest.pitch + (Math.atan2(to[1], Math.hypot(to[0], to[2])) - rest.pitch) * k
-      o.setFov(rest.fov * (1 - (1 - PUSH) * lean))
-      if (!on && !lean) rest = null
-    }
-    if (on) placeHint()
-  })
-
-  addEventListener('pointermove', (e) => {
-    if (state !== 'armed' || e.pointerType !== 'mouse') return
-    const w = boardWhere()
-    if (w && Math.hypot(Math.max(0, Math.abs(e.clientX - w.x) - w.wide / 2), Math.max(0, Math.abs(e.clientY - w.y) - w.high / 2)) > Math.max(140, w.wide)) disarm()
-  })
-  addEventListener('keydown', (e) => {
-    if (state === 'armed' && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); disarm() }
-  }, true)
-  o.canvas.addEventListener('click', () => { if (state === 'armed') disarm() })
-  addEventListener('blur', () => { if (state === 'armed') disarm() })
 
   // ── Realm Controls (`Back to the view` + Phone `Fly`/`Walk`/`Jump`/`Chute` Thumb Legends) ──
   const adoptKit = (...els: (Element | null)[]) => {
@@ -483,7 +419,8 @@ export function createEntry(o: EntryNeeds): EntryController {
   // ── 3D Map-to-Reality Optical Dive (World Entry & Map Visit) ──
   const runMapDive = async (target: EntryTarget, fromMap?: MapCameraSnapshot): Promise<void> => {
     cancelRun?.()
-    clearArmLean()
+    if (o.map?.picking) o.map.closeEntry()
+    o.prewarmShared?.()
     let cancelled = false
     const stops: (() => void)[] = []
     let resolvePending: (() => void) | null = null
@@ -514,7 +451,7 @@ export function createEntry(o: EntryNeeds): EntryController {
 
     const destName = target.name ?? DEFAULT_TARGET.name
     const destYaw = target.yaw ?? DEFAULT_TARGET.yaw
-    const streamP = streamTarget(target.x, target.z, 180)
+    const streamP = warmSpot(target.x, target.z)
     const mapReadyP = o.ensureMap()
 
     // Reduced-motion path: crisp still-frame cross-fade straight onto the street.
@@ -715,9 +652,9 @@ export function createEntry(o: EntryNeeds): EntryController {
   }
 
   // ── Enter / Visit / Cancel / Back ──
-  const enter = (target?: EntryTarget): Promise<void> => {
+  const enter = (target?: EntryTarget, fromMap?: MapCameraSnapshot): Promise<void> => {
     if (activeRun) return activeRun
-    const run = runMapDive(target ?? DEFAULT_TARGET).finally(() => { activeRun = null })
+    const run = runMapDive(target ?? DEFAULT_TARGET, fromMap).finally(() => { activeRun = null })
     activeRun = run
     return run
   }
@@ -738,6 +675,8 @@ export function createEntry(o: EntryNeeds): EntryController {
     cancelDive()
     o.map?.setDive(null)
     if (o.map?.open) o.map.toggle(false)
+    warmSpotKey = ''
+    warmSpotPromise = null
     if (state !== 'in') return
     state = 'leaving'
     o.alight()
@@ -803,13 +742,12 @@ export function createEntry(o: EntryNeeds): EntryController {
   const exploreApi: Explore = {
     get state() { return state },
     act() {
-      if (state === 'idle') arm()
-      else if (state === 'armed' && performance.now() - times.armed >= AGAIN) void enter()
+      if (state === 'idle') openPicker()
     },
     reframed() {
-      if (rest) rest = { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw, pitch: pose.pitch, fov: o.fov() }
+      // First-view reframing needs no arm-lean reset now that click 1 opens the map directly.
     },
-    disarm,
+    disarm: cancelPicker,
     go() { return enter() },
     back,
     get stand() { return resolvedStand },

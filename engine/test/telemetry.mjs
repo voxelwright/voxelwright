@@ -234,7 +234,37 @@ try {
   })
   await sleep(1000)
 
-  // Verify session flush to /api/session
+  // Verify session flush to /api/session and snapshot diagnostics (#105)
+  const diagCheck = await page.evaluate(async () => {
+    const snap = await globalThis.engine.recorder.snapshot({ reason: 'diag-check', pick: false, voxelBox: false })
+    return snap.diagnostics ?? null
+  })
+  check(
+    !!diagCheck?.tiles && typeof diagCheck.tiles.timedOut === 'number' &&
+    !!diagCheck?.mover && typeof diagCheck.mover.waitMs === 'number' &&
+    !!diagCheck?.workers && Array.isArray(diagCheck.workers.busy) &&
+    Array.isArray(diagCheck.notes),
+    `snapshot includes worker/tile diagnostics (busy=${JSON.stringify(diagCheck?.workers?.busy)}, timedOut=${diagCheck?.tiles?.timedOut})`,
+  )
+
+  // Verify mover crash/stall recovery replaces worker and on-foot mode still works (#105)
+  const recoveryCheck = await page.evaluate(async () => {
+    const e = globalThis.engine
+    const before = e.mended.movers
+    e.patience = 1500
+    e.kill('mover')
+    const deadline = Date.now() + 8000
+    while (e.mended.movers <= before && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
+    const after = e.mended.movers
+    e.me.walk(true)
+    const footDeadline = Date.now() + 5000
+    while (!e.me.feet && Date.now() < footDeadline) await new Promise((r) => setTimeout(r, 100))
+    const hasFeet = !!e.me.feet
+    e.me.walk(false)
+    return { before, after, hasFeet }
+  })
+  check(recoveryCheck.after > recoveryCheck.before && recoveryCheck.hasFeet, `killed mover replaced (${recoveryCheck.before}->${recoveryCheck.after}) and on-foot physics recovered (feet=${recoveryCheck.hasFeet})`)
+
   const flushed = await page.evaluate(() => globalThis.engine.recorder.flush('test-end', false))
   check(flushed === true, 'engine.recorder.flush() posted session to /api/session')
   check(pageErrors.length === 0, `zero unexpected page errors (${pageErrors.length})`)

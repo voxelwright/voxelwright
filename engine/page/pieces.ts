@@ -13,7 +13,7 @@
 // its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only a struck piece pays for it:
 // it draws from a copy of its faces split into rows a cell long, so every corner lies on the cells' lattice and faces
 // that meet still meet once bent (a merged row bent at its two ends only would open a gap beside its neighbours).
-import { fenderOpening, type CrashOpening } from './crash-opening.ts'
+import type { CrashOpening } from './crash-opening.ts'
 import { shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
@@ -304,6 +304,27 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       albedo = worn.albedo;
       rough = min(1.0, rough + worn.roughBoost);
       coat = worn.clearcoatKeep;
+      // On a hard side strike, render a clean, anti-aliased torn sheet-metal split along
+      // the buckled arch shoulder instead of carving a stepped voxel staircase (#92).
+      let depthRatio = u.deform.dirD[contact].w / max(u.deform.posR[contact].w, 0.001);
+      let splitStrength = sideHit * smoothstep(0.11, 0.17, depthRatio) * smoothstep(0.15, 0.45, in.wear.x) * detail;
+      if (splitStrength > 0.01) {
+        let sx = (across - 0.15) / 2.25;
+        let span = max(0.0, 1.0 - sx * sx);
+        let curve = 0.09 * sin(across * 1.8) + 0.06 * (deformNoise(vec3f(across * 1.6, 2.0, 1.0)) - 0.5);
+        let sd = materialAt.y - curve;
+        let aa = max(length(in.seen) * u.tanHalf * 0.0032, 0.012);
+        let halfGap = 0.068 * span * splitStrength;
+        let seam = (1.0 - smoothstep(halfGap - aa, halfGap + aa, abs(sd))) * span * splitStrength;
+        let lipBand = (smoothstep(halfGap - aa, halfGap + aa, abs(sd)) * (1.0 - smoothstep(halfGap + 0.08 * span, halfGap + 0.08 * span + aa, abs(sd)))) * span * splitStrength;
+        let upperLip = smoothstep(-aa, aa, sd);
+        let lipCol = mix(vec3f(0.14, 0.13, 0.12), vec3f(0.46, 0.47, 0.50), upperLip);
+        albedo = mix(albedo, lipCol, lipBand * 0.85);
+        albedo = mix(albedo, vec3f(0.016, 0.017, 0.020), seam * 0.96);
+        rough = mix(rough, mix(0.62, 0.34, upperLip), lipBand * 0.85);
+        rough = mix(rough, 0.94, seam);
+        coat *= (1.0 - lipBand * 0.82) * (1.0 - seam);
+      }
     }
   }
   var direct = max(dot(n, u.sun), 0.0);
@@ -630,20 +651,15 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   /** The faces a piece is drawn from now: a cell long once it is bent. */
   const facesOf = (piece: Held): Faces => {
     const state = piece.deform
-    if (state?.dentCount && piece.skin && (piece.tear?.state !== state || piece.tear.revision !== state.revision)) {
-      piece.tear = { state, revision: state.revision, opening: fenderOpening(piece.skin, piece.born.size, piece.cell, state) }
-    }
     const nose = state?.dentCount && state.hoodDamage >= 0.35 ? piece.opening : undefined
-    const fender = state?.dentCount ? piece.tear?.opening : undefined
-    if (piece.pocket && (piece.pocket.nose !== nose || piece.pocket.fender !== fender)) {
+    if (piece.pocket && piece.pocket.nose !== nose) {
       piece.pocket.mesh.faces.destroy()
       piece.pocket = undefined
     }
     if (!state?.dentCount) { piece.tear = undefined; return piece }
-    if (nose || fender) {
+    if (nose) {
       if (!piece.pocket) {
-        const openings = [nose, fender].filter((v): v is CrashOpening => v !== undefined)
-        piece.pocket = { nose, fender, mesh: upload(piece.born, true, openings) }
+        piece.pocket = { nose, mesh: upload(piece.born, true, [nose]) }
       }
       return piece.pocket.mesh
     }

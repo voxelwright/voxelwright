@@ -7,6 +7,10 @@ import { SCREEN_SIZE } from './march.ts'
 export interface Picture {
   /** Whether the picture moves of itself (it is drawn every frame). */
   readonly moving: boolean
+  /** Whether open sky gaps (no building) also display this picture via the drone + fog sky pass (eggs-sky.ts). */
+  readonly sky: boolean
+  /** Normalized [u0, v0, u1, v1] bounds of the active picture in SCREEN_SIZE (used by eggs-sky.ts). */
+  readonly rect: readonly [number, number, number, number]
   /** Draws it at `t` seconds; false if nothing changed since the last. */
   draw(device: GPUDevice, texture: GPUTexture, t: number): boolean
   dispose(): void
@@ -23,6 +27,8 @@ export function codeRain(): Picture {
   const [w, h] = SCREEN_SIZE, px = new Uint8Array(w * h * 4)
   return {
     moving: true,
+    sky: false,
+    rect: [0, 0, 1, 1],
     draw(device, texture, t) {
       for (let i = 0; i < px.length; i += 4) { px[i] = px[i + 1] = px[i + 2] = 0; px[i + 3] = DARK }
       for (let x = 0; x < w; x++) {
@@ -49,20 +55,24 @@ export function codeRain(): Picture {
   }
 }
 
-/** The band of the view, top to bottom, where the city's windows are from the park: above it is sky. */
-const BAND = [0.1, 0.98]
+/** Vertical bands where videos sit: on portrait phones, lifted into the upper sky + skyline above dark foreground roofs and clear of top HUD; on wide views, across the skyline. */
+const BAND_WIDE = [0.1, 0.9] as const
+const BAND_TALL = [0.18, 0.72] as const
 
 /**
- * A video on the windows. The media element plays it, sound and all, and is the clock: each new frame it shows is
- * copied into the picture, so the windows and the sound cannot drift apart and pausing it pauses both. `outside` is
- * what the panes beyond the video show (rgb and how much of their lamp it puts out; null keeps the city's own), and
- * `contrast` a lift round mid-grey, so the picture survives the haze and the glass. `aspect` is the view's.
+ * A video on the windows (and, when `sky` is true, on the sky-gap drone + fog formation in eggs-sky.ts). The media
+ * element plays it, sound and all, and is the clock: each new frame it shows is copied into the picture, so the
+ * windows and the sound cannot drift apart and pausing it pauses both. `outside` is what the panes beyond the video
+ * show (rgb and how much of their lamp it puts out; null keeps the city's own), and `contrast` a lift round mid-grey,
+ * so the picture survives the haze and the glass. `aspect` is the view's.
  */
-export function videoPicture(media: HTMLVideoElement, aspect: () => number, { outside = null as readonly [number, number, number, number] | null, contrast = 1, crop = 0.5 } = {}): Picture {
+export function videoPicture(media: HTMLVideoElement, aspect: () => number, { outside = null as readonly [number, number, number, number] | null, contrast = 1, crop = 0, sky = true } = {}): Picture {
   const [w, h] = SCREEN_SIZE
   const canvas = new OffscreenCanvas(w, h), ctx = canvas.getContext('2d', { alpha: true })!
   ctx.imageSmoothingQuality = 'high'
   let frames = 0, drawn = -1
+  let lastAspect = -1
+  const rect: [number, number, number, number] = [0, 0, 1, 1]
   const watch = typeof media.requestVideoFrameCallback === 'function'
   let handle = 0
   const tick = () => { frames++; handle = media.requestVideoFrameCallback(tick) }
@@ -71,20 +81,30 @@ export function videoPicture(media: HTMLVideoElement, aspect: () => number, { ou
   media.addEventListener('seeked', seeked)
   return {
     moving: true,
+    sky,
+    rect,
     draw(device, texture) {
       const ready = media.readyState >= 2 && media.videoWidth > 0
+      const a = aspect()
       const key = !ready ? -1 : watch ? frames : media.currentTime
-      if (key === drawn) return false
+      if (key === drawn && Math.abs(a - lastAspect) < 1e-4) return false
       drawn = key
+      lastAspect = a
       ctx.clearRect(0, 0, w, h)
       if (outside) { ctx.fillStyle = `rgb(${outside[0]} ${outside[1]} ${outside[2]} / ${outside[3] / 255})`; ctx.fillRect(0, 0, w, h) }
       if (ready) {
-        // The picture is the view's shape stretched to the screen's: a video as tall as the band allows, unless that
-        // would lose more than `crop` of its width off the sides (a tall phone crops a 4:3 picture's sides).
-        const sx = w / (h * aspect()), top = BAND[0] * h, tall = (BAND[1] - BAND[0]) * h, va = media.videoWidth / media.videoHeight
-        const height = Math.min(tall, (h * aspect()) / (1 - crop) / va), width = height * va * sx
+        // Fit the full uncropped video (crop = 0 by default) into the active band: on portrait phones the sky-gap
+        // drone/fog formation carries the upper part while the skyscraper windows carry the lower part seamlessly.
+        const band = a < 1 ? BAND_TALL : BAND_WIDE
+        const sx = w / (h * a), top = band[0] * h, tall = (band[1] - band[0]) * h, va = media.videoWidth / media.videoHeight
+        const height = Math.min(tall, (h * a) / (1 - crop) / va), width = height * va * sx
+        const x0 = (w - width) / 2, y0 = top + (tall - height) / 2
+        rect[0] = Math.max(0, x0 / w)
+        rect[1] = Math.max(0, y0 / h)
+        rect[2] = Math.min(1, (x0 + width) / w)
+        rect[3] = Math.min(1, (y0 + height) / h)
         ctx.filter = contrast === 1 ? 'none' : `contrast(${contrast})`
-        ctx.drawImage(media, (w - width) / 2, top + (tall - height) / 2, width, height)
+        ctx.drawImage(media, x0, y0, width, height)
         ctx.filter = 'none'
       }
       device.queue.copyExternalImageToTexture({ source: canvas }, { texture }, [w, h])

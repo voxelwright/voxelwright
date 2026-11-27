@@ -61,10 +61,11 @@ export interface Answer {
     ms: number;
     refused: number;
     lacking?: boolean;
+    failed?: string;
 }
 ```
 
-In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](/engine-core#the-edit-format). `lacking` means a San Francisco tile did not arrive, so the column was made as water and will be asked for again.
+In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](/engine-core#the-edit-format). `lacking` means a San Francisco tile did not arrive (or timed out), so the column was made as water and will be asked for again. `failed` reports a worker error (such as a WASM trap or OOM), prompting `World` to replace the worker and requeue its columns.
 
 ## Files to know
 
@@ -74,7 +75,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `world.ts` | Boxes, slots, the pool, asks to workers. |
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
-| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. `pieces.ts` draws a body's glass after its solid faces, tinting what is behind it; with mirrors off it still tints but mirrors nothing, so a car is seen out of from its seat on every preset (#74). |
+| `sun.ts`, `far.ts`, `eggs-sky.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. `eggs-sky.ts` draws an instanced drone swarm and atmospheric fog halo strictly over open sky pixels (`marched == 1.0 && faced == 0.0`) for video Easter eggs, with staggered takeoff and a ~1 s quaternion-spring camera chase (disabled for The Matrix). `pieces.ts` draws a body's glass after its solid faces, tinting what is behind it; with mirrors off it still tints but mirrors nothing, so a car is seen out of from its seat on every preset (#74). |
 | `deform.ts` | Vehicle damage: dents, scuffs, cracked glass and engine damage recorded from crashes, packed for `pieces.ts` (see [vehicle damage](#vehicle-damage)). |
 | `fine.ts`, `streetfaces.ts` | Faces of things in cells finer than the world's (vehicles' looks). `facesWithSmooth` also gives each outside face smooth words at its four corners: a normal fitted to the shape round the corner and how open it is (#38). The street's cars get theirs in the `streetfaces.ts` worker. |
 | `edits.ts` | Building edits as the core reads them. |
@@ -85,13 +86,14 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
 | `radio-ui.ts`, `sound/radio.ts`, `sound/radio-providers.ts` | Procedural offline FM car radio (`N` cycles), zero-login YouTube / YouTube Music streaming (official IFrame Player API with `>=200×200` visible mini-player and saved playlists; Spotify PKCE and Apple MusicKit JS v3 kept behind `ENABLED_STREAMING_PROVIDERS`), curated SF driving playlists, Waymo-style media picker (`R` while driving or Settings `Radio…`), horn/collision ducking, and Doppler pass-by whooshes. |
 | `ask.ts`, `making.ts`, `kept.ts`, `maker.ts`, `models.ts` | The ask bar's wishes: the helper, the ghost of what is kept, and making in the page with a visitor's own AI ([making](/making)). |
-| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `entry.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car, the gamepad, stunts, the 3D Map-to-Reality Optical Dive world entry and map fast travel (`entry.ts`), and the EXPLORE board ([gameplay](/gameplay)). |
+| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `entry.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car (with background `prewarm()`), the gamepad, stunts, the 1-click EXPLORE 3D map picker + background resource preloading + Optical Dive world entry and map fast travel (`entry.ts`), and the legacy EXPLORE board controller (`explore.ts`) ([gameplay](/gameplay)). |
 | `car-sculpt.ts` | The GT coupe (`sculptCoupe`: `car`, `KEPT.car`, the `G` summon and the SF library coupe) and racing kart (`sculptKart`: `KEPT.kart`) sculpted from continuous shapes, plus `coarser` and the edge-leak sealer that keep vehicle shells closed across levels. |
-| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen 2D/3D map, GPS routes, and 0-frame-lag Map-to-Reality dive rendering ([gameplay](/gameplay)). |
+| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen 2D/3D map (including pre-entry starting-location picker mode), GPS routes, and 0-frame-lag Map-to-Reality dive rendering ([gameplay](/gameplay)). |
 | `realms.ts`, `portal.ts`, `wheel.ts` | Stepping between realms without a reload ([realms](/engine-plugins#realms)). |
 | `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `recorder.ts`, `feedback.ts` | 30 s black-box gameplay flight recorder, passive anomaly watchers (stuck player, vehicle overlap, falls, stalls, GPU/worker faults), synchronous WebGPU canvas capture, and the F8 / `/bug` feedback dialog (`engine.recorder`, `engine.feedback`). |
+| `pwa.ts` | Progressive Web App runtime (`engine.pwa`): manifest-gated `/sw.js` registration, `navigator.storage.persist()` when installed, dynamic sky `<meta name="theme-color">` sync, Screen Wake Lock while playing, Car Radio `navigator.mediaSession` bridge, and the Settings `Install app` prompt (`beforeinstallprompt` and iOS Safari guidance). |
 | `bay.ts` | Loading the core (`open`), San Francisco tiles from a release, and cell-to-WGS84/tile helpers (`latLon`, `tileOf`) ([worlds as cells](/cells)). |
 
 ## The sun's share of a frame
@@ -117,11 +119,46 @@ Every drivable car and kart wears a 2.5 cm fine look (`car()`, `KEPT.car`, `KEPT
 
 - A struck piece draws from a copy of its faces cut into rows one cell long. Every corner then lies on the cell lattice, so faces that meet still meet once bent. Merged rows bent only at their ends opened gaps beside their neighbours. A piece never struck draws its merged faces, and the shader returns before any dent work.
 - Paint and lamps keep the unbent position, so a bent panel keeps its own paint.
-- The hit pushes the panel inward. Two flanks meet at an oblique crease. The upper sheet tucks into a diagonal joint, pinching the struck side of the grille. A low lip turns back toward the windshield behind the tuck. A broadside hit presses in the door between the creases. The painted shoulder folds above the contact. A hard strike against a wheel opening can split the painted lip and expose the inner metal. The body and wheel mounts share the same depth allowance and deformation. The clear coat dulls on the flanks. A small patch of primer and a few bare chips show along the fold. A directly struck lamp goes dark.
+- The hit pushes the panel inward. Two flanks meet at an oblique crease. The upper sheet tucks into a diagonal joint, pinching the struck side of the grille. A low lip turns back toward the windshield behind the tuck. A broadside hit presses in the door between the creases. The painted shoulder folds above the contact. A hard strike against a wheel opening renders a smooth, anti-aliased torn sheet-metal split and bare-steel lip along the buckled arch shoulder without carving a stepped voxel staircase (#92). The body and wheel mounts share the same depth allowance and deformation. The clear coat dulls on the flanks. A small patch of primer and a few bare chips show along the fold. A directly struck lamp goes dark.
 - Each window keeps its own crack origin in `Piece.cracks[0..3]`. Fine radial cracks and short connecting fractures wrap around the glass from that point. From the seat the cracks scatter less light near the forward sightline.
 - Drawn 3D wheels (`wheels.ts`) evaluate the same dent field on the CPU (`deformPointCpu` in `deform.ts`) across the hub and surrounding wheel arch so a crushed corner shifts and tilts its wheel inward with the bent fender. `carveWheelWells` preserves painted fender skin and lines recessed wheel-well walls in dark matte liner so bent arches show no bright inner wall or dark stair-step seam.
 
-Crashes at 2.8 m/s or more throw sparks, road dust and flakes of paint and trim. A newly cracked window also sheds glass. Broken wood and foliage from the surroundings scatter as small matte splinters. Pale steam, then grey smoke and finally flame escape at the grille or lamp opening nearest the struck corner. The broken housing loses its lens, including the amber tip. Its back and side walls remain visible. The flame starts in the empty space behind the torn lip and follows it as the car moves. The escaping vapour becomes visible as it rises clear of the body. Reduced motion suppresses the debris and thins the smoke. Press `F` while driving (touch **Repair**, gamepad D-pad right) or call `living.repair(thing)` to restore the body, wheels, windows and engine. Removing the car clears its damage. `node engine/test/dents.mjs` checks the struck corner against the repaired view, the driver’s sightline, horizontal streaks on glass after a side hit, the flame’s rendered position as the car turns, wheel alignment, per-window cracks and repair.
+Crashes at 2.8 m/s or more throw sparks, road dust and flakes of paint and trim. A newly cracked window also sheds glass. Broken wood and foliage from the surroundings scatter as small matte splinters. Pale steam, then grey smoke and finally flame escape at the grille or lamp opening nearest the struck corner. The broken housing loses its lens, including the amber tip. Its back and side walls remain visible. The flame starts in the empty space behind the torn lip and follows it as the car moves. The escaping vapour and smoke emerge directly from the upper flame tongue with an outward nose bias so the plume rises clear of the hood from every heading without a gap (#92). Reduced motion suppresses the debris and thins the smoke. Press `F` while driving (touch **Repair**, gamepad D-pad right) or call `living.repair(thing)` to restore the body, wheels, windows and engine. Removing the car clears its damage. `node engine/test/dents.mjs` checks the struck corner against the repaired view, the driver’s sightline, horizontal streaks on glass after a side hit, the flame’s rendered position as the car turns, smoke hood clearance and flame continuity, smooth side wheel-arch impacts, wheel alignment, per-window cracks and repair.
+
+## What the page refuses
+
+A link, a page that frames the realm and someone else's server can all send the page something. The page guards each of these inputs, and `engine/test/client-security.mjs` checks every guard (#81).
+
+- **Records from a server.** `told.ts` reads the core's records, from this page's worker or from a shared world's stream. A record that runs past the words that came, or is shorter than its kind's fixed part, or is not whole rows of a list kind (8 words a move, 12 a living thing), stops the reading. The page keeps what was read before it. The check also reads every record of a real crash in the core.
+- **Messages from a host page.** `host.ts` hears and tells only a host on this site's origin, `https://zahynailo.dev`, or, when the realm is served from `127.0.0.1` or `localhost`, a page on this machine. It posts to that origin, never to `'*'`. The host's origin is this page's own when the parent is on the same origin. Otherwise it comes from `location.ancestorOrigins`, then `document.referrer`. Where neither says, what the realm would tell is held until a trusted host first speaks.
+- **A sign's picture.** `screens.ts` `picture` shows this site's own pictures, any `https:` address and raster pictures drawn in the page (`data:image/png`, `jpeg`, `gif` or `webp`, base64). It refuses `javascript:`, `blob:`, `http:` from elsewhere and SVG.
+- **The far model's paths.** `?far=` and `?farlanding=` must be paths on this site (`far.ts` `samePath`), with no scheme, `//`, `..` or backslash, even percent-encoded. Otherwise the page draws the realm's own far model and says so on the console. The release's own manifest and the realm's `far` folder are used as they are. `?far=` with no value still turns the far model off.
+- **Numbers in the address.** The measuring knobs go through `march.ts` `bounded`, which keeps each in range and ignores `NaN`, `Infinity` and words: `workers` 1 to 8, `pool` 16 to 2048 MiB (and no more than the device allows), `levels` 1 to the march's most, `grid` three whole sizes of 2 to 32 sectors, `suntiles` 0 to 64, `fine` 0 to 2, `scale` 0.25 to 1.5, `tries` 1 to 64, `panes` 1 to 8, `through` 0.1 to 64, `farfaces` 100,000 to 20,000,000, `farreach` 0 to 20,000 m, `farthest` 100 to 50,000 m, `farnear` 0 to 5,000 m and `fardetail` 0.05 to 16.
+- **A worker's address.** `bay.ts` passes on `?ll=` only as two finite numbers on Earth, encoded. Anything else is left out.
+
+## Device classes and what each holds
+
+`bay.ts` `tierOf` sorts the device into a phone (a touch screen under 600 points on its short side), a tablet (a touch screen under 900 points, or a touch device that reports 4 GB of memory or less) or a desktop. `BUDGETS` says what each class holds. A tablet draws as a desktop does (`DEVICE` is `'desktop'`) and holds less.
+
+| | Phone | Tablet | Desktop |
+| --- | --- | --- | --- |
+| Pool of cells on the GPU | 128 MiB | 192 MiB | 256 MiB |
+| Makers of sectors (workers) | 2 | up to 3 | up to 6 |
+| Tile bytes the page keeps for its workers | 24 MiB | 48 MiB | 96 MiB |
+| Far model faces (20 bytes each) | 3,000,000 (about 60 MiB) | 6,000,000 | 12,000,000 |
+
+The canvas draws at most two device pixels to a CSS pixel. A band of the far model that is let go destroys its section buffers with its faces.
+
+Street life asks the network for nothing until it first wakes, which is when the visitor leaves the first view. It then fetches the life files' listing, the transit routes, the kept vehicles' listing and each kept vehicle. A visitor who leaves from the landing costs none of these requests. Squares of street life come nearest first, three at a time. A square stays held once it has come: street life does not yet let squares go, because its walks, roads and parked cars refer to one another across squares. The street names under the picture (`whereabouts`) keep the 32 nearest squares and never let go of one the eye is near.
+
+## When it cannot open, or the GPU is lost
+
+When the realm cannot open, `loading.fail()` dims the first view and sets `data-failed="1"` on the `<html>` element, so that no site notice is shown over the reason. `main.ts` `failCard` shows a card in the middle of the page:
+
+- **Without WebGPU** the card says WebGPU is needed. On a touch device, or in an app's own browser such as X's, it says to open the link in Safari or Chrome. Elsewhere it names a recent Chrome, Edge or Safari. **Copy link** copies the page's address and says **Copied** only if the copy worked. The card links to zahynailo.dev and to the project on GitHub.
+- **After any other failure** the card has a **Reload** key.
+
+If the GPU device is lost (`probe/gpu.ts` `onLost`: a reset, a phone short of memory, a long while in the background), the frame loop stops. A realm shows a card with a key to reload it, such as **Reload San Francisco**, and tells its host `error` with `fatal: true`. The engine's own pages say so in the status line.
 
 ## Invariants
 

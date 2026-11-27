@@ -26,7 +26,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 
 | Module | What it decides |
 | --- | --- |
-| `city.rs` | The generated town: hills, streets, houses, towers, parks. Synthetic data, made by rule, so none of it is stored. |
+| `city.rs` | The generated town: hills, streets, street furniture (lamps, signs, hydrants, bins, mailboxes), houses, towers, parks. Synthetic data, made by rule, so none of it is stored. Streets carry no cars made of world cells: every car is a fine, drivable vehicle. |
 | `land.rs` | The ground beyond the town: mountains, a plain, open country. |
 | `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes. Where no pack is loaded the world is level water. |
 | `heroes.rs` | Landmarks written as programs, asked for any cell at any size. |
@@ -57,7 +57,7 @@ The exports fall into groups by prefix:
 | `edits_room`, `merge_rows`, `merged_words` | Edits in, and edits merged into rows for a coarser copy. |
 | `make_sector`, `make_finer`, `tree_words`, `sector_span`, `fine_cells`, `fine_refused` | Making sectors. `sector_span` says which sectors of a column hold anything. |
 | `bay_*`, `hero_*` | Loading San Francisco packs and landmarks. |
-| `ground_at`, `feet_at`, `paving_at`, `top_at`, `world_kind` | Questions about the world. `world_kind(x, y, z)` returns the kind of one cell, edits included, as the solver's copy holds it (0 for air). `top_at(x, z)` answers from the land's rule alone, before any edit. |
+| `ground_at`, `feet_at`, `paving_at`, `top_at`, `world_kind`, `world_under` | Questions about the world. `world_kind(x, y, z)` returns the kind of one cell, edits included, as the solver's copy holds it (0 for air), probing unedited Bay columns directly without building a 64³ sector. `world_under(x, y, z, depth)` scans downward for the top of the first solid cell beneath `(x, y, z)`. `top_at(x, z)` answers from the land's rule alone, before any edit. |
 | `world_edit`, `world_regrow`, `world_forget` | The solver's copy of the world, which loose bodies collide with. |
 | `bodies_*` | Blasts, fire, thrown balls, moving what is loose. |
 | `living_*` | Living things and people's bodies: spawn, drive, `living_drive_aux` (boost, rain wetness, surface grip), walk, place. `living_place` moves a rolling vehicle out of any vehicle that is coming into the place it is put, ahead of it, and moves on the vehicles standing where it lands. |

@@ -74,8 +74,8 @@ export interface Needs {
 }
 
 export interface Explore {
-  /** Where it is: the first view, the board asked once, the flight, in the realm, or on the way back to the first view. */
-  readonly state: 'idle' | 'armed' | 'going' | 'in' | 'leaving'
+  /** Where it is: the first view, the board asked once / map picker open, the flight/dive, in the realm, or on the way back to the first view. */
+  readonly state: 'idle' | 'armed' | 'picking' | 'going' | 'in' | 'leaving'
   /** The board was asked: once arms it, again within a few seconds goes. */
   act(): void
   /** The first view was framed again (a phone turned): the eye as it is now is the one an ask leans from and goes back to. */

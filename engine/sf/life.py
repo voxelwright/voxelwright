@@ -603,6 +603,103 @@ for name, r in sorted(relations.items()):
     transit.append({"ref": ref, "kind": "cable" if ref in CABLE_REFS else "streetcar", "lines": [[int(round(v)) for p in l for v in p] for l in lines]})
 print("transit:", [(t["ref"], t["kind"], len(t["lines"]), round(sum(math.dist((l[i], l[i + 1]), (l[i + 2], l[i + 3])) for l in t["lines"] for i in range(0, len(l) - 2, 2)) / 10)) for t in transit], file=sys.stderr)
 
+# ── Keep opposing lanes clear of parallel streetcar rails (#72) ──
+# On Market and Steuart streets near the Ferry Building (and a few spots along the F line), OSM maps a one-way
+# carriageway centerline right beside an opposing streetcar track so the leftmost lane sits 0.3-1.7 m from the rail
+# centre (a streetcar is 2.7 m wide and a car/bus 2.0-2.6 m, needing >= 2.8 m centre-to-centre). Shift affected road
+# vertices to their right (away from the opposing rail, kept inside any surveyed kerb) so oncoming vehicles pass cleanly
+# without moving the streetcar off its baked rails.
+def clear_opposing_streetcar_rails(out_squares, transit_routes, kerb_ray, clear=28.0):
+    tcell = 300
+    tgrid = defaultdict(list)
+    for rt in transit_routes:
+        if rt.get("kind") != "streetcar":
+            continue
+        for flat_line in rt.get("lines", ()):
+            pts = [(flat_line[i], flat_line[i + 1]) for i in range(0, len(flat_line), 2)]
+            for i in range(len(pts) - 1):
+                ax, az = pts[i]
+                bx, bz = pts[i + 1]
+                L = math.hypot(bx - ax, bz - az)
+                if L < 1:
+                    continue
+                seg = (ax, az, bx, bz, (bx - ax) / L, (bz - az) / L)
+                for gx in range(int(min(ax, bx) // tcell) - 1, int(max(ax, bx) // tcell) + 2):
+                    for gz in range(int(min(az, bz) // tcell) - 1, int(max(az, bz) // tcell) + 2):
+                        tgrid[(gx, gz)].append(seg)
+    if not tgrid:
+        return 0
+    shifted_roads = 0
+    for sq in out_squares.values():
+        for row in sq["roads"]:
+            lanes, flags = row[3], row[4]
+            oneway = bool(flags & 1)
+            pts = [(row[i], row[i + 1]) for i in range(7, len(row), 2)]
+            if len(pts) < 2:
+                continue
+            left_off = -((lanes - 1) / 2.0) * 33.0 if oneway else 16.5
+            right_off = ((lanes - 1) / 2.0) * 33.0 if oneway else (lanes - 0.5) * 33.0
+            need = 0.0
+            sum_nx = sum_nz = 0.0
+            for j in range(len(pts) - 1):
+                x0, z0 = pts[j]
+                x1, z1 = pts[j + 1]
+                L = math.hypot(x1 - x0, z1 - z0)
+                if L < 1:
+                    continue
+                rtx, rtz = (x1 - x0) / L, (z1 - z0) / L
+                rnx, rnz = -rtz, rtx
+                steps = max(2, int(L / 40))
+                for k in range(steps + 1):
+                    px = x0 + (x1 - x0) * k / steps
+                    pz = z0 + (z1 - z0) * k / steps
+                    for ax, az, bx, bz, ttx, ttz in tgrid.get((int(px // tcell), int(pz // tcell)), ()):
+                        if rtx * ttx + rtz * ttz > -0.90:
+                            continue
+                        ex, ez = bx - ax, bz - az
+                        l2 = ex * ex + ez * ez
+                        t = max(0.0, min(1.0, ((px - ax) * ex + (pz - az) * ez) / l2))
+                        qx, qz = ax + ex * t, az + ez * t
+                        dx, dz = qx - px, qz - pz
+                        if math.hypot(dx, dz) > 80.0 or abs(dx * rtx + dz * rtz) > 20.0:
+                            continue
+                        lat = dx * rnx + dz * rnz
+                        if left_off - clear < lat < right_off + clear:
+                            req = (lat + clear) - left_off
+                            if req > need:
+                                need = req
+                                sum_nx, sum_nz = rnx, rnz
+            if need <= 0.5:
+                continue
+            # Cap rightward shift to stay inside the right kerb when one is surveyed.
+            shift = min(need, 45.0)
+            mid_x, mid_z = pts[len(pts) // 2]
+            k_dist = kerb_ray((mid_x, mid_z), (sum_nx, sum_nz), most=200) if kerb_ray else None
+            if k_dist is not None:
+                room = k_dist - (right_off + 12.0)
+                if room > 0:
+                    shift = min(shift, room)
+            if shift <= 0.5:
+                continue
+            for idx in range(len(pts)):
+                if idx == 0:
+                    dx, dz = pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]
+                elif idx == len(pts) - 1:
+                    dx, dz = pts[-1][0] - pts[-2][0], pts[-1][1] - pts[-2][1]
+                else:
+                    dx, dz = pts[idx + 1][0] - pts[idx - 1][0], pts[idx + 1][1] - pts[idx - 1][1]
+                L = math.hypot(dx, dz) or 1.0
+                nx, nz = -dz / L, dx / L
+                row[7 + 2 * idx] = int(round(pts[idx][0] + nx * shift))
+                row[7 + 2 * idx + 1] = int(round(pts[idx][1] + nz * shift))
+            shifted_roads += 1
+    return shifted_roads
+
+
+rail_shifts = clear_opposing_streetcar_rails(out, transit, ray)
+if rail_shifts:
+    print(f"rail clearance: shifted {rail_shifts} road segments clear of opposing streetcar tracks", file=sys.stderr)
+
 # ── Buses and trolleybuses: OSM's route relations (public_transport v2), each as the roads of the graph it runs on ──
 # A route's member ways in their order, each turned to carry on from the last, are cut at the graph's junctions into
 # the directed roads `way/a/b` the page drives; where one is not in the graph (a busway the graph left out, or the

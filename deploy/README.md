@@ -8,7 +8,8 @@ Builds and ships the two Cloudflare Workers. `voxelwright` serves the San Franci
 
 | File | What it holds |
 | --- | --- |
-| `assemble.mjs` | Writes `dist/` (zahynailo.dev: `site/dist` as it is) and `dist-world/` (voxelwright.world: `engine/dist-sf` with the alpha notice, the share card, the favicon, a dark 404 and `_headers` whose CSP hashes the pages' inline scripts). |
+| `assemble.mjs` | Writes `dist/` (zahynailo.dev: `site/dist` as it is) and `dist-world/` (voxelwright.world: `engine/dist-sf` with the alpha notice, the share card, the favicon, the PWA manifest, icons and generated service worker, a dark 404 and `_headers` whose CSP hashes the pages' inline scripts). |
+| `manifest.webmanifest`, `sw.js`, `icons/`, `make-icons.mjs` | The PWA manifest (`fullscreen` / `standalone`, shortcuts, `focus-existing` launch handler), Voxelmorphism PNG icons (`192`, `512`, `maskable`, `apple-touch-icon`) and service worker (shell precache, bounded LRU `/releases/*` tile cache with old-release pruning on `/current.json`, `/bay/*` stale-while-revalidate and offline `/weather` fallback). |
 | `notice.mjs`, `alpha.js` | The early-alpha notice that assembly adds to the realm's pages. |
 | `worker.mjs`, `world-worker.mjs`, `encoding.mjs` | The `voxelwright` Worker's code: `/weather`, each release and bay file sent as its stored `.br` copy, and the security headers and CSP both the Worker and `_headers` use. |
 | `og-world.png` | voxelwright.world's share card (1200 × 630), published as `/og.png`. |

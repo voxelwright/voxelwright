@@ -161,7 +161,7 @@ try {
       await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.explore && globalThis.engine.playHud, null, { timeout: 300_000 })
       if (mode === 'default') await firstView(page, phone)
       // (Off, and kept off: leaving the first view wakes street life, main.ts `leaveLanding`.)
-      await page.evaluate(() => { const st = globalThis.engine.street; if (st) { st.enabled = false; Object.defineProperty(st, 'enabled', { get: () => false, set() {}, configurable: true }) } globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
+      await page.evaluate(() => { const st = globalThis.engine.street; if (st) { globalThis.__stEnabledDesc = Object.getOwnPropertyDescriptor(st, 'enabled'); st.enabled = false; Object.defineProperty(st, 'enabled', { get: () => false, set() {}, configurable: true }) } globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
       const inside = await until(page, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 90_000)
       check(inside, 'on the roof, the eye behind the body')
       const gate = mode !== 'classic', at = {}
@@ -644,6 +644,54 @@ try {
           const backed = await until(page, () => !globalThis.engine.first.engaged && document.documentElement.classList.contains('first') && globalThis.engine.explore.state !== 'leaving', 20_000)
           const after = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state }))
           check(backed && after.credits, `Back to the view in the panel goes back to the view, the credits key there (${JSON.stringify(after)})`)
+        }
+      }
+      // Desktop E prompt vs tool wheel (#75): beside a stopped live traffic car, the prompt binds F (not E), avoids
+      // overlapping the player's body, KeyE still opens the radial wheel, and disabling street life clears the cue.
+      if (mode === 'default' && size === 'wide') {
+        const reEnabled = await page.evaluate(async () => {
+          const e = globalThis.engine, st = e.street
+          if (!st || !globalThis.__stEnabledDesc) return { skipped: true }
+          Object.defineProperty(st, 'enabled', globalThis.__stEnabledDesc)
+          st.enabled = true
+          // Move down to a street (Taylor St) and wait for a traffic car to stop beside the player (via triggerStuck).
+          const x = 515900, z = 663000
+          e.me.walk(false)
+          Object.assign(e.pose, { x: x / 10, z: z / 10, y: e.ground(x / 10, z / 10) + 1.8, pitch: -0.08 })
+          e.me.walk(true)
+          for (let i = 0; i < 40 && !st.ready; i++) await new Promise((r) => setTimeout(r, 150))
+          await new Promise((r) => setTimeout(r, 1200))
+          const stuck = st.robotaxis.triggerStuck('intersection') || st.robotaxis.triggerStuck('narrow')
+          if (!stuck) return { skipped: false, ok: false, why: 'no stopped traffic car spawned' }
+          // Stand 1.8 m beside the stopped traffic car (closer than 2.8 m offer reach, on foot, facing it).
+          const sx = stuck.x + Math.cos(stuck.heading + Math.PI / 2) * 18
+          const sz = stuck.z + Math.sin(stuck.heading + Math.PI / 2) * 18
+          e.me.walk(false)
+          Object.assign(e.pose, { x: sx / 10, z: sz / 10, y: e.ground(sx / 10, sz / 10) + 1.8, yaw: Math.atan2(-(stuck.x - sx), stuck.z - sz), pitch: -0.05 })
+          e.me.walk(true)
+          let cueText = ''
+          for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 100))
+            const p = document.querySelector('#over > #cues p:not([hidden])')
+            if (p?.textContent?.includes('Take the')) { cueText = p.textContent.trim(); break }
+          }
+          return { skipped: false, ok: !!cueText, cueText }
+        })
+        if (!reEnabled.skipped) {
+          check(reEnabled.ok && reEnabled.cueText.startsWith('F  Take the '), `stopped nearby traffic car prompts F instead of stealing E (${JSON.stringify(reEnabled)})`)
+          const m = await measure(page, safe)
+          const cueOver = m.over.filter((s) => s.path.includes('cues'))
+          check(cueOver.length === 0, `traffic car cue does not overlap the body (${cueOver.length})`)
+          await page.keyboard.press('KeyE')
+          await page.waitForTimeout(200)
+          const afterE = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, riding: !!globalThis.engine.alive.riding, cueHidden: [...document.querySelectorAll('#over > #cues p')].every((p) => !p.checkVisibility({ visibilityProperty: true, opacityProperty: true })) }))
+          check(afterE.choosing && !afterE.riding && afterE.cueHidden, `beside a stopped traffic car, E opens the radial tool wheel and hides world cues (${JSON.stringify(afterE)})`)
+          await page.keyboard.press('Escape')
+          await page.waitForTimeout(150)
+          await page.evaluate(() => { globalThis.engine.street.enabled = false })
+          await page.waitForTimeout(150)
+          const afterDisable = await page.evaluate(() => document.querySelectorAll('#over > #cues p').length)
+          check(afterDisable === 0, `disabling street life clears any active traffic cue (${afterDisable})`)
         }
       }
       // A preset and resolution setting chosen are there again when the page is opened again (once: a load is long), and an address's ?shadows=0 is kept over it.

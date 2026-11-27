@@ -58,8 +58,8 @@ try {
   }
   const whole = { mode: 'thing', share: 'whole' }
 
-  // Pink: the car's cells, and only they, in another colour; what they are made of is as it was.
-  check(await find(12), 'a parked car is near')
+  // Pink: the street fixture's cells, and only they, in another colour; what they are made of is as it was.
+  check(await find(12), 'a steel street fixture is near')
   const beside = await page.evaluate(async () => { const e = globalThis.engine; e.wand.held = true; e.wand.mode = 'thing'; const t = await e.wand.aim(e.view()); const b = t.box; const at = [b[0] - 3, b[1] - 1, (b[2] + b[5]) >> 1]; globalThis.beside = at; return e.wand.kind(...at) })
   const pink = await cast('make it pink', whole)
   const PINK = 16 + 22 * 10 + 2

@@ -280,6 +280,90 @@ const steam = await page.evaluate(() => ({ samples: globalThis.steamClearance.le
 check(steam.samples > 0 && steam.low > 0.6, `visible steam clears the emitting surface (${steam.low?.toFixed(2)} cells)`)
 const turnedVent = await ventInBody()
 check(!turnedVent.inside && Math.hypot(...turnedVent.rest.map((v,i)=>v-vent.rest[i]))<0.25, 'the vent follows the same open cells when the damaged car turns')
+// #92: engine smoke must rise clear of the hood from every heading (including facing -x into the wind)
+// and connect to the flame without a visible gap.
+await page.evaluate(() => {
+  const e = globalThis.engine, t = globalThis.car, p = e.alive.where(t)
+  // Face -x (180° yaw) so the +x world wind blows toward the hood and windscreen.
+  e.alive.place(t, p.at, [0, 1, 0, 0])
+  globalThis.smokeSamples = []
+})
+await page.waitForFunction(() => Math.abs(globalThis.engine.alive.where(globalThis.car).rot[1]) > 0.95, null, { timeout: 5000 })
+await page.waitForTimeout(1400)
+const smokeCheck = await page.evaluate(() => {
+  const e = globalThis.engine, t = globalThis.car, d = e.alive.damage(t)
+  const part = globalThis.parts.find((p) => p.deform === d)
+  const vent = globalThis.burningVent
+  if (!part || !vent) return null
+  const [qx, qy, qz, qw] = part.rot
+  const invRot = (v) => {
+    const tx = 2 * (qy * v[2] - qz * v[1]), ty = 2 * (qz * v[0] - qx * v[2]), tz = 2 * (qx * v[1] - qy * v[0])
+    return [v[0] - qw * tx + qy * tz - qz * ty, v[1] - qw * ty + qz * tx - qx * tz, v[2] - qw * tz + qx * ty - qy * tx]
+  }
+  const { size, com } = part.born, cell = part.cell
+  const roofTop = (size[1] - com[1]) * cell
+  const ventLocal = invRot([vent[0] - part.pos[0], vent[1] - part.pos[1], vent[2] - part.pos[2]])
+  const halfWide = (size[2] * 0.58) * cell
+  return new Promise((resolve) => {
+    const write = GPUQueue.prototype.writeBuffer
+    let frames = 0, hoodOverlaps = 0, totalVisible = 0, flameConnectedFrames = 0, flameFrames = 0, maxGap = -Infinity
+    GPUQueue.prototype.writeBuffer = function(buffer, offset, data, start, count) {
+      if (buffer.label === 'puff instances' && frames < 30) {
+        frames++
+        let flameTop = -Infinity
+        const darkSmoke = []
+        for (let i = 0; i < count; i += 12) {
+          const px = data[i] + globalThis.puffAnchor[0], py = data[i + 1] + globalThis.puffAnchor[1], pz = data[i + 2] + globalThis.puffAnchor[2]
+          const sz = data[i + 3], lum = data[i + 4], heat = data[i + 8], age = data[i + 10], late = data[i + 11]
+          if (Math.hypot(px - vent[0], py - vent[1], pz - vent[2]) > 35) continue
+          if (late < 0 && heat > 0) {
+            flameTop = Math.max(flameTop, py + sz * 1.96)
+            continue
+          }
+          // Only count smoke puffs once they have substantially faded in.
+          if (heat > 0 || age < late + 0.04) continue
+          totalVisible++
+          const rel = invRot([px - part.pos[0], py - part.pos[1], pz - part.pos[2]])
+          // Any visible smoke whose billboard drifts back behind the nose vent over the hood/windscreen fails.
+          if (rel[0] - sz * 0.85 < ventLocal[0] - 1.0 && Math.abs(rel[2]) < halfWide && rel[1] < roofTop + 6) hoodOverlaps++
+          // Dark oil smoke (lum < 0.55) must emerge directly from the upper flame with no visible gap.
+          if (lum < 0.55 && Math.hypot(px - vent[0], pz - vent[2]) < 5.0) darkSmoke.push(py - sz * 0.35)
+        }
+        if (flameTop > -Infinity) {
+          flameFrames++
+          const gap = darkSmoke.length ? Math.min(...darkSmoke) - flameTop : 99
+          maxGap = Math.max(maxGap, gap)
+          if (gap <= 0.25) flameConnectedFrames++
+        }
+        if (frames >= 30) {
+          GPUQueue.prototype.writeBuffer = write
+          resolve({ totalVisible, hoodOverlaps, flameFrames, flameConnectedFrames, maxGap: +maxGap.toFixed(2) })
+        }
+      }
+      return write.apply(this, arguments)
+    }
+  })
+})
+check(!!smokeCheck && smokeCheck.totalVisible >= 10 && smokeCheck.hoodOverlaps === 0, `engine smoke stays off the hood when facing into the wind (${JSON.stringify(smokeCheck)})`)
+check(!!smokeCheck && smokeCheck.flameFrames > 0 && smokeCheck.flameConnectedFrames / smokeCheck.flameFrames >= 0.9, `engine smoke connects to the flame without a gap (${JSON.stringify(smokeCheck)})`)
+// #92: a hard side strike over the rear wheel arch must not carve a stepped unsmoothed voxel staircase into the painted fender.
+await page.evaluate(() => { globalThis.engine.alive.repair(globalThis.car) })
+for (let i = 0; i < 4; i++) await hit([-13, -2, 9], [0, 0, 1])
+await page.waitForTimeout(250)
+const archCheck = await page.evaluate(() => {
+  const e = globalThis.engine, t = globalThis.car, d = e.alive.damage(t)
+  const part = globalThis.parts.find((p) => p.deform === d)
+  const dent = d?.dents?.[0]
+  return {
+    dents: d?.dentCount ?? 0,
+    depth: dent ? +(dent.depth * part.cell).toFixed(2) : 0,
+    ratio: dent ? +(dent.depth / dent.radius).toFixed(3) : 0,
+    // A stepped voxel cutout on the side fender creates unsmoothed dark cap walls (piece.tear.opening).
+    fenderCutoutRemoved: part?.tear?.opening?.removed?.size ?? 0,
+    fenderCutoutWalls: (part?.tear?.opening?.walls?.length ?? 0) / 2,
+  }
+})
+check(archCheck.dents > 0 && archCheck.depth > 0.8 && archCheck.ratio >= 0.13 && archCheck.fenderCutoutRemoved === 0 && archCheck.fenderCutoutWalls === 0, `side wheel-arch impact produces no stepped voxel cutout (${JSON.stringify(archCheck)})`)
 // Taken away, its dents go with it: a body's id may be another thing's later.
 const gone = await page.evaluate(() => { const e = globalThis.engine, t = globalThis.car; e.alive.vanish(t); return e.alive.damage(t) })
 check(gone === null, 'a car taken away leaves no dents behind')

@@ -91,6 +91,17 @@ def despike(a):
     return np.where(a > around + 2.0, around, a).astype(np.float32)
 
 
+def despike_roof(a, mask, radius=2, thresh=2.5):
+    """Remove narrow vertical spikes (rooftop light poles, masts, vents) narrower than (2*radius+1)*0.5 m and taller than thresh m."""
+    k = 2 * radius + 1
+    from numpy.lib.stride_tricks import sliding_window_view
+    pad = np.pad(np.where(mask, a, 1e9), radius, mode='edge')
+    eroded = sliding_window_view(pad, (k, k)).min(axis=(2, 3))
+    pad2 = np.pad(np.where(mask, eroded, -1e9), radius, mode='edge')
+    opened = sliding_window_view(pad2, (k, k)).max(axis=(2, 3))
+    return np.where(mask & (a - opened > thresh), opened, a).astype(np.float32)
+
+
 def rings(geometry):
     polys = geometry['coordinates'] if geometry['type'] == 'MultiPolygon' else [geometry['coordinates']]
     for poly in polys:
@@ -194,6 +205,7 @@ def main():
     core = inside & ~grow(~inside, 1)
     roof, known = spread(np.where(core, surface, 0), core, 4)
     roof = np.where(known, roof, surface)
+    roof = despike_roof(roof, inside)
 
     # ── Streets: what is not a lot is street; its carriageway is what a centre line reaches without crossing a kerb.
     street = lots == 0
