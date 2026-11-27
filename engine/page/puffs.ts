@@ -4,6 +4,64 @@
 // for the eye. What burns, and what that does to the world, is the core's (fire.rs).
 import { shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
+import type { Piece } from './pieces.ts'
+import { deformPointCpu, type DeformState } from './deform.ts'
+
+type Point = [number, number, number]
+function rotate(point: Point, rotation: Piece['rot'], inverse = false): Point {
+  const [x, y, z, w] = rotation, [px, py, pz] = point
+  const tx = 2 * (y * pz - z * py), ty = 2 * (z * px - x * pz), tz = 2 * (x * py - y * px)
+  const spin = inverse ? -w : w
+  return [px + spin * tx + y * tz - z * ty, py + spin * ty + z * tx - x * tz, pz + spin * tz + x * ty - y * tx]
+}
+const vents = new WeakMap<Piece, { state: DeformState; revision: number; faces: Uint32Array; offset: Point }>()
+/** Find the grille, lamp or trim face nearest the front impact, then carry it with the car. */
+export function engineVent(piece: Piece, bonnet: readonly [number, number, number]): readonly [number, number, number] {
+  const state = piece.deform
+  if (!state?.dentCount) return bonnet
+  const { faces, size, com } = piece.born
+  let vent = vents.get(piece)
+  if (vent?.state !== state || vent.revision !== state.revision || vent.faces !== faces) {
+    const toBonnet: Point = [bonnet[0] - piece.pos[0], bonnet[1] - piece.pos[1], bonnet[2] - piece.pos[2]]
+    const hood = rotate(toBonnet, piece.rot, true).map((v, i) => com[i] + v / piece.cell)
+    const front = state.front < 2 ? 0 : 2, across = 2 - front
+    const sign = state.front % 2 === 0 ? 1 : -1, nose = sign > 0 ? size[front] : 0
+    let beside = hood[across], deepest = -1
+    for (let i = 0; i < state.dentCount; i++) {
+      const dent = state.dents[i]
+      if (sign * (dent.center[front] - size[front] / 2) > 0 && dent.depth > deepest) {
+        beside = dent.center[across]
+        deepest = dent.depth
+      }
+    }
+    // A part without an opaque nose face vents over the front edge of its bounds.
+    let best = Infinity
+    let face: Point = [size[0] / 2, size[1], size[2] / 2]
+    face[front] = nose
+    face[across] = Math.max(0, Math.min(size[across], beside))
+    for (let i = 0; i < faces.length; i += 2) {
+      const start = faces[i], packed = faces[i + 1]
+      const axis = (packed >>> 8) & 3, side = (packed >>> 10) & 1, kind = packed >>> 16
+      if (axis !== front || side * 2 - 1 !== sign || (kind & 15) === 11) continue
+      const point: Point = [(start & 1023) + 0.5, ((start >>> 10) & 1023) + 0.5, ((start >>> 20) & 1023) + 0.5]
+      point[front] += side - 0.5
+      if (Math.abs(point[front] - nose) > size[front] * 0.24) continue
+      point[across] += Math.max(0, Math.min((packed & 255) - 1, beside - point[across]))
+      const paintPenalty = (kind & 128) ? 7 / piece.cell : 0
+      const distance = (point[across] - beside) ** 2 + 0.3 * (point[1] - hood[1]) ** 2 + (point[front] - nose) ** 2 + paintPenalty ** 2
+      if (distance < best) { best = distance; face = point }
+    }
+    const normal: Point = [0, 0, 0], offset: Point = [0, 0, 0]
+    normal[front] = sign
+    const bent = deformPointCpu(face, normal, state)
+    // The light and smoke start 5.5 cm outside the deformed face.
+    for (let i = 0; i < 3; i++) offset[i] = (bent.pos[i] - com[i]) * piece.cell + bent.norm[i] * 0.55
+    vent = { state, revision: state.revision, faces, offset }
+    vents.set(piece, vent)
+  }
+  const offset = rotate(vent.offset, piece.rot)
+  return [piece.pos[0] + offset[0], piece.pos[1] + offset[1], piece.pos[2] + offset[2]]
+}
 
 const MOST = 3072
 /** A puff that lives longer than this many seconds is one of the first KEPT. */
@@ -288,30 +346,27 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
     },
     engine(at, level, dt) {
-      // Emit cleanly just above the buckled front hood ridge (never intersecting the hood mesh like a
-      // dark painted stain): pale radiator steam at the base, thickening into sunlit charcoal smoke as it rises.
-      const seam: [number, number, number] = [at[0], at[1] - 1.5, at[2]]
+      // The vent is already outside the deformed skin. Start here and let each puff fan out as it rises.
       if (level < 0.7) {
         const frac = (level - 0.35) / 0.35
         if (Math.random() < dt * (14 + 12 * frac)) {
           const w = rnd(0.84, 0.95)
-          puff(seam, 0.75, rnd(0.6, 1.7), rnd(8, 14), { size: rnd(0.65, 1.0), grow: rnd(1.8, 2.8), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.24 + 0.08 * frac, late: 0.0 })
+          puff(at, 0, rnd(0.6, 1.7), rnd(8, 14), { size: rnd(0.65, 1.0), grow: rnd(1.8, 2.8), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.24 + 0.08 * frac, late: 0.0 })
         }
         return
       }
-      // Pale warm-grey steam escaping cleanly off the buckled hood crest (no dark decal on the paint).
+      // A few lighter wisps mix with the darker engine smoke.
       if (Math.random() < dt * 15) {
         const wisp = rnd(0.56, 0.70)
-        puff(seam, 0.85, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.65, 1.0), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.20, late: 0.0 })
+        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.65, 1.0), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.20, late: 0.0 })
       }
-      // Warm-charcoal engine smoke (clearly damaged-engine smoke rather than a pitch-black oil fire)
-      // fading in softly off the hood crest and keeping the right driving lane readable from the seat.
+      // Oil smoke rises from the same opening and expands as it cools.
       if (Math.random() < dt * 10) {
         const grey = rnd(0.30, 0.43)
-        puff(seam, 0.85, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.32, late: 0.0 })
+        puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.32, late: 0.0 })
       }
-      // Burning: compact flickering orange tongues at the hood seam.
-      if (level > 0.92 && Math.random() < dt * 12) puff(seam, 0.8, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.95, 1.7), grow: rnd(0.8, 1.8), life: rnd(0.28, 0.55), heat: 0.72, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.22, late: 0.0 })
+      // Burning: compact flickering orange tongues at the vent.
+      if (level > 0.92 && Math.random() < dt * 9) puff(at, 0, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.75, 1.35), grow: rnd(0.8, 1.5), life: rnd(0.28, 0.48), heat: 0.60, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.22, late: 0.0 })
     },
     step(dt) {
       live = 0

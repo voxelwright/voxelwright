@@ -298,7 +298,7 @@ export function living(o: {
     /** A hard crash (#37): dust, chips of the paint it was struck on (`kind`), and shards of glass if a window cracked. */
     crash?(at: readonly [number, number, number], strength: number, kind: number, glass: boolean): void
     /** A damaged engine under the bonnet (#37), for one frame of `dt` seconds: steam, then dark smoke, then flames as `level` goes from 0.35 to 1. */
-    engine?(at: readonly [number, number, number], level: number, dt: number): void
+    engine?(at: readonly [number, number, number], level: number, dt: number, source: Piece): void
     rain(): number
     day(): number
     surface(x: number, z: number): number
@@ -875,12 +875,15 @@ export function living(o: {
       // A struck engine steams, then smokes, then burns (#37), under the bonnet at its front: only near the eye, and
       // gentler where motion is to be reduced.
       if (o.fx?.engine) for (const [thing, worn] of looks) {
-        let level = 0
-        for (const w of worn) level = Math.max(level, w.piece.deform?.hoodDamage ?? 0)
-        if (level < 0.35) continue
+        let level = 0, source: Piece | undefined
+        for (const { piece } of worn) {
+          const heat = piece.deform?.hoodDamage ?? 0
+          if (heat > level) { level = heat; source = piece }
+        }
+        if (level < 0.35 || !source) continue
         const f = FRONTS[thing.motor.front], half = (thing.motor.front < 2 ? thing.size[0] : thing.size[2]) * 0.5
         const at = placeOf(thing, [thing.size[0] / 2 + f[0] * half * 0.62, thing.size[1] * 0.8, thing.size[2] / 2 + f[2] * half * 0.62])
-        if (at && Math.hypot(at[0] - o.pose.x * M, at[1] - o.pose.y * M, at[2] - o.pose.z * M) < ENGINE_SEEN) o.fx.engine(at, level, reducedMotion.matches ? dt * 0.4 : dt)
+        if (at && Math.hypot(at[0] - o.pose.x * M, at[1] - o.pose.y * M, at[2] - o.pose.z * M) < ENGINE_SEEN) o.fx.engine(at, level, reducedMotion.matches ? dt * 0.4 : dt, source)
       }
       // Near is near the body when there is one (#367): by the eye, which rides three metres behind someone on foot, a kart
       // right beside them was out of reach and E did nothing until they had walked past it.

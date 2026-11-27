@@ -150,6 +150,46 @@ const clear = await page.screenshot({clip: passengerGlass})
 const glass = await compare(cracked, clear)
 check(strength > 0 && glass.rowBand < 0.5, `side impact leaves no bright scanlines across the windshield (row contrast ${glass.rowBand.toFixed(2)})`)
 await page.evaluate(() => { const e = globalThis.engine; e.off.delete('puffs'); e.alive.view(false); e.alive.mount(null) })
+// Listen at the smoke system's real entry point. A burning front corner must vent
+// into air on that side, even after the car has turned. Map the point back into the
+// undeformed fine cells to check the actual occupancy at the source.
+await page.evaluate(() => {
+  const e = globalThis.engine, emit = e.smoke.engine.bind(e.smoke)
+  e.alive.repair(globalThis.car)
+  e.smoke.engine = (at, level, dt) => {
+    if (level > 0.92) globalThis.burningVent = [...at]
+    emit(at, level, dt)
+  }
+})
+for (let i=0; i<4; i++) await hit([19,4,7], [1,0,0.25])
+await page.waitForFunction(() => globalThis.burningVent, null, {timeout: 5000})
+const ventInBody = () => page.evaluate(async () => {
+  const {deformPointCpu} = await import('/page/deform.ts')
+  const e = globalThis.engine, t = globalThis.car, part=e.alive.look(t).parts[0]
+  const v = globalThis.burningVent.map((x,i) => (x-part.pos[i])/part.cell)
+  const [x,y,z,w] = part.rot
+  const tx=2*(y*v[2]-z*v[1]), ty=2*(z*v[0]-x*v[2]), tz=2*(x*v[1]-y*v[0])
+  const bent = [v[0]-w*tx+y*tz-z*ty,v[1]-w*ty+z*tx-x*tz,v[2]-w*tz+x*ty-y*tx]
+  let rest=[...bent]
+  const d=e.alive.damage(t)
+  for (let i=0; i<20; i++) {
+    const warped=deformPointCpu(rest,[1,0,0],d).pos
+    rest=rest.map((p,j)=>p+bent[j]-warped[j])
+  }
+  const [a,b,c]=rest.map(Math.floor), {size,cells}=t.fine[0]
+  const inside=a>=0 && a<size[0] && b>=0 && b<size[1] && c>=0 && c<size[2] && cells[a+size[0]*(c+size[2]*b)]!==0
+  return {rest,inside,front:rest[0]/size[0],side:rest[2]/size[2]}
+})
+const vent = await ventInBody()
+check(!vent.inside && vent.front>0.88 && vent.side>0.58, `flame starts in air at the struck nose opening (length ${vent.front.toFixed(2)}, width ${vent.side.toFixed(2)}, inside skin ${vent.inside})`)
+await page.evaluate(() => {
+  const e=globalThis.engine, t=globalThis.car, p=e.alive.where(t)
+  e.alive.place(t,p.at,[0,Math.SQRT1_2,0,Math.SQRT1_2])
+})
+await page.waitForFunction(() => Math.abs(globalThis.engine.alive.where(globalThis.car).rot[1]) > 0.64)
+await page.waitForTimeout(180)
+const turnedVent = await ventInBody()
+check(!turnedVent.inside && Math.hypot(...turnedVent.rest.map((v,i)=>v-vent.rest[i]))<0.25, 'the vent follows the same open cells when the damaged car turns')
 // Taken away, its dents go with it: a body's id may be another thing's later.
 const gone = await page.evaluate(() => { const e = globalThis.engine, t = globalThis.car; e.alive.vanish(t); return e.alive.damage(t) })
 check(gone === null, 'a car taken away leaves no dents behind')
