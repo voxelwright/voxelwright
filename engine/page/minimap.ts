@@ -25,6 +25,28 @@ export interface MapCameraSnapshot {
   extrude: number
 }
 
+export interface EntryPickTarget {
+  /** World metres (x east, z south). */
+  x: number
+  z: number
+  /** Display name shown on the pin and Start card. */
+  name: string
+  /** Optional subtitle shown under the name in the Start card. */
+  subtitle?: string
+  /** Optional preferred street facing yaw (radians). */
+  yaw?: number
+}
+
+export interface EntryPickOptions {
+  initial: EntryPickTarget
+  /** Called whenever the visitor selects a different spot on the map (to pre-warm that location). */
+  onSelect?(target: EntryPickTarget): void
+  /** Called when the visitor confirms Start from the map. */
+  onStart(target: EntryPickTarget, cam: MapCameraSnapshot): void
+  /** Called if the visitor closes/cancels the map back to the first view. */
+  onCancel(): void
+}
+
 export interface MapSystemOptions {
   device: GPUDevice
   format: GPUTextureFormat
@@ -48,6 +70,8 @@ export interface MapSystemOptions {
 
 export interface MapSystem {
   readonly open: boolean
+  /** True when the fullscreen map is open in pre-entry starting-location picker mode. */
+  readonly picking: boolean
   /** True when the fullscreen map completely covers the viewport (lets main loop skip world raymarch). */
   readonly opaque: boolean
   readonly ready: boolean
@@ -63,6 +87,10 @@ export interface MapSystem {
   camera(): MapCameraSnapshot
   /** Drives `#world-map` directly during an optical 3D Map-to-Reality dive (pass `null` to end). */
   setDive(state: MapDiveState | null): void
+  /** Opens the fullscreen map immediately in pre-entry picker mode with a default scenic spot selected. */
+  openForEntry(options: EntryPickOptions): void
+  /** Closes pre-entry picker mode programmatically without firing onCancel. */
+  closeEntry(): void
   toggle(open?: boolean): void
   setMode(mode: '2d' | '3d'): void
   setDestination(x: number, z: number, name?: string): GpsRoute | null
@@ -339,6 +367,44 @@ html.has-mapillary #minimap .mm-mly { display: inline-flex; }
 }
 #world-map .wm-visit:hover { background: #ff4496; }
 #world-map .wm-visit[hidden] { display: none; }
+#world-map.entry-pick .wm-clear { display: none; }
+#world-map.entry-pick .wm-visit {
+  height: 32px;
+  padding: 0 15px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  box-shadow: 0 3px 14px rgba(255, 42, 133, 0.45);
+}
+#world-map .wm-loading {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(11, 17, 25, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #eef4fa;
+  font: 600 13px/1.2 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+  pointer-events: none;
+}
+#world-map .wm-loading[hidden] { display: none; }
+#world-map .wm-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  border-top-color: #ff2a85;
+  animation: wm-spin 0.75s linear infinite;
+}
+@keyframes wm-spin { to { transform: rotate(360deg); } }
 #world-map .wm-clear {
   flex: none;
   width: 28px;
@@ -609,6 +675,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     <div class="wm-stage">
       <canvas class="wm-gpu"></canvas>
       <canvas class="wm-ov"></canvas>
+      <div class="wm-loading" hidden><span class="wm-spin" aria-hidden="true"></span><span>Loading San Francisco map…</span></div>
     </div>
     <div class="wm-head">
       <div class="wm-title-card">
@@ -648,6 +715,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   const wmStage = wmRoot.querySelector<HTMLElement>('.wm-stage')!
   const wmGpu = wmRoot.querySelector<HTMLCanvasElement>('.wm-gpu')!
   const wmOv = wmRoot.querySelector<HTMLCanvasElement>('.wm-ov')!
+  const wmLoading = wmRoot.querySelector<HTMLElement>('.wm-loading')!
   const wmCtx = wmOv.getContext('2d')!
   const wmCity = wmRoot.querySelector<HTMLElement>('.wm-city')!
   const wmSub = wmRoot.querySelector<HTMLElement>('.wm-sub')!
@@ -666,19 +734,13 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   const wmPlacesEl = wmRoot.querySelector<HTMLElement>('.wm-places')!
   const wmHintEl = wmRoot.querySelector<HTMLElement>('.wm-hint')!
 
-  const updateHint = () => {
-    wmHintEl.textContent = coarse.matches
-      ? 'Tap anywhere to set GPS route · Drag to pan · Pinch to zoom'
-      : 'Click anywhere to set GPS route · Drag to pan · Scroll to zoom · Right-drag to tilt · M to close'
-  }
-  updateHint()
-  coarse.addEventListener('change', updateHint)
-
   // ── State ──
   let map: MapData | null = null
   let streetLabels: StreetLabel[] = []
   let engagedOnce = false
   let isOpen = false
+  let entrySession: EntryPickOptions | null = null
+  let entryTarget: EntryPickTarget | null = null
   let diveState: MapDiveState | null = null
   let diveDrawn = false
   let openedAt = 0
@@ -687,6 +749,20 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   let viewMode: '2d' | '3d' = '2d'
   let time = 0
   let renderMs = 0
+
+  const updateHint = () => {
+    if (entrySession) {
+      wmHintEl.textContent = coarse.matches
+        ? 'Tap anywhere to pick your start · Drag to pan · Pinch to zoom'
+        : 'Click anywhere to pick your start · Drag to pan · Scroll to zoom · Enter to start · Esc to go back'
+      return
+    }
+    wmHintEl.textContent = coarse.matches
+      ? 'Tap anywhere to set GPS route · Drag to pan · Pinch to zoom'
+      : 'Click anywhere to set GPS route · Drag to pan · Scroll to zoom · Right-drag to tilt · M to close'
+  }
+  updateHint()
+  coarse.addEventListener('change', updateHint)
 
   // Active GPS state
   let destination: { x: number; z: number; name: string } | null = null
@@ -722,6 +798,23 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   let northBtnPos: { x: number; y: number; r: number } | null = null
 
   const syncRouteCard = () => {
+    if (entrySession && entryTarget) {
+      wmRouteName.textContent = entryTarget.name
+      wmRouteMeta.textContent = entryTarget.subtitle ?? 'Selected start · click anywhere to change'
+      wmVisitBtn.textContent = 'Start'
+      wmVisitBtn.title = 'Start exploring here (Enter)'
+      wmVisitBtn.setAttribute('aria-label', `Start exploring at ${entryTarget.name}`)
+      wmVisitBtn.hidden = false
+      wmRouteCard.hidden = false
+      for (const b of wmPlacesEl.querySelectorAll<HTMLButtonElement>('.wm-chip')) {
+        b.classList.toggle('on', b.dataset.name === entryTarget.name)
+      }
+      return
+    }
+    wmVisitBtn.textContent = 'Visit'
+    wmVisitBtn.title = 'Fast travel to destination'
+    wmVisitBtn.removeAttribute('aria-label')
+    wmVisitBtn.hidden = !opts.onVisit
     if (!destination || !route) {
       wmRouteCard.hidden = true
       for (const b of wmPlacesEl.querySelectorAll('.wm-chip')) b.classList.remove('on')
@@ -738,19 +831,51 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
   }
 
+  const selectEntrySpot = (next: EntryPickTarget, pan = false) => {
+    if (!entrySession) return
+    entryTarget = { ...next }
+    pinDropAt = time
+    if (pan) {
+      wmCam.tCx = next.x
+      wmCam.tCz = next.z
+      wmCam.tSpan = clamp(wmCam.tSpan, 360, 820)
+      wmCam.vx = 0; wmCam.vz = 0
+      clampTargetToMap()
+    }
+    syncRouteCard()
+    entrySession.onSelect?.(entryTarget)
+  }
+
   const rebuildChips = () => {
     wmPlacesEl.replaceChildren()
-    if (!map) return
-    const featured = map.places.filter((p) => p.kind === 'landmark' || p.kind === 'park')
-    for (const p of featured) {
+    const items: { name: string; x: number; z: number; subtitle?: string; yaw?: number }[] = []
+    const seen = new Set<string>()
+    if (entrySession) {
+      const init = entrySession.initial
+      items.push({ name: init.name, x: init.x, z: init.z, subtitle: init.subtitle, yaw: init.yaw })
+      seen.add(init.name)
+    }
+    if (map) {
+      const featured = map.places.filter((p) => p.kind === 'landmark' || p.kind === 'park')
+      for (const p of featured) {
+        if (seen.has(p.name)) continue
+        seen.add(p.name)
+        items.push({ name: p.name, x: p.x, z: p.z })
+      }
+    }
+    for (const p of items) {
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'wm-chip'
       btn.dataset.name = p.name
       btn.textContent = p.name
       btn.addEventListener('click', () => {
-        setDestination(p.x, p.z, p.name)
-        frameRouteOrPoint(p.x, p.z)
+        if (entrySession) {
+          selectEntrySpot({ x: p.x, z: p.z, name: p.name, subtitle: p.subtitle, yaw: p.yaw }, true)
+        } else {
+          setDestination(p.x, p.z, p.name)
+          frameRouteOrPoint(p.x, p.z)
+        }
       })
       wmPlacesEl.append(btn)
     }
@@ -803,6 +928,14 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   }
 
   const centerOnPlayer = () => {
+    if (entrySession && entryTarget) {
+      wmCam.tCx = entryTarget.x
+      wmCam.tCz = entryTarget.z
+      wmCam.tSpan = clamp(wmCam.tSpan, 360, 820)
+      wmCam.vx = 0; wmCam.vz = 0
+      clampTargetToMap()
+      return
+    }
     const p = opts.player()
     wmCam.tCx = p.x
     wmCam.tCz = p.z
@@ -828,7 +961,127 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
   }
 
+  const snapEntryCamera = (target: EntryPickTarget) => {
+    viewMode = '3d'
+    wmBtn2d.classList.remove('on')
+    wmBtn3d.classList.add('on')
+    wmBtn2d.setAttribute('aria-pressed', 'false')
+    wmBtn3d.setAttribute('aria-pressed', 'true')
+    wmCam.tCx = wmCam.cx = target.x
+    wmCam.tCz = wmCam.cz = target.z
+    wmCam.tYaw = wmCam.yaw = 0.35
+    wmCam.tTilt = wmCam.tilt = 0.78
+    wmCam.tExtrude = wmCam.extrude = 1.0
+    wmCam.tSpan = wmCam.span = 680
+    wmCam.vx = 0; wmCam.vz = 0
+    wmCam.init = true
+    clampTargetToMap()
+  }
+
+  const teardownEntryDom = () => {
+    isOpen = false
+    entrySession = null
+    entryTarget = null
+    wmHeld.clear()
+    wmRoot.classList.remove('open', 'entry-pick')
+    html.classList.remove('map-open')
+    wmLoading.hidden = true
+    wmCloseBtn.innerHTML = 'Close <kbd>M</kbd>'
+    wmCloseBtn.setAttribute('aria-label', 'Close map')
+    wmCenterBtn.title = 'Center on player'
+    wmCenterBtn.setAttribute('aria-label', 'Center on player')
+    wmSub.textContent = 'Click anywhere to set a GPS route'
+    leaveInput?.(); leaveInput = null
+    updateHint()
+    rebuildChips()
+    if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) wmRoot.hidden = true }, 200)
+  }
+
+  const confirmEntryStart = () => {
+    if (!entrySession || !entryTarget) return
+    const session = entrySession
+    const chosen = { ...entryTarget }
+    const snap: MapCameraSnapshot = { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
+    teardownEntryDom()
+    session.onStart(chosen, snap)
+  }
+
+  const cancelEntry = () => {
+    if (!entrySession) return
+    const session = entrySession
+    teardownEntryDom()
+    session.onCancel()
+  }
+
+  const closeEntry = () => {
+    if (!entrySession) return
+    teardownEntryDom()
+  }
+
+  const openForEntry = (options: EntryPickOptions) => {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+    diveState = null
+    wmRoot.classList.remove('dive')
+    html.classList.remove('map-dive')
+    wmRoot.style.removeProperty('opacity')
+    entrySession = options
+    entryTarget = { ...options.initial }
+    isOpen = true
+    openedAt = performance.now()
+    pinDropAt = time
+    document.exitPointerLock?.()
+    html.classList.add('map-open')
+    wmRoot.classList.add('entry-pick')
+    wmRoot.hidden = false
+    wmLoading.hidden = !!map
+    wmSub.textContent = 'Choose where to start · click anywhere on the map'
+    wmCloseBtn.innerHTML = 'Back <kbd>Esc</kbd>'
+    wmCloseBtn.setAttribute('aria-label', 'Back to first view')
+    wmCenterBtn.title = 'Center on selected spot'
+    wmCenterBtn.setAttribute('aria-label', 'Center on selected spot')
+    snapEntryCamera(entryTarget)
+    updateHint()
+    rebuildChips()
+    syncRouteCard()
+    void wmRoot.offsetWidth
+    wmRoot.classList.add('open')
+    wmHeld.clear()
+    leaveInput?.()
+    leaveInput = opts.input.push({
+      name: 'map',
+      solid: true,
+      every: true,
+      key(code, e) {
+        if (code === 'Escape' || (code === 'KeyM' && !e.shiftKey && !e.repeat)) {
+          e.preventDefault()
+          cancelEntry()
+          return true
+        }
+        if ((code === 'Enter' || code === 'NumpadEnter') && !e.repeat) {
+          e.preventDefault()
+          confirmEntryStart()
+          return true
+        }
+        if (code === 'Equal' || code === 'NumpadAdd') { wmCam.tSpan *= 0.78; clampTargetToMap(); return true }
+        if (code === 'Minus' || code === 'NumpadSubtract') { wmCam.tSpan *= 1.28; clampTargetToMap(); return true }
+        if (code === 'Digit2') { setMode('2d'); return true }
+        if (code === 'Digit3') { setMode('3d'); return true }
+        if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(code)) {
+          wmHeld.add(code)
+          return true
+        }
+        return true
+      },
+      wheel() { return true },
+      use() { return true },
+    })
+  }
+
   const toggle = (next?: boolean) => {
+    if (entrySession) {
+      if (next === false || next === undefined) cancelEntry()
+      return
+    }
     const want = next ?? !isOpen
     if (want === isOpen) return
     if (want && !opts.engaged()) return
@@ -837,9 +1090,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
     if (isOpen) {
       diveState = null
-      wmRoot.classList.remove('dive')
+      wmRoot.classList.remove('dive', 'entry-pick')
       html.classList.remove('map-dive')
       wmRoot.style.removeProperty('opacity')
+      wmLoading.hidden = !!map
       openedAt = performance.now()
       document.exitPointerLock?.()
       html.classList.add('map-open')
@@ -924,6 +1178,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   wmZoomOut.addEventListener('click', () => { wmCam.tSpan *= 1.38; clampTargetToMap() })
   wmCenterBtn.addEventListener('click', () => centerOnPlayer())
   wmVisitBtn.addEventListener('click', () => {
+    if (entrySession) {
+      confirmEntryStart()
+      return
+    }
     if (!destination || !opts.onVisit) return
     const { x, z, name } = destination
     const snap: MapCameraSnapshot = { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
@@ -933,11 +1191,12 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     void opts.onVisit(x, z, name, snap)
   })
   wmClearBtn.addEventListener('click', () => clearDestination())
-  wmCloseBtn.addEventListener('click', () => toggle(false))
+  wmCloseBtn.addEventListener('click', () => { if (entrySession) cancelEntry(); else toggle(false) })
 
   // ── Fullscreen Interactive Pan / Zoom / Tilt / Pinch / Click-to-Navigate ──
   const buildWmCamera = (): MapCamera => {
     const p = opts.player()
+    const pin = entrySession ? entryTarget : destination
     return {
       cx: wmCam.cx,
       cz: wmCam.cz,
@@ -949,12 +1208,12 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       targetOffsetY: 0,
       playerX: p.x,
       playerZ: p.z,
-      routeAlong: progress?.alongM ?? 0,
+      routeAlong: entrySession ? 0 : (progress?.alongM ?? 0),
       routeFadeLen: 0,
       time,
-      destActive: !!destination,
-      destX: destination?.x ?? 0,
-      destZ: destination?.z ?? 0,
+      destActive: !!pin,
+      destX: pin?.x ?? 0,
+      destZ: pin?.z ?? 0,
       night: clamp(1 - opts.day(), 0, 1),
     }
   }
@@ -988,11 +1247,15 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       if (d < bestD) { bestD = d; pickedPlace = pp.place }
     }
     if (pickedPlace) {
-      setDestination(pickedPlace.x, pickedPlace.z, pickedPlace.name)
+      if (entrySession) {
+        selectEntrySpot({ x: pickedPlace.x, z: pickedPlace.z, name: pickedPlace.name })
+      } else {
+        setDestination(pickedPlace.x, pickedPlace.z, pickedPlace.name)
+      }
       return
     }
-    // If clicking right on the active destination pin (within 18 px), toggle-clear it cleanly.
-    if (destination && lastWmVP) {
+    // If clicking right on the active destination pin (within 18 px), toggle-clear it cleanly (in-game GPS only).
+    if (!entrySession && destination && lastWmVP) {
       const dp = projectMapPoint(lastWmVP, destination.x, 1, destination.z, r.width, r.height)
       if (dp && Math.hypot(dp[0] - px, dp[1] - py) < 18) {
         clearDestination()
@@ -1005,7 +1268,14 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     // Clamp clicks inside the map area + slight shore margin.
     const cx = clamp(wx, map.x0, map.x0 + map.spanX)
     const cz = clamp(wz, map.z0, map.z0 + map.spanZ)
-    setDestination(cx, cz)
+    if (entrySession) {
+      const snap = snapToRoad(map, cx, cz, 120)
+      const label = snap?.street || describeSpot(map, cx, cz)
+      const sub = snap?.street ? describeSpot(map, cx, cz) : 'Custom starting spot'
+      selectEntrySpot({ x: cx, z: cz, name: label, subtitle: sub !== label ? sub : 'Custom starting spot' })
+    } else {
+      setDestination(cx, cz)
+    }
   }
 
   wmStage.addEventListener('contextmenu', (e) => e.preventDefault())
@@ -1102,12 +1372,14 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       }
       hoveredPlace = hit
       if (hit) {
-        hoveredText = `${hit.name} · Click to route`
+        hoveredText = entrySession ? `${hit.name} · Click to start here` : `${hit.name} · Click to route`
       } else {
         const g = unprojectToGround(buildWmCamera(), px, py, r.width, r.height)
         if (g && g[0] >= map.x0 && g[0] <= map.x0 + map.spanX && g[1] >= map.z0 && g[1] <= map.z0 + map.spanZ) {
           const snap = snapToRoad(map, g[0], g[1], 90)
-          hoveredText = snap?.street ? `${snap.street} · Click to set waypoint` : describeSpot(map, g[0], g[1])
+          hoveredText = snap?.street
+            ? `${snap.street} · ${entrySession ? 'Click to start here' : 'Click to set waypoint'}`
+            : describeSpot(map, g[0], g[1])
         } else {
           hoveredText = 'San Francisco Bay'
         }
@@ -1348,7 +1620,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     ctx.clearRect(0, 0, cssW, cssH)
 
     // Simple screen-space bounding-box occupancy list to keep labels 100% crisp and collision-free.
-    // Pre-seed with floating UI chrome cards so street & neighborhood labels never peek behind them!
+    // Pre-seed with floating UI chrome cards AND the active destination/entry pin tag so labels never collide with them!
     const used: [number, number, number, number][] = []
     const stageR = wmStage.getBoundingClientRect()
     for (const el of wmRoot.querySelectorAll<HTMLElement>('.wm-title-card, .wm-route-card, .wm-tools, .wm-dock')) {
@@ -1356,6 +1628,17 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       const r = el.getBoundingClientRect()
       if (r.width > 2 && r.height > 2) {
         used.push([r.left - stageR.left - 8, r.top - stageR.top - 8, r.right - stageR.left + 8, r.bottom - stageR.top + 8])
+      }
+    }
+    const activePinForOcc = entrySession ? entryTarget : (destination && route ? destination : null)
+    if (activePinForOcc) {
+      const dp = projectMapPoint(vp, activePinForOcc.x, 1.5, activePinForOcc.z, cssW, cssH)
+      if (dp) {
+        ctx.font = '600 12px -apple-system, BlinkMacSystemFont, system-ui, sans-serif'
+        const rem = !entrySession && route ? (progress ? progress.remainingM : route.totalM) : 0
+        const tag = entrySession ? activePinForOcc.name : `${activePinForOcc.name} · ${formatDistance(rem)}`
+        const tw = ctx.measureText(tag).width + 24
+        used.push([dp[0] - tw * 0.5 - 6, dp[1] - 62, dp[0] + tw * 0.5 + 6, dp[1] + 10])
       }
     }
     const fits = (x0: number, y0: number, x1: number, y1: number) => {
@@ -1434,7 +1717,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       const pr = projectMapPoint(vp, p.x, elev, p.z, cssW, cssH)
       if (!pr || pr[0] < 14 || pr[0] > cssW - 14 || pr[1] < 60 || pr[1] > cssH - 76) continue
       projectedPlaces.push({ place: p, x: pr[0], y: pr[1] })
-      const isDest = destination?.name === p.name
+      const activePin = entrySession ? entryTarget : destination
+      const isDest = activePin?.name === p.name
       const isHover = hoveredPlace === p
       const tw = ctx.measureText(p.name).width
       const pillW = tw + 22, pillH = 22
@@ -1463,8 +1747,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
     ctx.restore()
 
-    // 4. Player sight cone + GTA VI circular directional arrow badge
-    {
+    // 4. Player sight cone + GTA VI circular directional arrow badge (hidden in pre-entry picker before player lands)
+    if (!entrySession) {
       const pProj = projectMapPoint(vp, cam.playerX, 2, cam.playerZ, cssW, cssH)
       if (pProj) {
         const px = pProj[0], py = pProj[1]
@@ -1506,9 +1790,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       }
     }
 
-    // 5. Active Neon-Pink GPS Destination Pin + Drop Ripple + Floating Tag
-    if (destination && route) {
-      const dProj = projectMapPoint(vp, destination.x, 1.5, destination.z, cssW, cssH)
+    // 5. Active Neon-Pink GPS Destination Pin (or Entry Start Pin) + Drop Ripple + Floating Tag
+    const pinTarget = entrySession ? entryTarget : (destination && route ? destination : null)
+    if (pinTarget) {
+      const dProj = projectMapPoint(vp, pinTarget.x, 1.5, pinTarget.z, cssW, cssH)
       if (dProj) {
         const dx = dProj[0], dy = dProj[1]
         ctx.save()
@@ -1545,8 +1830,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         ctx.fill()
 
         // Crisp floating destination tag above pin
-        const rem = progress ? progress.remainingM : route.totalM
-        const tag = `${destination.name} · ${formatDistance(rem)}`
+        const rem = !entrySession && route ? (progress ? progress.remainingM : route.totalM) : 0
+        const tag = entrySession ? pinTarget.name : `${pinTarget.name} · ${formatDistance(rem)}`
         ctx.font = '600 12px -apple-system, BlinkMacSystemFont, system-ui, sans-serif'
         const tw = ctx.measureText(tag).width + 18
         ctx.fillStyle = 'rgba(13, 17, 25, 0.88)'
@@ -1682,8 +1967,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
     if (!engaged) {
       if (!mmRoot.hidden) mmRoot.hidden = true
-      if (isOpen) toggle(false)
-      return
+      if (!entrySession) {
+        if (isOpen) toggle(false)
+        return
+      }
     }
     if (engaged && mmRoot.hidden && map) mmRoot.hidden = false
     if (!map || opts.paused()) return
@@ -1692,7 +1979,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     const night = clamp(1 - opts.day(), 0, 1)
 
     // 1. Live GPS route tracking, progress trimming, off-route auto-reroute, and arrival detection!
-    if (destination && route) {
+    if (engaged && destination && route) {
       progress = trackRoute(map, route, p.x, p.z)
       if (progress.arrived) {
         const reached = destination.name
@@ -1855,9 +2142,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
   return {
     get open() { return isOpen },
+    get picking() { return isOpen && !!entrySession },
     get opaque() {
       if (diveState) return false
-      return isOpen && performance.now() - openedAt > 220
+      return isOpen && !!map && performance.now() - openedAt > 220
     },
     get ready() { return !!map },
     get data() { return map },
@@ -1882,6 +2170,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       return { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
     },
     setDive,
+    openForEntry,
+    closeEntry,
     toggle,
     setMode,
     setDestination,
@@ -1892,7 +2182,12 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       streetLabels = buildStreetLabels(next)
       wmCity.textContent = next.title.toUpperCase()
       gpu.setMap(next)
+      wmLoading.hidden = true
       rebuildChips()
+      if (entrySession && entryTarget) {
+        snapEntryCamera(entryTarget)
+        pinDropAt = time
+      }
       if (opts.engaged()) mmRoot.hidden = false
       // If a destination was active before a map refresh, re-route on the new graph.
       if (destination) setDestination(destination.x, destination.z, destination.name)

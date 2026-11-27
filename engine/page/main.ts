@@ -294,8 +294,8 @@ async function main() {
   // (it is fetched once the park is shown), or before this (it is heard from the script's first line). Where nothing leads in (a realm with no such board,
   // `?boards=0`, boards or a flow that could not be had) the first view ends as it used to, on a key or a click on
   // the picture: nobody is left before a still picture with no way past it.
-  let way: import('./explore.ts').Explore | null = null, meant = false, openly = false
-  const enter = (host: boolean) => { if (!first || first.engaged) return; if (way) { if (host) void way.go(); else way.act() } else if (openly) first.engage(); else if (host) meant = true }
+  let way: import('./explore.ts').Explore | null = null, meant = false, askedAct = false, openly = false
+  const enter = (host: boolean) => { if (!first || first.engaged) return; if (way) { if (host) void way.go(); else way.act() } else if (openly) first.engage(); else if (host) meant = true; else askedAct = true }
   const noWayIn = () => {
     if (!first || first.engaged || openly) return
     openly = true
@@ -655,10 +655,10 @@ async function main() {
   const firstStill = () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && atArrival()
   // The first view as it was left needs only its own picture (#523): the far model keeps to the landing's cut of the
   // view, which from that eye draws the skyline every band does (a hundredth of the faces), and street life sleeps,
-  // none of it in sight from there. Both wake at the first ask of EXPLORE or anything else that leaves the first view, for good.
+  // none of it in sight from there. Far model unlocks when the map opens; street life ticks once diving/in-world.
   let landing = true
   const leaveLanding = () => {
-    if (!landing || !seen.near || (first && !first.engaged && (!way || way.state === 'idle') && !!arrive && atArrival())) return
+    if (!landing || !seen.near || (first && !first.engaged && (!way || way.state === 'idle' || way.state === 'picking') && !!arrive && atArrival())) return
     landing = false
     farModel.left()
     if (streetLife) streetLife.enabled = true
@@ -735,7 +735,14 @@ async function main() {
     const gap = now - last
     for (const each of watchers) each(gap)
     telemetry?.frame(dt, gap, now)
-    if (paused || mapSys?.opaque) { last = now; requestAnimationFrame(frame); return }
+    if (paused) { last = now; requestAnimationFrame(frame); return }
+    if (mapSys?.opaque) {
+      // While the fullscreen entry map is open, keep background WASM sector workers building the chosen landing spot!
+      if (ahead) world.update(ahead)
+      last = now
+      requestAnimationFrame(frame)
+      return
+    }
     // Rest is not lateness: the screen's rate, and how long a frame takes, are counted only from frames at that rate.
     if (wasResting && !resting) frameMs = screenMs
     if (!resting) {
@@ -858,10 +865,14 @@ async function main() {
   // The road's paint and rails (#450): lines the march draws over the asphalt (marks.ts), asked for once the place is
   // shown round the eye, so the first picture waits on none of their bytes. Until then a road is bare asphalt.
   // One that fails is asked for again, four times at most, 15 s apart.
-  const markRoads = (tries: number): void => void roadMarks().then((bytes) => {
-    if (bytes) { if (march.marks(bytes) < 0) console.error('marks.bin is not marks') } else if (tries > 1) setTimeout(() => markRoads(tries - 1), 15_000)
-  })
-  if (BAY_ON) { const later = setInterval(() => { if (!seen.near) return; clearInterval(later); markRoads(4) }, 250) }
+  let marksAsked = false
+  const markRoads = (tries: number): void => {
+    marksAsked = true
+    void roadMarks().then((bytes) => {
+      if (bytes) { if (march.marks(bytes) < 0) console.error('marks.bin is not marks') } else if (tries > 1) setTimeout(() => markRoads(tries - 1), 15_000)
+    })
+  }
+  if (BAY_ON) { const later = setInterval(() => { if (!seen.near) return; clearInterval(later); if (!marksAsked) markRoads(4) }, 250) }
   requestAnimationFrame(frame)
 
   // ── Breaking ────────────────────────────────────────────────────────────
@@ -2138,7 +2149,7 @@ async function main() {
     // does nothing else. Not from a key, a link or a field in focus (Enter on the board's button is the button's: it
     // asks for the way in), nor a key held until it repeats. What is typed is the line's, and its Enter shuts it.
     if (first && !first.engaged) addEventListener('keydown', (e) => {
-      if (first.engaged || !said || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !['Enter', 'NumpadEnter', 'Slash'].includes(e.code)) return
+      if (first.engaged || mapSys?.open || !said || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !['Enter', 'NumpadEnter', 'Slash'].includes(e.code)) return
       if (e.target instanceof Element && e.target.closest('button, a, input, textarea, select, [contenteditable]')) return
       e.preventDefault()
       way?.disarm()
@@ -2152,6 +2163,7 @@ async function main() {
       // The kept sky, once the park is shown: the loader clears onto the day it was pictured in, and the clock goes on from there.
       realmUi.modes?.start()
       if (first && leads && signboards && !first.engaged) void Promise.all([import('./entry.ts'), lists()]).then(([{ createEntry }, within]) => {
+        let sharedWarmed = false
         entryCtrl = createEntry({
           board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi, home: firstEye, alight: () => { if (alive.riding) alive.mount(null) },
           fov: () => fov, setFov: (v) => { fov = v },
@@ -2165,6 +2177,17 @@ async function main() {
           map: mapSys,
           ensureMap,
           leaveFar: () => farModel.left(),
+          prewarmShared: () => {
+            if (sharedWarmed) return
+            sharedWarmed = true
+            farModel.left()
+            if (BAY_ON && !marksAsked) markRoads(4)
+            streetLife?.prewarm()
+            carSummon.prewarm()
+          },
+          prewarmSpot: (xM, zM) => {
+            streetLife?.warmAt(Math.round(xM * M), Math.round(zM * M))
+          },
           ground: { within, feet: (x, z) => core.feet_at(Math.round(x), Math.round(z)), kind: (x, y, z) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)) },
           terrainAt: (x, z) => core.ground_at(Math.round(x), Math.round(z)),
           hold: (x, z) => { mover.postMessage({ bay: [x, z] } as never); shadow?.postMessage({ bay: [x, z] } as never); return STREAM ? underfoot(inner, x, z) : Promise.resolve(true) },
@@ -2173,6 +2196,7 @@ async function main() {
         way = entryCtrl.explore
         Object.assign((globalThis as unknown as { engine: object }).engine, { explore: way, entry: entryCtrl })
         if (meant) void way.go()
+        else if (askedAct) { askedAct = false; way.act() }
       }).catch((e) => { console.error('entry init failed:', e); noWayIn() })
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: said = eggs({
@@ -2204,6 +2228,18 @@ async function main() {
     origin: () => { const f = me.feet; return f ? { x: f.at[0], z: f.at[2], yaw: f.yaw } : { x: pose.x * M, z: pose.z * M, yaw: pose.yaw } },
     street: () => streetLife,
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
+    onPrewarm: (data) => {
+      for (const f of data.fine ?? []) {
+        if (!(f.cells instanceof Uint16Array)) continue
+        let by = lookFaces.get(f.cells); if (!by) lookFaces.set(f.cells, by = new Map())
+        const key = f.size.join()
+        if (!by.has(key)) {
+          const born = thing(f.cells, f.size)
+          by.set(key, born)
+          if (!born.smooth) smoothen(f.cells, f.size, born)
+        }
+      }
+    },
   })
   const summonCarNow = () => { telemetry?.event('summon'); return carSummon.summon() }
   own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void summonCarNow() })
