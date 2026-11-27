@@ -73,6 +73,7 @@ import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
 import { createCarSummon } from './summon.ts'
 import { createRecorder, type Recorder } from './recorder.ts'
+import { steerScale, type SteerState } from './steer.ts'
 import { feedbackUi, type FeedbackUi } from './feedback.ts'
 import { initPwa } from './pwa.ts'
 
@@ -448,39 +449,13 @@ async function main() {
   let held = 0
   // A phone's GPU clock is not to be believed: the iPhone's read 0.01 to 10 ms for the same work from one second to the next.
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
-  // How many frames came well late just now.
-  let lateRun = 0
+  const steerState: SteerState = { scale, held, lateRun: 0, backoffs: 0, sinceDrop: 999 }
   const steer = (budget: number, gap: number, calm = false) => {
-    // Pinned by whoever measures (`engine.scale`): not even a late frame moves it.
-    if (fixed || held > 1e6) return
-    // At rest (`restful`) frames come late on purpose: only the GPU's clock steers, to the march it would have at the
-    // screen's rate, so the picture left alone is as sharp as it was drawn every frame.
-    if (calm) {
-      if (!clocked || gpuMs <= 0 || --held > 0) return
-      const next = Math.round(Math.max(0.3, Math.min(1, scale * Math.sqrt((0.6 * budget) / gpuMs))) * 20) / 20
-      if (next !== scale) { scale = next; held = 20 }
-      return
-    }
-    // A look turned from a cheap view to a dear one (#367): the march is suddenly several frames long, and coming down
-    // 15% every 45 frames the picture took three seconds to fit again (60 frames dropped in one turn of the head, with
-    // the march at 50 ms). Two late frames close together with the GPU's clock saying why bring it down at once to what fits.
-    // (Late frames close together, not only in a row: with a window come into view at once one frame in five was
-    // late for a second, never two running. Each late frame counts one and fades by a seventh a frame.)
-    lateRun = lateRun * 0.85 + (gap > budget * 1.4 ? 1 : 0)
-    if (lateRun >= 1.4 && clocked && marchMs > budget && scale > 0.3) {
-      const fits = Math.round(Math.max(0.3, Math.min(scale - 0.05, scale * Math.sqrt((0.6 * budget) / marchMs))) * 20) / 20
-      scale = fits; held = 20; lateRun = 0
-      return
-    }
-    if (--held > 0) return
-    // Frames that come late are the one sure sign: back off. Otherwise, with a clock to believe, aim the march at
-    // six tenths of a frame; without one, go up a step at a time while frames keep coming on time.
-    const late = frameMs > budget * 1.12
-    const want = late ? scale * 0.85 : clocked && gpuMs > 0 ? scale * Math.sqrt((0.6 * budget) / gpuMs) : scale + 0.05
-    const next = Math.round(Math.max(0.3, Math.min(1, want)) * 20) / 20
-    if (next === scale) return
-    scale = next
-    held = late ? 45 : clocked ? 20 : 45
+    steerState.scale = scale
+    steerState.held = held
+    steerScale(steerState, { budget, gap, frameMs, cpuMs, gpuMs, marchMs, clocked, calm, fixed })
+    scale = steerState.scale
+    held = steerState.held
   }
   let target: Offscreen | null = null
   const fit = () => {
@@ -1156,23 +1131,46 @@ async function main() {
   // pieces wearing it are drawn square; then they are given them (pieces.ts `refit`), and so is every later one.
   const smoothing = new Map<Born, Piece[]>()
   let smoother: Worker | null = null
-  const smoothen = (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => {
+  type FaceAnswer = { key: number; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; cells?: Uint16Array; filled?: number }
+  const smoothPending = new Map<number, (ans: FaceAnswer) => void>()
+  const ensureSmoother = () => {
     if (!smoother) {
       smoother = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
-      smoother.onmessage = (e: MessageEvent<{ key: number; faces: Uint32Array<ArrayBuffer>; smooth: Uint32Array<ArrayBuffer> }>) => {
+      smoother.onmessage = (e: MessageEvent<FaceAnswer>) => {
+        const pending = smoothPending.get(e.data.key)
+        if (pending) { smoothPending.delete(e.data.key); pending(e.data); return }
         const born = smoothKeys.get(e.data.key)
         smoothKeys.delete(e.data.key)
-        if (!born) return
+        if (!born || !e.data.faces || !e.data.smooth) return
         born.faces = e.data.faces
         born.smooth = e.data.smooth
         for (const piece of smoothing.get(born) ?? []) falling.refit(piece, e.data.faces, e.data.smooth)
         smoothing.delete(born)
       }
     }
+    return smoother
+  }
+  const askSmoother = (msg: Record<string, unknown>): Promise<FaceAnswer> => new Promise((done) => {
+    const key = ++smoothAsked
+    smoothPending.set(key, done)
+    ensureSmoother().postMessage({ key, ...msg })
+  })
+  /** Builds a fine look's faces (and optional smooth normals) off the page thread and registers them in `lookFaces` (#129). */
+  const prebakeLook = async (kinds: Uint16Array, size: readonly [number, number, number], smooth: boolean): Promise<Born> => {
+    const key = size.join()
+    let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map())
+    const existing = by.get(key)
+    if (existing) return existing
+    const ans = await askSmoother({ raw: kinds.slice(), size: [size[0], size[1], size[2]], ...(smooth ? { reach: 5 } : {}) })
+    const born: Born = { id: 0, cells: ans.filled ?? 0, low: [0, 0, 0], size: [size[0], size[1], size[2]], com: [size[0] / 2, size[1] / 2, size[2] / 2], faces: ans.faces!, ...(ans.smooth ? { smooth: ans.smooth } : {}) }
+    by.set(key, born)
+    return born
+  }
+  const smoothen = (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => {
     smoothing.set(born, [])
     const key = ++smoothAsked
     smoothKeys.set(key, born)
-    smoother.postMessage({ key, raw: kinds.slice(), size: [size[0], size[1], size[2]], reach: 5 })
+    ensureSmoother().postMessage({ key, raw: kinds.slice(), size: [size[0], size[1], size[2]], reach: 5 })
   }
   let smoothAsked = 0
   const smoothKeys = new Map<number, Born>()
@@ -2078,7 +2076,18 @@ async function main() {
     return null
   }
   const setDown = () => Promise.all((LOCAL?.kept ?? []).map(async (k) => {
-    if (!keptFiles.has(k.file)) keptFiles.set(k.file, fetch(new URL(k.file, location.href)).then((r) => (r.ok ? r.json() : null)).then((m: Kept | null) => m && { ...m, cells: unrun(m.body, m.size[0] * m.size[1] * m.size[2], Int32Array), fine: m.fine?.map((f) => ({ size: f.size, per: f.per, low: f.low, cells: unrun(f, f.size[0] * f.size[1] * f.size[2], Uint16Array) })) }, () => null))
+    if (!keptFiles.has(k.file)) keptFiles.set(k.file, fetch(new URL(k.file, location.href)).then((r) => (r.ok ? r.json() : null)).then(async (m: Kept | null) => {
+      if (!m) return null
+      const cells = unrun(m.body, m.size[0] * m.size[1] * m.size[2], Int32Array)
+      const fine = m.fine ? await Promise.all(m.fine.map(async (f, i) => {
+        // Decode high-res fine vehicle cells & faces off the main thread so boot/landing never stalls (#129).
+        const decoded = await askSmoother({ runs: f.runs, kinds: f.palette, size: f.size, cells: true })
+        const fineCells = decoded.cells ?? unrun(f, f.size[0] * f.size[1] * f.size[2], Uint16Array)
+        await prebakeLook(fineCells, f.size, !(i > 0 && f.per > 4))
+        return { size: f.size, per: f.per, low: f.low, cells: fineCells }
+      })) : undefined
+      return { ...m, cells, fine }
+    }, () => null))
     const making = await keptFiles.get(k.file)
     if (!making) return null
     // Over the ground where it stands (bay.ts has the tiles there by now: the realm begins beside it), or at the
@@ -2346,16 +2355,10 @@ async function main() {
     street: () => streetLife,
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
     onPrewarm: (data) => {
-      for (const f of data.fine ?? []) {
-        if (!(f.cells instanceof Uint16Array)) continue
-        let by = lookFaces.get(f.cells); if (!by) lookFaces.set(f.cells, by = new Map())
-        const key = f.size.join()
-        if (!by.has(key)) {
-          const born = thing(f.cells, f.size)
-          by.set(key, born)
-          if (!born.smooth) smoothen(f.cells, f.size, born)
-        }
-      }
+      (data.fine ?? []).forEach((f, i) => {
+        if (!(f.cells instanceof Uint16Array)) return
+        void prebakeLook(f.cells, f.size, !(i > 0 && f.per > 4))
+      })
     },
   })
   const summonCarNow = () => { telemetry?.event('summon'); return carSummon.summon() }

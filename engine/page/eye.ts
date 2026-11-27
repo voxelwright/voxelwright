@@ -15,7 +15,17 @@ export const standsBy = (kind: ((x: number, y: number, z: number) => number) | u
 export function clearWay(stands: (x: number, y: number, z: number) => boolean, head: readonly number[], off: readonly number[]): number {
   const far = Math.hypot(off[0], off[1], off[2])
   let free = 1
-  if (far > 0) for (let s = 1; s <= far + CLEAR; s += 0.5) if (stands(head[0] + off[0] / far * s, head[1] + off[1] / far * s, head[2] + off[2] / far * s)) { free = Math.max(0, s - CLEAR) / far; break }
+  if (far > 0) {
+    const ux = off[0] / far, uy = off[1] / far, uz = off[2] / far
+    let lastX = 1e9, lastY = 1e9, lastZ = 1e9
+    for (let s = 1; s <= far + CLEAR; s += 0.85) {
+      const x = head[0] + ux * s, y = head[1] + uy * s, z = head[2] + uz * s
+      const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z)
+      if (ix === lastX && iy === lastY && iz === lastZ) continue
+      lastX = ix; lastY = iy; lastZ = iz
+      if (stands(x, y, z)) { free = Math.max(0, s - CLEAR) / far; break }
+    }
+  }
   const tight = (r: number) => { const x = head[0] + off[0] * r, y = head[1] + off[1] * r, z = head[2] + off[2] * r; return stands(x + 2, y, z) || stands(x - 2, y, z) || stands(x, y + 2, z) || stands(x, y - 2, z) || stands(x, y, z + 2) || stands(x, y, z - 2) }
   while (free > 0 && far > 0 && tight(free)) free = Math.max(0, free - 1 / far)
   return free

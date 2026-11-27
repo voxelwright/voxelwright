@@ -41,10 +41,12 @@ struct SolidEntry {
     top: i32,
     g: i32,
     ground: Kind,
+    /** Lowest fixture cell in this column (`i32::MAX` when none): queries below `ceil` hit the O(1) cache even under overhead wires (#129). */
+    ceil: i32,
 }
 
 impl SolidEntry {
-    const EMPTY: Self = Self { x: 0, z: 0, epoch: 0, top: 0, g: 0, ground: 0 };
+    const EMPTY: Self = Self { x: 0, z: 0, epoch: 0, top: 0, g: 0, ground: 0, ceil: 0 };
 }
 
 #[derive(Default)]
@@ -1258,7 +1260,8 @@ impl Pack {
             // A cell is in a rod when its middle is within the rod's radius, and never less than the 0.71 of a cell
             // that keeps a thin one whole at any slant. Added to the radius, it made a stop sign's plate a red box
             // 1 m across and 24 cm deep and every lamp's mast 38 cm thick (#450).
-            let rad = if cable { r[6] as f32/10.0 + if size == 2 { 0.3 } else { size as f32*0.71 } } else { (r[6] as f32/10.0).max(size as f32*0.71) };
+            let cable_rad = (r[6] as f32 / 10.0).min(0.18);
+            let rad = if cable { cable_rad + size as f32 * 0.71 } else { (r[6] as f32 / 10.0).max(size as f32 * 0.71) };
             let far = (ux-dx*t).powi(2)+(uz-dz*t).powi(2);
             if far > rad*rad { continue; }
             let height = |v:f32| r[1] as f32 + v*(r[4]-r[1]) as f32;
@@ -1706,7 +1709,9 @@ impl FixtureSpan {
         let dy = (r[4]-r[1]) as f32;
         let dz = (r[5]-r[2]) as f32;
         let length2 = (dx*dx+dy*dy+dz*dz).max(1.0);
-        let radius2 = (r[6] as f32 / 10.0).powi(2);
+        // Cap aerial cables to 1.8 cm radius (1-2 fine 2.5 cm subcells, guaranteed gap-free along any diagonal)
+        // so overhead trolley/utility wires stay slim rather than rendering as thick 7.5 cm black pipes (#129).
+        let radius2 = (r[6] as f32 / 10.0).min(0.18).powi(2);
         for y in self.low.max(floor)..=self.high.min(floor+SIDE as i32-1) {
             for sy in 0..4 {
                 for sz in 0..4 {
@@ -1854,8 +1859,13 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
                 let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
                 match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
                     Some(eave) => {
+                        // Blend from the smoothed eave at the wall face (`far <= 5`) into the roof raster over
+                        // `far = 5..15`, matching surveyed eaves so perimeter lidar dropouts never carve mid-wall
+                        // notches with floating white cornice/roofing strips (#129).
+                        let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                        let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
                         pitched = raster > eave + 6;
-                        (if pitched { raster } else { raster.min(eave + 3) }, eave)
+                        (if pitched { blended } else { blended.min(eave + 3) }, eave)
                     }
                     None => (raster, b.eave_med),
                 }
@@ -1962,7 +1972,7 @@ pub fn kind_single(x: i32, y: i32, z: i32) -> Kind {
     let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
     let cached = SOLID_CACHE.with_borrow(|cache| {
         let e = cache[idx];
-        (e.epoch == epoch && e.x == x && e.z == z).then_some(e)
+        (e.epoch == epoch && e.x == x && e.z == z && y < e.ceil).then_some(e)
     });
     if let Some(e) = cached {
         return if y <= e.g {
@@ -1975,9 +1985,10 @@ pub fn kind_single(x: i32, y: i32, z: i32) -> Kind {
     }
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
-        if matches!(c.what, What::Open) && c.hero_n == 0 && c.fixtures.is_empty() {
+        if matches!(c.what, What::Open) && c.hero_n == 0 {
+            let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
             SOLID_CACHE.with_borrow_mut(|cache| {
-                cache[idx] = SolidEntry { x, z, epoch, top: c.g + c.kerb, g: c.g, ground: c.ground };
+                cache[idx] = SolidEntry { x, z, epoch, top: c.g + c.kerb, g: c.g, ground: c.ground, ceil };
             });
         }
         kind_at(&c, x, y, z, 1)
@@ -1991,7 +2002,7 @@ pub fn solid_single(x: i32, y: i32, z: i32) -> bool {
     let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
     let cached = SOLID_CACHE.with_borrow(|cache| {
         let e = cache[idx];
-        (e.epoch == epoch && e.x == x && e.z == z).then_some(e)
+        (e.epoch == epoch && e.x == x && e.z == z && y < e.ceil).then_some(e)
     });
     if let Some(e) = cached {
         return y <= e.top;
@@ -2005,7 +2016,7 @@ pub fn under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
     let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
     let cached = SOLID_CACHE.with_borrow(|cache| {
         let e = cache[idx];
-        (e.epoch == epoch && e.x == x && e.z == z).then_some(e)
+        (e.epoch == epoch && e.x == x && e.z == z && y < e.ceil).then_some(e)
     });
     if let Some(e) = cached {
         return if y <= e.top {
@@ -2018,12 +2029,15 @@ pub fn under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
     }
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
-        if matches!(c.what, What::Open) && c.hero_n == 0 && c.fixtures.is_empty() {
+        if matches!(c.what, What::Open) && c.hero_n == 0 {
             let top = c.g + c.kerb;
+            let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
             SOLID_CACHE.with_borrow_mut(|cache| {
-                cache[idx] = SolidEntry { x, z, epoch, top, g: c.g, ground: c.ground };
+                cache[idx] = SolidEntry { x, z, epoch, top, g: c.g, ground: c.ground, ceil };
             });
-            return if y <= top { y + 1 } else if top > y - depth { top + 1 } else { i32::MIN };
+            if y < ceil {
+                return if y <= top { y + 1 } else if top > y - depth { top + 1 } else { i32::MIN };
+            }
         }
         let end = y - depth;
         let mut at = y;
@@ -2163,8 +2177,13 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                 let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
                 match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
                     Some(eave) => {
+                        // Blend from the smoothed eave at the wall face (`far <= 5`) into the roof raster over
+                        // `far = 5..15`, matching surveyed eaves so perimeter lidar dropouts never carve mid-wall
+                        // notches with floating white cornice/roofing strips (#129).
+                        let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                        let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
                         pitched = raster > eave + 6;
-                        (if pitched { raster } else { raster.min(eave + 3) }, eave)
+                        (if pitched { blended } else { blended.min(eave + 3) }, eave)
                     }
                     None => (raster, b.eave_med),
                 }
@@ -3601,6 +3620,66 @@ mod tests {
         assert_eq!(p1.top[(10 * tw + 10) as usize], 150, "L1 2-cell spike should be removed");
         assert_eq!(p1.top[(10 * tw + 11) as usize], 150, "L1 2-cell spike should be removed");
         assert_eq!(p1.top[(18 * tw + 16) as usize], 220, "4 m x 10 m rowhouse must stay");
+    }
+
+    #[test]
+    fn aerial_cables_rasterize_slim_and_open_columns_below_them_hit_cache() {
+        let mut b = pack();
+        // Add a horizontal trolley wire (rad=3 cm in tile format, steel dark) at y=160 spanning x=60..140, z=50 (over road).
+        let wire: [i32; 8] = [60, 160, 50, 140, 160, 50, 3, kind(STEEL, grey(14)) as i32];
+        b.extend_from_slice(b"SFST");
+        b.extend_from_slice(&1u32.to_le_bytes());
+        for w in wire { b.extend_from_slice(&w.to_le_bytes()); }
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+        // Check cable_rows emits slim 1-2 fine subcells per cross-section (never 3x3 bloated pipes) and zero gaps.
+        let p = PACKS.with_borrow(|ps| ps[0].fixture_spans(100, 50, 1));
+        assert_eq!(p.len(), 1);
+        let mut rows = Vec::new();
+        p[0].cable_rows(100, 50, 128, &mut rows);
+        assert!(!rows.is_empty(), "cable must emit fine subcell runs");
+        let min_y = rows.iter().map(|r| r.y).min().unwrap();
+        let max_y = rows.iter().map(|r| r.y).max().unwrap();
+        assert!(max_y - min_y <= 1, "aerial cable vertical thickness must be <= 2 fine subcells (got {})", max_y - min_y + 1);
+        // Check kind_single & under return exact road ground below wire (hitting SolidEntry.ceil cache) AND wire at y=160.
+        let g = ground(100, 50);
+        assert_eq!(material(kind_single(100, g, 50)), ASPHALT);
+        assert_eq!(kind_single(100, g + 10, 50), 0);
+        assert_eq!(under(100, g + 20, 50, 40), g + 1);
+        assert_eq!(material(kind_single(100, 160, 50)), STEEL, "wire remains visible at wire height");
+        clear();
+    }
+
+    #[test]
+    fn unsurveyed_corniced_facade_blends_perimeter_lidar_dropouts() {
+        // Unsurveyed corniced building (detail=2, eave=0) with flat roof at y=260 and a perimeter lidar dropout to y=210
+        // right along the street edge z=200 (x=280..320). Blending from eave_near must keep the facade unbroken up to 260.
+        let mut b = pack();
+        // Patch vertex 0 of the house at (200,200) to carry detail=2 (cornice, unsurveyed eave) and street front flag 0x3.
+        // Header=64, ground=65*65*2=8450, top=128*128*2=32768, class=16384, tint=16384, bld=24 -> verts at 74074.
+        let top_off = 64 + 65 * 65 * 2;
+        let verts_off = top_off + 128 * 128 * 2 + 128 * 128 + 128 * 128 + 24;
+        // Drop lidar top right on the front lip j=40 (z=200..204), i=56..64 (x=280..319) down to 210 while j>=41 stays 260.
+        for i in 56..64 {
+            let k = top_off + (40 * 128 + i) * 2;
+            b[k..k + 2].copy_from_slice(&210i16.to_le_bytes());
+        }
+        // Set v0 looks = 0x3 | (2 << 24) (cornice, unsurveyed eave).
+        let v0_looks = (3i32 | (2 << 24)).to_le_bytes();
+        b[verts_off + 8..verts_off + 12].copy_from_slice(&v0_looks);
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+        // At x=300, z=201 (far=1.5 inside front lip), y=208..212 must NOT be air, ROOFING, or floating mid-wall cornice trim.
+        for y in 207..=214 {
+            let k = kind_single(300, y, 201);
+            assert_ne!(k, 0, "perimeter lidar dropout must not carve air notch at y={y}");
+            assert_ne!(material(k), ROOFING, "perimeter lidar dropout must not emit mid-wall roofing at y={y}");
+        }
+        // Wall continues cleanly up near the eave (260).
+        assert_ne!(kind_single(300, 250, 201), 0, "wall must continue unbroken up to eave");
+        clear();
     }
 }
 

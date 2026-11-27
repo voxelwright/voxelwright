@@ -93,6 +93,7 @@ let checks = [
   ['telemetry', 'node', ['test/telemetry.mjs'], true],
   ['studio', 'node', ['test/studio.mjs'], true],
   ['worker-resilience', 'node', ['test/worker-resilience.mjs'], false],
+  ['iphone-perf-fixes', 'node', ['test/iphone-perf-fixes.mjs'], false],
   ['cable-overlap', 'node', ['test/cable-overlap.mjs'], false],
   ['taken', 'node', ['test/taken.mjs'], true],
   ['moves', 'node', ['test/moves.mjs'], true],

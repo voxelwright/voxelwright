@@ -148,11 +148,11 @@ The building's style word packs cells per storey (bits 0 to 7), cells per bay (8
 
 SF staging carries three reviewed residential footprints into the near tiles. At Haight and Ashbury a warm cream wall replaces a pink tint. On Valencia Street a slate blue-grey replaces ochre. One Russian Hill apartment has a smooth wall finish. Each field comes from multiple photographs and a separate street view of the same outline. A colour sets bit 16 of the trim word. A material-only record changes the material nibble. Previously painted buildings and known cladding keep their appearance. The operator can supply another credited survey in the same frame with `release.py --facades FILE`.
 
-On loading a fine tile, the core samples the roof inside each ordinary building's footprint to fill low or missing lidar returns along its edge. It also smooths isolated roof spikes and reconstructs missing street eaves in memory. Previously pinned BAY1 tiles receive these repairs when loaded by the updated core.
+On loading a fine tile, the core samples the roof inside each ordinary building's footprint to fill low or missing lidar returns along its edge. It also smooths isolated roof spikes, reconstructs missing street eaves in memory, and blends perimeter lidar dropouts into the neighbouring eave height on corniced facades. Previously pinned BAY1 tiles receive these repairs when loaded by the updated core.
 
 Two trailers may follow the trunks, in this order. Any other trailing bytes make the pack invalid.
 
-**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach.
+**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach. Overhead aerial cables (`radius <= 3 cm`) rasterize at a slim capped radius (`<= 0.18` cells) at fine detail so wires stay slender on pinned tiles too.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |

@@ -187,7 +187,10 @@ export function trafficObstacleGap(
   const ahead = dx * c.hx + dz * c.hz, across = Math.abs(dx * c.hz - dz * c.hx)
   const ext = Math.abs(ob.hx * c.hz - ob.hz * c.hx) * ob.long + Math.abs(dot) * ob.wide
   if (ahead <= 0 || ahead > 400 || across > c.halfW + ext * 0.9 + 2) return Infinity
-  return ahead - c.halfL - (Math.abs(dot) * ob.long + Math.abs(ob.hx * c.hz - ob.hz * c.hx) * ob.wide)
+  const g = ahead - c.halfL - (Math.abs(dot) * ob.long + Math.abs(ob.hx * c.hz - ob.hz * c.hx) * ob.wide)
+  // Break perpendicular/oblique mutual deadlocks between two stopped traffic cars so intersections never gridlock (#129).
+  if (Math.abs(dot) < 0.35 && ob.id !== undefined && c.v < 2 && ob.v < 2 && c.id < ob.id && g > -2) return Infinity
+  return g
 }
 
 /**
@@ -1593,31 +1596,51 @@ export function street(o: {
     return false
   }
   let inLanes = 0, signStops = 0
+  const isSolidBuildingMat = (m: number) => m === 8 || m === 9 || m === 11 || m === 14
   const open = (r: Road) => {
     if (r.blocked) return false
     if (r.open !== null) return r.open
     if (probes <= 0) return false
     probes--
-    // Verify centerline and every driving lane against buildings, and never cache `open = true` while a tile is unloaded (`ground_at <= -150`).
-    let openLanes = r.lanes
-    for (let s = 0; s <= r.len; s += 30) {
-      along(r.p, r.cum, s, P)
-      const cx = Math.round(P.x), cz = Math.round(P.z)
-      const cg = o.land.ground_at(cx, cz)
-      if (cg <= -150) return false
-      if (o.land.feet_at(cx, cz) - cg > 30) { r.open = false; return false }
-      for (let lane = 0; lane < openLanes; lane++) {
-        lanePoint(r, lane, s, P)
-        const lx = Math.round(P.x), lz = Math.round(P.z)
-        const lg = o.land.ground_at(lx, lz)
-        if (lg <= -150) return false
-        if (o.land.feet_at(lx, lz) - lg > 30) { openLanes = lane; break }
-      }
-      if (openLanes <= 0) { r.open = false; return false }
+    // Verify centerline and full lane width (±0.9 m) across the entire segment including its endpoint `s = r.len`
+    // against roofs and solid building walls; never cache `open = true` while a tile is unloaded (`ground_at <= -150`) (#129).
+    const steps = Math.max(1, Math.ceil(r.len / 20))
+    const checkSpot = (x: number, z: number): 'ok' | 'unloaded' | 'blocked' => {
+      const ix = Math.round(x), iz = Math.round(z)
+      const g = o.land.ground_at(ix, iz)
+      if (g <= -150) return 'unloaded'
+      if (o.land.feet_at(ix, iz) - g > 30) return 'blocked'
+      if (isSolidBuildingMat(o.land.world_kind(Math.floor(x), g + 8, Math.floor(z)) & 15)) return 'blocked'
+      return 'ok'
     }
-    if (openLanes < r.lanes) r.lanes = openLanes
-    r.open = true
-    return true
+    // Trimming `r.lanes` on a one-way road shifts its symmetric `laneOff`, so re-verify until stable.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      let openLanes = r.lanes
+      for (let k = 0; k <= steps; k++) {
+        const s = (r.len * k) / steps
+        along(r.p, r.cum, s, P)
+        const centerState = checkSpot(P.x, P.z)
+        if (centerState === 'unloaded') return false
+        if (centerState === 'blocked') { r.open = false; return false }
+        for (let lane = 0; lane < openLanes; lane++) {
+          lanePoint(r, lane, s, P)
+          const tx = P.tx, tz = P.tz, lx = P.x, lz = P.z
+          let blocked = false
+          for (const side of [0, -9, 9]) {
+            const st = checkSpot(lx - tz * side, lz + tx * side)
+            if (st === 'unloaded') return false
+            if (st === 'blocked') { blocked = true; break }
+          }
+          if (blocked) { openLanes = lane; break }
+        }
+        if (openLanes <= 0) { r.open = false; return false }
+      }
+      if (openLanes === r.lanes) { r.open = true; return true }
+      r.lanes = openLanes
+      if (!(r.flags & 1)) { r.open = true; return true }
+    }
+    r.open = false
+    return false
   }
   /** The road a vehicle takes next at a road's end: liking a straight way and a wide one; a trolleybus keeps under its wires where it can, a bus to the main streets, a truck off the small ones. */
   const choose = (r: Road, kind = 'car'): Road | null => {
@@ -2305,12 +2328,12 @@ export function street(o: {
       if (nudged && !c.rtStuck && why !== 'lights' && gap > 8 && c.v < 18) c.v = Math.min(gap * 1.4, c.v + GATHER * 1.6 * dt)
       if (gap < 5) c.v = Math.min(c.v, Math.max(0, gap) * 2)
       c.s! += c.v * dt
-      // Waiting on a control — or queued behind a vehicle waiting on one (red light, stop sign, bus stop, turn) — is not stuck.
-      const queued = held || why === 'bus stop' || why === 'lights' || why === 'stop sign' || why === 'oncoming' || why === 'its turn' || (why === 'car' && !!leadCar?.queued)
+      // Waiting on a control — or queued behind a vehicle waiting on one (red light, stop sign, bus stop, turn, or frozen robotaxi) — is not stuck.
+      const queued = held || why === 'bus stop' || why === 'lights' || why === 'stop sign' || why === 'oncoming' || why === 'its turn' || (why === 'car' && !!(leadCar?.queued || leadCar?.rtStuck))
       c.queued = c.v < 2 && queued
       c.held = held && c.v < 2 ? (c.held ?? 0) + dt : 0
       c.stuck = c.v < 2 && !queued && !c.rtStuck ? c.stuck! + dt : 0
-      c.wait = c.v < 2 ? (why === 'car' && leadCar?.queued ? 'queue' : why) : ''
+      c.wait = c.v < 2 ? (why === 'car' && (leadCar?.queued || leadCar?.rtStuck) ? 'queue' : why) : ''
       // Annoyed nearby cars honk and flash high beams when blocked behind or around a stuck robotaxi!
       if (!c.rtStuck && c.v < 10) {
         const blockedByRT = traffic.some((sc) => {
@@ -2359,10 +2382,23 @@ export function street(o: {
         if (back && !back.blocked) { c.prev = null; c.road = back; c.s = Math.max(0, back.len - c.s!); c.lane = 0; c.route = undefined; c.next = choose(back, c.model.kind); c.stuck = 0; letGo(c) }
         else if (unseen(c.x, c.z, view)) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       }
-      // At the end of a road that goes nowhere it may (mapping ends there, or the way on is closed): it turns round.
+      // Multi-lane unblock (#129): if held up behind a stopped vehicle on a multi-lane street, shift into a clear adjacent lane.
+      if (!c.rtStuck && r.lanes > 1 && c.stuck! > 3.5 && (why === 'car' || why === 'vehicle')) {
+        for (const delta of [-1, 1]) {
+          const alt = c.lane! + delta
+          if (alt < 0 || alt >= r.lanes) continue
+          lanePoint(r, alt, c.s!, Q)
+          if (!taken(Q.x, Q.z, Q.tx, Q.tz, c.model.long / 2 + 12, c.model.wide / 2 + 2, 2)) {
+            c.lane = alt; c.stuck = 0; letGo(c); break
+          }
+        }
+      }
+      // At the end of a road that goes nowhere it may (mapping ends there, or the way on is closed): it turns round,
+      // or clears cleanly on one-way stubs where no reverse road exists so it cannot stall the lane forever (#129).
       if (!c.next && c.stuck! > 4 && c.road!.len - c.s! < 40) {
         const back = roads.get(`${c.road!.way}/${c.road!.b}/${c.road!.a}`)
         if (back && open(back)) { c.prev = null; c.road = back; c.s = 0; c.lane = Math.min(c.lane!, back.lanes - 1); c.route = undefined; c.next = choose(back, c.model.kind); c.stuck = 0; letGo(c) }
+        else if (c.stuck! > 6) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       }
       while (c.s! >= c.road!.len) {
         if (!c.next) break
@@ -2374,8 +2410,9 @@ export function street(o: {
       // Past the junction it held by 8 m: it is free for the next.
       if (c.prev && c.s! > 80) { const h = holds.get(c.prev.b); if (h?.delete(c) && !h.size) holds.delete(c.prev.b) }
       const d = Math.hypot(c.x - view.eye[0], c.z - view.eye[2])
-      // Gone where nobody sees: too far, at a road's end, or stuck a long while out of sight.
-      if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 40 && unseen(c.x, c.z, view))) { letGo(c); hide(c); traffic.splice(i, 1); continue }
+      // Gone where nobody sees: too far, at a road's end, or stuck a long while out of sight; also recycle mutual car-on-car deadlocks before 12 s (#129).
+      const mutualDeadlock = c.stuck! > 9.5 && why === 'car' && !!leadCar && leadCar.v < 2 && !leadCar.queued && !leadCar.rtStuck && (leadCar.stuck ?? 0) > 8 && c.id > leadCar.id
+      if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 10 && unseen(c.x, c.z, view)) || mutualDeadlock) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       // Someone held a junction a long time without moving (a person stands in front of them): let it go.
       if (c.stuck! > 6) letGo(c)
       pose(c)
