@@ -13,6 +13,7 @@
 // its paint is scuffed to primer and bare steel in them, and its glass cracks near them. Only a struck piece pays for it:
 // it draws from a copy of its faces split into rows a cell long, so every corner lies on the cells' lattice and faces
 // that meet still meet once bent (a merged row bent at its two ends only would open a gap beside its neighbours).
+import { fenderOpening, type CrashOpening } from './crash-opening.ts'
 import { shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
@@ -38,7 +39,7 @@ struct U {
   c2: vec3f, lampAxis: f32,
   // Whether smooth words are heeded (#38): 0 draws every face by its square normal, as before them. mirrors: 0 is
   // the M key's mirrors off, under which glass is seen through, tinted, and mirrors nothing (#74).
-  smoothOn: f32, mirrors: f32, pad1: f32, pad2: f32,
+  smoothOn: f32, mirrors: f32, frontZ: f32, pad2: f32,
   // Its dents (#37): none for a piece that was never struck, and then nothing of them is worked out.
   deform: Deform,
   // Per-window crack origins (#61): front, rear, left, right; each (originX, originY, originZ, strength).
@@ -112,9 +113,9 @@ fn unfold(word: u32) -> vec3f {
     lit = normalize(mix(n, unfold(word), f32((word >> 28u) & 7u) / 7.0));
     out.open = mix(0.38, 1.0, f32((word >> 20u) & 255u) / 255.0);
   }
-  // Bent by its dents (#37; at once back for a piece never struck). Where the cell is, for its paint and its lamps,
+  // Bent by its dents (#37, #62; at once back for a piece never struck). Where the cell is, for its paint and its lamps,
   // stays where it was made: a bent panel keeps its own paint.
-  let bent = deformPoint(p, lit, u.deform);
+  let bent = deformPoint(p, lit, u.deform, u.frontZ > 0.5);
   let world = u.pos + turned * ((bent.pos - u.com) * u.cell) - u.eye;
   let d = dot(world, u.forward);
   out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
@@ -264,20 +265,46 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   if (polished && soft) { albedo = factoryPaint(in.kind, in.at - in.n * 0.5); }
   else { albedo = paint(in.kind, vec3i(floor(inside)) + u.cells, in.n, 1.0, fract(inside), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022)); }
   let n = select(in.facing, litBy(in, rd), soft);
-  // Where it is dented (#37): primer and bare steel scratched through its paint, rougher, darker in its folds, and its
-  // clear coat worn away there, beside paint that still mirrors bent.
   var rough = m.rough;
-  var open = in.open;
+  let open = in.open;
   var coat = 1.0;
-  // Only its outside (the faces with smooth words): the seats inside a struck door are not scraped. Scrapes are bands a
-  // centimetre or two wide, 11 cm apart, fading out by 9 m: finer, they were a sparkle of single pixels. Most of
-  // the clear coat stays, so a dent shows as its bent reflections more than as a dark patch.
-  if (in.hasSmooth != 0u && (in.wear.x > 0.005 || in.wear.y > 0.005)) {
-    let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y * 0.5, in.at * u.cell * 0.15, 1.0 - smoothstep(30.0, 90.0, length(in.seen)));
-    albedo = worn.albedo;
-    rough = min(1.0, rough + worn.roughBoost * 0.6);
-    open *= 1.0 - 0.12 * clamp(in.wear.y, 0.0, 1.0);
-    coat = 1.0 - 0.45 * clamp(in.wear.x, 0.0, 1.0);
+  var brokenLamp = 0.0;
+  if (in.hasSmooth != 0u && in.wear.x > 0.001) {
+    if (stuff == 15u) {
+      brokenLamp = deformLamp(in.wear.x);
+      albedo = mix(albedo, vec3f(0.026, 0.029, 0.034), brokenLamp);
+      rough = mix(rough, 0.68, brokenLamp);
+    } else if (polished) {
+      // Only the closest contact leaves a transfer mark. The strike direction and
+      // its sideways tangent give a bent panel the same scar from every camera.
+      var nearest = 2.0;
+      var contact = 0u;
+      for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
+        let zone = u.deform.posR[i];
+        let q = (in.at - zone.xyz) / max(zone.w, 0.001);
+        let gap = dot(q, q);
+        if (gap < nearest) { nearest = gap; contact = i; }
+      }
+      let rel = (in.at - u.deform.posR[contact].xyz) * u.cell;
+      let dir = u.deform.dirD[contact].xyz;
+      let side = normalize(select(vec3f(dir.z, 0.0, -dir.x), vec3f(1,0,0), abs(dir.y) > 0.95));
+      let across = dot(rel, side);
+      let inward = dot(rel, dir);
+      // The horizontal bumper crosses the vertical door and rolls over the shoulders.
+      let frontZ = u.frontZ > 0.5;
+      let lateral = abs(select(dir.z, dir.x, frontZ));
+      // Across a quarter panel the bumper rubs the upper flank of the crease.
+      // At a low hit the contact centre can be in the empty wheel opening.
+      let sideHit = smoothstep(0.55, 0.85, lateral);
+      let radius = u.deform.posR[contact].w * u.cell;
+      let markHeight = mix(1.55, 0.44 * radius, sideHit);
+      let materialAt = vec3f(across, rel.y + inward * 0.50 + across * mix(0.16,-0.28,sideHit) - markHeight, inward);
+      let detail = 1.0 - smoothstep(40.0, 95.0, length(in.seen));
+      let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y, materialAt, detail);
+      albedo = worn.albedo;
+      rough = min(1.0, rough + worn.roughBoost);
+      coat = worn.clearcoatKeep;
+    }
   }
   var direct = max(dot(n, u.sun), 0.0);
   if (direct > 0.0) {
@@ -287,8 +314,8 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     if (sunny >= 0.0) { direct *= sunny; }
   }
   let dynLamp = stuff == 15u && u.lampAxis != 0.0;
-  var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow, 0.0, dynLamp));
-  if (dynLamp) { col += vehicleLamp(in, albedo); }
+  var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow * (1.0 - brokenLamp), 0.0, dynLamp));
+  if (dynLamp) { col += vehicleLamp(in, albedo) * (1.0 - brokenLamp); }
   if (polished) { col = mix(col, select(carPaint(col, in.facing, rd, direct), clearCoat(col, albedo, n, rd, direct, open), soft), coat); }
   let lit = tone(col);
   // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
@@ -316,33 +343,43 @@ fn paneMirror(rd: vec3f, n: vec3f, soft: bool) -> f32 {
   let facing = min(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 0.4);
   return looks.material[11].mirror * (0.08 + 0.92 * pow(facing, 5.0));
 }
-// Glass broken into pieces (#37): the edges between cells of a scatter of points, about 6 cm apart (p in 2.5 cm cells).
-// The web of deform.ts alone was lines a few millimetres wide round a point on the bumper, and from the seat it did
-// not show.
-fn crackNet(p: vec2f) -> f32 {
-  let q = p / 2.4;
+// Glass broken into pieces (#37, #62): Voronoi cell edges near the impact bullseye, with
+// distance-adaptive anti-aliasing (px) and a per-shard facet seed for crystalline sky glints.
+fn crackNet(p: vec2f, px: f32) -> vec2f {
+  let q = p / 2.2;
   let c = floor(q);
   let f = fract(q);
   var d1 = 8.0;
   var d2 = 8.0;
+  var cellId = 0.0;
   for (var j = -1; j <= 1; j++) {
     for (var i = -1; i <= 1; i++) {
       let o = vec2f(f32(i), f32(j));
       let h = vec2f(deformHash(vec3f(c + o, 3.0)), deformHash(vec3f(c + o, 9.0)));
       let d = length(o + h - f);
-      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+      if (d < d1) { d2 = d1; d1 = d; cellId = h.x - 0.5; } else if (d < d2) { d2 = d; }
     }
   }
-  return 1.0 - smoothstep(0.03, 0.09, d2 - d1);
+  let w = 0.035;
+  let edge = (1.0 - smoothstep(w, w + max(0.055, px * 0.55), d2 - d1)) * (0.09 / (0.09 + px * 0.45));
+  return vec2f(edge, cellId);
 }
-// How cracked a pane is here (#37, #61): broken round where each struck window was hit (front, rear, left, right),
-// out to 30 cm for a knock and over a metre for a hard blow, with a web of cracks out from that window's own origin.
-// Both lie across the way it was struck, so they run on unbroken over a pane's stair of faces. 0 on a piece whose
-// glass was never struck.
-fn paneCrack(in: Out) -> f32 {
-  if (u.deform.status.w <= 0.01) { return 0.0; }
-  let seenNear = 1.0 - smoothstep(30.0, 90.0, length(in.seen));
-  var total = 0.0;
+// Shattered laminated auto-glass (#37, #61, #62): evaluates each struck window (front, rear, left,
+// right) from its own per-window origin u.cracks[w], returning (crackIntensity, facetTilt).
+// Compact crushed impact bullseye + piecewise-straight jagged radial rays + straight-chord cobweb
+// arcs + tight shatter mosaic near the core, clipped to each window plane and distance anti-aliased.
+// The camera and window share the same local coordinate frame.
+fn eyeInsidePiece() -> bool {
+  let eye = u.com + transpose(mat3x3f(u.c0,u.c1,u.c2)) * (u.eye-u.pos) / u.cell;
+  let mid = vec3f(u.midX,u.midY,u.midZ);
+  return all(abs(eye-mid) < mid);
+}
+fn paneCrack(in: Out) -> vec2f {
+  if (u.deform.status.w <= 0.01) { return vec2f(0.0); }
+  let viewDist = length(in.seen);
+  let px = max(viewDist * u.tanHalf * 0.022, 0.018);
+  var bestTotal = 0.0;
+  var bestTilt = 0.0;
   for (var w = 0u; w < 4u; w++) {
     let cr = u.cracks[w];
     let crack = cr.w;
@@ -350,24 +387,70 @@ fn paneCrack(in: Out) -> f32 {
     let origin = cr.xyz;
     // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
     let p = (in.at - origin) * u.cell * 4.0;
-    let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
-    if (amount <= 0.0) { continue; }
-    var best = 1e9;
-    var closest = 0u;
-    for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
-      let gap = distance(origin, u.deform.posR[i].xyz);
-      if (gap < best) { best = gap; closest = i; }
+    let maxReach = 19.2 + 30.4 * crack;
+    if (length(p) >= maxReach) { continue; }
+    // Unwrap around the cabin. A side blow can crack the edge of the windshield:
+    // projecting that pane along the impact direction collapsed the web into horizontal lines.
+    let mid = max(vec2f(u.midX, u.midZ), vec2f(1.0));
+    let radial = (origin.xz - mid) / mid;
+    let here = (in.at.xz - mid) / mid;
+    let arc = atan2(radial.x * here.y - radial.y * here.x, dot(radial, here));
+    let span = max(1.0, length(radial.yx * mid));
+    let across = vec2f(arc * span * u.cell * 4.0, p.y * 1.22);
+    let dist = length(across);
+    if (dist >= maxReach) { continue; }
+    let angle = atan2(across.y, across.x);
+    let rayCount = 11.0;
+    let sectorSpan = 6.2831853 / rayCount;
+    let uAngle = angle + 3.14159265;
+    let sector = floor(uAngle / sectorSpan);
+    let rayReach = maxReach * (0.58 + 0.42 * deformHash(vec3f(sector, 2.0 + f32(w), 5.0)));
+    let amount = clamp(crack * 1.40, 0.30, 1.0) * (1.0 - smoothstep(rayReach * 0.38, rayReach, dist));
+    if (amount <= 0.005) { continue; }
+    // 1. Compact crushed laminated impact bullseye core (smaller inside cabin -> no lens-flare starburst).
+    let bullNoise = (deformHash(vec3f(sector, 9.0, 3.0 + f32(w))) - 0.5) * 0.9;
+    let bullRadius = (1.3 + 1.8 * crack) * select(0.75, 1.0, in.hasSmooth != 0u);
+    let bullseye = (1.0 - smoothstep(bullRadius * 0.42, bullRadius + px * 1.2, dist + bullNoise)) * clamp(crack * 1.45, 0.38, 0.88);
+    // 2. Piecewise-straight jagged radial fracture rays tapering finely so nearby cars stay legible.
+    let seg = floor(dist / 4.2);
+    let segF = fract(dist / 4.2);
+    let k0 = (deformHash(vec3f(sector, seg, 7.0 + f32(w))) - 0.5) * 0.19;
+    let k1 = (deformHash(vec3f(sector, seg + 1.0, 7.0 + f32(w))) - 0.5) * 0.19;
+    let jag = mix(k0, k1, segF);
+    let localA = fract(uAngle / sectorSpan + jag) - 0.5;
+    let rayDist = abs(localA) * max(dist, 1.5) * sectorSpan;
+    let fineScale = select(0.78, 1.0, in.hasSmooth != 0u);
+    let rayWidth = mix(0.15, 0.025, clamp(dist / rayReach, 0.0, 1.0)) * fineScale;
+    let rayVis = max(rayWidth / (rayWidth + px * 0.28), 0.36);
+    let rays = (1.0 - smoothstep(rayWidth, rayWidth + px * 0.90, rayDist)) * rayVis * clamp(amount * 1.40, 0.0, 0.92);
+    // 3. Straight-chord staggered cobweb cross-cracks between adjacent radial rays.
+    let chordDist = dist * cos(localA * sectorSpan);
+    let ringOffset = deformHash(vec3f(sector, 6.0, 1.0 + f32(w))) * 2.8;
+    let ringSpace = 3.5 + 0.14 * dist;
+    let ringDist = abs(fract((chordDist + ringOffset) / ringSpace) - 0.5) * ringSpace;
+    let ringWidth = 0.060 * fineScale;
+    let ringEnv = smoothstep(bullRadius * 0.7, bullRadius * 1.5, dist) * (1.0 - smoothstep(rayReach * 0.35, rayReach * 0.84, dist));
+    let ringVis = max(ringWidth / (ringWidth + px * 0.34), 0.34);
+    let rings = (1.0 - smoothstep(ringWidth, ringWidth + px * 0.95, ringDist)) * ringVis * ringEnv * clamp(amount * 1.30, 0.0, 0.84);
+    // 4. Fine Voronoi shatter mosaic concentrated tightly near the impact core.
+    let netMask = 1.0 - smoothstep(bullRadius * 1.1, bullRadius * 3.6, dist);
+    var net = vec2f(0.0);
+    if (netMask > 0.01) { net = crackNet(across * 1.20, px); }
+    let mosaic = net.x * netMask * clamp(crack * 1.35, 0.0, 0.84);
+    var total = max(max(bullseye, rays), max(rings, mosaic));
+    total = max(total, bullseye * 0.65 + netMask * crack * 0.10);
+    if (total > bestTotal) {
+      bestTotal = total;
+      bestTilt = net.y * netMask * clamp(crack * 1.2, 0.0, 1.0);
     }
-    let a = abs(u.deform.dirD[closest].xyz);
-    var across = vec3f(p.x, p.y, 0.0);
-    if (a.x >= a.y && a.x >= a.z) { across = vec3f(p.z, p.y, 0.0); }
-    else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
-    // Its lines are finer than a pixel from the street: there they glittered, so further than 3 m they give way to an
-    // even whitening of the broken glass.
-    let lines = max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
-    total = max(total, mix(amount * 0.3, lines, seenNear));
   }
-  return total;
+  // Seen from inside, keep the narrow forward road corridor clear of glare.
+  if (bestTotal > 0.0 && eyeInsidePiece()) {
+    let rd = normalize(in.seen);
+    let centerCone = smoothstep(0.955, 0.992, dot(rd, u.forward));
+    bestTotal *= mix(1.0, 0.28, centerCone);
+  }
+  return vec2f(clamp(bestTotal, 0.0, 1.0), bestTilt);
 }
 @fragment fn fs_tint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -375,9 +458,10 @@ fn paneCrack(in: Out) -> f32 {
   // (A picture already toned: what lets a share through of the light lets about that share's root through of the picture.)
   let soft = smoothSeen(in, rd);
   let n = select(in.facing, litBy(in, rd), soft);
-  // A crack lets less through: it is white, and lit (fs_glint). With mirrors off there is no glint to give back
-  // what it mirrors, so it lets all of its share through.
-  let through = 1.0 - 0.6 * paneCrack(in);
+  // A crack scatters light and lets less through; interior cabin glass keeps dark fracture contrast while staying drivable.
+  let cracked = paneCrack(in).x;
+  let block = select(0.74, 0.48, cracked > 0.0 && eyeInsidePiece());
+  let through = 1.0 - block * cracked;
   let mirrored = select(0.0, paneMirror(rd, n, soft), u.mirrors > 0.5);
   return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - mirrored) * through, vec3f(0.4545)), 1.0);
 }
@@ -386,7 +470,15 @@ fn paneCrack(in: Out) -> f32 {
   let rd = normalize(in.seen);
   let m = looks.material[11];
   let soft = smoothSeen(in, rd);
-  let n = select(in.facing, litBy(in, rd), soft);
+  var n = select(in.facing, litBy(in, rd), soft);
+  let crackInfo = paneCrack(in);
+  let cracked = crackInfo.x;
+  let tilt = crackInfo.y;
+  // Slightly tilt reflected sky on shattered exterior glass facets for crystalline broken-glass sparkle.
+  if (in.hasSmooth != 0u && abs(tilt) > 0.01) {
+    let side = normalize(cross(n, select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(n.y) > 0.9)));
+    n = normalize(n + side * (tilt * 0.22));
+  }
   // What it mirrors: the sky as the hour colours it, lighter towards the horizon (a body's glass does not ask the
   // world); a smooth pane, the street below the horizon too.
   let back = reflect(rd, n);
@@ -395,9 +487,13 @@ fn paneCrack(in: Out) -> f32 {
   if (direct > 0.0) { let sunny = sunlit(in.seen + u.eye, in.facing, 0u); if (sunny >= 0.0) { direct *= sunny; } }
   // Its own faint film, and the sun's glint off it.
   let own = shade(m.colour, n, rd, u.sun, direct, in.open, m.rough, 0.0);
-  // Added to a picture already toned: as much as it would add to a thing of middling brightness behind it.
-  let cracked = paneCrack(in);
-  let add = own * 0.1 + sky * paneMirror(rd, n, soft) + shade(vec3f(0.72, 0.75, 0.76), n, rd, u.sun, direct, in.open, 0.7, 0.0) * cracked * 0.5;
+  // Crisp white-silver internal reflection along laminated fracture planes; interior faces are
+  // strictly capped below glow.ts's bloom threshold so cracks never bloom into a lens-flare starburst.
+  let crackStrength = select(0.85, 0.38, cracked > 0.0 && eyeInsidePiece());
+  let litCrack = shade(vec3f(0.60, 0.64, 0.68), n, rd, u.sun, max(direct, 0.34), max(in.open, 0.74), 0.38, 0.0);
+  let transmitted = vec3f(0.68, 0.72, 0.76) * max(g.lightSun.a, 0.32);
+  let crackLight = select(min(max(litCrack, transmitted), vec3f(0.76)), min(litCrack, vec3f(1.25)), in.hasSmooth != 0u);
+  let add = own * 0.1 + sky * paneMirror(rd, n, soft) + crackLight * cracked * crackStrength;
   return vec4f(tone(add + 0.3) - tone(vec3f(0.3)), 0.0);
 }
 `
@@ -405,6 +501,9 @@ fn paneCrack(in: Out) -> f32 {
 /** One body as the GPU holds it. */
 export interface Piece {
   born: Born
+  /** A living look keeps its intact fine skin for a local break and repair. */
+  skin?: Uint16Array
+  opening?: CrashOpening
   /** Its middle of mass in the world's finest cells, and its turn (x, y, z, w). */
   pos: [number, number, number]
   rot: [number, number, number, number]
@@ -448,27 +547,37 @@ const OWN = 192, DEFORM_AT = OWN / 4, CRACKS_BYTES = 16 * 4, CRACKS_AT = (OWN + 
  * a row of smooth faces is merged only where its corners' words are alike, so each piece of it keeps its first ones and
  * the last keeps the row's last.
  */
-function sortFaces(born: Born, unit: boolean) {
+function sortFaces(born: Born, unit: boolean, openings: readonly CrashOpening[]) {
   const all = born.faces, smooth = born.smooth, total = all.length / 2
   let size = total
   if (unit) { size = 0; for (let f = 0; f < total; f++) size += (all[f * 2 + 1] & 255) || 1 }
-  const sorted = new Uint32Array(size * 6)
+  const sorted = new Uint32Array((size + openings.reduce((sum, opening) => sum + opening.walls.length / 2, 0)) * 6)
   let at = 0, glass = 0
-  for (const glassy of [false, true]) for (let f = 0; f < total; f++) {
-    const a = all[f * 2], b = all[f * 2 + 1]
-    if ((((b >>> 16) & 15) === 11) !== glassy) continue
-    const long = unit ? (b & 255) || 1 : 1, axis = (b >>> 8) & 3
-    for (let k = 0; k < long; k++) {
-      // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
-      const start = axis === 0 ? a + (k << 20) : a + k
-      sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
-      if (smooth) {
-        sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
-        const last = k === long - 1
-        sorted[at * 6 + 3] = smooth[f * 4 + (last ? 1 : 0)]; sorted[at * 6 + 5] = smooth[f * 4 + (last ? 3 : 2)]
-      }
+  for (const glassy of [false, true]) {
+    // Interior walls are solid and draw before the glass. Their square normals
+    // catch light on the recessed edge of the broken lamp surround.
+    if (glassy) for (const opening of openings) for (let w = 0; w < opening.walls.length; w += 2) {
+      sorted[at * 6] = opening.walls[w]
+      sorted[at * 6 + 1] = opening.walls[w + 1]
       at++
-      if (glassy) glass++
+    }
+    for (let f = 0; f < total; f++) {
+      const a = all[f * 2], b = all[f * 2 + 1]
+      if ((((b >>> 16) & 15) === 11) !== glassy) continue
+      const long = unit ? (b & 255) || 1 : 1, axis = (b >>> 8) & 3
+      for (let k = 0; k < long; k++) {
+        // Along x for faces that look along y or z, along z for those that look along x (pieces.ts `vs`).
+        const start = axis === 0 ? a + (k << 20) : a + k
+        if (openings[0]?.removed.has(start) || openings[1]?.removed.has(start)) continue
+        sorted[at * 6] = start >>> 0; sorted[at * 6 + 1] = unit ? ((b & ~255) | 1) >>> 0 : b
+        if (smooth) {
+          sorted[at * 6 + 2] = smooth[f * 4]; sorted[at * 6 + 4] = smooth[f * 4 + 2]
+          const last = k === long - 1
+          sorted[at * 6 + 3] = smooth[f * 4 + (last ? 1 : 0)]; sorted[at * 6 + 5] = smooth[f * 4 + (last ? 3 : 2)]
+        }
+        at++
+        if (glassy) glass++
+      }
     }
   }
   return { sorted, count: at, glass }
@@ -500,18 +609,44 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   interface Faces { faces: GPUBuffer; count: number; glass: number }
   /** unit: the same faces a cell long, made the first time one of its pieces is drawn bent (#37). */
   interface Shared extends Faces { users: number; unit?: Faces }
-  interface Held extends Piece { faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number; glass: number; held: Shared }
+  interface Held extends Piece {
+    tear?: { state: DeformState; revision: number; opening?: CrashOpening }
+    pocket?: { nose?: CrashOpening; fender?: CrashOpening; mesh: Faces }
+    faces: GPUBuffer
+    uniforms: GPUBuffer
+    bind: GPUBindGroup
+    count: number
+    glass: number
+    held: Shared
+  }
   /** A look's faces on the GPU: the solid ones first, then the glass, each with its corners' smooth words. */
-  const upload = (born: Born, unit = false): Faces => {
-    const { sorted, count, glass } = sortFaces(born, unit)
-    const faces = device.createBuffer({ size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+  const upload = (born: Born, unit = false, openings: readonly CrashOpening[] = []): Faces => {
+    const { sorted, count, glass } = sortFaces(born, unit, openings)
+    const faces = device.createBuffer({ label: openings.length ? 'torn body mesh' : 'piece faces', size: Math.max(24, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
     device.queue.writeBuffer(faces, 0, sorted)
     return { faces, count, glass }
   }
   const release = (held: Shared) => { held.faces.destroy(); held.unit?.faces.destroy() }
   /** The faces a piece is drawn from now: a cell long once it is bent. */
   const facesOf = (piece: Held): Faces => {
-    if (!piece.deform?.dentCount) return piece
+    const state = piece.deform
+    if (state?.dentCount && piece.skin && (piece.tear?.state !== state || piece.tear.revision !== state.revision)) {
+      piece.tear = { state, revision: state.revision, opening: fenderOpening(piece.skin, piece.born.size, piece.cell, state) }
+    }
+    const nose = state?.dentCount && state.hoodDamage >= 0.35 ? piece.opening : undefined
+    const fender = state?.dentCount ? piece.tear?.opening : undefined
+    if (piece.pocket && (piece.pocket.nose !== nose || piece.pocket.fender !== fender)) {
+      piece.pocket.mesh.faces.destroy()
+      piece.pocket = undefined
+    }
+    if (!state?.dentCount) { piece.tear = undefined; return piece }
+    if (nose || fender) {
+      if (!piece.pocket) {
+        const openings = [nose, fender].filter((v): v is CrashOpening => v !== undefined)
+        piece.pocket = { nose, fender, mesh: upload(piece.born, true, openings) }
+      }
+      return piece.pocket.mesh
+    }
     return piece.held.unit ??= upload(piece.born, true)
   }
 
@@ -523,7 +658,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     get smooth() { return smooth },
     set smooth(on: boolean) { smooth = on },
     get count() { return live.size },
-    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount && p.held.unit ? p.held.unit : p).count; return n },
+    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount ? p.pocket?.mesh ?? p.held.unit ?? p : p).count; return n },
     add(born, share = false) {
       let made = share ? common.get(born.faces) : undefined
       if (!made) {
@@ -533,7 +668,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       made.users++
       const held = made, uniforms = device.createBuffer({ size: UNIFORMS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: own, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
+      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); piece.pocket?.mesh.faces.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
       live.add(piece)
       return piece
     },
@@ -541,6 +676,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       const piece = p as Held
       if (!live.has(piece) || piece.held.users !== 1 || common.get(piece.born.faces) === piece.held) return
       release(piece.held)
+      piece.pocket?.mesh.faces.destroy(); piece.pocket = undefined
       piece.born.faces = faces
       piece.born.smooth = smooth
       piece.held = { ...upload(piece.born), users: 1 }
@@ -578,7 +714,9 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         f.set([2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)], 40)
         f[43] = lamps ? lamps[3] : 0
         f[44] = smooth ? 1 : 0
-        f[45] = mirrors ? 1 : 0; f[46] = 0; f[47] = 0
+        f[45] = mirrors ? 1 : 0
+        f[46] = (piece.deform?.front ?? 0) >= 2 ? 1 : 0
+        f[47] = 0
         packDeformUniforms(piece.deform, f, DEFORM_AT)
         const cracks = piece.cracks, gc = piece.deform?.glassCrack
         for (let k = 0; k < 4; k++) {

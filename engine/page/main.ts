@@ -22,7 +22,7 @@ import { car, fineCar, living, type Making } from './living.ts'
 import { stunts } from './stunts.ts'
 import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
-import { puffs } from './puffs.ts'
+import { engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
@@ -1028,7 +1028,7 @@ async function main() {
         debris.burst(piece.pos, (size[0] + size[2]) / 4, Math.min(10, 1 + Math.round(piece.born.cells / 70)), [c[0], c[1], c[2]], 0.9, 40, 0.45)
       }
     }
-    if (!far || far.live) for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
+    if (!far || far.live) for (const d of told.dust) { const c = hue(d.kind); debris.dust(d.at, d.kind, d.amount, [c[0], c[1], c[2]]); fell.dust += d.amount }
     bodies = answer.bodies
     burning = answer.burning
     running = answer.flowing || answer.released
@@ -1091,6 +1091,7 @@ async function main() {
       let born = by.get(size.join())
       if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
       const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
+      piece.skin = kinds
       smoothing.get(born)?.push(piece)
       return piece
     },
@@ -1106,15 +1107,16 @@ async function main() {
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
-      sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
-      // A hard crash (#37): road dust, chips of the paint struck, and shards of a window that cracked.
+      sparks: (at, strength) => { debris.burst(at, 1.5, Math.round(3 + strength * 6), [1.0, 0.57, 0.12], 0.13, 0.34, 0.5 + strength * 0.4, true); smoke.glint(at, 4 + strength * 5) },
+      // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)
         smoke.crash(at, strength)
-        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.3, 8, 0.9 + strength * 0.4)
-        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.5, 0.58, 0.62], 0.16, 3, 1.1)
+        debris.burst(at, 1.1, Math.round(2 + strength * 2), [c[0] * 0.92, c[1] * 0.92, c[2] * 0.92], 0.26, 15, 0.08 + strength * 0.06, true)
+        debris.burst(at, 1.1, Math.round(1 + strength * 2), [0.06, 0.06, 0.07], 0.30, 15, 0.07 + strength * 0.05, true)
+        if (glass) debris.burst([at[0], at[1] + 0.8, at[2]], 1.0, Math.round(2 + strength * 3), [0.48, 0.55, 0.60], 0.20, 14, 0.09 + strength * 0.06, true)
       },
-      engine: (at, level, dt) => smoke.engine(at, level, dt),
+      engine: (at, level, dt, source) => smoke.engine(engineVent(source, at), level, dt),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,
