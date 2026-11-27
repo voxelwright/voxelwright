@@ -263,21 +263,77 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var albedo: vec3f;
   if (polished && soft) { albedo = factoryPaint(in.kind, in.at - in.n * 0.5); }
   else { albedo = paint(in.kind, vec3i(floor(inside)) + u.cells, in.n, 1.0, fract(inside), 1.0 / (max(length(in.seen), 1.0) * u.tanHalf * 0.0022)); }
-  let n = select(in.facing, litBy(in, rd), soft);
-  // Where it is dented (#37): primer and bare steel scratched through its paint, rougher, darker in its folds, and its
-  // clear coat worn away there, beside paint that still mirrors bent.
+  var n = select(in.facing, litBy(in, rd), soft);
+  // Where it is dented (#37, #62): broken dark lamp recesses on struck headlights/taillights,
+  // crisp sheet-metal buckle folds that kink clearcoat highlights (not dark smudges!), and tight
+  // directional scrapes revealing gleaming brushed bare steel along the raised fold edges.
   var rough = m.rough;
   var open = in.open;
   var coat = 1.0;
-  // Only its outside (the faces with smooth words): the seats inside a struck door are not scraped. Scrapes are bands a
-  // centimetre or two wide, 11 cm apart, fading out by 9 m: finer, they were a sparkle of single pixels. Most of
-  // the clear coat stays, so a dent shows as its bent reflections more than as a dark patch.
+  var bareMetal = 0.0;
+  var brokenLamp = 0.0;
   if (in.hasSmooth != 0u && (in.wear.x > 0.005 || in.wear.y > 0.005)) {
-    let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y * 0.5, in.at * u.cell * 0.15, 1.0 - smoothstep(30.0, 90.0, length(in.seen)));
-    albedo = worn.albedo;
-    rough = min(1.0, rough + worn.roughBoost * 0.6);
-    open *= 1.0 - 0.12 * clamp(in.wear.y, 0.0, 1.0);
-    coat = 1.0 - 0.45 * clamp(in.wear.x, 0.0, 1.0);
+    if (stuff == 15u) {
+      // Struck headlight or taillight: only break a lamp directly inside the crushed corner, leaving
+      // untouched opposite lamps intact.
+      brokenLamp = smoothstep(0.42, 0.72, in.wear.x);
+      let rimSpark = smoothstep(0.36, 0.54, in.wear.x) * (1.0 - smoothstep(0.58, 0.76, in.wear.x));
+      albedo = mix(albedo, vec3f(0.025, 0.028, 0.034) + vec3f(0.07) * rimSpark, brokenLamp);
+      rough = mix(rough, 0.68, brokenLamp);
+    } else {
+      let viewDist = length(in.seen);
+      let turned = mat3x3f(u.c0, u.c1, u.c2);
+      var bestW = -1.0;
+      var bestIdx = 0u;
+      let count = min(u32(u.deform.status.x), 6u);
+      for (var i = 0u; i < count; i++) {
+        let z = u.deform.posR[i];
+        if (z.w <= 0.0001) { continue; }
+        let w = 1.0 - length(in.at - z.xyz) / z.w;
+        if (w > bestW) { bestW = w; bestIdx = i; }
+      }
+      let crushDir = u.deform.dirD[bestIdx].xyz;
+      let dLen = length(crushDir);
+      let impact = select(vec3f(1.0, 0.0, 0.0), crushDir / dLen, dLen > 0.001);
+      let upRef = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(impact.y) > 0.85);
+      let t1 = normalize(cross(upRef, impact));
+      let t2 = cross(impact, t1);
+      let rel = (in.at - u.deform.posR[bestIdx].xyz) * u.cell;
+      let rt1 = dot(rel, t1);
+      let rt2 = dot(rel, t2);
+      let rimp = dot(rel, impact);
+      // Dominant sheet-metal V-fold crease centered at the contact scar: sharp highlight kink on
+      // the raised lip beside a darker concave fold line (turns soft clay dents into crisp bent steel).
+      let frontness = smoothstep(0.05, 0.16, dot(n, -rd));
+      let creaseFade = (1.0 - smoothstep(65.0, 180.0, viewDist)) * frontness;
+      var ridgeBoost = 0.0;
+      if (soft && creaseFade > 0.01) {
+        let warp = (deformNoise(vec3f(rt1, rt2, rimp) * 0.20) - 0.5) * 1.8;
+        // One dominant buckle crease passing right through the impact core + subtle cross-bend.
+        let c1 = rt1 * 0.45 + rt2 * 0.89 + warp;
+        let c2 = -rt1 * 0.72 + rt2 * 0.69 - warp * 0.55;
+        let slope1 = clamp(cos(c1 * 0.78) * 2.8, -1.0, 1.0);
+        let slope2 = clamp(cos(c2 * 1.05) * 1.8, -1.0, 1.0);
+        let foldAmp = clamp(in.wear.y * 1.25 + in.wear.x * 0.55, 0.0, 1.0) * 0.46 * creaseFade;
+        let foldDir1 = normalize(turned * (t1 * 0.45 + t2 * 0.89));
+        let foldDir2 = normalize(turned * (-t1 * 0.72 + t2 * 0.69));
+        let cand = normalize(n + foldDir1 * (slope1 * foldAmp) + foldDir2 * (slope2 * foldAmp * 0.42));
+        if (dot(cand, -rd) > 0.05) { n = cand; }
+        ridgeBoost = smoothstep(0.40, 0.92, abs(sin(c1 * 0.78))) * 0.25 * creaseFade;
+        // Crisp narrow dark crease line right in the concave fold valley + deep impact core.
+        let creaseValley = (1.0 - smoothstep(0.0, 0.22, abs(cos(c1 * 0.78)))) * clamp(in.wear.y * 0.85 + in.wear.x * 0.4, 0.0, 1.0) * creaseFade;
+        open *= 1.0 - creaseValley * 0.28;
+      }
+      // Project into impact-aligned tangent coordinates so scrapes drag along the direction of the hit.
+      let scrapeP = vec3f(rt1, rt2, rimp) * 0.30;
+      let detail = 1.0 - smoothstep(22.0, 72.0, viewDist);
+      let worn = deformPaintSeen(albedo, in.wear.x, clamp(in.wear.y + ridgeBoost, 0.0, 1.0), scrapeP, detail);
+      albedo = worn.albedo;
+      rough = min(1.0, rough + worn.roughBoost * 0.72);
+      coat = worn.clearcoatKeep;
+      // Satin brushed steel (roughBoost around 0.34, clearcoat stripped) gets subtle satin metallic glint, NOT mirror gloss!
+      bareMetal = (1.0 - worn.clearcoatKeep) * smoothstep(0.55, 0.25, worn.roughBoost) * smoothstep(0.28, 0.62, in.wear.x);
+    }
   }
   var direct = max(dot(n, u.sun), 0.0);
   if (direct > 0.0) {
@@ -287,9 +343,16 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     if (sunny >= 0.0) { direct *= sunny; }
   }
   let dynLamp = stuff == 15u && u.lampAxis != 0.0;
-  var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow, 0.0, dynLamp));
-  if (dynLamp) { col += vehicleLamp(in, albedo); }
+  var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow * (1.0 - brokenLamp), 0.0, dynLamp));
+  if (dynLamp) { col += vehicleLamp(in, albedo) * (1.0 - brokenLamp); }
   if (polished) { col = mix(col, select(carPaint(col, in.facing, rd, direct), clearCoat(col, albedo, n, rd, direct, open), soft), coat); }
+  // Exposed bare brushed steel: satin metallic sheen (broad specular, restrained sky fill) so scraped steel looks raw, not glossy.
+  if (bareMetal > 0.02 && soft) {
+    let back = reflect(rd, n);
+    let satinEnv = street(back, open) * vec3f(0.42, 0.42, 0.41) * (0.4 + 0.6 * open);
+    let sunBrushed = pow(max(dot(back, u.sun), 0.0), 16.0) * direct * 0.65;
+    col = mix(col, col * 0.58 + satinEnv * 0.45 + vec3f(sunBrushed), bareMetal * 0.75);
+  }
   let lit = tone(col);
   // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
   let glowAlpha = select(1.0, 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0), dynLamp);
@@ -316,33 +379,38 @@ fn paneMirror(rd: vec3f, n: vec3f, soft: bool) -> f32 {
   let facing = min(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 0.4);
   return looks.material[11].mirror * (0.08 + 0.92 * pow(facing, 5.0));
 }
-// Glass broken into pieces (#37): the edges between cells of a scatter of points, about 6 cm apart (p in 2.5 cm cells).
-// The web of deform.ts alone was lines a few millimetres wide round a point on the bumper, and from the seat it did
-// not show.
-fn crackNet(p: vec2f) -> f32 {
-  let q = p / 2.4;
+// Glass broken into pieces (#37, #62): Voronoi cell edges near the impact bullseye, with
+// distance-adaptive anti-aliasing (px) and a per-shard facet seed for crystalline sky glints.
+fn crackNet(p: vec2f, px: f32) -> vec2f {
+  let q = p / 2.2;
   let c = floor(q);
   let f = fract(q);
   var d1 = 8.0;
   var d2 = 8.0;
+  var cellId = 0.0;
   for (var j = -1; j <= 1; j++) {
     for (var i = -1; i <= 1; i++) {
       let o = vec2f(f32(i), f32(j));
       let h = vec2f(deformHash(vec3f(c + o, 3.0)), deformHash(vec3f(c + o, 9.0)));
       let d = length(o + h - f);
-      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+      if (d < d1) { d2 = d1; d1 = d; cellId = h.x - 0.5; } else if (d < d2) { d2 = d; }
     }
   }
-  return 1.0 - smoothstep(0.03, 0.09, d2 - d1);
+  let w = 0.035;
+  let edge = (1.0 - smoothstep(w, w + max(0.055, px * 0.55), d2 - d1)) * (0.09 / (0.09 + px * 0.45));
+  return vec2f(edge, cellId);
 }
-// How cracked a pane is here (#37, #61): broken round where each struck window was hit (front, rear, left, right),
-// out to 30 cm for a knock and over a metre for a hard blow, with a web of cracks out from that window's own origin.
-// Both lie across the way it was struck, so they run on unbroken over a pane's stair of faces. 0 on a piece whose
-// glass was never struck.
-fn paneCrack(in: Out) -> f32 {
-  if (u.deform.status.w <= 0.01) { return 0.0; }
-  let seenNear = 1.0 - smoothstep(30.0, 90.0, length(in.seen));
-  var total = 0.0;
+// Shattered laminated auto-glass (#37, #61, #62): evaluates each struck window (front, rear, left,
+// right) from its own per-window origin u.cracks[w], returning (crackIntensity, facetTilt).
+// Compact crushed impact bullseye + piecewise-straight jagged radial rays + straight-chord cobweb
+// arcs + tight shatter mosaic near the core, clipped to each window plane and distance anti-aliased.
+// Inside the cabin (hasSmooth == 0), keeps the narrow ~15-degree forward road corridor clear.
+fn paneCrack(in: Out) -> vec2f {
+  if (u.deform.status.w <= 0.01) { return vec2f(0.0); }
+  let viewDist = length(in.seen);
+  let px = max(viewDist * u.tanHalf * 0.022, 0.018);
+  var bestTotal = 0.0;
+  var bestTilt = 0.0;
   for (var w = 0u; w < 4u; w++) {
     let cr = u.cracks[w];
     let crack = cr.w;
@@ -350,8 +418,8 @@ fn paneCrack(in: Out) -> f32 {
     let origin = cr.xyz;
     // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
     let p = (in.at - origin) * u.cell * 4.0;
-    let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
-    if (amount <= 0.0) { continue; }
+    let maxReach = 12.0 + 32.0 * crack;
+    if (length(p) >= maxReach) { continue; }
     var best = 1e9;
     var closest = 0u;
     for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
@@ -359,15 +427,64 @@ fn paneCrack(in: Out) -> f32 {
       if (gap < best) { best = gap; closest = i; }
     }
     let a = abs(u.deform.dirD[closest].xyz);
-    var across = vec3f(p.x, p.y, 0.0);
-    if (a.x >= a.y && a.x >= a.z) { across = vec3f(p.z, p.y, 0.0); }
-    else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
-    // Its lines are finer than a pixel from the street: there they glittered, so further than 3 m they give way to an
-    // even whitening of the broken glass.
-    let lines = max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
-    total = max(total, mix(amount * 0.3, lines, seenNear));
+    // Clip cracks to the struck window plane so front windshield fractures never bleed across the A-pillar onto side windows.
+    if (a.x > a.z * 1.15 && abs(in.n.z) > 0.5) { continue; }
+    if (a.z > a.x * 1.15 && abs(in.n.x) > 0.5) { continue; }
+    var across = vec2f(p.x, p.y);
+    if (a.x >= a.y && a.x >= a.z) { across = vec2f(p.z, p.y); }
+    else if (a.y >= a.z) { across = vec2f(p.x, p.z); }
+    let dist = length(across);
+    if (dist >= maxReach) { continue; }
+    let angle = atan2(across.y, across.x);
+    let rayCount = 13.0;
+    let sectorSpan = 6.2831853 / rayCount;
+    let uAngle = angle + 3.14159265;
+    let sector = floor(uAngle / sectorSpan);
+    let rayReach = maxReach * (0.48 + 0.52 * deformHash(vec3f(sector, 2.0 + f32(w), 5.0)));
+    let amount = crack * (1.0 - smoothstep(rayReach * 0.28, rayReach, dist));
+    if (amount <= 0.005) { continue; }
+    // 1. Compact crushed laminated impact bullseye core (smaller inside cabin -> no lens-flare starburst).
+    let bullNoise = (deformHash(vec3f(sector, 9.0, 3.0 + f32(w))) - 0.5) * 0.9;
+    let bullRadius = (1.1 + 1.6 * crack) * select(0.65, 1.0, in.hasSmooth != 0u);
+    let bullseye = (1.0 - smoothstep(bullRadius * 0.42, bullRadius + px * 1.2, dist + bullNoise)) * clamp(crack * 1.35, 0.30, 0.85);
+    // 2. Piecewise-straight jagged radial fracture rays tapering finely so nearby cars stay legible.
+    let seg = floor(dist / 3.8);
+    let segF = fract(dist / 3.8);
+    let k0 = (deformHash(vec3f(sector, seg, 7.0 + f32(w))) - 0.5) * 0.19;
+    let k1 = (deformHash(vec3f(sector, seg + 1.0, 7.0 + f32(w))) - 0.5) * 0.19;
+    let jag = mix(k0, k1, segF);
+    let localA = fract(uAngle / sectorSpan + jag) - 0.5;
+    let rayDist = abs(localA) * max(dist, 1.5) * sectorSpan;
+    let rayWidth = mix(0.15, 0.038, clamp(dist / rayReach, 0.0, 1.0));
+    let rays = (1.0 - smoothstep(rayWidth, rayWidth + px * 1.05, rayDist)) * (rayWidth / (rayWidth + px * 0.45)) * clamp(amount * 1.4, 0.0, 0.92);
+    // 3. Straight-chord staggered cobweb cross-cracks between adjacent radial rays.
+    let chordDist = dist * cos(localA * sectorSpan);
+    let ringOffset = deformHash(vec3f(sector, 6.0, 1.0 + f32(w))) * 2.8;
+    let ringSpace = 3.2 + 0.13 * dist;
+    let ringDist = abs(fract((chordDist + ringOffset) / ringSpace) - 0.5) * ringSpace;
+    let ringWidth = 0.062;
+    let ringEnv = smoothstep(bullRadius * 0.7, bullRadius * 1.6, dist) * (1.0 - smoothstep(rayReach * 0.35, rayReach * 0.82, dist));
+    let rings = (1.0 - smoothstep(ringWidth, ringWidth + px * 1.05, ringDist)) * (ringWidth / (ringWidth + px * 0.55)) * ringEnv * clamp(amount * 1.25, 0.0, 0.80);
+    // 4. Fine Voronoi shatter mosaic concentrated tightly near the impact core.
+    let netMask = 1.0 - smoothstep(bullRadius * 1.1, bullRadius * 3.4, dist);
+    var net = vec2f(0.0);
+    if (netMask > 0.01) { net = crackNet(across * 1.25, px); }
+    let mosaic = net.x * netMask * clamp(crack * 1.25, 0.0, 0.80);
+    var total = max(max(bullseye, rays), max(rings, mosaic));
+    total = max(total, bullseye * 0.65 + netMask * crack * 0.09);
+    if (total > bestTotal) {
+      bestTotal = total;
+      bestTilt = net.y * netMask * clamp(crack * 1.2, 0.0, 1.0);
+    }
   }
-  return total;
+  // Interior cabin glass (hasSmooth == 0): show crisp delicate cracks matching the exterior while
+  // keeping the central ~15-degree road corridor clean and preventing bright flare near the bullseye.
+  if (in.hasSmooth == 0u && bestTotal > 0.0) {
+    let rd = normalize(in.seen);
+    let centerCone = smoothstep(0.955, 0.992, dot(rd, u.forward));
+    bestTotal *= mix(0.86, 0.34, centerCone);
+  }
+  return vec2f(clamp(bestTotal, 0.0, 1.0), bestTilt);
 }
 @fragment fn fs_tint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -375,9 +492,10 @@ fn paneCrack(in: Out) -> f32 {
   // (A picture already toned: what lets a share through of the light lets about that share's root through of the picture.)
   let soft = smoothSeen(in, rd);
   let n = select(in.facing, litBy(in, rd), soft);
-  // A crack lets less through: it is white, and lit (fs_glint). With mirrors off there is no glint to give back
-  // what it mirrors, so it lets all of its share through.
-  let through = 1.0 - 0.6 * paneCrack(in);
+  // A crack scatters light and lets less through; interior cabin glass stays clearer for driving visibility.
+  let cracked = paneCrack(in).x;
+  let block = select(0.46, 0.66, in.hasSmooth != 0u);
+  let through = 1.0 - block * cracked;
   let mirrored = select(0.0, paneMirror(rd, n, soft), u.mirrors > 0.5);
   return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - mirrored) * through, vec3f(0.4545)), 1.0);
 }
@@ -386,7 +504,15 @@ fn paneCrack(in: Out) -> f32 {
   let rd = normalize(in.seen);
   let m = looks.material[11];
   let soft = smoothSeen(in, rd);
-  let n = select(in.facing, litBy(in, rd), soft);
+  var n = select(in.facing, litBy(in, rd), soft);
+  let crackInfo = paneCrack(in);
+  let cracked = crackInfo.x;
+  let tilt = crackInfo.y;
+  // Slightly tilt reflected sky on shattered exterior glass facets for crystalline broken-glass sparkle.
+  if (in.hasSmooth != 0u && abs(tilt) > 0.01) {
+    let side = normalize(cross(n, select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(n.y) > 0.9)));
+    n = normalize(n + side * (tilt * 0.22));
+  }
   // What it mirrors: the sky as the hour colours it, lighter towards the horizon (a body's glass does not ask the
   // world); a smooth pane, the street below the horizon too.
   let back = reflect(rd, n);
@@ -395,9 +521,13 @@ fn paneCrack(in: Out) -> f32 {
   if (direct > 0.0) { let sunny = sunlit(in.seen + u.eye, in.facing, 0u); if (sunny >= 0.0) { direct *= sunny; } }
   // Its own faint film, and the sun's glint off it.
   let own = shade(m.colour, n, rd, u.sun, direct, in.open, m.rough, 0.0);
-  // Added to a picture already toned: as much as it would add to a thing of middling brightness behind it.
-  let cracked = paneCrack(in);
-  let add = own * 0.1 + sky * paneMirror(rd, n, soft) + shade(vec3f(0.72, 0.75, 0.76), n, rd, u.sun, direct, in.open, 0.7, 0.0) * cracked * 0.5;
+  // Crisp white-silver internal reflection along laminated fracture planes; interior faces are
+  // strictly capped below glow.ts's bloom threshold so cracks never bloom into a lens-flare starburst.
+  let crackStrength = select(0.55, 0.90, in.hasSmooth != 0u);
+  let litCrack = shade(vec3f(0.52, 0.56, 0.60), n, rd, u.sun, max(direct, 0.28), max(in.open, 0.70), 0.42, 0.0);
+  let transmitted = vec3f(0.44, 0.48, 0.52) * max(g.lightSun.a, 0.25);
+  let crackLight = select(min(max(litCrack, transmitted), vec3f(0.65)), min(litCrack, vec3f(1.2)), in.hasSmooth != 0u);
+  let add = own * 0.1 + sky * paneMirror(rd, n, soft) + crackLight * cracked * crackStrength;
   return vec4f(tone(add + 0.3) - tone(vec3f(0.3)), 0.0);
 }
 `

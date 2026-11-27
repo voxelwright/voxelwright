@@ -137,14 +137,13 @@ export class VehicleDeformation {
       s.cabin[a] = initial ? lo : Math.min(s.cabin[a], lo)
       s.cabin[a + 3] = initial ? hi : Math.max(s.cabin[a + 3], hi)
     }
-    const limit = Math.min(body.maxCrushCells ?? Infinity, Math.min(size[0], size[1], size[2]) * 0.3)
+    const limit = Math.min(body.maxCrushCells ?? Infinity, Math.min(size[0], size[1], size[2]) * 0.55)
     s.maxCrushCells = initial ? limit : Math.min(s.maxCrushCells, limit)
     for (let i = 0; i < s.dentCount; i++) protect(s.dents[i], s)
     // Impulse is mass-dependent, so it modulates rather than overrides closing speed.
     const severity = clamp((closingSpeed - 18) / 110) * (0.85 + 0.15 * push / (push + 8000))
-    // Local and deep enough to read: 25 cm round for a knock, 1.25 m for a crash at speed. Wider and shallower, a
-    // crash bent a whole front by a few centimetres and nobody could see it.
-    const radius = Math.min((2.5 + 10 * Math.sqrt(severity)) / body.cell, Math.max(size[0], size[2]) * 0.45)
+    // Local and deep enough to read without over-stretching fender stairs: 25 cm for a knock, up to 1.3 m for a heavy hit.
+    const radius = Math.min((2.5 + 10.5 * Math.sqrt(severity)) / body.cell, Math.max(size[0], size[2]) * 0.45)
     let slot = -1, smallest = 0, nearest = Infinity
     for (let i = 0; i < s.dentCount; i++) {
       const d = s.dents[i], distance = Math.hypot(px - d.center[0], py - d.center[1], pz - d.center[2])
@@ -155,9 +154,9 @@ export class VehicleDeformation {
     if (!merged) slot = s.dentCount < MAX_DENTS ? s.dentCount++ : smallest
     const d = s.dents[slot]
     if (!merged) { d.center[0] = px; d.center[1] = py; d.center[2] = pz; d.dir[0] = dx; d.dir[1] = dy; d.dir[2] = dz; d.depth = 0; d.radius = radius }
-    else d.radius = Math.min(Math.max(radius, d.radius) + nearest * 0.25, Math.max(size[0], size[2]) * 0.45)
+    else d.radius = Math.min(Math.max(radius, d.radius) + nearest * 0.3, Math.max(size[0], size[2]) * 0.45)
     // Fixed center/direction on merge avoids moving old damage through the protected box.
-    d.depth += (0.05 + 3 * severity) / body.cell
+    d.depth += (0.08 + 3.8 * severity) / body.cell
     protect(d, s)
     limitConnected(s)
     s.health = Math.max(0, s.health - (0.002 + severity * severity * 0.3))
@@ -198,18 +197,25 @@ export function deformPointCpu(
     const t = dist / d.radius
     const s = 1 - t * t * (3 - 2 * t)
     const ds = -6 * t * (1 - t)
+    const core = s * (1.35 - 0.35 * s)
+    const dcore = (1.35 - 0.70 * s) * ds
+    const env = 16 * t * t * (1 - t) * (1 - t)
+    const denv = 32 * t * (1 - t) * (1 - 2 * t)
     const invD = 1 / Math.max(dist, 0.00001)
     const rx = dx * invD, ry = dy * invD, rz = dz * invD
-    const phase = 36 * t + (dx * 7 + dy * 3 + dz * 11) / d.radius
-    const wave = Math.sin(phase), slope = Math.cos(phase)
-    const buckle = 1 + 0.18 * t * t * wave
-    const field = s * s * buckle
-    const radScale = 2 * s * ds * buckle + s * s * 0.36 * t * wave
-    const waveScale = s * s * 0.18 * t * t * slope
+    const ux = dx / d.radius, uy = dy / d.radius, uz = dz / d.radius
+    const p1 = 10 * t + ux * 5.5 + uy * 2.5 + uz * 8.5
+    const p2 = 6 * t + ux * -7.5 + uy * 4.5 + uz * 4.0
+    const wave = 0.62 * Math.sin(p1) + 0.38 * Math.sin(p2)
+    const c1 = 0.62 * Math.cos(p1), c2 = 0.38 * Math.cos(p2)
+    const buckle = 1 + 0.18 * env * wave
+    const field = core * buckle
+    const radScale = dcore * buckle + core * 0.18 * denv * wave
+    const waveScale = core * 0.18 * env
     const gScale = d.depth / d.radius
-    const gx = (rx * radScale + waveScale * (rx * 36 + 7)) * gScale
-    const gy = (ry * radScale + waveScale * (ry * 36 + 3)) * gScale
-    const gz = (rz * radScale + waveScale * (rz * 36 + 11)) * gScale
+    const gx = (rx * radScale + waveScale * (c1 * (rx * 10 + 5.5) + c2 * (rx * 6 - 7.5))) * gScale
+    const gy = (ry * radScale + waveScale * (c1 * (ry * 10 + 2.5) + c2 * (ry * 6 + 4.5))) * gScale
+    const gz = (rz * radScale + waveScale * (c1 * (rz * 10 + 8.5) + c2 * (rz * 6 + 4.0))) * gScale
     const cDotN = d.dir[0] * nx + d.dir[1] * ny + d.dir[2] * nz
     const denom = 1 + d.dir[0] * gx + d.dir[1] * gy + d.dir[2] * gz
     if (Math.abs(denom) > 1e-6) {
@@ -247,6 +253,19 @@ struct Deform { status: vec4f, posR: array<vec4f, 6>, dirD: array<vec4f, 6> }
 export const DEFORM_WGSL = /* wgsl */ `
 struct DeformResult { pos: vec3f, norm: vec3f, scuff: f32, crease: f32 }
 struct DeformPaint { albedo: vec3f, roughBoost: f32, clearcoatKeep: f32 }
+fn deformHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453); }
+fn deformNoise(p: vec3f) -> f32 {
+  let c = floor(p);
+  let f = fract(p);
+  let e = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(mix(deformHash(c), deformHash(c + vec3f(1.0, 0.0, 0.0)), e.x),
+        mix(deformHash(c + vec3f(0.0, 1.0, 0.0)), deformHash(c + vec3f(1.0, 1.0, 0.0)), e.x), e.y),
+    mix(mix(deformHash(c + vec3f(0.0, 0.0, 1.0)), deformHash(c + vec3f(1.0, 0.0, 1.0)), e.x),
+        mix(deformHash(c + vec3f(0.0, 1.0, 1.0)), deformHash(c + vec3f(1.0, 1.0, 1.0)), e.x), e.y),
+    e.z,
+  );
+}
 fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
   var result = DeformResult(p, n, 0.0, 0.0);
   // No dent arithmetic on healthy cars; the branch itself still has a cost.
@@ -257,56 +276,83 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
     let dist = length(delta);
     if (zone.w <= 0.0001 || dist >= zone.w) { continue; }
     let t = dist / zone.w;
-    // Equivalent to reversed smoothstep, with defined ascending-edge semantics.
+    let u = delta / zone.w;
+    // Broad crushed core (1.35*s - 0.35*s^2) with two bold sheet-metal buckle folds weighted by
+    // 16*t^2*(1-t)^2: C1-smooth at center and edge, buckle in [0.82, 1.18], Jacobian > 0 everywhere.
     let s = 1.0 - t * t * (3.0 - 2.0 * t);
     let ds = -6.0 * t * (1.0 - t);
+    let core = s * (1.35 - 0.35 * s);
+    let dcore = (1.35 - 0.70 * s) * ds;
+    let env = 16.0 * t * t * (1.0 - t) * (1.0 - t);
+    let denv = 32.0 * t * (1.0 - t) * (1.0 - 2.0 * t);
     let radial = delta / max(dist, 0.00001);
-    let grain = vec3f(7.0, 3.0, 11.0);
-    let phase = 36.0 * t + dot(delta / zone.w, grain);
-    let wave = sin(phase); let slope = cos(phase);
-    let buckle = 1.0 + 0.18 * t * t * wave;
-    let field = s * s * buckle;
-    let derivative = radial * (2.0 * s * ds * buckle + s * s * 0.36 * t * wave)
-      + s * s * 0.18 * t * t * slope * (radial * 36.0 + grain);
+    let g1 = vec3f(5.5, 2.5, 8.5);
+    let g2 = vec3f(-7.5, 4.5, 4.0);
+    let p1 = 10.0 * t + dot(u, g1);
+    let p2 = 6.0 * t + dot(u, g2);
+    let wave = 0.62 * sin(p1) + 0.38 * sin(p2);
+    let dwave = 0.62 * cos(p1) * (radial * 10.0 + g1) + 0.38 * cos(p2) * (radial * 6.0 + g2);
+    let buckle = 1.0 + 0.18 * env * wave;
+    let field = core * buckle;
+    let derivative = radial * (dcore * buckle + core * 0.18 * denv * wave) + (core * 0.18 * env) * dwave;
     let gradient = derivative * (crush.w / zone.w);
     // Exact inverse-transpose of I + dir * gradient^T, composed per dent.
-    // CPU depth/radius limits keep the denominator positive; no flipped normals.
+    // CPU depth/radius limits (<= 0.2) keep 1 + dot(dir, gradient) >= 0.21 > 0; no flipped normals.
     result.norm = normalize(result.norm - gradient * dot(crush.xyz, result.norm) / (1.0 + dot(crush.xyz, gradient)));
     result.pos += crush.xyz * (crush.w * field);
     // Zero-depth cabin dents still carry scuffs and cracks. The 208-byte format
     // has no per-zone cosmetic scalar, so these use the vehicle wear aggregate.
-    let strength = select(clamp(crush.w / zone.w * 8.0, 0.0, 1.0), clamp((1.0 - def.status.y) * 3.0, 0.0, 1.0), crush.w <= 0.0);
+    let strength = select(clamp(crush.w / zone.w * 6.5, 0.0, 1.0), clamp((1.0 - def.status.y) * 3.0, 0.0, 1.0), crush.w <= 0.0);
+    // Concentrate paint scuffing tightly on the actual contact scar (s^3) and crumple creases on
+    // the inner dent shoulder (s^2) so damage never scatters as blotches across untouched panels.
+    let tight = s * (0.04 + 0.96 * s * s);
     let rim = 4.0 * t * (1.0 - t);
-    result.scuff = max(result.scuff, strength * s * (0.55 + 0.45 * rim));
-    result.crease = max(result.crease, strength * s * (0.15 + 0.85 * rim * abs(wave)));
+    let bend = clamp(length(derivative) * 0.42, 0.0, 1.0);
+    result.scuff = max(result.scuff, strength * tight);
+    result.crease = max(result.crease, strength * s * s * (0.14 + 0.86 * max(bend * rim, env * abs(wave))));
   }
   return result;
 }
-fn deformHash(p: vec3f) -> f32 { return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453); }
 fn deformPaint(albedo: vec3f, scuff: f32, crease: f32, p: vec3f) -> DeformPaint { return deformPaintSeen(albedo, scuff, crease, p, 1.0); }
-// detail: how much of its fine scratches show (1 near; toward 0 where they are finer than a pixel and would sparkle).
+// Directional brushed-metal crash scrapes (#62): crisp parallel drag-scratches along the impact
+// tangent cutting through dulled, scuffed paint into satin bare steel — zero pink airbrush frosting,
+// zero black cartoon sticker outlines, zero camo blobs — dulling clearcoat across crumpled metal.
 fn deformPaintSeen(albedo: vec3f, scuff: f32, crease: f32, p: vec3f, detail: f32) -> DeformPaint {
   if (scuff <= 0.0 && crease <= 0.0) { return DeformPaint(albedo, 0.0, 1.0); }
   let wear = clamp(scuff, 0.0, 1.0);
-  let lane = p.z * 6.0 + p.y * 4.0 + sin(p.x * 0.21) * 0.6;
-  let along = p.x * 0.4;
-  let seed = vec3f(floor(along), floor(lane), 7.0);
-  let streak = mix(deformHash(seed), deformHash(seed + vec3f(1.0, 0.0, 0.0)), smoothstep(0.0, 1.0, fract(along)));
-  let jitter = 0.15 + deformHash(vec3f(floor(lane), 1.0, 4.0)) * 0.7;
-  let thin = 1.0 - smoothstep(0.025, 0.12, abs(fract(lane) - jitter));
-  let scratch = smoothstep(0.65, 0.9, streak) * thin * wear * detail;
-  let steel = vec3f(0.31, 0.33, 0.35) + vec3f(streak * 0.12);
-  let primer = mix(albedo, vec3f(0.065, 0.07, 0.075), wear * 0.35);
-  let col = mix(primer, steel, scratch * 0.9);
-  return DeformPaint(col * (1.0 - clamp(crease, 0.0, 1.0) * 0.28), wear * 0.65, 1.0 - wear * 0.95);
+  let fold = clamp(crease, 0.0, 1.0);
+  // Strongly elongated 14:1 directional drag-scrape lines along impact tangent x.
+  let nBand = deformNoise(vec3f(p.x * 0.28, p.y * 4.2, p.z * 4.2));
+  let nStreak = deformNoise(vec3f(p.x * 0.52, p.y * 8.6, p.z * 8.6) + vec3f(5.3, 1.9, 9.7));
+  let nFine = deformNoise(vec3f(p.x * 0.85, p.y * 14.5, p.z * 14.5) + vec3f(11.1, 4.7, 17.3));
+  // Crisp parallel scratch ridges (never a broad pink/white airbrush wash!).
+  let scuffEnv = smoothstep(0.18, 0.58, wear + fold * 0.28);
+  let darkScuff = smoothstep(0.42, 0.72, nBand * 0.5 + nStreak * 0.5) * scuffEnv;
+  // Tight high-contrast bare-steel scrape lines concentrated along the deepest drag tracks.
+  let mainScratch = smoothstep(0.56, 0.74, nStreak + (wear - 0.52) * 0.42) * smoothstep(0.42, 0.68, nBand) * smoothstep(0.28, 0.62, wear);
+  let fineScratch = smoothstep(0.62, 0.80, nFine) * smoothstep(0.46, 0.74, nStreak) * smoothstep(0.20, 0.56, wear) * detail;
+  let bareSteel = clamp(max(mainScratch, fineScratch * 0.9), 0.0, 1.0);
+  // Scuffed paint darkens slightly to dull rubbed undercoat/primer (not pale pink frosting!), then crisp steel streaks cut through.
+  let scuffedPaint = mix(albedo, albedo * 0.45 + vec3f(0.055, 0.056, 0.058), clamp(darkScuff * 0.62, 0.0, 0.62));
+  let steelCol = vec3f(0.24, 0.245, 0.242) * (0.78 + 0.42 * nStreak);
+  var col = mix(scuffedPaint, steelCol, bareSteel);
+  // Subtle concave shadow right inside the deepest buckled dent hollow so side dents read in 3D.
+  col *= 1.0 - smoothstep(0.30, 0.90, fold) * 0.20;
+  // Dull showroom clearcoat and raise roughness across scuffed & crumpled panels; bare steel is satin-metallic.
+  let roughBoost = clamp(max(wear * 0.24 + fold * 0.14, mix(darkScuff * 0.68, 0.34, bareSteel)), 0.0, 1.0);
+  let coatKeep = clamp(1.0 - clamp(wear * 0.62 + fold * 0.38 + bareSteel * 0.70 + darkScuff * 0.42, 0.0, 0.92), 0.08, 1.0);
+  return DeformPaint(col, roughBoost, coatKeep);
 }
 // p is window-local, relative to the impact center, in the same fine cells as scuff.
 fn deformGlass(crack: f32, scuff: f32, p: vec3f) -> f32 {
   if (crack <= 0.0 || scuff <= 0.0) { return 0.0; }
   let radial = length(p);
   let angle = atan2(p.y + p.z * 0.37, p.x + 0.0001);
-  let spokes = 1.0 - smoothstep(0.015, 0.10, abs(sin(angle * 9.0 + sin(radial * 0.6) * 0.18)));
-  let rings = 1.0 - smoothstep(0.02, 0.13, abs(sin(radial * 1.7 + sin(angle * 7.0) * 0.4)));
-  return clamp(crack, 0.0, 1.0) * clamp(scuff, 0.0, 1.0) * clamp(max(spokes, rings * 0.75) + crack * 0.15, 0.0, 1.0);
+  let jag = (deformNoise(p * 0.45 + vec3f(2.3, 5.1, 1.7)) - 0.5) * 0.55;
+  let spokes = 1.0 - smoothstep(0.015, 0.095, abs(sin(angle * 7.0 + jag + sin(radial * 0.55) * 0.22)));
+  let sector = floor((angle + 3.14159) * 2.23);
+  let ringShift = deformHash(vec3f(sector, 1.0, 4.0)) * 3.14;
+  let rings = 1.0 - smoothstep(0.02, 0.12, abs(sin(radial * 1.45 + ringShift + sin(angle * 5.0) * 0.35)));
+  return clamp(crack, 0.0, 1.0) * clamp(scuff, 0.0, 1.0) * clamp(max(spokes, rings * 0.72) + crack * 0.12, 0.0, 1.0);
 }
 `

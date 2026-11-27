@@ -45,28 +45,45 @@ fn cloud(p: vec2f, seed: u32) -> f32 {
   let e = f * f * (3.0 - 2.0 * f);
   return mix(mix(lump(c, seed), lump(c + vec2i(1, 0), seed), e.x), mix(lump(c + vec2i(0, 1), seed), lump(c + vec2i(1, 1), seed), e.x), e.y);
 }
+fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
+  return cloud(uv * 2.2 + drift, seed) * 0.62 + cloud(uv * 4.8 + drift * 1.7, seed + 7u) * 0.38;
+}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let heat = in.more.x;
   let age = in.more.z;
   let seed = u32(in.more.y);
-  // A puff is a soft ball whose edge is eaten by billows that drift up it as it ages. Things here are made of
-  // cells, but smoke is not a thing: drawn in squares it read as a picture of smoke, not smoke.
+  // A puff is a sculpted curling billow lit with warm sunlight on its sunward folds and cool sky
+  // fill in its shadowed undersides, so smoke reads with 3D volume instead of a flat grey smudge.
   let r = length(in.uv);
   if (r >= 1.0) { discard; }
-  let drift = vec2f(f32(seed & 15u), age * 2.2 + f32((seed >> 4u) & 15u));
-  let billow = cloud(in.uv * 2.1 + drift, seed) * 0.62 + cloud(in.uv * 4.6 + drift * 1.7, seed + 7u) * 0.38;
-  let body = smoothstep(1.0, 0.3, r + (billow - 0.5) * 0.85) * (1.0 - r * r * r);
+  let drift = vec2f(f32(seed & 15u), age * 2.4 + f32((seed >> 4u) & 15u));
+  let billow = billowAt(in.uv, drift, seed);
+  let body = smoothstep(0.96, 0.42, r + (billow - 0.5) * 0.82) * (1.0 - r * r * r);
   if (body <= 0.004) { discard; }
   // The smoke a blast leaves comes late (more.w): it shows as the ball of fire goes out, not in front of it.
   let fade = smoothstep(in.more.w, in.more.w + 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
   // While it burns it is fire and not smoke: its smoke shows as it cools. Covered by its own smoke from the first, a
   // ball of fire was a dark smudge with a little orange a third of a second after it went off.
   let cover = in.colour.a * body * fade * (1.0 - 0.92 * smoothstep(0.05, 0.6, heat));
-  // Smoke is lit as the ball it is: bright on the sun's side and on top, dark underneath and in its folds.
+  // Directional billow self-shadowing: sample slightly toward the sun in screen space so each lobe
+  // has a bright sunlit crest and a cool shadowed underside matching the world's daylight.
   let round = vec3f(in.uv.x, -in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
   let towards = vec3f(dot(u.sun, u.right), dot(u.sun, u.up), -dot(u.sun, u.forward));
-  let lit = 0.42 + 0.5 * max(dot(round, towards), 0.0) + 0.16 * round.y + (billow - 0.5) * 0.5;
-  let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35) * mix(0.07, 1.0, u.day);
+  let sunStep = normalize(vec2f(towards.x, -towards.y) + vec2f(0.001, 0.001)) * 0.14;
+  let billowSun = billowAt(in.uv + sunStep, drift, seed);
+  let foldRelief = clamp((billow - billowSun) * 2.2, -0.45, 0.65);
+  let sunFace = clamp(dot(round, towards) * 0.65 + 0.35 + foldRelief * 0.55, 0.0, 1.25);
+  let topLight = 0.5 + 0.5 * round.y;
+  let rim = pow(1.0 - max(round.z, 0.0), 2.2) * (0.25 + 0.55 * max(dot(towards, vec3f(0.0, 0.0, 1.0)), 0.0));
+  // Pale steam scatters light internally (never dark grey in its core); dark oil smoke keeps deep shadowed undersides.
+  let lum = dot(in.colour.rgb, vec3f(0.333));
+  let scatter = smoothstep(0.45, 0.82, lum);
+  let shadowTint = mix(mix(vec3f(0.16, 0.20, 0.28), vec3f(0.30, 0.37, 0.48), topLight), vec3f(0.52, 0.56, 0.62), scatter * 0.65);
+  let sunTint = vec3f(0.76, 0.72, 0.64) * (sunFace * 0.82 + rim * 0.26);
+  let lightCol = (shadowTint + sunTint) * mix(0.08, 1.0, u.day);
+  // Keep non-emissive smoke strictly below glow.ts's 0.80 bloom threshold so bright steam never blooms into a glowing orb.
+  let rawSmoke = in.colour.rgb * lightCol;
+  let smoke = rawSmoke / (vec3f(1.0) + rawSmoke * 0.62);
   // Fire: white-yellow at its heart and when hottest, then yellow, orange for most of its life, and a dull red only
   // as it goes out. Blue-white plasma flame for nitrous boost when colour encodes cool blue with zero smoke cover.
   let core = body * body;
@@ -265,24 +282,35 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       late[j] = 0
     },
     crash(at, strength) {
-      for (let k = Math.round(2 + strength * 3); k > 0; k--) {
-        const pale = rnd(0.5, 0.62)
-        puff(at, 2, rnd(8, 20) * (0.5 + strength), rnd(3, 8), { size: rnd(1.5, 3), grow: rnd(3, 5), life: rnd(1.2, 2.2), heat: 0, cool: 0, rise: 3, drag: 2.4, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.3 })
+      for (let k = Math.round(3 + strength * 4); k > 0; k--) {
+        const pale = rnd(0.54, 0.68)
+        puff(at, 1.6, rnd(10, 24) * (0.5 + strength), rnd(3, 9), { size: rnd(1.3, 2.5), grow: rnd(2.8, 4.6), life: rnd(1.0, 1.8), heat: 0, cool: 0, rise: 4, drag: 2.6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.36 })
       }
     },
     engine(at, level, dt) {
+      // living.ts passes 0.8 * full roof height: drop 1.6 cells to sit cleanly on the hood surface
+      // (never buried inside it like a soot stain) and emit a continuous overlapping stream of
+      // slender curling wisps so the rising column always connects to the engine bay in both outside and seat views.
+      const hood: [number, number, number] = [at[0], at[1] - 1.6, at[2]]
       if (level < 0.7) {
-        // Steam: thin and white, gone within a second or two; more of it the worse the damage.
-        if (Math.random() < dt * (4 + 10 * (level - 0.35) / 0.35)) puff(at, 1.5, rnd(1, 4), rnd(8, 16), { size: rnd(1.4, 2.4), grow: rnd(4, 7), life: rnd(0.9, 1.6), heat: 0, cool: 0, rise: 12, drag: 1.8, colour: [0.9, 0.92, 0.94], cover: 0.26 })
+        const frac = (level - 0.35) / 0.35
+        if (Math.random() < dt * (14 + 14 * frac)) {
+          const w = rnd(0.84, 0.95)
+          puff(hood, 0.5, rnd(0.6, 1.8), rnd(8, 14), { size: rnd(0.65, 1.0), grow: rnd(1.8, 2.8), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.28 + 0.08 * frac, late: -0.06 })
+        }
         return
       }
-      if (Math.random() < dt * 9) {
-        const grey = rnd(0.1, 0.2)
-        // (Quick to climb and thin: from the seat a thick slow plume sat over the road ahead.)
-        puff(at, 1.8, rnd(1, 4), rnd(16, 26), { size: rnd(1.6, 2.8), grow: rnd(5, 8), life: rnd(1.4, 2.4), heat: 0, cool: 0, rise: 24, drag: 1.2, colour: [grey, grey, grey * 1.02], cover: 0.32 })
+      // Continuous connected billowing smoke column rising cleanly from the engine bay.
+      if (Math.random() < dt * 22) {
+        const grey = rnd(0.24, 0.38)
+        puff(hood, 0.55, rnd(0.8, 2.2), rnd(9, 16), { size: rnd(0.75, 1.15), grow: rnd(2.0, 3.2), life: rnd(1.5, 2.3), heat: 0, cool: 0, rise: 17, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.36, late: -0.06 })
       }
-      // Burning: tongues of flame in the smoke, small (a blast's fire is bigger).
-      if (level > 0.92 && Math.random() < dt * 10) puff(at, 1.2, rnd(1, 3), rnd(14, 28), { size: rnd(1.2, 2.4), grow: rnd(1, 2.5), life: rnd(0.3, 0.6), heat: 0.66, cool: rnd(1, 1.5), rise: 50, drag: 1.5, colour: [0.05, 0.045, 0.04], cover: 0.25 })
+      if (Math.random() < dt * 11) {
+        const wisp = rnd(0.58, 0.74)
+        puff(hood, 0.5, rnd(0.7, 2.0), rnd(8, 14), { size: rnd(0.60, 0.95), grow: rnd(1.6, 2.6), life: rnd(1.0, 1.6), heat: 0, cool: 0, rise: 15, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.24, late: -0.06 })
+      }
+      // Burning: tongues of flame in the smoke, compact right at the hood seam.
+      if (level > 0.92 && Math.random() < dt * 12) puff(hood, 0.7, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.95, 1.7), grow: rnd(0.8, 1.8), life: rnd(0.28, 0.55), heat: 0.72, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.25, late: -0.06 })
     },
     step(dt) {
       live = 0
