@@ -8,6 +8,7 @@ import zipfile
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from mapped_water import areas as water_areas
 from street_sources import UTM, osm
 from street_graph import cells
 
@@ -71,7 +72,7 @@ def acquire(archive, dest):
         if kind == "node"
     }
     buildings, fixtures, wires = [], [], []
-    osm_bldg_tags, osm_water, osm_gardens = {}, [], []
+    osm_bldg_tags, osm_gardens = {}, []
     KEEP_BLDG = (
         "name", "building", "building:colour", "building:material",
         "roof:shape", "roof:colour", "roof:material", "height", "building:levels", "historic", "tourism",
@@ -112,12 +113,6 @@ def acquire(archive, dest):
             if len(kept_t) > 1 or kept_t.get("building") not in (None, "yes"):
                 osm_bldg_tags[str(i)] = kept_t
         if (
-            (tags.get("natural") == "water" or "water" in tags or tags.get("amenity") == "fountain")
-            and len(line) >= 4
-            and line[0] == line[-1]
-        ):
-            osm_water.append([i, line[:-1], tags.get("water") or tags.get("amenity") or "water"])
-        if (
             (tags.get("leisure") == "garden" or tags.get("landuse") == "flowerbed")
             and len(line) >= 4
             and line[0] == line[-1]
@@ -139,7 +134,7 @@ def acquire(archive, dest):
         extraDataSF=missing,
         osmBuildings=buildings,
         osmBuildingTags=osm_bldg_tags,
-        osmWater=osm_water,
+        osmWater=water_areas(elements, nodes),
         osmGardens=osm_gardens,
         assessor2025=assessor,
         fixtures=fixtures,

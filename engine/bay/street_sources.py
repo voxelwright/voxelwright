@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from pyproj import Transformer
+from mapped_water import is_water
 
 UTM = Transformer.from_crs(26910, 4326, always_xy=True)
 KEEP = set(
@@ -25,14 +26,27 @@ def extract_semantics(items):
     without any extra network requests (#60)."""
     buildings, water, gardens = {}, [], []
     for (kind, id_), item in items.items():
+        tags = item.get("tags", {})
+        if kind == "relation" and tags.get("type") == "multipolygon" and is_water(tags):
+            parts = []
+            for member in item["members"]:
+                if member["type"] != "way" or member["role"] not in ("outer", "inner", ""):
+                    continue
+                way = items.get(("way", member["ref"]))
+                if not way:
+                    break
+                parts.append({"role": member["role"] or "outer", "ref": member["ref"], "nodes": way["nodes"]})
+            else:
+                if parts:
+                    water.append({"type": "relation", "id": id_, "members": parts,
+                                  "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
         if kind != "way":
             continue
-        tags = item.get("tags", {})
         if tags.get("building") not in (None, "no"):
             kept = {k: tags[k] for k in SEMANTIC_BUILDING_TAGS if k in tags}
             if len(kept) > 1 or kept.get("building") not in (None, "yes"):
                 buildings[str(id_)] = kept
-        if tags.get("natural") == "water" or "water" in tags or tags.get("amenity") == "fountain":
+        if is_water(tags):
             water.append({"id": id_, "nodes": item.get("nodes", []), "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
         elif tags.get("leisure") in ("garden", "park") or tags.get("landuse") in ("flowerbed", "meadow", "orchard"):
             gardens.append({"id": id_, "nodes": item.get("nodes", []), "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
@@ -94,7 +108,9 @@ def acquire(name, path):
             )
     semantics = extract_semantics(items)
     for feat in semantics["water"] + semantics["gardens"]:
-        nodes.update(feat["nodes"])
+        nodes.update(feat.get("nodes", []))
+        for member in feat.get("members", []):
+            nodes.update(member["nodes"])
     coords = {
         id_: [
             items["node", id_]["lon"],

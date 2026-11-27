@@ -19,7 +19,7 @@ is left alone, so the far model grows as the run finishes squares.
 
     ~/.village/engine/landing/ina/venv/bin/python engine/sf/far/bake.py [square ...] [--force] [--cell 1] [--out dir]
 """
-import io, json, math, os, sys, time, zipfile, zlib
+import gzip, hashlib, io, json, math, os, sys, time, zipfile, zlib
 import numpy as np
 from scipy import ndimage
 
@@ -27,6 +27,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'landing', 'ina'))
 import looks  # noqa: E402  wall colours and windows by rule (#423)
 from matte import LEAF_SIDE, LEAF_TOP, crown_rule, faces, filled, rgb24  # noqa: E402  columns to faces, and trees as crowns (#423)
+
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'bay'))
+from mapped_water import WATER_RGB, for_square as square_water, mask as water_mask  # noqa: E402
 
 # Where the archives are: the city's run (bay/full_run.py) writes them square by square; the pilot's are kept apart.
 # A square in both is the run's.
@@ -74,6 +77,16 @@ def bake(square, force=False, cell=0.5, out=OUT):
     src = archive(square)
     st = os.stat(src)
     sig = f'{VERSION}:{cell}:{st.st_size}:{int(st.st_mtime)}'
+    sidecar = os.path.splitext(src)[0] + '.detail.json.gz'
+    observed = {}
+    if os.path.exists(sidecar):
+        with gzip.open(sidecar, 'rt') as stream:
+            observed = json.load(stream)
+        if observed.get('square') != square:
+            raise ValueError(f'incorrect water observations for {square}')
+    ponds = square_water(square, observed)
+    if ponds:
+        sig += ':water1:' + hashlib.sha256(json.dumps(ponds, separators=(',', ':')).encode()).hexdigest()
     dest = f'{out}/{square}'
     if not force and os.path.exists(f'{dest}/index.json') and json.load(open(f'{dest}/index.json')).get('inputs') == sig:
         return None
@@ -212,9 +225,14 @@ def bake(square, force=False, cell=0.5, out=OUT):
     sub = (slice(step // 2, None, step), slice(step // 2, None, step))
     gh = np.maximum(np.round((ground[sub] - SEA) * 10 / hq).astype(np.int64), 0)
     gc = np.where(leafy[sub] | crown[sub] | ((over[sub] > 0.5) & (ids[sub] == 0)), rgb24(np.full(gh.shape, 92), np.full(gh.shape, 104), np.full(gh.shape, 80)), rgb24(np.full(gh.shape, 104), np.full(gh.shape, 104), np.full(gh.shape, 106)))
+    if ponds:
+        inland = water_mask(ponds, (ee[sub[1]] - E0) * 10, (N0 - nn[sub[0]]) * 10)
+        gc[inland] = WATER_RGB
     write('ground', gh, ~water[sub], own[sub], gc, gc, np.zeros(gh.shape, np.int64), np.zeros(gh.shape, np.int64), gh, hq, step)
     index = {'village': 'far', 'version': VERSION, 'square': square, 'inputs': sig, 'turn': 0, 'faces': sum(b['faces'] for b in blocks), 'blocks': blocks,
              'sun': None, 'styles': looks.STYLES, 'credit': 'U.S. Geological Survey 3DEP; City and County of San Francisco (DataSF)'}
+    if ponds:
+        index['credit'] += '; © OpenStreetMap contributors (ODbL, inland water)'
     json.dump(index, open(f'{dest}/index.json.part', 'w'))
     os.replace(f'{dest}/index.json.part', f'{dest}/index.json')
     return {'square': square, 'faces': index['faces'], 'blocks': len(blocks), 'seconds': round(time.time() - began, 1)}

@@ -14,6 +14,7 @@ import earth
 from coverage import landmark_extras
 from full_run import plan
 import street_detail
+import mapped_water
 import street_sources
 
 
@@ -88,14 +89,47 @@ class TestMultiCityProcedure(unittest.TestCase):
         self.assertEqual(len(sem["water"]), 1)
         self.assertEqual(len(sem["gardens"]), 1)
 
+    def test_split_shore_keeps_its_island_and_drops_incomplete_relations(self):
+        nodes = dict(enumerate([(0, 0), (10, 0), (10, 10), (0, 10), (3, 3), (7, 3), (7, 7), (3, 7)]))
+        ways = {("way", i): {"nodes": seq} for i, seq in enumerate(([0, 1, 2], [0, 3, 2], [4, 5, 6, 7, 4]))}
+        ways["relation", 42] = {
+            "tags": {"type": "multipolygon", "natural": "water", "water": "pond"},
+            "members": [{"type": "way", "ref": i, "role": role} for i, role in enumerate(["outer", "outer", "inner"])],
+        }
+        raw = street_sources.extract_semantics(ways)["water"]
+        self.assertEqual([m["role"] for m in raw[0]["members"]], ["outer", "outer", "inner"])
+        records = mapped_water.areas(ways, nodes)
+        self.assertEqual([r[0] for r in records], [-42])
+        grid = mapped_water.mask(records, np.arange(11), np.arange(11))
+        self.assertTrue(grid[2, 5])
+        self.assertFalse(grid[5, 5])
+        self.assertEqual(mapped_water.areas({k: v for k, v in ways.items() if k != ("way", 2)}, nodes), [])
+
+    def test_waterfowl_pond_and_moon_pool_survive_an_older_park_survey(self):
+        park = mapped_water.for_square("545.7_4179.5", {})
+        wildfowl = next(r for r in park if r[0] == -2792384)
+        self.assertEqual(len(wildfowl[3]), 1)
+        # Sample a mapped point in the water and another on its island, independently of the sampler.
+        xs, zs = np.array([466868, 466973, 465338]), np.array([697562, 697440, 698181])
+        grid = mapped_water.mask(park, xs, zs)
+        self.assertTrue(grid[0, 0])
+        self.assertFalse(grid[1, 1])
+        self.assertTrue(grid[2, 2])
+        self.assertFalse(mapped_water.for_square("543.7_4178.5", {}))
+        # A new observation supersedes the retained geometry.
+        updated = [-2792384, [(0, 0), (5, 0), (0, 5)], "pond", []]
+        self.assertEqual([r for r in mapped_water.for_square("545.7_4179.5", {"osmWater": [updated]}) if r[0] == -2792384], [updated])
+
     def test_inland_water_stamped_onto_surface_grid(self):
         class FakeSquare:
             def __init__(self):
                 self.h = [0] * 16
+                self.h[8] = 5
                 self.h[9] = 40
                 self.h[10] = 0
                 self.h[11] = 0
                 self.cls = np.full((40, 40), 6, dtype=np.uint8)  # concrete YARD
+                self.cls[10, 10] = 9  # pavement misclassified under a tree crown
                 self.cls[0:4, :] = 0  # road along north edge
 
             window = street_detail.Square.window
@@ -108,7 +142,7 @@ class TestMultiCityProcedure(unittest.TestCase):
         self.assertGreater(stats["inlandWaterSamples"], 200)
         # Road preserved on north edge; interior yard turned into WATER (5).
         self.assertEqual(int(sq.cls[1, 10] & 7), 0)
-        self.assertEqual(int(sq.cls[10, 10] & 7), 5)
+        self.assertEqual(int(sq.cls[10, 10]), 5 | 8)
 
 
 if __name__ == "__main__":

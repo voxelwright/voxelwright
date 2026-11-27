@@ -16,6 +16,7 @@ from shapely.strtree import STRtree
 from street_furniture import bake as furniture, encode
 from earth import style
 from street_sources import UTM
+from mapped_water import for_square as square_water, mask as water_mask
 from street_graph import cells
 from bake import rings
 
@@ -456,15 +457,16 @@ def streets(sq, network, stats):
 def inland_water(sq, detail, stats):
     """Stamp retained OSM inland water polygons (park ponds, lagoons, fountains) onto the surface class grid
     so elevated water bodies are rendered as reflective WATER rather than concrete YARD (#60)."""
-    for _id, ring, _kind in detail.get("osmWater") or ():
-        part = sq.window([ring])
-        if not part:
-            continue
-        w, mask = part
-        # Keep roads/bridges intact; turn ground/yard/grass inside mapped water basins into WATER (5).
-        paint = mask & ((sq.cls[w] & 7) != 0)
-        sq.cls[w][paint] = (sq.cls[w][paint] & 240) | 5
-        stats["inlandWaterSamples"] += int(paint.sum())
+    records = square_water(detail.get("square"), detail)
+    if not records:
+        return
+    sample = np.arange(sq.h[9]) * sq.h[8]
+    inside = water_mask(records, sq.h[10] + sample, sq.h[11] + sample)
+    ground = sq.cls & 7
+    # Aerial classification calls much of McBean Pond pavement. Keep roads and the mapped island.
+    paint = inside & (ground != 0) & (ground != 5)
+    sq.cls[paint] = (sq.cls[paint] & 248) | 5
+    stats["inlandWaterSamples"] += int(paint.sum())
 
 
 def apply(path, archive, sidecar, graph, stage=5, *, public_works_fixtures):

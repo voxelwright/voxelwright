@@ -68,3 +68,5 @@ To put new far tiles or a new first-view cut into a release, restock it ([releas
 | `?farfaces=` | 12000000 | The most faces held |
 | `?farlanding=URL` | | A first-view cut's listing, for a release without one |
 | `?farcutfit=` | 1.6 | How much taller than its tallest picture the first-view cut is still trusted |
+
+The two-metre ground cells use the same inland shorelines as the near bake. A mapped island keeps its own ground colour. The source signature includes the water geometry for the square, so a changed shore invalidates its distant ground.

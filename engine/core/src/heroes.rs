@@ -56,7 +56,7 @@ pub fn reach(sort: u32) -> Option<[f32; 6]> {
         FORT_POINT => Some([-54.0, -5.0, -34.0, 54.0, 25.0, 34.0]),
         ACADEMY_SCIENCES => Some([-81.0, -7.0, -66.5, 81.0, 24.0, 36.5]),
         JAPANESE_TEA_GARDEN => Some([-66.0, -10.0, -66.0, 66.0, 26.0, 66.0]),
-        BOTANICAL_GARDEN => Some([-80.0, -10.0, -60.0, 80.0, 26.0, 124.0]),
+        BOTANICAL_GARDEN => Some([-80.0, -10.0, -60.0, 80.0, 26.0, 60.0]),
         CONSERVATORY => Some([-50.0, -10.0, -22.0, 50.0, 24.0, 94.0]),
         PAINTED_LADIES => Some([-28.5, -5.0, -11.0, 27.0, 21.0, 13.0]),
         DE_YOUNG => Some([-80.0, -8.0, -40.0, 78.0, 47.0, 44.0]),
@@ -1941,10 +1941,8 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
 }
 
 // ── San Francisco Botanical Garden. Frame from sf/heroes.json: `at` 37.7672, -122.4679 (the Great Meadow, way
-// 476290501, landuse=grass), u east. OSM maps no pond, no pavilion and no glasshouse within this box: the garden's
-// ponds (Anelli, Dwarf Conifer, Bamboo; ways 1062189335, 388991375, 388991378) lie south of w = 58, and the box's
-// reach runs on to w = 124 for them alone (`BOTANICAL_PONDS`); its Moon Viewing Garden is 330 m west. What it does map here: the main entrance off Martin Luther King Jr Drive, the round
-// fountain in the gravel court beside the library, and flowerbeds by the gate.
+// 476290501, landuse=grass), u east. The main entrance, fountain court and flowerbeds lie in this reach.
+// The surrounding ponds and their islands are terrain in both views (bay/sf-garden-water.json).
 /// The fountain, way 1036243321, in the fine-gravel court of way 1064976638 (about 7.5 m round its middle).
 pub(crate) const BOTANICAL_FOUNTAIN: (f32, f32) = (26.2, 21.3);
 /// Flowerbeds, as (middle u, middle w, half u, half w): ways 1072073350, 1063385914 (Rock Garden Circle), 1072073345.
@@ -1975,35 +1973,7 @@ pub(crate) fn botanical_place(u: f32, w: f32) -> bool {
     u.abs() <= 76.0 && w.abs() <= 56.0 && !BOTANICAL_KEPT.iter().any(|k| inside(k, u, w))
 }
 
-/// Ponds south of the meadow, as their OSM ways (natural=water, water=pond): Anelli Pond (way 1062189335), Dwarf
-/// Conifer Pond (388991375) and Bamboo Pond (388991378). Water on the ground only: the rule does not own them, so the
-/// trees, banks and paths round and over them stay the map's. (The Moon Viewing Garden's pond, way 1064989905 by
-/// node 2969748424, is some 330 m west of `at`, past this box.)
-pub(crate) const BOTANICAL_PONDS: [&[(f32, f32)]; 3] = [
-    &[
-        (-22.9, 58.0), (-24.2, 58.7), (-25.4, 60.4), (-26.1, 62.5), (-26.0, 64.8), (-25.3, 66.1), (-25.4, 67.4),
-        (-25.0, 68.0), (-22.9, 68.4), (-20.8, 68.8), (-18.2, 67.8), (-16.0, 66.7), (-14.9, 65.7), (-13.8, 65.7),
-        (-12.8, 66.2), (-11.2, 66.5), (-9.6, 65.7), (-8.4, 65.0), (-8.3, 64.2), (-8.8, 63.8), (-9.6, 63.7),
-        (-10.2, 63.0), (-10.6, 61.6), (-11.2, 60.8), (-12.7, 59.7), (-14.9, 58.6), (-17.6, 58.1), (-20.7, 57.8),
-    ],
-    &[
-        (-59.2, 68.5), (-56.5, 68.1), (-54.6, 68.7), (-51.2, 70.6), (-49.2, 69.7), (-48.3, 69.4), (-46.1, 70.4),
-        (-44.3, 70.2), (-42.8, 70.6), (-42.0, 71.4), (-42.5, 71.9), (-44.5, 73.2), (-46.7, 73.0), (-49.0, 75.3),
-        (-52.8, 77.9), (-55.8, 79.8), (-58.7, 80.5), (-61.6, 81.9), (-64.2, 82.5), (-66.7, 81.9), (-68.1, 81.0),
-        (-69.6, 76.9), (-70.9, 73.6), (-69.7, 70.8), (-67.8, 68.4), (-66.6, 68.0), (-64.6, 68.6), (-61.2, 68.2),
-    ],
-    &[
-        (-62.4, 105.0), (-66.1, 107.0), (-70.2, 110.6), (-71.8, 112.6), (-72.4, 115.8), (-71.2, 119.8),
-        (-69.6, 121.1), (-63.0, 120.4), (-58.0, 119.3), (-54.6, 118.2), (-52.6, 116.1), (-51.0, 113.2),
-        (-50.9, 110.2), (-51.1, 107.2), (-52.1, 103.7), (-54.2, 102.0), (-57.9, 102.9),
-    ],
-];
-
 fn botanical_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
-    if w > 56.0 && BOTANICAL_PONDS.iter().any(|p| inside(p, u, w)) {
-        let h = hash3((u * 0.7) as i32, 2, (w * 0.7) as i32, 59);
-        return Some(kind(WATER, if h % 4 == 0 { colour(12, 4) } else { colour(12, 5) }));
-    }
     if !botanical_place(u, w) {
         return None;
     }
@@ -3033,28 +3003,11 @@ mod tests {
     }
 
     #[test]
-    fn botanical_ponds_are_water_where_mapped_and_nothing_else_moves() {
-        let r = reach(BOTANICAL_GARDEN).unwrap();
-        let water = |u: f32, w: f32| surface_at(BOTANICAL_GARDEN, u, w, 72.0, 0.2).map(material);
-        // Middles of Anelli (way 1062189335), Dwarf Conifer (388991375) and Bamboo (388991378) ponds: water, and in
-        // the reach, so the world's columns there ask the rule (they were past w = 60 before).
+    fn the_garden_leaves_the_surveyed_southern_ponds_to_the_terrain() {
         for (u, w) in [(-17.0, 63.0), (-57.0, 75.0), (-62.0, 112.0)] {
-            assert_eq!(water(u, w), Some(WATER), "pond at ({u}, {w})");
-            assert!(u >= r[0] && u < r[3] && w >= r[2] && w < r[5], "({u}, {w}) out of reach");
-            // Not owned: what stands round and over the pond (trees, banks) stays the map's; nothing is drawn.
+            assert_eq!(botanical_surface(u, w, 0.2), None);
             assert!(!owns(BOTANICAL_GARDEN, u, 1.0, w));
             assert_eq!(botanical_garden(u, 0.5, w, 0.2), 0);
-        }
-        // Land between and beside them, and the paths there, are the map's own ground.
-        for (u, w) in [(-35.0, 66.0), (-17.0, 75.0), (-57.0, 92.0), (-40.0, 112.0), (0.0, 100.0), (-30.0, 58.5)] {
-            assert_eq!(water(u, w), None, "ground at ({u}, {w})");
-            assert!(!owns(BOTANICAL_GARDEN, u, 1.0, w));
-        }
-        // Owning stops where it did, so the far model's lidar past the old box is untouched.
-        for u in (-80..80).step_by(2) {
-            for w in (57..124).step_by(2) {
-                assert!(!owns(BOTANICAL_GARDEN, u as f32, 1.0, w as f32), "owns ({u}, {w})");
-            }
         }
     }
 

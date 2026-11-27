@@ -176,6 +176,8 @@ def build(args, lock_fd):
         )
         if f != "paint_tile.py" or (source / f).exists()
     ]
+    if (source / "mapped_water.py").is_file():
+        recipe.extend(digest(source / name) for name in ("mapped_water.py", "sf-garden-water.json"))
     recipe += [args.pilot]
     # Frozen recipes predating fixture selection can resume only with their original Public Works survey.
     legacy = not (source / "street_inputs.py").is_file()

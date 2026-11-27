@@ -28,7 +28,9 @@
   },
   "San Francisco Botanical Garden": {
     "garden": [46995, 125, 69785, -150.0, -17.4],
-    "ponds": [46885, 90, 69925, -116.6, -16.0]
+    "ponds": [46885, 90, 69925, -116.6, -16.0],
+    "Waterfowl Pond": [46687, 127, 69756, 0, -90],
+    "Moon Viewing Garden": [46533.8, 94, 69818.1, 0, -90]
   },
   "Conservatory of Flowers": {
     "terrace": [47530, 92, 69365, 2.0, -7.8]

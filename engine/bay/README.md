@@ -130,3 +130,5 @@ It works under `~/.village/engine/bay/450-city-paint/`. Workers survey street wi
 ```
 
 A change to `bake.py` or `tiles.py` changes tile bytes, so it needs a new release and a panel pass before the pin moves.
+
+Both terrain bakes read inland water from the street-detail survey. An OSM multipolygon retains its outer shore and any islands. Seven mapped water features in the Golden Gate Park gardens are retained in `sf-garden-water.json` for older archives of the two survey squares. Each polygon uses the same projected cells as the building footprints.
