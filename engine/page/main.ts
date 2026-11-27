@@ -1177,10 +1177,24 @@ async function main() {
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },
     piece: (id) => moving.get(id),
-    look: (kinds, size) => {
+    look: (kinds, size, opts) => {
+      const key = size.join()
       let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map())
-      let born = by.get(size.join())
-      if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
+      let born = by.get(key)
+      if (!born) {
+        // When wheel-well carving creates a new array from a street car's uncarved cells, reuse the pre-built smooth
+        // Born immediately (avoiding a 20-100ms main-thread `thing()` stall on crash/wake) and refit once the worker finishes.
+        const pre = opts?.fallback ? lookFaces.get(opts.fallback)?.get(key) : undefined
+        if (pre) {
+          born = { ...pre, com: [...pre.com], low: [...pre.low] }
+          by.set(key, born)
+          if (opts?.smooth !== false) smoothen(kinds, size, born)
+        } else {
+          born = thing(kinds, size)
+          by.set(key, born)
+          if (!born.smooth && opts?.smooth !== false) smoothen(kinds, size, born)
+        }
+      }
       const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
       piece.skin = kinds
       smoothing.get(born)?.push(piece)
@@ -1240,7 +1254,7 @@ async function main() {
       const st = !active && t.state ? t.state : null
       const stBrake = st && ((st.go < -0.1 && st.speed > 8) || (st.go > 0.1 && st.speed < -8)) ? Math.min(1, Math.abs(st.go)) : 0
       const deform = alive.damage(t)
-      const look0 = deform && deform.dentCount > 0 ? alive.look(t).parts[0] : undefined
+      const look0 = deform && deform.dentCount > 0 ? (t.fine?.[0] ?? t.kept?.[0]) : undefined
       out.push({
         id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
         bornLow: piece.born.low, bornCom: piece.born.com,
