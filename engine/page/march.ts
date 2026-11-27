@@ -1429,7 +1429,11 @@ fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
         if (!whole && all((c >> vec3u(4u)) == (front >> vec3u(4u)))) { side[i] = f32(solidInMid(entry, mid, c)); } else { side[i] = f32(solidIn(entry, rootLo, rootHi, rootChild, c)); }
       }
       // A street climbs a hill a cell at a time: a step one cell high beside a tread is the slope, not a corner.
-      if (ground && side[i] > 0.5 && !solidAt(c + vec3i(0, 1, 0), hit.level)) { side[i] = 0.0; }
+      // A sloped sub-cell kerb (FINE | CONCRETE = 71) capping the cell above a kerb is also a low lip, not a wall (#150).
+      if (ground && side[i] > 0.5) {
+        let over = kindAt(c + vec3i(0, 1, 0), hit.level);
+        if (over == 0u || (over & 79u) == 71u) { side[i] = 0.0; }
+      }
     } else {
       let other = sectorOf(c, hit.level);
       if (other != 0u) {
@@ -1538,8 +1542,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var slope = false;
   if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
     let c = hit.cell - g.level[hit.level].cells;
-    // (A kerb is not a step of the slope: paving over asphalt keeps its face, or the street had no kerb, #450.)
-    let kerb = ${world.options.surveyedWalls ? 'stuff == 7u && (kindAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level) & 15u) == 6u' : 'false'};
+    // (A kerb is not a step of the slope: paving over asphalt keeps its face, or the street had no kerb, #450, #150.)
+    let kerb = ${world.options.surveyedWalls ? 'stuff == 7u && ((kindAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level) & 15u) == 6u || (kindAt(c + vec3i(n) * 2 - vec3i(0, 1, 0), hit.level) & 15u) == 6u)' : 'false'};
     if (!kerb && !solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
       // And it is in the sun when the tread above it is: the sun is asked about from the middle of the cell's top.
       let lv = g.level[hit.level];

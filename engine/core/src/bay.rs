@@ -23,6 +23,7 @@ thread_local! {
     static HEROES: RefCell<Vec<Hero>> = const { RefCell::new(Vec::new()) };
     static LANDMARKS: Cell<bool> = const { Cell::new(true) };
     static MARKS: RefCell<Marks> = RefCell::new(Marks::default());
+    static KERBS: RefCell<Kerbs> = RefCell::new(Kerbs::default());
     static SECTOR_COLS: RefCell<SectorColCache> = RefCell::new(SectorColCache::default());
     static SOLID_CACHE: RefCell<Box<[SolidEntry; 512]>> = RefCell::new(Box::new([SolidEntry::EMPTY; 512]));
 }
@@ -56,6 +57,7 @@ struct SectorColCache {
     lod: u32,
     epoch: u32,
     cols: Vec<OwnedColumn>,
+    kerbs: Vec<KerbEval>,
 }
 
 /// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
@@ -86,6 +88,391 @@ pub fn marks() -> i32 {
 /// Whether the graph's marks are drawn at a column: then the bake's paint and rails are not.
 fn marked_place(x: i32, z: i32) -> bool {
     MARKS.with_borrow(|m| m.covers.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]))
+}
+
+/// Reach in 10 cm cells around a surveyed kerb polyline within which its exact signed distance overrides the
+/// 50 cm road/pavement raster (1.8 m, wide enough to straighten every 0.5-1.0 m raster step without crossing a lane).
+const KERB_REACH: f32 = 18.0;
+/// Spatial bucket size for surveyed kerb segments: 512 cells (51.2 m) in a compact CSR grid.
+const KERB_BUCKET_SHIFT: i32 = 9;
+const KERB_POLY_CLOSED: u32 = 1 << 31;
+const KERB_MAX_POLYS: usize = (1 << 17) - 1;
+const KERB_MAX_VERTS_PER_POLY: usize = (1 << 15) - 1;
+
+/// Oriented surveyed kerb polylines for San Francisco (`sf/kerbs.mjs`, #150), indexed in a compact CSR bucket grid.
+/// Every segment is oriented so LEFT of `a -> b` in `(x east, z south)` is PAVEMENT (`sdf >= 0`) and RIGHT is ROAD (`sdf < 0`).
+#[derive(Default)]
+struct Kerbs {
+    /// Quarter-cell coordinates (`x * 4, z * 4`, 2.5 cm precision).
+    verts: Vec<[i32; 2]>,
+    /// Per polyline: `(first_vert, len | (closed << 31))`.
+    polys: Vec<(u32, u32)>,
+    bx0: i32,
+    bz0: i32,
+    bw: i32,
+    bh: i32,
+    bucket_offsets: Vec<u32>,
+    /// Packed `(poly_idx << 15) | seg_idx`.
+    bucket_segs: Vec<u32>,
+}
+
+/// Precomputed kerb segment hoisted for one sector column so per-column and 8x8 sub-cell SDF queries stay cheap.
+#[derive(Clone, Copy)]
+struct KerbEval {
+    ax: f32,
+    az: f32,
+    dx: f32,
+    dz: f32,
+    len2: f32,
+    nx: f32,
+    nz: f32,
+    anx: f32,
+    anz: f32,
+    bnx: f32,
+    bnz: f32,
+    open_a: bool,
+    open_b: bool,
+}
+
+#[derive(Clone, Copy)]
+struct KerbHit {
+    d2: f32,
+    signed: f32,
+    open_end: bool,
+}
+
+impl KerbHit {
+    const NONE: Self = Self { d2: f32::MAX, signed: 0.0, open_end: true };
+}
+
+#[inline]
+fn eval_kerb_seg(e: &KerbEval, px: f32, pz: f32, best: &mut KerbHit) {
+    let vx = px - e.ax;
+    let vz = pz - e.az;
+    let raw_t = (vx * e.dx + vz * e.dz) / e.len2;
+    if (e.open_a && raw_t < 0.0) || (e.open_b && raw_t > 1.0) {
+        let over = if raw_t < 0.0 { -raw_t } else { raw_t - 1.0 };
+        if over * over * e.len2 > 1.0 {
+            return;
+        }
+    }
+    let t = raw_t.clamp(0.0, 1.0);
+    let rx = px - (e.ax + e.dx * t);
+    let rz = pz - (e.az + e.dz * t);
+    let d2 = rx * rx + rz * rz;
+    if d2 > KERB_REACH * KERB_REACH {
+        return;
+    }
+    let open_end = (e.open_a && raw_t <= 0.0) || (e.open_b && raw_t >= 1.0);
+    if best.d2 < f32::MAX {
+        if open_end && !best.open_end && d2 >= best.d2 - 0.0625 {
+            return;
+        }
+        if !open_end && best.open_end {
+            if d2 > best.d2 + 0.0625 {
+                return;
+            }
+        } else if d2 >= best.d2 - 1e-6 {
+            return;
+        }
+    }
+    let (pnx, pnz) = if raw_t <= 0.0 {
+        (e.anx, e.anz)
+    } else if raw_t >= 1.0 {
+        (e.bnx, e.bnz)
+    } else {
+        (e.nx, e.nz)
+    };
+    let dot = rx * pnx + rz * pnz;
+    let dist = d2.sqrt();
+    *best = KerbHit { d2, signed: if dot >= 0.0 { dist } else { -dist }, open_end };
+}
+
+#[inline]
+fn signed_distance_in_slice(kerbs: &[KerbEval], px: f32, pz: f32) -> Option<f32> {
+    if kerbs.is_empty() {
+        return None;
+    }
+    let mut best = KerbHit::NONE;
+    for e in kerbs {
+        eval_kerb_seg(e, px, pz, &mut best);
+    }
+    (best.d2 < f32::MAX).then_some(best.signed)
+}
+
+impl Kerbs {
+    fn seg_normal(&self, a: [i32; 2], b: [i32; 2]) -> Option<(f32, f32)> {
+        let dx = (b[0] - a[0]) as f32 * 0.25;
+        let dz = (b[1] - a[1]) as f32 * 0.25;
+        let len = (dx * dx + dz * dz).sqrt();
+        (len > 1e-4).then(|| (-dz / len, dx / len))
+    }
+
+    fn eval_of(&self, poly_idx: usize, seg_idx: usize) -> Option<KerbEval> {
+        let (first, packed) = self.polys[poly_idx];
+        let closed = packed & KERB_POLY_CLOSED != 0;
+        let count = (packed & !KERB_POLY_CLOSED) as usize;
+        let start = first as usize;
+        let a = self.verts[start + seg_idx];
+        let next_i = if seg_idx + 1 < count { seg_idx + 1 } else { 0 };
+        let b = self.verts[start + next_i];
+        let ax = a[0] as f32 * 0.25;
+        let az = a[1] as f32 * 0.25;
+        let dx = (b[0] - a[0]) as f32 * 0.25;
+        let dz = (b[1] - a[1]) as f32 * 0.25;
+        let len2 = dx * dx + dz * dz;
+        if len2 <= 1e-6 {
+            return None;
+        }
+        let inv_len = 1.0 / len2.sqrt();
+        let (nx, nz) = (-dz * inv_len, dx * inv_len);
+        let open_a = !closed && seg_idx == 0;
+        let open_b = !closed && seg_idx + 1 == count - 1;
+        let (anx, anz) = if !open_a {
+            let prev_i = if seg_idx > 0 { seg_idx - 1 } else { count - 1 };
+            if let Some((pnx, pnz)) = self.seg_normal(self.verts[start + prev_i], a) {
+                let (bx, bz) = (pnx + nx, pnz + nz);
+                let bl = (bx * bx + bz * bz).sqrt();
+                if bl > 1e-4 { (bx / bl, bz / bl) } else { (nx, nz) }
+            } else {
+                (nx, nz)
+            }
+        } else {
+            (nx, nz)
+        };
+        let (bnx, bnz) = if !open_b {
+            let after_i = if next_i + 1 < count { next_i + 1 } else { 0 };
+            if let Some((nnx, nnz)) = self.seg_normal(b, self.verts[start + after_i]) {
+                let (bx, bz) = (nx + nnx, nz + nnz);
+                let bl = (bx * bx + bz * bz).sqrt();
+                if bl > 1e-4 { (bx / bl, bz / bl) } else { (nx, nz) }
+            } else {
+                (nx, nz)
+            }
+        } else {
+            (nx, nz)
+        };
+        Some(KerbEval { ax, az, dx, dz, len2, nx, nz, anx, anz, bnx, bnz, open_a, open_b })
+    }
+
+    fn for_box(&self, x0: i32, z0: i32, x1: i32, z1: i32) -> Vec<KerbEval> {
+        if self.verts.is_empty() || self.bw <= 0 || self.bh <= 0 {
+            return Vec::new();
+        }
+        let m = KERB_REACH as i32 + 2;
+        let b_x0 = ((x0 - m) >> KERB_BUCKET_SHIFT).max(self.bx0);
+        let b_x1 = ((x1 + m) >> KERB_BUCKET_SHIFT).min(self.bx0 + self.bw - 1);
+        let b_z0 = ((z0 - m) >> KERB_BUCKET_SHIFT).max(self.bz0);
+        let b_z1 = ((z1 + m) >> KERB_BUCKET_SHIFT).min(self.bz0 + self.bh - 1);
+        if b_x0 > b_x1 || b_z0 > b_z1 {
+            return Vec::new();
+        }
+        let mut ids = Vec::new();
+        for bz in b_z0..=b_z1 {
+            let row = ((bz - self.bz0) * self.bw) as usize;
+            for bx in b_x0..=b_x1 {
+                let idx = row + (bx - self.bx0) as usize;
+                let lo = self.bucket_offsets[idx] as usize;
+                let hi = self.bucket_offsets[idx + 1] as usize;
+                ids.extend_from_slice(&self.bucket_segs[lo..hi]);
+            }
+        }
+        if ids.is_empty() {
+            return Vec::new();
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        let (fx0, fz0, fx1, fz1) = ((x0 - m) as f32, (z0 - m) as f32, (x1 + m) as f32, (z1 + m) as f32);
+        let mut out = Vec::with_capacity(ids.len());
+        for packed in ids {
+            let poly_idx = (packed >> 15) as usize;
+            let seg_idx = (packed & 0x7fff) as usize;
+            if let Some(e) = self.eval_of(poly_idx, seg_idx) {
+                let sx0 = e.ax.min(e.ax + e.dx);
+                let sx1 = e.ax.max(e.ax + e.dx);
+                let sz0 = e.az.min(e.az + e.dz);
+                let sz1 = e.az.max(e.az + e.dz);
+                if sx1 >= fx0 && sx0 <= fx1 && sz1 >= fz0 && sz0 <= fz1 {
+                    out.push(e);
+                }
+            }
+        }
+        out
+    }
+
+    fn signed_distance(&self, px: f32, pz: f32) -> Option<f32> {
+        if self.verts.is_empty() || self.bw <= 0 || self.bh <= 0 {
+            return None;
+        }
+        let m = KERB_REACH + 1.0;
+        let b_x0 = ((px - m).floor() as i32 >> KERB_BUCKET_SHIFT).max(self.bx0);
+        let b_x1 = ((px + m).floor() as i32 >> KERB_BUCKET_SHIFT).min(self.bx0 + self.bw - 1);
+        let b_z0 = ((pz - m).floor() as i32 >> KERB_BUCKET_SHIFT).max(self.bz0);
+        let b_z1 = ((pz + m).floor() as i32 >> KERB_BUCKET_SHIFT).min(self.bz0 + self.bh - 1);
+        if b_x0 > b_x1 || b_z0 > b_z1 {
+            return None;
+        }
+        let mut best = KerbHit::NONE;
+        for bz in b_z0..=b_z1 {
+            let row = ((bz - self.bz0) * self.bw) as usize;
+            for bx in b_x0..=b_x1 {
+                let idx = row + (bx - self.bx0) as usize;
+                let lo = self.bucket_offsets[idx] as usize;
+                let hi = self.bucket_offsets[idx + 1] as usize;
+                for &packed in &self.bucket_segs[lo..hi] {
+                    let poly_idx = (packed >> 15) as usize;
+                    let seg_idx = (packed & 0x7fff) as usize;
+                    if let Some(e) = self.eval_of(poly_idx, seg_idx) {
+                        eval_kerb_seg(&e, px, pz, &mut best);
+                    }
+                }
+            }
+        }
+        (best.d2 < f32::MAX).then_some(best.signed)
+    }
+}
+
+/// Takes surveyed kerb polylines in the room (`room`; sf/kerbs.mjs): little-endian `KERB`, version 1,
+/// polyline count, vertex count, then each polyline as `(flagsAndLen, x0, z0, (m - 1) * (dx_i16, dz_i16))`
+/// in quarter-cells (2.5 cm). Returns polyline count, or -1 on invalid bytes (leaving existing kerbs intact).
+pub fn kerbs() -> i32 {
+    let bytes = ROOM.with_borrow_mut(std::mem::take);
+    if bytes.len() < 16 || bytes.len() > 128 << 20 {
+        return -1;
+    }
+    let rd_i32 = |o: usize| i32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    let rd_u32 = |o: usize| u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+    let rd_i16 = |o: usize| i16::from_le_bytes([bytes[o], bytes[o + 1]]);
+    if rd_i32(0) != 0x4252_454b || rd_i32(4) != 1 {
+        return -1;
+    }
+    let (Ok(n_polys), Ok(n_verts)) = (usize::try_from(rd_i32(8)), usize::try_from(rd_i32(12))) else {
+        return -1;
+    };
+    if n_polys > KERB_MAX_POLYS || n_verts > 4_000_000 {
+        return -1;
+    }
+    let mut verts: Vec<[i32; 2]> = Vec::with_capacity(n_verts);
+    let mut polys: Vec<(u32, u32)> = Vec::with_capacity(n_polys);
+    let mut off = 16usize;
+    let (mut min_bx, mut max_bx) = (i32::MAX, i32::MIN);
+    let (mut min_bz, mut max_bz) = (i32::MAX, i32::MIN);
+    for _ in 0..n_polys {
+        if off + 12 > bytes.len() {
+            return -1;
+        }
+        let header = rd_u32(off);
+        let closed = header & KERB_POLY_CLOSED != 0;
+        let m = (header & !KERB_POLY_CLOSED) as usize;
+        if m < if closed { 3 } else { 2 } || m > KERB_MAX_VERTS_PER_POLY {
+            return -1;
+        }
+        let Some(need) = off.checked_add(12).and_then(|o| o.checked_add((m - 1).checked_mul(4)?)) else {
+            return -1;
+        };
+        if need > bytes.len() || verts.len() + m > n_verts {
+            return -1;
+        }
+        let first = verts.len() as u32;
+        let mut x = rd_i32(off + 4);
+        let mut z = rd_i32(off + 8);
+        off += 12;
+        let record_pt = |qx: i32, qz: i32, min_bx: &mut i32, max_bx: &mut i32, min_bz: &mut i32, max_bz: &mut i32| {
+            let bx = (qx >> 2) >> KERB_BUCKET_SHIFT;
+            let bz = (qz >> 2) >> KERB_BUCKET_SHIFT;
+            *min_bx = (*min_bx).min(bx);
+            *max_bx = (*max_bx).max(bx);
+            *min_bz = (*min_bz).min(bz);
+            *max_bz = (*max_bz).max(bz);
+        };
+        verts.push([x, z]);
+        record_pt(x, z, &mut min_bx, &mut max_bx, &mut min_bz, &mut max_bz);
+        for _ in 1..m {
+            let Some(nx) = x.checked_add(rd_i16(off) as i32) else { return -1; };
+            let Some(nz) = z.checked_add(rd_i16(off + 2) as i32) else { return -1; };
+            x = nx;
+            z = nz;
+            off += 4;
+            verts.push([x, z]);
+            record_pt(x, z, &mut min_bx, &mut max_bx, &mut min_bz, &mut max_bz);
+        }
+        polys.push((first, header));
+    }
+    if off != bytes.len() || verts.len() != n_verts {
+        return -1;
+    }
+    if n_polys == 0 {
+        KERBS.with_borrow_mut(|held| *held = Kerbs::default());
+        bump_gen();
+        return 0;
+    }
+    let Some(bw) = max_bx.checked_sub(min_bx).and_then(|d| d.checked_add(1)) else { return -1; };
+    let Some(bh) = max_bz.checked_sub(min_bz).and_then(|d| d.checked_add(1)) else { return -1; };
+    let Some(n_buckets) = (bw as usize).checked_mul(bh as usize) else { return -1; };
+    if bw <= 0 || bh <= 0 || n_buckets > 4_000_000 {
+        return -1;
+    }
+    // 2-pass CSR bucket index: zero per-bucket Vec allocations so every core holds all of SF in ~4.5 MB.
+    let mut counts = vec![0u32; n_buckets];
+    for &(first, packed) in &polys {
+        let closed = packed & KERB_POLY_CLOSED != 0;
+        let m = (packed & !KERB_POLY_CLOSED) as usize;
+        let segs = if closed { m } else { m - 1 };
+        let start = first as usize;
+        for si in 0..segs {
+            let a = verts[start + si];
+            let b = verts[start + if si + 1 < m { si + 1 } else { 0 }];
+            let x0 = ((a[0].min(b[0]) >> 2) >> KERB_BUCKET_SHIFT) - min_bx;
+            let x1 = ((a[0].max(b[0]) >> 2) >> KERB_BUCKET_SHIFT) - min_bx;
+            let z0 = ((a[1].min(b[1]) >> 2) >> KERB_BUCKET_SHIFT) - min_bz;
+            let z1 = ((a[1].max(b[1]) >> 2) >> KERB_BUCKET_SHIFT) - min_bz;
+            for bz in z0..=z1 {
+                let row = (bz * bw) as usize;
+                for bx in x0..=x1 {
+                    counts[row + bx as usize] += 1;
+                }
+            }
+        }
+    }
+    let mut bucket_offsets = Vec::with_capacity(n_buckets + 1);
+    let mut total = 0u32;
+    for &c in &counts {
+        bucket_offsets.push(total);
+        let Some(next) = total.checked_add(c) else { return -1; };
+        total = next;
+    }
+    bucket_offsets.push(total);
+    let mut cursor = bucket_offsets[..n_buckets].to_vec();
+    let mut bucket_segs = vec![0u32; total as usize];
+    for (pi, &(first, packed)) in polys.iter().enumerate() {
+        let closed = packed & KERB_POLY_CLOSED != 0;
+        let m = (packed & !KERB_POLY_CLOSED) as usize;
+        let segs = if closed { m } else { m - 1 };
+        let start = first as usize;
+        for si in 0..segs {
+            let a = verts[start + si];
+            let b = verts[start + if si + 1 < m { si + 1 } else { 0 }];
+            let x0 = ((a[0].min(b[0]) >> 2) >> KERB_BUCKET_SHIFT) - min_bx;
+            let x1 = ((a[0].max(b[0]) >> 2) >> KERB_BUCKET_SHIFT) - min_bx;
+            let z0 = ((a[1].min(b[1]) >> 2) >> KERB_BUCKET_SHIFT) - min_bz;
+            let z1 = ((a[1].max(b[1]) >> 2) >> KERB_BUCKET_SHIFT) - min_bz;
+            let id = ((pi as u32) << 15) | (si as u32);
+            for bz in z0..=z1 {
+                let row = (bz * bw) as usize;
+                for bx in x0..=x1 {
+                    let idx = row + bx as usize;
+                    let slot = cursor[idx] as usize;
+                    bucket_segs[slot] = id;
+                    cursor[idx] = (slot + 1) as u32;
+                }
+            }
+        }
+    }
+    KERBS.with_borrow_mut(|held| {
+        *held = Kerbs { verts, polys, bx0: min_bx, bz0: min_bz, bw, bh, bucket_offsets, bucket_segs };
+    });
+    bump_gen();
+    n_polys as i32
 }
 
 /// A landmark (#423, heroes.rs) standing in the world: which rule, where its frame's middle and foot are in cells,
@@ -283,6 +670,7 @@ pub fn least_step(size: i32) -> i32 {
 /// Lets every pack go: the world is the town's again.
 pub fn clear() {
     PACKS.with_borrow_mut(|p| p.clear());
+    KERBS.with_borrow_mut(|k| *k = Kerbs::default());
     ON.set(false);
     bump_gen();
 }
@@ -1366,11 +1754,27 @@ impl Pack {
     /// What the ground is at a column, and the colour of its top. Road against pavement is settled between samples,
     /// so a kerb runs straight and not in steps of half a metre.
     fn surface(&self, x: i32, z: i32) -> (u8, u8) {
-        let Some(here) = self.cell(x, z) else { return (GRASS_HERE, 0) };
+        let (c, t, _) = self.surface_inner(x, z, None);
+        (c, t)
+    }
+
+    /// Surface classification overridden by surveyed vector kerbs (`sdf < 0` = ROAD, `sdf >= 0` = PAVEMENT)
+    /// whenever the tile sample is ROAD or PAVEMENT, leaving grass, water, yards and buildings untouched (#150).
+    fn surface_with_kerbs(&self, x: i32, z: i32, kerb_sdf: Option<f32>) -> (u8, u8, Option<f32>) {
+        self.surface_inner(x, z, kerb_sdf)
+    }
+
+    fn surface_inner(&self, x: i32, z: i32, kerb_sdf: Option<f32>) -> (u8, u8, Option<f32>) {
+        let Some(here) = self.cell(x, z) else { return (GRASS_HERE, 0, None) };
         let (c, tint) = (self.class[here], self.tint[here]);
         let sort = c & 7;
         if sort != ROAD && sort != PAVEMENT {
-            return (c, tint);
+            return (c, tint, None);
+        }
+        if let Some(sdf) = kerb_sdf {
+            let surface = if sdf < 0.0 { ROAD } else { PAVEMENT };
+            let flags = if surface == sort { c & !7 } else { c & !135 };
+            return (flags | surface, tint, Some(sdf));
         }
         let half = self.tstep as f32 / 2.0;
         let (fx, fz) = (((x - self.tx0) as f32 + 0.5 - half) / self.tstep as f32, ((z - self.tz0) as f32 + 0.5 - half) / self.tstep as f32);
@@ -1380,7 +1784,41 @@ impl Pack {
         let road = s(i, j) + (s(i + 1, j) - s(i, j)) * u + (s(i, j + 1) + (s(i + 1, j + 1) - s(i, j + 1)) * u - (s(i, j) + (s(i + 1, j) - s(i, j)) * u)) * v;
         let surface = if road > 0.5 { ROAD } else { PAVEMENT };
         let flags = if surface == sort { c & !7 } else { c & !135 };
-        (flags | surface, tint)
+        (flags | surface, tint, None)
+    }
+
+    /// Borrow measured road brightness from nearby ROAD samples when a surveyed kerb reclassifies a 50 cm PAVEMENT
+    /// pixel back to ROAD (or paints the road half of a kerb-straddling sub-cell column), avoiding dark OWN triangles.
+    fn nearby_asphalt(&self, x: i32, z: i32) -> Option<u8> {
+        let here = self.cell(x, z)?;
+        let tw = self.tw as usize;
+        let (ci, cj) = ((here % tw) as i32, (here / tw) as i32);
+        for rad in [1i32, 2] {
+            let (mut sum, mut count) = (0u32, 0u32);
+            for dj in -rad..=rad {
+                let nj = cj + dj;
+                if nj < 0 || nj >= self.tw { continue; }
+                let row = (nj as usize) * tw;
+                for di in -rad..=rad {
+                    let ni = ci + di;
+                    if ni < 0 || ni >= self.tw { continue; }
+                    let k = row + ni as usize;
+                    let c = self.class[k];
+                    let t = self.tint[k];
+                    if c & 159 == 128 && (1..=15).contains(&t) {
+                        sum += t as u32;
+                        count += 1;
+                    }
+                }
+            }
+            if count > 0 {
+                return Some(((sum + count / 2) / count) as u8);
+            }
+        }
+        if !self.under_leaf_road.is_empty() {
+            return Some(self.under_leaf_road[(here / tw / 16) * tw.div_ceil(16) + (here % tw) / 16]);
+        }
+        None
     }
 
     /// The building a column is in, or the nearest one it is just outside of, with where on its outline.
@@ -1945,11 +2383,19 @@ impl FixtureSpan {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CurbCarve {
+    base_top4: i32,
+    road_kind: Kind,
+    pave_kind: Kind,
+}
+
 struct OwnedColumn {
     g: i32,
     road_top4: Option<i32>,
     ground: Kind,
     kerb: i32,
+    curb: Option<CurbCarve>,
     what: OwnedWhat,
     fixtures: Vec<FixtureSpan>,
     heroes: [Option<(Hero, f32, f32)>; 2],
@@ -2013,18 +2459,19 @@ fn heroes_from_slice(heroes: &[Hero], x: i32, z: i32, size: i32) -> ([Option<(He
     (out, n)
 }
 
-fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], marks: &[[i32; 4]], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
+fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], marks: &[[i32; 4]], kerbs: &[KerbEval], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
     let (heroes, hero_n) = heroes_from_slice(heroes_slice, x, z, size);
     let picked = pack_indices.iter().copied().find(|&pi| packs[pi].gstep >= least && packs[pi].holds(x, z))
         .or_else(|| pack_indices.iter().copied().find(|&pi| packs[pi].holds(x, z)));
     let Some(pi) = picked else {
-        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: OwnedWhat::Open, heroes, hero_n };
+        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, curb: None, fixtures: Vec::new(), what: OwnedWhat::Open, heroes, hero_n };
     };
     let p = &packs[pi];
     let tread = tread_ground(&heroes[..hero_n as usize]);
     let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
     let g = (ground_height + 0.5).floor() as i32;
-    let (mut class, tint) = p.surface(x, z);
+    let raw_sdf = signed_distance_in_slice(kerbs, x as f32 + 0.5, z as f32 + 0.5);
+    let (mut class, tint, kerb_sdf) = p.surface_with_kerbs(x, z, raw_sdf);
     if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
         h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
     }) {
@@ -2040,13 +2487,16 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
             let w = p.tw as usize;
             road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
         })
+    } else if class & 7 == ROAD && kerb_sdf.is_some() {
+        p.nearby_asphalt(x, z).map(road_grey)
     } else { None };
     let (ground, kerb) = match class & 7 {
         _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
-        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        // Uniform 10 cm kerb height: raw 50 cm flush-cutout (bit 32) and 20 cm DEM spike (bit 128) flags punched jagged notches into corners (#150).
+        PAVEMENT => (kind(CONCRETE, grey(5)), 1),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         WATER_HERE if g > 4 => (kind(WATER, colour(13, 5)), 0),
         WATER_HERE => (kind(SAND, OWN), 0),
@@ -2171,9 +2621,18 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
         },
         _ => OwnedWhat::Open,
     };
-    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(..) | OwnedWhat::Mass(..));
+    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(..) | OwnedWhat::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
-    OwnedColumn { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x, z, size), what, heroes, hero_n }
+    let curb = if ramped {
+        kerb_sdf.filter(|&d| d.abs() < 0.78).map(|_| {
+            let base_top4 = ((ground_height + 1.0) * 4.0).round() as i32;
+            let road_kind = kind(ASPHALT, asphalt.or_else(|| p.nearby_asphalt(x, z).map(road_grey)).unwrap_or(OWN));
+            CurbCarve { base_top4, road_kind, pave_kind: kind(CONCRETE, grey(5)) }
+        })
+    } else {
+        None
+    };
+    OwnedColumn { g, road_top4, ground, kerb, curb, fixtures: p.fixture_spans(x, z, size), what, heroes, hero_n }
 }
 
 /// Fast single-cell kind query for unedited Bay columns (#73). Uses a 512-entry direct-mapped cache for simple open columns.
@@ -2332,7 +2791,12 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let tread = tread_ground(&heroes[..hero_n as usize]);
     let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
     let g = (ground_height + 0.5).floor() as i32;
-    let (mut class, tint) = p.surface(x, z);
+    let raw_sdf = if size <= 2 {
+        KERBS.with_borrow(|kb| kb.signed_distance(x as f32 + 0.5, z as f32 + 0.5))
+    } else {
+        None
+    };
+    let (mut class, tint, kerb_sdf) = p.surface_with_kerbs(x, z, raw_sdf);
     if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
         h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
     }) {
@@ -2353,6 +2817,8 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             let w = p.tw as usize;
             road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
         })
+    } else if class & 7 == ROAD && kerb_sdf.is_some() {
+        p.nearby_asphalt(x, z).map(road_grey)
     } else { None };
     let (ground, kerb) = match class & 7 {
         _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
@@ -2360,7 +2826,8 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
         // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
-        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        // Uniform 10 cm kerb height: raw 50 cm flush-cutout (bit 32) and 20 cm DEM spike (bit 128) flags punched jagged notches into corners (#150).
+        PAVEMENT => (kind(CONCRETE, grey(5)), 1),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         // Elevated inland water (park ponds, lagoons, lakes, rivers): render as real water so it ripples and reflects (#60).
         WATER_HERE if g > 4 => (kind(WATER, colour(13, 5)), 0),
@@ -2841,6 +3308,102 @@ fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
     }
 }
 
+/// Carve a kerb-straddling 10 cm column at 1.25 cm (8x8x8, shift 3) so diagonal block edges and rounded corners
+/// run straight and smooth instead of 10 cm staircases (#150). Returns true when fine runs were emitted.
+fn curb_rows(c: &Column, curb: CurbCarve, kerbs: &[KerbEval], x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) -> bool {
+    let road_top8 = curb.base_top4 * 2;
+    let pave_top8 = road_top8 + 8;
+    let y_lo = road_top8.div_euclid(8).min(c.g).max(low_y);
+    let y_hi = (pave_top8 - 1).div_euclid(8).max(c.g + c.kerb).min(low_y + SIDE as i32 - 1);
+    if y_lo > y_hi {
+        return false;
+    }
+    for slot in 0..c.hero_n as usize {
+        if let Some((h, u, w)) = c.heroes[slot] {
+            if heroes::surface_at(h.sort, u, w, c.g as f32 * 0.1, 0.1).is_some() {
+                return false;
+            }
+        }
+    }
+    let mut mask = [0u8; 8];
+    let mut all_pave = true;
+    let mut all_road = true;
+    for sz in 0..8 {
+        let pz = z as f32 + (sz as f32 + 0.5) * 0.125;
+        let mut bits = 0u8;
+        for sx in 0..8 {
+            let px = x as f32 + (sx as f32 + 0.5) * 0.125;
+            let is_pave = signed_distance_in_slice(kerbs, px, pz).map_or(c.kerb > 0, |d| d >= 0.0);
+            if is_pave {
+                bits |= 1 << sx;
+                all_road = false;
+            } else {
+                all_pave = false;
+            }
+        }
+        mask[sz] = bits;
+    }
+    if all_pave || all_road {
+        return false;
+    }
+    let mut emitted = false;
+    for y in y_lo..=y_hi {
+        if c.fixtures.iter().any(|s| s.low <= y && y <= s.high) {
+            continue;
+        }
+        let coarse = kind_at(c, x, y, z, 1);
+        if coarse != 0 && coarse != c.ground {
+            continue;
+        }
+        if coarse == c.ground && y == c.g + c.kerb {
+            let above = kind_at(c, x, y + 1, z, 1);
+            if above != 0 && above != c.ground {
+                continue;
+            }
+        }
+        for sy in 0..8 {
+            let wy8 = y * 8 + sy;
+            for sz in 0..8 {
+                let row_bits = mask[sz];
+                let mut sx = 0usize;
+                while sx < 8 {
+                    let is_pave = (row_bits >> sx) & 1 != 0;
+                    let want = if is_pave {
+                        if wy8 < pave_top8 { curb.pave_kind } else { 0 }
+                    } else if wy8 < road_top8 {
+                        curb.road_kind
+                    } else {
+                        0
+                    };
+                    if want == coarse {
+                        sx += 1;
+                        continue;
+                    }
+                    let start = sx;
+                    sx += 1;
+                    while sx < 8 {
+                        let next_pave = (row_bits >> sx) & 1 != 0;
+                        let next_want = if next_pave {
+                            if wy8 < pave_top8 { curb.pave_kind } else { 0 }
+                        } else if wy8 < road_top8 {
+                            curb.road_kind
+                        } else {
+                            0
+                        };
+                        if next_want != want {
+                            break;
+                        }
+                        sx += 1;
+                    }
+                    rows.push(Run { x0: x * 8 + start as i32, x1: x * 8 + sx as i32, y: wy8, z: z * 8 + sz as i32, kind: want });
+                    emitted = true;
+                }
+            }
+        }
+    }
+    emitted
+}
+
 /// Makes one sector of the Bay in `s`, at the coarseness `s` was started with.
 /// Caches the 4,096 column evaluations for the current `(low_x, low_z, lod)` across vertical sectors `sy`,
 /// hoists sector-invariant pack/hero/mark filters outside the loop, and early-exits above open/roof tops (#73).
@@ -2849,6 +3412,7 @@ pub fn make(s: &mut Scratch) {
     let side = SIDE as i32;
     let mut cables = Vec::new();
     let mut road = Vec::new();
+    let mut curbs = Vec::new();
     let epoch = PACK_GEN.get();
     let x_min = (s.low[0] << k) + size / 2;
     let z_min = (s.low[2] << k) + size / 2;
@@ -2875,13 +3439,18 @@ pub fn make(s: &mut Scratch) {
                 let sector_marks: Vec<[i32; 4]> = MARKS.with_borrow(|m| {
                     m.covers.iter().copied().filter(|c| x_max >= c[0] && z_max >= c[1] && x_min < c[2] && z_min < c[3]).collect()
                 });
+                cache.kerbs = if size <= 2 {
+                    KERBS.with_borrow(|kb| kb.for_box(x_min, z_min, x_max, z_max))
+                } else {
+                    Vec::new()
+                };
                 cache.cols.clear();
                 cache.cols.reserve(SIDE * SIDE);
                 for cz in 0..side {
                     let z = ((s.low[2] + cz) << k) + size / 2;
                     for cx in 0..side {
                         let x = ((s.low[0] + cx) << k) + size / 2;
-                        cache.cols.push(owned_column(packs, &sector_packs, &sector_heroes, &sector_marks, x, z, size, least));
+                        cache.cols.push(owned_column(packs, &sector_packs, &sector_heroes, &sector_marks, &cache.kerbs, x, z, size, least));
                     }
                 }
                 cache.low_x = s.low[0];
@@ -2900,7 +3469,13 @@ pub fn make(s: &mut Scratch) {
                     let oc = &cache.cols[row_base + cx as usize];
                     let has_fixtures = !oc.fixtures.is_empty();
                     if skip_cables {
-                        if oc.road_top4.is_some() {
+                        let mut carved = false;
+                        if let Some(curb) = oc.curb {
+                            let mut c = oc.as_column(packs);
+                            if has_fixtures { c.fixtures = oc.fixtures.clone(); }
+                            carved = curb_rows(&c, curb, &cache.kerbs, x, z, s.low[1], &mut curbs);
+                        }
+                        if !carved && oc.road_top4.is_some() {
                             let mut c = oc.as_column(packs);
                             if has_fixtures { c.fixtures = oc.fixtures.clone(); }
                             grade_rows(&c, x, z, s.low[1], &mut road);
@@ -2971,6 +3546,7 @@ pub fn make(s: &mut Scratch) {
         });
     });
     if !road.is_empty() { s.fine_runs(&road, 2); }
+    if !curbs.is_empty() { s.fine_runs(&curbs, 3); }
     if !cables.is_empty() { s.fine_runs(&cables, 2); }
 }
 
@@ -3977,6 +4553,88 @@ mod tests {
         assert_eq!(material(kind_single(227, g as i32 + 30, 227)), WOOD, "real 18 m park tree trunk must stay");
         assert!(((g as i32 + 120)..=(g as i32 + 178)).any(|y| material(kind_single(220, y, 227)) == LEAVES), "real 18 m park tree crown must stay");
         assert_eq!(material(kind_single(22, g as i32 + 6, 222)), LEAVES, "low 1.2 m yard bush must stay");
+        clear();
+    }
+
+    fn take_kerbs(polys: &[(bool, Vec<[i32; 2]>)]) -> i32 {
+        let total_verts: i32 = polys.iter().map(|(_, pts)| pts.len() as i32).sum();
+        let mut bytes = Vec::new();
+        for w in [0x4252_454bi32, 1, polys.len() as i32, total_verts] {
+            bytes.extend(w.to_le_bytes());
+        }
+        for (closed, pts) in polys {
+            let head = (pts.len() as u32) | if *closed { KERB_POLY_CLOSED } else { 0 };
+            bytes.extend(head.to_le_bytes());
+            bytes.extend((pts[0][0] * 4).to_le_bytes());
+            bytes.extend((pts[0][1] * 4).to_le_bytes());
+            for w in pts.windows(2) {
+                bytes.extend((((w[1][0] - w[0][0]) * 4) as i16).to_le_bytes());
+                bytes.extend((((w[1][1] - w[0][1]) * 4) as i16).to_le_bytes());
+            }
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()); }
+        kerbs()
+    }
+
+    #[test]
+    fn surveyed_kerbs_carve_straight_diagonal_edges_at_subcell_precision() {
+        // Diagonal kerb from (70, 90) -> (120, 120): LEFT normal points (+z, -x) = PAVEMENT, RIGHT (-z, +x) = ROAD.
+        // Pack has road at z < 100, pavement at 100 <= z < 150, and yard at z >= 150 (with road tint = 7 -> road_grey = 10).
+        let mut bytes = pack();
+        let tops = 64 + 65 * 65 * 2;
+        let classes = tops + 128 * 128 * 2;
+        let tints = classes + 128 * 128;
+        for j in 0..20 {
+            for i in 0..128 {
+                let k = j * 128 + i;
+                bytes[classes + k] = ROAD | 128;
+                bytes[tints + k] = 7;
+            }
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()); }
+        assert_eq!(load(), 1);
+        assert_eq!(take_kerbs(&[(false, vec![[70, 90], [120, 120]])]), 1);
+
+        // Point (100, 102) was PAVEMENT in raster (z >= 100), but lies on the RIGHT (ROAD) side of (70,90)->(120,120).
+        // Vector kerb reclassifies it to ROAD and borrows measured nearby asphalt grey (10), never dark OWN.
+        assert_eq!(material(top(100, 102)), ASPHALT);
+        assert_eq!((top(100, 102) >> 8) as u8, 10);
+        assert_eq!(footing(100, 102).0, ground(100, 102) + 1);
+
+        // Point (80, 99) was ROAD in raster (z < 100), but lies on the LEFT (PAVEMENT) side of the diagonal kerb.
+        assert_eq!(material(top(80, 99)), CONCRETE);
+        assert_eq!(footing(80, 99).0, ground(80, 99) + 2);
+
+        // Build sector (1, 1, 1) covering x=64..128, y=64..128, z=64..128 with finer cells enabled:
+        // kerb-straddling columns along the diagonal must be carved into 1.25 cm (8x8x8) fine cells.
+        let mut s = Scratch::new();
+        s.finer = true;
+        s.start(1, 1, 1, 0);
+        make(&mut s);
+        let fine_curb_cells = s.cells.iter().filter(|&&c| c & FINE != 0 && (material(c) == CONCRETE || material(c) == ASPHALT)).count();
+        assert!(fine_curb_cells >= 20, "expected sub-cell carved diagonal kerb columns, got {fine_curb_cells}");
+        // Single-cell queries match sector coarse cells on both sides of the kerb.
+        for (x, z) in [(100, 102), (80, 99), (90, 115)] {
+            let gy = ground(x, z);
+            assert_eq!(kind_single(x, gy, z), s.cells[at((x - 64) as usize, (gy - 64) as usize, (z - 64) as usize)] & !FINE);
+        }
+        clear();
+    }
+
+    #[test]
+    fn kerbs_reject_bad_bytes() {
+        assert_eq!(take_kerbs(&[(false, vec![[0, 0], [50, 0]])]), 1);
+        for bad in [
+            vec![1, 2, 3, 4],
+            [0x4252_454bi32, 2, 0, 0].into_iter().flat_map(i32::to_le_bytes).collect(),
+            [0x4252_454bi32, 1, -1, 0].into_iter().flat_map(i32::to_le_bytes).collect(),
+            [0x4252_454bi32, 1, 1, 2].into_iter().flat_map(i32::to_le_bytes).collect(),
+        ] {
+            ROOM.with_borrow_mut(|r| *r = bad);
+            assert_eq!(kerbs(), -1);
+        }
+        // Previous valid kerb stayed loaded after rejections.
+        assert!(KERBS.with_borrow(|k| k.signed_distance(25.0, 2.0).is_some_and(|d| d > 1.5)));
         clear();
     }
 }

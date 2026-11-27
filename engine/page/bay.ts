@@ -162,7 +162,7 @@ export const START: [number, number] | null = there ? [there.x, there.z] : WORLD
 /** `?bay=earth`: nothing baked from lidar is used, only what is made from the planet's data. */
 const BAKED = asked === '1' && FRAME === '10n4250'
 
-interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_marks(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number; bay_hero(sort: number, x: number, z: number, foot: number, turn: number): number; bay_landmarks(on: number): void }
+interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_marks(): number; bay_kerbs?(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number; bay_hero(sort: number, x: number, z: number, foot: number, turn: number): number; bay_landmarks(on: number): void }
 
 /** A level of the tiles: `size` cells a side, with a ground sample every `gstep`. */
 export interface Level { size: number; gstep: number }
@@ -385,7 +385,7 @@ type Said = { id: number; body?: ArrayBuffer | null; error?: string }
 let port: MessagePort | null = null, portCame: (p: MessagePort) => void = () => {}
 const portReady = new Promise<MessagePort>((r) => (portCame = r))
 let toldLevels: Level[] = LEVELS, toldKeep = HOLD.keep
-let toldHeroes: Landmark[] | undefined, toldSquares: ArrayBuffer | null | undefined
+let toldHeroes: Landmark[] | undefined, toldSquares: ArrayBuffer | null | undefined, toldKerbs: ArrayBuffer | null | undefined
 const waiting = new Map<number, (s: Said) => void>()
 let asks = 0
 /** The cores this context opened: what they hold is reported to the page (`memory`). */
@@ -394,11 +394,11 @@ if (typeof document === 'undefined' && typeof self !== 'undefined') {
   // The page's first message to a worker that streams the Bay. It is this module's alone: the worker's own handler
   // (worker.ts, mover.ts) never sees it, since this listener was added first, when this module was evaluated.
   self.addEventListener('message', (e: MessageEvent) => {
-    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[]; heroes?: Landmark[]; squares?: ArrayBuffer | null } | null
+    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[]; heroes?: Landmark[]; squares?: ArrayBuffer | null; kerbs?: ArrayBuffer | null } | null
     if (!told?.tiles) return
     e.stopImmediatePropagation()
     port = told.tiles; toldLevels = told.levels ?? LEVELS; toldKeep = told.keep ?? HOLD.keep
-    toldHeroes = told.heroes; toldSquares = told.squares
+    toldHeroes = told.heroes; toldSquares = told.squares; toldKerbs = told.kerbs
     port.onmessage = (m: MessageEvent<Said | { memory: true } | { ping: number }>) => {
       // Answered at once, whatever this worker is waiting on: the page knows it is there (`silent`).
       if ('ping' in m.data) return port!.postMessage({ pong: m.data.ping })
@@ -430,14 +430,15 @@ export function share(worker: Worker): Worker {
     const { id, level, key } = m.data
     try { const body = await tile(level, key); port1.postMessage({ id, body } satisfies Said) } catch (e) { port1.postMessage({ id, error: String((e as Error).message ?? e) } satisfies Said) }
   }
-  const give = (levels: Level[], h: Landmark[], sq: ArrayBuffer | null) =>
-    worker.postMessage({ tiles: port2, levels, keep: HOLD.keep, heroes: h, squares: sq }, [port2])
-  // Hand levels, landmarks and marked squares once from the page so workers never duplicate /bay/ fetches (#82).
+  const give = (levels: Level[], h: Landmark[], sq: ArrayBuffer | null, kb: ArrayBuffer | null) =>
+    worker.postMessage({ tiles: port2, levels, keep: HOLD.keep, heroes: h, squares: sq, kerbs: kb }, [port2])
+  // Hand levels, landmarks, marked squares and surveyed kerbs once from the page so workers never duplicate /bay/ fetches (#82).
   void Promise.all([
     STREAM ? where().then((s) => s.levels, () => LEVELS) : Promise.resolve(LEVELS),
     ON ? heroes() : Promise.resolve([]),
     ON && FRAME === '10n4250' ? markedSquares() : Promise.resolve(null),
-  ]).then(([levels, h, sq]) => give(levels, h, sq))
+    ON && FRAME === '10n4250' ? surveyedKerbs() : Promise.resolve(null),
+  ]).then(([levels, h, sq, kb]) => give(levels, h, sq, kb))
   // Silence is counted in pings gone unanswered, a second apart, not in time: a page whose timers slept (a tab in the
   // background) or whose own thread stalled sends none meanwhile, so it does not take its workers for gone.
   const ping = setInterval(() => { if (entry.owed) entry.missed++; entry.owed = true; port1.postMessage({ ping: 1 }) }, 1000)
@@ -477,8 +478,9 @@ export async function prepare<T>(instance: object): Promise<T> {
   for (const h of await heroes()) { if (h.only === 'night') continue; const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
   // Which squares the road's marks cover (#450, sf/marks.mjs): there the bake's own paint is not drawn. The marks
   // themselves come later, for the march alone (`marks`).
-  const lines = await markedSquares()
+  const [lines, kerbs] = await Promise.all([markedSquares(), surveyedKerbs()])
   if (lines) { const at = core.bay_room(lines.byteLength); new Uint8Array(core.memory.buffer, at, lines.byteLength).set(new Uint8Array(lines)); if (core.bay_marks() < 0) throw new Error('marks this core does not read') }
+  if (kerbs && core.bay_kerbs) { const at = core.bay_room(kerbs.byteLength); new Uint8Array(core.memory.buffer, at, kerbs.byteLength).set(new Uint8Array(kerbs)); if (core.bay_kerbs() < 0) throw new Error('kerbs this core does not read') }
   for (const name of SQUARES) await take(core, await whole(`${BASE}${name}.bay`))
   return core as unknown as T
 }
@@ -523,6 +525,19 @@ const markedSquares = () => (squaring ??= (
             await new Promise((r) => setTimeout(r, 1000))
           }
         })()
+))
+/** Surveyed kerb polylines (kerbs.bin, sf/kerbs.mjs): loaded once on the page and shared with every core before it makes sectors (#150). */
+let kerbing: Promise<ArrayBuffer | null> | null = null
+const surveyedKerbs = () => (kerbing ??= (
+  !(ON && FRAME === '10n4250') ? Promise.resolve(null)
+    : !owns ? portReady.then(() => (toldKerbs !== undefined ? toldKerbs : markFile('kerbs.bin', "sidewalks keep the bake's 50 cm raster")))
+      : (async () => {
+        for (let tries = 3; ; tries--) {
+          const bytes = await markFile('kerbs.bin', tries > 1 ? 'asking again' : "sidewalks keep the bake's 50 cm raster")
+          if (bytes || tries <= 1 || !(ON && FRAME === '10n4250')) return bytes
+          await new Promise((r) => setTimeout(r, 1000))
+        }
+      })()
 ))
 /**
  * The marks themselves (marks.bin, 1.5 MB, 0.4 MB as Brotli), for the march (marks.ts): asked for once the place is
@@ -706,7 +721,7 @@ export const dropped = (core: object) => { const at = opened.indexOf(core as Cor
  * holds no tile bytes beside its core's; and lets go by time (`forget`), not by count. `heroes` and `squares` are the
  * landmarks and the squares the road's marks cover, the same the server gives its pages.
  */
-export async function hold(o: { pointer: string; read: typeof get; passed?: (url: string, body: ArrayBuffer) => void; heroes: Landmark[]; squares: ArrayBuffer | null; taken?: (core: object, x0: number, z0: number, size: number) => void; most?: number }): Promise<Source> {
+export async function hold(o: { pointer: string; read: typeof get; passed?: (url: string, body: ArrayBuffer) => void; heroes: Landmark[]; squares: ArrayBuffer | null; kerbs?: ArrayBuffer | null; taken?: (core: object, x0: number, z0: number, size: number) => void; most?: number }): Promise<Source> {
   get = o.read; passed = o.passed ?? passed; owns = true; taken = o.taken ?? taken; most = o.most ?? most
   asked = '1'; STREAM = true; ON = true
   Object.assign(HOLD, { keep: [Infinity, Infinity, Infinity], bytes: 0 })
@@ -715,6 +730,7 @@ export async function hold(o: { pointer: string; read: typeof get; passed?: (url
   tries = 0; wait = 250; rest = 5000
   landmarks = Promise.resolve(o.heroes)
   squaring = Promise.resolve(o.squares)
+  kerbing = Promise.resolve(o.kerbs ?? null)
   source = released(new URL(o.pointer))
   const s = await source
   toldLevels = s.levels
