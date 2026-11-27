@@ -912,8 +912,8 @@ async function main() {
   // faster than anything goes, which was set down somewhere else). A thing the last step did not move lies where it
   // was said to. `?ahead=0`, or `engine.ahead = false`, draws things as they are said: for measuring.
   type Placed = { pos: [number, number, number]; rot: [number, number, number, number] }
-  /** A moving thing's last two places as the mover said them, the frame the last was asked in and the seconds asked for, which step it was, and where it is drawn. */
-  const went = new WeakMap<Piece, { from: Placed | null; to: Placed; at: number; took: number; step: number; drawn: Placed }>()
+  /** A moving thing's last two places as the mover said them, the frame the last was asked in and the seconds asked for, and which step it was. */
+  const went = new WeakMap<Piece, { from: Placed | null; to: Placed; at: number; took: number; step: number }>()
   let aheadOn = query.get('ahead') !== '0', frameAt = 0, tickAt = 0, tickTook = 0, stepped = 0
   const AHEAD_MOST = 0.1, AHEAD_SPEED = 2000
   /** Draws each thing the last step moved on to the time of this frame. */
@@ -925,14 +925,12 @@ async function main() {
       if (!w || w.step !== stepped || !w.from || w.took < 1e-3) continue
       const a = w.from, b = w.to, k = Math.min(AHEAD_MOST, Math.max(0, (now - w.at) / 1000)) / w.took
       if (Math.hypot(b.pos[0] - a.pos[0], b.pos[1] - a.pos[1], b.pos[2] - a.pos[2]) > AHEAD_SPEED * w.took) continue
-      for (let i = 0; i < 3; i++) w.drawn.pos[i] = b.pos[i] + (b.pos[i] - a.pos[i]) * k
       // Its turn goes on the same way: along the short way from the one turn to the other, and as far again.
       const near = a.rot[0] * b.rot[0] + a.rot[1] * b.rot[1] + a.rot[2] * b.rot[2] + a.rot[3] * b.rot[3] < 0 ? -1 : 1
-      let length = 0
-      for (let i = 0; i < 4; i++) { w.drawn.rot[i] = b.rot[i] + (b.rot[i] - near * a.rot[i]) * k; length += w.drawn.rot[i] ** 2 }
-      length = Math.sqrt(length) || 1
-      for (let i = 0; i < 4; i++) w.drawn.rot[i] /= length
-      piece.pos = w.drawn.pos; piece.rot = w.drawn.rot
+      const q = [0, 1, 2, 3].map((i) => b.rot[i] + (b.rot[i] - near * a.rot[i]) * k), length = Math.hypot(q[0], q[1], q[2], q[3]) || 1
+      // (A place of its own each frame, as each answer's is: whoever kept the last one still has the last one.)
+      piece.pos = [b.pos[0] + (b.pos[0] - a.pos[0]) * k, b.pos[1] + (b.pos[1] - a.pos[1]) * k, b.pos[2] + (b.pos[2] - a.pos[2]) * k]
+      piece.rot = [q[0] / length, q[1] / length, q[2] / length, q[3] / length]
     }
   }
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
@@ -1001,7 +999,7 @@ async function main() {
     // Something went up of itself: the cells it emptied came as edits, and this is its fire, smoke and shock.
     if (!far || far.live) for (const b of told.bursts) { smoke.blast(b.at, b.radius); shocks.push({ at: b.at, radius: b.radius, t: folkClock.now() }); fell.bursts++ }
     // What the last step moved and this one did not lies where that step left it, not where it was drawn on to.
-    if (step) { stepped++; for (const piece of moving.values()) { const w = went.get(piece); if (w && w.step === stepped - 1) { piece.pos = w.to.pos; piece.rot = w.to.rot } } }
+    if (step) { stepped++; for (const piece of moving.values()) { const w = went.get(piece); if (w && w.step === stepped - 1) { piece.pos = [...w.to.pos]; piece.rot = [...w.to.rot] } } }
     for (const at of [...told.moves, ...told.gone]) {
       const piece = moving.get(at.id)
       if (piece) { piece.pos = at.pos; piece.rot = at.rot }
@@ -1014,7 +1012,7 @@ async function main() {
       const w = went.get(piece), to: Placed = { pos: [at.pos[0], at.pos[1], at.pos[2]], rot: [at.rot[0], at.rot[1], at.rot[2], at.rot[3]] }
       if (!step) went.delete(piece)
       else if (w) Object.assign(w, { from: w.step === stepped - 1 ? w.to : null, to, at: tickAt, took: tickTook, step: stepped })
-      else went.set(piece, { from: null, to, at: tickAt, took: tickTook, step: stepped, drawn: { pos: [0, 0, 0], rot: [0, 0, 0, 1] } })
+      else went.set(piece, { from: null, to, at: tickAt, took: tickTook, step: stepped })
     }
     for (const { id } of told.gone) {
       const piece = moving.get(id)
