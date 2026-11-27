@@ -195,13 +195,15 @@ The place's music is off unless the page has `?music=1` (the car radio below is 
 
 Three things change while you drive.
 
-**The cabin.** In the driver's seat (V), `world.ts` sets the muffle low-pass to 3,400 Hz instead of 20,000 and the cover to 0.45, so rain, wind and surf play at 55%. Wind is cut by a further 40%. The muffle is on the whole mix, the radio included.
+**The cabin.** In the driver's seat (V), `world.ts` sets the muffle low-pass to 3,400 Hz instead of 20,000 and the cover to 0.45, so rain, wind and surf play at 55%. Wind is cut by a further 40%. The muffle applies to the synthesized mix, including the FM stations.
 
 **The radio.** `radio.ts` plays four stations in turn on N (`STATIONS`): Radio Off, Bay Drive FM (synthwave, 116 BPM, Dorian), Twin Peaks Chill (Rhodes lo-fi, 86 BPM, Lydian, swung) and Fillmore Funk (funk bass and brass stabs, 108 BPM, Mixolydian). Each is a mood in `RADIO_MOODS`, composed by the same rules and search as the place's music. They are kept out of `MOODS`, which realm rules and the benchmark read, and `resolve()` finds both. The radio has a conductor of its own that plays pieces with no rest between them. A change of station plays a dial click and, on a station, a burst of static, then cuts to the new mood (`cut()` in `conductor.ts`). While a station plays, the place's music is paused.
 
 - The horn ducks the radio by 60%. A hard landing or a crash ducks it for a moment. It never drops below 32%, and it comes back slowly.
 - Getting out turns it off. Getting back in brings the last station back after 0.42 s.
 - It starts on Bay Drive FM for a person and off when `navigator.webdriver` is set, unless `?radio=` says otherwise.
+
+Open the picker with R while driving, the touch Radio button, or Radio in settings. YouTube plays through its embedded player. Spotify and Apple Music are behind `?radio_providers=all` and require provider configuration. The horn and crashes also duck streaming audio.
 
 **Pass-by whooshes.** Above 70 km/h, a `whoosh` patch (a band of noise sweeping from 2,800 Hz down to 260 Hz) and a lower `whooshTail` 55 ms later are played on the side something passes. They are triggered three ways:
 
