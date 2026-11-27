@@ -593,12 +593,16 @@ export function carveWheelWells(
 interface VehicleState {
   steerSm: number
   prevPos: [number, number, number] | null
+  deformState?: DeformState
+  deformRev: number
   wheels: {
     roll: number
     susp: number
     heat: number
     steer: number
     offset: [number, number, number]
+    camber: number
+    toe: number
     tilt: number
     init: boolean
   }[]
@@ -705,7 +709,9 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
           st = {
             steerSm: 0,
             prevPos: [v.pos[0], v.pos[1], v.pos[2]],
-            wheels: v.feet.map(() => ({ roll: 0, susp: 0, heat: 0, steer: 0, offset: [0, 0, 0] as [number, number, number], tilt: 0, init: false })),
+            deformState: undefined,
+            deformRev: -1,
+            wheels: v.feet.map(() => ({ roll: 0, susp: 0, heat: 0, steer: 0, offset: [0, 0, 0] as [number, number, number], camber: 0, toe: 0, tilt: 0, init: false })),
             lastSeen: tick,
           }
           states.set(v.id, st)
@@ -803,15 +809,17 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
             maxBump = 0.85
           }
 
-          // Wheel hub displacement and axle camber/toe tilt from vehicle body dents (#61), so a crushed corner does not leave a wheel standing outside its fender.
+          // Wheel hub displacement and axle camber/toe tilt from vehicle body dents (#61), cached per deform revision so undamaged frames pay zero CPU.
           const hx = alongX ? foot.at[0] : wheelLat
           const hz = alongX ? wheelLat : foot.at[2]
+          const hasDeform = !!(v.deform && v.deform.dentCount > 0 && v.fineLow && v.finePer)
+          const deformDirty = hasDeform ? (st.deformState !== v.deform || st.deformRev !== v.deform!.revision) : (st.deformRev !== -1)
           let bendX = 0, bendY = 0, bendZ = 0, camber = 0, toe = 0
-          if (v.deform && v.deform.dentCount > 0 && v.fineLow && v.finePer) {
-            const per = v.finePer
-            const flx = (hx - v.fineLow[0]) * per
-            const fly = (restHubY - v.fineLow[1]) * per
-            const flz = (hz - v.fineLow[2]) * per
+          if (hasDeform && deformDirty) {
+            const per = v.finePer!
+            const flx = (hx - v.fineLow![0]) * per
+            const fly = (restHubY - v.fineLow![1]) * per
+            const flz = (hz - v.fineLow![2]) * per
             const longSign = (v.front & 1) === 0 ? 1 : -1
             const latAxis = alongX ? 2 : 0
             const longAxis = alongX ? 0 : 2
@@ -857,9 +865,16 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
             const rawCamber = ((latBot - Math.min(latTop, latFwdTop, latAftTop)) / Math.max(1, radius * 1.4)) * 0.85 + Math.max(0, -latShift) * 0.14
             camber = Math.max(-0.38, Math.min(0.38, rawCamber))
             toe = Math.max(-0.38, Math.min(0.38, (((latFwd - latAft) * sideSign) / Math.max(1, radius * 1.4)) * 1.1))
+            ws.offset[0] = bendX; ws.offset[1] = bendY; ws.offset[2] = bendZ
+            ws.camber = camber; ws.toe = toe
+            ws.tilt = Math.hypot(camber, toe)
+          } else if (hasDeform) {
+            bendX = ws.offset[0]; bendY = ws.offset[1]; bendZ = ws.offset[2]
+            camber = ws.camber; toe = ws.toe
+          } else if (deformDirty) {
+            ws.offset[0] = 0; ws.offset[1] = 0; ws.offset[2] = 0
+            ws.camber = 0; ws.toe = 0; ws.tilt = 0
           }
-          ws.offset[0] = bendX; ws.offset[1] = bendY; ws.offset[2] = bendZ
-          ws.tilt = Math.hypot(camber, toe)
 
           const restOff = turned(v.rot, [hx + bendX - offX, restHubY + bendY - offY, hz + bendZ - offZ])
           const restW: [number, number, number] = [v.pos[0] + restOff[0], v.pos[1] + restOff[1], v.pos[2] + restOff[2]]
@@ -945,6 +960,9 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
             heat: ws.heat,
           })
         }
+        const hasDeform = !!(v.deform && v.deform.dentCount > 0 && v.fineLow && v.finePer)
+        st.deformState = hasDeform ? v.deform : undefined
+        st.deformRev = hasDeform ? v.deform!.revision : -1
       }
 
       // Drop stale vehicle state entries once a vehicle breaks or vanishes.

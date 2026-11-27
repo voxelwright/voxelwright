@@ -58,8 +58,19 @@ if (parts.includes('cars')) {
       look.palette.forEach((k, j) => { if (look.roles?.[j] === 'paint' && hueOf(colourOf(k)) >= 0) byHue.set(hueOf(colourOf(k)), (byHue.get(hueOf(colourOf(k))) ?? 0) + n[j]) })
       const own = [...byHue.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
       if (c.id === 'hatch') check(own === 15, `blue saloon (hatch) paint role selects blue hue 15, not dark grey trim (got hue ${own})`)
-      if (own === undefined) continue
       const filled = n.reduce((a, b, j) => a + (look.palette[j] ? b : 0), 0)
+      // A grey-bodied SUV repainted white must not leave mid/dark grey (col 7..13) or muted slate (tone 7..9) steel blotches unrepainted.
+      if (c.id === 'suv') {
+        const white = car.variants.find((v) => v.name === 'white')
+        let blotch = 0
+        white?.looks[0].forEach((k, j) => {
+          if (!k || material(k) !== 12) return
+          const col = colourOf(k)
+          if ((col >= 7 && col <= 13) || (col >= 16 && (col - 16) % 10 >= 7)) blotch += n[j]
+        })
+        check(blotch / filled < 0.005, `${c.name} in white: ${(100 * blotch / filled).toFixed(2)}% dark grey/slate steel blotches left unrepainted (under 0.5%)`)
+      }
+      if (own === undefined) continue
       for (const v of car.variants) {
         const pal = v.looks[0]
         if (pal.some((k, j) => look.roles?.[j] === 'paint' && hueOf(colourOf(k)) >= 0 && apart(hueOf(colourOf(k)), own) <= 1)) continue // repainted in a colour near its own

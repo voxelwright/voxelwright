@@ -88,7 +88,15 @@ function paintOf(kinds) {
   const top = [...n.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
   if (top === undefined) return () => false
   const c = colourOf(top)
-  if (c >= 1 && c <= 15) return (k) => material(k) === STEEL && colourOf(k) >= 1 && colourOf(k) <= 15 && Math.abs(colourOf(k) - c) <= 4 && colourOf(k) <= 13
+  // A grey-bodied vehicle (e.g. grey SUV) has charcoal underbody (col 14..15) plus mid-to-light grey body steel
+  // (col 1..13) and muted slate-grey sky-reflection steel tones (tone 7..9, saturation <= 0.30). Anchoring on col 14
+  // with |col - c| <= 4 previously left col 1..9 and slate tones 155/165/175 unrepainted as dark blotches on white SUVs.
+  if (c >= 1 && c <= 15) return (k) => {
+    if (material(k) !== STEEL) return false
+    const col = colourOf(k)
+    if (col >= 1 && col <= 13) return true
+    return col >= 16 && (col - 16) % 10 >= 7
+  }
   const hue = hueOf(c)
   return (k) => [STEEL, PLASTER, ROOFING_].includes(material(k)) && colourOf(k) >= 16 && hueApart(hueOf(colourOf(k)), hue) <= 1
 }

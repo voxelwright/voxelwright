@@ -271,7 +271,7 @@ export function living(o: {
   /** The eye: metres, and which way it looks; `tilt` turns its whole frame (main.ts `view`), as it does in the seat. */
   pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] }
   /** Draws a block of finer cells as a piece (pieces.ts), for a thing's fine look: placed each frame where the body is. */
-  look?: (kinds: Uint16Array, size: [number, number, number]) => Piece
+  look?: (kinds: Uint16Array, size: [number, number, number], opts?: { smooth?: boolean; fallback?: Uint16Array }) => Piece
   /** How high the ground is at a place (metres). */
   ground(x: number, z: number): number
   /** Where the person's own body is when they are on foot (cells, at the height of their chest), or null: what is near is near that. */
@@ -536,11 +536,17 @@ export function living(o: {
   // Its glass is seen through (pieces.ts), from the seat as from the street.
   /** glass: where its glass cells are, three numbers a cell (#37: where a crack starts). */
   interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number; glass: Int16Array }
-  /** Where a look's glass cells are (kind 11), three numbers a cell. */
+  /** Where a look's glass cells are (kind 11), three numbers a cell. Cached per array so waking cars skip rescanning millions of cells. */
+  const EMPTY_GLASS = new Int16Array(0)
+  const glassCache = new WeakMap<Uint16Array, Int16Array>()
   const glassOf = (kinds: Uint16Array, [w, , d]: readonly number[]) => {
+    let cached = glassCache.get(kinds)
+    if (cached) return cached
     const at: number[] = []
     for (let i = 0; i < kinds.length; i++) if ((kinds[i] & 15) === 11) at.push(i % w, Math.floor(i / (w * d)), Math.floor(i / w) % d)
-    return Int16Array.from(at)
+    cached = Int16Array.from(at)
+    glassCache.set(kinds, cached)
+    return cached
   }
   // Its dents (#37): one record a part, by the thing's body and the part's place in its look.
   const dents = new VehicleDeformation()
@@ -560,15 +566,17 @@ export function living(o: {
     for (const f of parts) for (let i = 0; i < f.kinds.length; i++) if (f.kinds[i]) filled++
     if (!fineWithin(parts) || filled > FINE_FILLED) { console.warn(`a look of ${parts.length} parts with ${filled} filled cells is more than a look may be: the thing is drawn as its own cells`); return }
     const carveWheels = (thing.controls ?? 'drive') === 'drive' && thing.motor.feet.length >= 2 && !(thing.motor.steer === 0 && thing.motor.upright > 0)
-    looks.set(thing, parts.map((f) => {
-      const carved = carveWheels ? carveWheelWells(f.kinds, f.size, f.per, f.low, thing.motor, thing.size) : null
+    looks.set(thing, parts.map((f, i) => {
+      // High-resolution interior cabin parts (i > 0 && per > 4, e.g. 3.6M-cell 1.25cm seats/dash) need neither wheel-well carving nor smooth shading.
+      const interior = i > 0 && f.per > 4
+      const carved = carveWheels && !interior ? carveWheelWells(f.kinds, f.size, f.per, f.low, thing.motor, thing.size) : null
       if (carved && !thing.wheelProfile) thing.wheelProfile = carved.profile
       const kinds = carved ? carved.kinds : f.kinds
-      const piece = o.look!(kinds, f.size)
+      const piece = o.look!(kinds, f.size, { smooth: !interior, fallback: carved ? f.kinds : undefined })
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
-      return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: glassOf(kinds, f.size) }
+      return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: interior ? EMPTY_GLASS : glassOf(kinds, f.size) }
     }))
     // The eye where it sees out (#74): once, as its look is worn, and kept on it for the seat, its dents and its card.
     const eye = clearEye(eyeOf(thing), thing.motor.front, parts)
@@ -612,6 +620,8 @@ export function living(o: {
       hi[a] = Math.max(hi[a], seat[a] + (a === 1 ? SITTING_EYE + HEAD_ROOM : HEAD_ROOM))
     }
     worn.forEach((w, i) => {
+      // Do not deform high-resolution interior cabin meshes (350k–422k unit faces): cabin seats/dash sit inside the survival box anyway.
+      if (i > 0 && w.per > 4) return
       const at = partAt(thing, body, w, pos, rot), cell = 1 / w.per
       // Where it was struck in the part's own cells, and from there the way out of its box.
       const local = turned([-rot[0], -rot[1], -rot[2], rot[3]], [hitAt[0] - at[0], hitAt[1] - at[1], hitAt[2] - at[2]])
@@ -663,11 +673,15 @@ export function living(o: {
     else lightMode = 'low'
   }
   const follow = () => {
+    const ex = o.pose.x * M, ey = o.pose.y * M, ez = o.pose.z * M
     for (const [thing, worn] of looks) {
       const body = o.piece(thing.id)
       // Its own cells are not drawn while it wears a look; broken, its pieces are drawn as they are.
       if (body) body.cell = 0
-      for (const w of worn) {
+      const farInterior = body && thing !== riding && ((body.pos[0] - ex) ** 2 + (body.pos[1] - ey) ** 2 + (body.pos[2] - ez) ** 2) > 120 * 120
+      for (let i = 0; i < worn.length; i++) {
+        const w = worn[i]
+        if (i > 0 && w.per > 4 && farInterior) { w.piece.cell = 0; continue }
         const at = body && placeOf(thing, w.low)
         if (at && body) { w.piece.pos = at; w.piece.rot = body.rot; w.piece.cell = 1 / w.per } else w.piece.cell = 0
       }

@@ -87,6 +87,7 @@ let checks = [
   ['swap', 'node', ['test/swap.mjs'], true],
   ['workshop', 'node', ['test/workshop.mjs'], true],
   ['telemetry', 'node', ['test/telemetry.mjs'], true],
+  ['studio', 'node', ['test/studio.mjs'], true],
   ['worker-resilience', 'node', ['test/worker-resilience.mjs'], false],
   ['cable-overlap', 'node', ['test/cable-overlap.mjs'], false],
   ['taken', 'node', ['test/taken.mjs'], true],

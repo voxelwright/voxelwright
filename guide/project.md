@@ -59,6 +59,7 @@ World and engine:
 - [Making](/making): how a typed wish becomes a thing, with the asker's own model, and what a model may do.
 - [Living things and people](/living): bodies that move, from a car to a person on foot, and people who answer through a model on someone's own machine.
 - [Plugins, rules and realms](/engine-plugins): scripts anyone writes, trusted engine code, and the worlds one server keeps. Then [render passes](/render-passes) and [page plugin types](/plugin-types).
+- [Studio & Game-Use IDE](/studio): native in-game T3 Code client, `F9`/`F10` bug-to-thread capture, live worktree verification, and `voxelwright-game` MCP control plane.
 
 Look:
 

@@ -2934,9 +2934,10 @@ export function street(o: {
       if (Math.abs(c.y - m.y) > 35) return
       const dist = Math.hypot(dx, dz)
       if (dist > scan) return
-      // Pre-warm finest look faces before impact so waking (with interior, drivable) is instant (#61).
+      // Pre-warm only the finest exterior look before impact so crash waking is instant without decoding 3.6M-cell interiors.
       if (c.model.motor && dist < scan - 10) {
-        for (let i = 0; i < c.model.looks.length; i++) if (c.model.looks[i].per >= 4) bornOf(c.model, c.paint, i)
+        const ext = lods(c.model)
+        if (ext.length) bornOf(c.model, c.paint, ext[ext.length - 1].i)
       }
       const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
       const cHalfL = c.model.long * 0.5, cHalfW = c.model.wide * 0.5
@@ -3004,9 +3005,10 @@ export function street(o: {
         if (ph > 420) { px = (px * 420) / ph; pz = (pz * 420) / ph }
         // A little off the road, not a car's height: at 55 cells a second up it came down on the next car's roof.
         const py = Math.min(12, Math.max(3, (relSpeed - 28) * 0.06))
-        // Both the striking vehicle and the woken street car dent immediately on impact, and the woken car is drivable (#61).
+        // Both the striking vehicle and the woken street car dent immediately on impact; keep woken crash cars exterior-only
+        // so collisions never decode or draw 3.6M-cell per=8 interiors (reachable on-foot waking still loads interiors).
         if (m.thing) o.alive.hit(m.thing, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 80)
-        pending.set(c, { inside: true, push: [px, py, pz], asked: now, then: (thing: Thing) => o.alive.hit(thing, hitAt, [-nx, 0, -nz], hitSpeed, hitSpeed * 80) })
+        pending.set(c, { inside: false, push: [px, py, pz], asked: now, then: (thing: Thing) => o.alive.hit(thing, hitAt, [-nx, 0, -nz], hitSpeed, hitSpeed * 80) })
         void wake(c, pending.get(c)!)
         // Immediate tactile recoil on the striking vehicle.
         if (recoil > 0) shove(m, -nx * recoil, m.ridden ? Math.min(12, recoil * 0.08) : 0, -nz * recoil)

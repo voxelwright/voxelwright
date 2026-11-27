@@ -1177,10 +1177,24 @@ async function main() {
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },
     piece: (id) => moving.get(id),
-    look: (kinds, size) => {
+    look: (kinds, size, opts) => {
+      const key = size.join()
       let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map())
-      let born = by.get(size.join())
-      if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
+      let born = by.get(key)
+      if (!born) {
+        // When wheel-well carving creates a new array from a street car's uncarved cells, reuse the pre-built smooth
+        // Born immediately (avoiding a 20-100ms main-thread `thing()` stall on crash/wake) and refit once the worker finishes.
+        const pre = opts?.fallback ? lookFaces.get(opts.fallback)?.get(key) : undefined
+        if (pre) {
+          born = { ...pre, com: [...pre.com], low: [...pre.low] }
+          by.set(key, born)
+          if (opts?.smooth !== false) smoothen(kinds, size, born)
+        } else {
+          born = thing(kinds, size)
+          by.set(key, born)
+          if (!born.smooth && opts?.smooth !== false) smoothen(kinds, size, born)
+        }
+      }
       const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
       piece.skin = kinds
       smoothing.get(born)?.push(piece)
@@ -1240,7 +1254,7 @@ async function main() {
       const st = !active && t.state ? t.state : null
       const stBrake = st && ((st.go < -0.1 && st.speed > 8) || (st.go > 0.1 && st.speed < -8)) ? Math.min(1, Math.abs(st.go)) : 0
       const deform = alive.damage(t)
-      const look0 = deform && deform.dentCount > 0 ? alive.look(t).parts[0] : undefined
+      const look0 = deform && deform.dentCount > 0 ? (t.fine?.[0] ?? t.kept?.[0]) : undefined
       out.push({
         id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
         bornLow: piece.born.low, bornCom: piece.born.com,
@@ -2388,6 +2402,14 @@ async function main() {
   feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })
   // Living things, on a line of their own: every lane adds to the line above.
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) { const reach = e.radius ?? 44, runs: number[] = []; for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) { const half = Math.floor(Math.sqrt(reach * reach - dz * dz)); runs.push(e.at[0] - half, e.at[0] + half + 1, e.at[1] + dy, e.at[2] + dz, 0) } make(rows(Int32Array.from(runs), [e.at[0] - reach, e.at[1], e.at[2] - reach, e.at[0] + reach + 1, e.at[1] + 2, e.at[2] + reach + 1]), e.at); cuts.push({ at: e.at, radius: reach }) } else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
+  // Native in-game T3 Studio & Game-Use runtime (#98): local dev only; computed URL keeps it out of static sf/build.mjs deploys.
+  const studioWanted = query.get('studio') !== '0' && (query.get('studio') === '1' || /(?:^|#|&)studio=/.test(location.hash) || (!navigator.webdriver && !!document.querySelector('meta[name="vw-studio"]')))
+  if (!LOCAL && studioWanted) {
+    const studioEntry = ['./studio', 'index.ts'].join('/')
+    void import(studioEntry).then((m: { bootStudio: (o: { engine: unknown; canvas: HTMLCanvasElement }) => Promise<unknown> }) =>
+      m.bootStudio({ engine: (globalThis as unknown as { engine: unknown }).engine, canvas }),
+    ).catch((e: unknown) => console.warn(`studio: ${e instanceof Error ? e.message : String(e)}`))
+  }
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
