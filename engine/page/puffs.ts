@@ -4,6 +4,7 @@
 // for the eye. What burns, and what that does to the world, is the core's (fire.rs).
 import { shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
+import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
 import { crashOpening } from './crash-opening.ts'
 import type { Piece } from './pieces.ts'
 import { deformPointCpu, type DeformState } from './deform.ts'
@@ -218,6 +219,8 @@ export interface Puffs {
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
   light(sun: readonly number[], day: number): void
+  /** Emits flickering warm firelight from active blasts, burning buildings, crash engine flames, and fireballs. */
+  lights(sink: LocalLightSink): void
   readonly live: number
 }
 
@@ -258,9 +261,56 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     late[i] = o.late ?? 0
     wind[i] = o.wind ?? 1
   }
+  const fireX = new Float64Array(6), fireY = new Float64Array(6), fireZ = new Float64Array(6)
+  const fireW = new Float32Array(6), fireHeat = new Float32Array(6), fireSize = new Float32Array(6)
   return {
     get live() { return live },
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
+    lights(sink) {
+      if (!live) return
+      let nc = 0
+      for (let i = 0; i < MOST; i++) {
+        if (life[i] <= 0) continue
+        const h = heat[i]
+        if (h < 0.16) continue
+        const px = p[i * 3], py = p[i * 3 + 1], pz = p[i * 3 + 2]
+        const s = size[i]
+        const w = h * Math.max(s, 1.5)
+        let merged = false
+        for (let c = 0; c < nc; c++) {
+          const inv = 1 / fireW[c]
+          const dx = px - fireX[c] * inv, dy = py - fireY[c] * inv, dz = pz - fireZ[c] * inv
+          if (dx * dx + dy * dy + dz * dz < 1600) {
+            fireX[c] += px * w; fireY[c] += py * w; fireZ[c] += pz * w
+            fireW[c] += w
+            if (h > fireHeat[c]) fireHeat[c] = h
+            if (s > fireSize[c]) fireSize[c] = s
+            merged = true
+            break
+          }
+        }
+        if (!merged && nc < 6) {
+          fireX[nc] = px * w; fireY[nc] = py * w; fireZ[nc] = pz * w
+          fireW[nc] = w; fireHeat[nc] = h; fireSize[nc] = s
+          nc++
+        }
+      }
+      if (!nc) return
+      const flicker = 0.88 + 0.16 * Math.sin(flamePhase * 1.7)
+      const dayScale = 0.55 + 0.45 * Math.min(1, sink.dark * 1.4)
+      for (let c = 0; c < nc; c++) {
+        const inv = 1 / fireW[c]
+        const h = fireHeat[c]
+        const s = fireSize[c]
+        const power = Math.min(5.5, (1.4 + h * 3.4) * Math.min(1.6, 0.7 + s * 0.08)) * flicker * dayScale
+        const range = Math.min(280, Math.max(95, 75 + s * 10))
+        sink.addPoint(
+          fireX[c] * inv, fireY[c] * inv + 1.5, fireZ[c] * inv,
+          1.0 * power, (0.36 + 0.34 * h) * power, (0.06 + 0.22 * h * h) * power,
+          range, range * 0.32, 1.15, 110 + h * 60, LIGHT_EXTRA,
+        )
+      }
+    },
     blast(at, r) {
       // The flash: one puff of light, gone in a tenth of a second.
       puff(at, 0, 0, 0, { size: r * 2.6, grow: r * 6, life: 0.12, heat: 1, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })

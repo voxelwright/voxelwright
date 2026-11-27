@@ -6,6 +6,7 @@ import { shader, type Target } from '../probe/gpu.ts'
 import { deformPointCpu, type DeformState } from './deform.ts'
 import type { Foot, Motor } from './living.ts'
 import type { View } from './march.ts'
+import { LOCAL_LIGHTS_STRUCT, localLightsEval } from './lights.ts'
 
 const MAX_WHEELS = 64
 const VERT_FLOATS = 13 // pos(3), normal(3), color(3), meta(4: spins, glowWeight, metallic, rough)
@@ -20,6 +21,9 @@ struct U {
   sun: vec3f, day: f32,
 }
 @group(0) @binding(0) var<uniform> u: U;
+${LOCAL_LIGHTS_STRUCT}
+@group(0) @binding(1) var<uniform> localLights: LocalLights;
+${localLightsEval()}
 
 struct Out {
   @builtin(position) pos: vec4f,
@@ -104,6 +108,10 @@ const FAR = 100000.0;
     let h2 = heat * heat;
     let glowCol = mix(vec3f(1.45, 0.14, 0.015), vec3f(5.8, 1.55, 0.22), h2);
     col += glowCol * heat * glowW;
+  }
+
+  if (localLights.info.x > 0u) {
+    col += evalLocalLights(in.seen + u.eye, n, rd, in.colour, rough, metal * 0.65, 0.0);
   }
 
   col = col / (col + 0.75) * 1.45;
@@ -620,14 +628,21 @@ interface ActiveWheel {
   heat: number
 }
 
-export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promise<Wheels> {
+export async function wheels(device: GPUDevice, format: GPUTextureFormat, localLightsBuffer: GPUBuffer): Promise<Wheels> {
   const module = await shader(device, 'wheels', CODE)
   const mesh = buildWheelMesh()
   const vertCount = mesh.length / VERT_FLOATS
 
+  const bindLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: {} },
+    ],
+  })
+  const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [bindLayout] })
   const pipeline = await device.createRenderPipelineAsync({
     label: 'wheels',
-    layout: 'auto',
+    layout: pipelineLayout,
     vertex: {
       module,
       entryPoint: 'vs',
@@ -663,7 +678,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
   device.queue.writeBuffer(vertBuf, 0, mesh)
   const instBuf = device.createBuffer({ size: MAX_WHEELS * INST_FLOATS * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
+  const bind = device.createBindGroup({ layout: bindLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: localLightsBuffer } }] })
 
   const instData = new Float32Array(new ArrayBuffer(MAX_WHEELS * INST_FLOATS * 4))
   const uniformData = new Float32Array(new ArrayBuffer(80))
