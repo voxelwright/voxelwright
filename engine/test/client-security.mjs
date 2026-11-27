@@ -13,7 +13,7 @@ import { picture } from '../page/screens.ts'
 import { samePath } from '../page/far.ts'
 import { bounded } from '../page/march.ts'
 import { keep, kept, remembered } from '../page/models.ts'
-import { BUDGETS, forgetFar, latLon, tierOf } from '../page/bay.ts'
+import { BUDGETS, forgetFar, llAsked, tierOf } from '../page/bay.ts'
 
 let steps = 0
 const step = async (name, run) => { await run(); steps++; console.log(`ok  ${name}`) }
@@ -145,8 +145,8 @@ await step('models: a key is kept for the tab by default, in the browser only wh
 })
 
 await step('bay: only two finite coordinates on Earth reach a worker\'s address', () => {
-  assert.deepEqual(latLon('37.8,-122.4'), [37.8, -122.4])
-  for (const bad of ['37.8,-122.4&bay=0', '37.8,-122.4,1', 'x,y', ',', '91,0', '0,181', 'Infinity,0', '', null]) assert.equal(latLon(bad), null, String(bad))
+  assert.deepEqual(llAsked('37.8,-122.4'), [37.8, -122.4])
+  for (const bad of ['37.8,-122.4&bay=0', '37.8,-122.4,1', 'x,y', ',', '91,0', '0,181', 'Infinity,0', '', null]) assert.equal(llAsked(bad), null, String(bad))
   assert.equal(encodeURIComponent([37.8, -122.4].join(',')), '37.8%2C-122.4')
 })
 

@@ -102,11 +102,11 @@ export let ON = STREAM || SQUARES.length > 0
 /** Where on Earth the address says the page starts (`&ll=`): never in a world the server keeps, whose frame is its release's. */
 const ll = WORLD ? null : query.get('ll')
 /** `&ll=latitude,longitude` as two finite numbers on Earth, or null (#81: nothing else of the address reaches a worker's). */
-export const latLon = (said: string | null): [number, number] | null => {
+export const llAsked = (said: string | null): [number, number] | null => {
   const v = said?.split(',').map((p) => (p.trim() === '' ? NaN : Number(p)))
   return v?.length === 2 && v.every(Number.isFinite) && Math.abs(v[0]) <= 90 && Math.abs(v[1]) <= 180 ? [v[0], v[1]] : null
 }
-const asked_ll = latLon(ll)
+const asked_ll = llAsked(ll)
 /** What a worker's address ends in, so that it opens its core as this page does. */
 export const BAY = (STREAM ? `?bay=${encodeURIComponent(asked!)}${asked_ll ? `&ll=${encodeURIComponent(asked_ll.join(','))}` : ''}` : SQUARES.length ? `?bay=${SQUARES.map(encodeURIComponent).join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
