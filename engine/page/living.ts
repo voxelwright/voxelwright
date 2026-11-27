@@ -10,6 +10,7 @@ import { createDriveCam, DRIVE_CAM_LABELS, nextDriveCam, type DriveCamMode } fro
 import { driveTouch, type DriveTouch } from './drive-touch.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
+import type { LocalLightSink } from './lights.ts'
 import type { Answer, Ask } from './mover.ts'
 import type { Piece } from './pieces.ts'
 import type { Placed, Struck, Told } from './told.ts'
@@ -196,6 +197,8 @@ export interface Living {
   /** How a car is driven by touch (drive-touch.ts): its scheme, its settings and the Controls sheet. */
   readonly touch: DriveTouch
   readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
+  /** Appends the active driven vehicle's dynamic lights (headlights, taillights, brake, reverse, boost) for unified scene lighting. */
+  lights(sink: LocalLightSink): void
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
@@ -965,6 +968,35 @@ export function living(o: {
       }
     },
     repair: repairCar,
+    lights(sink) {
+      if (!riding || !riding.alive || (riding.controls ?? 'drive') !== 'drive') return
+      const at = where(riding)
+      if (!at) return
+      const dmg = dents.get(dentId(riding, 0))?.hoodDamage ?? 0
+      const headMul = Math.max(0.15, 1 - dmg * 0.85)
+      const head = lampState[2] * headMul
+      const brake = lampState[0]
+      const rev = lampState[1]
+      const boost = telemetryNow?.boosting ? 1 : 0
+      if (head <= 0.01 && brake <= 0.04 && rev <= 0.05 && boost <= 0.05) return
+      const fwd = turned(at.rot, FRONTS[riding.motor.front])
+      const up = turned(at.rot, [0, 1, 0])
+      const rx = fwd[1] * up[2] - fwd[2] * up[1]
+      const ry = fwd[2] * up[0] - fwd[0] * up[2]
+      const rz = fwd[0] * up[1] - fwd[1] * up[0]
+      const rl = Math.hypot(rx, ry, rz) || 1
+      const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
+      const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
+      const halfH = riding.size[1] * 0.5
+      sink.addVehicle(
+        at.at[0] - up[0] * halfH, at.at[1] - up[1] * halfH, at.at[2] - up[2] * halfH,
+        fwd[0], fwd[1], fwd[2],
+        rx / rl, ry / rl, rz / rl,
+        up[0], up[1], up[2],
+        halfLen, halfWide, riding.size[1],
+        head, brake, rev, 0, boost, true,
+      )
+    },
     frame(dt) {
       follow()
       // A struck engine steams, then smokes, then burns (#37), under the bonnet at its front: only near the eye, and
@@ -1223,38 +1255,6 @@ export function living(o: {
             else o.fx.lift(i)
             const puffLevel = Math.max(slipAmt, wet && horizSpeed > 55 ? Math.min(0.55, (horizSpeed - 50) / 140) : 0, !paved && horizSpeed > 30 ? Math.min(0.65, horizSpeed / 120) : 0)
             if (emitSmoke && puffLevel > 0.13) o.fx.smoke(p, [-velSm[0] * 0.16, 4.2 + puffLevel * 9, -velSm[2] * 0.16], puffLevel, smokeCol)
-          }
-          // Vivid crimson taillight/brake glow, fiery orange exhaust pop flash, cyan nitrous splash, white reverse pool, and two-stage headlight beams.
-          const dir2: readonly [number, number] = [at.front[0], at.front[2]]
-          const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
-          const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
-          if (boosting) {
-            const nosPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 12), at.at[1], at.at[2] - at.front[2] * (halfLen + 12)]
-            o.fx.light(nosPos, dir2, [20, halfWide + 13], [0.18, 0.74, 1.0], 0.48 + dark * 0.42 + (wet ? 0.18 : 0))
-          } else if (exhaustFlash > 0.02) {
-            const flashAnchor = rearTips[0] ?? ([at.at[0] - at.front[0] * (halfLen + 5), at.at[1], at.at[2] - at.front[2] * (halfLen + 5)] as const)
-            const flashPos: readonly [number, number, number] = [flashAnchor[0] - at.front[0] * 3.5, at.at[1], flashAnchor[2] - at.front[2] * 3.5]
-            o.fx.light(flashPos, dir2, [8.5, halfWide + 3.5], [1.0, 0.42, 0.06], (0.28 + dark * 0.42 + (wet ? 0.12 : 0)) * exhaustFlash)
-          }
-          if (lampBrake > 0) {
-            const backPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 9), at.at[1], at.at[2] - at.front[2] * (halfLen + 9)]
-            o.fx.light(backPos, dir2, [15, halfWide + 10], [1.0, 0.05, 0.015], (0.24 + dark * 0.36 + (wet ? 0.14 : 0)) * (handbraking ? 1.1 : Math.min(1.0, lampBrake)))
-          } else if (headLevel > 0) {
-            const tailPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 7), at.at[1], at.at[2] - at.front[2] * (halfLen + 7)]
-            o.fx.light(tailPos, dir2, [12, halfWide + 8], [1.0, 0.04, 0.015], (0.10 + dark * 0.28 + (wet ? 0.12 : 0)) * Math.min(1, headLevel))
-          }
-          if (lampRev > 0) {
-            const revPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 11), at.at[1], at.at[2] - at.front[2] * (halfLen + 11)]
-            o.fx.light(revPos, dir2, [13, halfWide + 7], [0.92, 0.96, 1.0], 0.12 + dark * 0.34 + (wet ? 0.12 : 0))
-          }
-          if (headLevel > 0) {
-            const hi = headLevel > 1.2
-            const nearReach = hi ? 32 : 24
-            const nearPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + nearReach), at.at[1], at.at[2] + at.front[2] * (halfLen + nearReach)]
-            o.fx.light(nearPos, dir2, [nearReach + 8, halfWide + (hi ? 18 : 14)], hi ? [1.0, 0.98, 0.92] : [1.0, 0.94, 0.80], (0.14 + dark * 0.78) * (hi ? 0.66 : 0.48) + (wet ? 0.14 * dark : 0))
-            const farReach = hi ? 108 : 76
-            const farPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + farReach), at.at[1], at.at[2] + at.front[2] * (halfLen + farReach)]
-            o.fx.light(farPos, dir2, [hi ? 114 : 82, halfWide + (hi ? 40 : 30)], hi ? [1.0, 0.97, 0.90] : [1.0, 0.92, 0.76], (0.10 + dark * 0.86) * (hi ? 0.56 : 0.38) + (wet ? 0.12 * dark : 0))
           }
         }
       } else if (telemetryNow || wheelDriveNow) {

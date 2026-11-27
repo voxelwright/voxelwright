@@ -10,6 +10,7 @@ import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
 import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
+import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
 import type { Heavens } from './almanac.ts'
 import type { WindowEffect } from './eggs-pictures.ts'
 import { crumbs } from './crumbs.ts'
@@ -50,7 +51,7 @@ import { SIDE, World } from './world.ts'
 import { far as farOf, samePath } from './far.ts'
 import { fog } from './fog.ts'
 import { eggSky } from './eggs-sky.ts'
-import { BAY, BUDGET, DEVICE, HOLD, holds, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, BUDGET, DEVICE, HOLD, holds, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, streetLamps, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -257,7 +258,7 @@ async function main() {
     workers: bounded(query.get('workers'), WORKERS, 1, 8, true),
   })
   // Build independent GPU pipelines concurrently in two batches (#83) so shader compilation never serializes startup.
-  const [march, blit, debris, smoke, water, planet, shade, roadTracks, carWheels, released] = await Promise.all([
+  const [march, blit, debris, smoke, water, planet, shade, roadTracks, released] = await Promise.all([
     marcher(device, gpu.format, world, false, !!LOCAL?.release),
     glow(gpu),
     crumbs(device, gpu.format),
@@ -266,7 +267,6 @@ async function main() {
     space(device, gpu.format),
     under(device, gpu.format),
     tracks(device, gpu.format),
-    wheels(device, gpu.format),
     releasedPromise,
   ])
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
@@ -283,13 +283,14 @@ async function main() {
   // (A path the address names is this site's own or nothing, #81: `samePath`. The realm's own and its release's are as they say.)
   const farAsked = query.get('far') === '' ? '' : query.has('far') ? samePath(query.get('far')) : null
   if (query.has('far') && farAsked === null) console.warn('?far= names no path of this site: the realm\'s own far model is drawn')
-  const [falling, farModel, marine, skyEggs, folk, staff] = await Promise.all([
+  const [falling, farModel, marine, skyEggs, folk, staff, carWheels] = await Promise.all([
     pieces(device, gpu.format, march),
     farOf(device, gpu.format, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null)),
     fog(device, gpu.format, march),
     eggSky(device, gpu.format, march),
     people(device, gpu.format, march),
     wand(device, gpu.format, march, core, controls, over),
+    wheels(device, gpu.format, march.localLights.buffer),
   ])
   // Show the place once its near boxes and skyline are ready. Coarser fallback cells have lower fetch priority.
   const nearLevels = farModel.listing && farModel.reach > 0
@@ -797,6 +798,91 @@ async function main() {
     if (Math.abs(to - roomed) < 0.01) roomed = to
     return roomed
   }
+  /** Placed world LAMP (material 15) voxel edits tracked so player-built glowing blocks cast real local light. */
+  const placedLamps: { x: number; y: number; z: number; r: number; g: number; b: number; range: number }[] = []
+  let worldPal: Float32Array | null = null
+  const trackLampEdit = (edit: Edit) => {
+    const w = edit.words
+    if (!w.length) return
+    const op = w[0]
+    if (op === 0 && w.length >= 6) {
+      const cx = w[1], cy = w[2], cz = w[3], radius = w[4], kind = w[5]
+      if (kind === 0) {
+        // Blast / clear: remove any placed lamps destroyed inside the blast reach.
+        const r = Math.ceil((radius * 44) / 16) + 2, r2 = r * r
+        for (let i = placedLamps.length - 1; i >= 0; i--) {
+          const l = placedLamps[i], dx = l.x - cx, dy = l.y - cy, dz = l.z - cz
+          if (dx * dx + dy * dy + dz * dz <= r2) placedLamps.splice(i, 1)
+        }
+      } else if ((kind & 15) === 15) {
+        const ci = (kind >>> 8) & 255
+        let r = 1.0, g = 0.78, b = 0.48
+        if (ci !== 0 && ci !== 46) {
+          const pal = (worldPal ??= palette())
+          const o = ci * 4, peak = Math.max(pal[o], pal[o + 1], pal[o + 2], 0.001)
+          r = pal[o] / peak; g = pal[o + 1] / peak; b = pal[o + 2] / peak
+        }
+        const range = Math.min(220, Math.max(95, 75 + radius * 18))
+        // Merge with an existing nearby placed lamp rather than duplicating on repeated clicks.
+        for (let i = 0; i < placedLamps.length; i++) {
+          const l = placedLamps[i], dx = l.x - cx, dy = l.y - cy, dz = l.z - cz
+          if (dx * dx + dy * dy + dz * dz < 225) { l.x = cx; l.y = cy; l.z = cz; l.r = r; l.g = g; l.b = b; l.range = Math.max(l.range, range); return }
+        }
+        if (placedLamps.length >= 64) placedLamps.shift()
+        placedLamps.push({ x: cx, y: cy, z: cz, r, g, b, range })
+      }
+    } else if ((op === 1 || op === 3 || op === 4) && w.length >= 7) {
+      const count = w[1], scale = op === 4 ? 0.125 : op === 3 ? 0.25 : 1
+      let sx = 0, sy = 0, sz = 0, area = 0, lastCi = 0
+      for (let i = 0, o = 2; i < count && o + 4 < w.length; i++, o += 5) {
+        const kind = w[o + 4]
+        if ((kind & 15) !== 15) continue
+        const len = Math.max(1, w[o + 1] - w[o])
+        sx += (w[o] + w[o + 1]) * 0.5 * scale * len
+        sy += w[o + 2] * scale * len
+        sz += w[o + 3] * scale * len
+        area += len
+        lastCi = (kind >>> 8) & 255
+      }
+      if (area > 0) {
+        const cx = sx / area, cy = sy / area, cz = sz / area
+        let r = 1.0, g = 0.78, b = 0.48
+        if (lastCi !== 0 && lastCi !== 46) {
+          const pal = (worldPal ??= palette())
+          const o = lastCi * 4, peak = Math.max(pal[o], pal[o + 1], pal[o + 2], 0.001)
+          r = pal[o] / peak; g = pal[o + 1] / peak; b = pal[o + 2] / peak
+        }
+        if (placedLamps.length >= 64) placedLamps.shift()
+        placedLamps.push({ x: cx, y: cy, z: cz, r, g, b, range: Math.min(200, Math.max(95, 75 + Math.sqrt(area) * scale * 16)) })
+      }
+    }
+  }
+  const emitPlacedLamps = (sink: LocalLightSink) => {
+    if (!placedLamps.length) return
+    const scale = 1.85 * (0.45 + 0.55 * Math.min(1, sink.dark * 1.4))
+    for (let i = 0; i < placedLamps.length; i++) {
+      const l = placedLamps[i]
+      sink.addPoint(l.x, l.y, l.z, l.r * scale, l.g * scale, l.b * scale, l.range, l.range * 0.34, 1.05, 85, LIGHT_EXTRA)
+    }
+  }
+  let portalLights: ((sink: LocalLightSink) => void) | null = null
+  const updateLocalLights = (v: View) => {
+    if (pose.y > SPACE || off.has('lights')) { march.localLights.clear(); return }
+    const ancX = Math.floor(v.eye[0] / SIDE) * SIDE
+    const ancY = Math.floor(v.eye[1] / SIDE) * SIDE
+    const ancZ = Math.floor(v.eye[2] / SIDE) * SIDE
+    march.localLights.beginFrame(v, ancX, ancY, ancZ, preset, march.lights, march.rain)
+    alive.lights(march.localLights)
+    streetLife?.lights(march.localLights)
+    falling.emitLights(march.localLights)
+    smoke.lights(march.localLights)
+    portalLights?.(march.localLights)
+    emitPlacedLamps(march.localLights)
+    if (BAY_ON && march.lights > 0.02) {
+      march.localLights.addStreetLamps(streetLamps(v.eye[0], v.eye[2], preset === 'high' ? 1450 : preset === 'medium' ? 1050 : 650))
+    }
+    march.localLights.finishFrame()
+  }
   const frame = (now: number) => {
     if (lost) return
     // At rest, a screen frame that comes too soon after the last one drawn is let go by, unseen by the watchers too: what
@@ -874,9 +960,11 @@ async function main() {
     if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
     if (pose.y > SPACE) {
+      march.localLights.clear()
       // Where the page starts is the land's middle (land.rs HOME), 70 m east and 407 m south of the world's corner.
       planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     } else {
+      updateLocalLights(v)
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
       windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       farModel.draw(encoder, to, v)
@@ -1040,7 +1128,7 @@ async function main() {
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
   /** `farToo` false: the far model keeps the tile (#450, the billboards: laid in every world, they are no reason to draw their whole tiles as cells from far off). */
-  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); spoiled.push(edit); if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); trackLampEdit(edit); spoiled.push(edit); if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -1611,7 +1699,7 @@ async function main() {
       shadow?.postMessage({ forget: true })
       for (const piece of moving.values()) piece.destroy()
       for (const l of lying) l.piece.destroy()
-      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
+      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0; placedLamps.length = 0
       heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; flames = new Float32Array(0)
       for (const id of [...made.all.keys()]) made.heard({ by: '', gone: id }, false)
       // The sun's maps are drawn again where the old world's edits were, once those sectors have been made again.
@@ -2151,7 +2239,7 @@ async function main() {
       w.onerror = () => { w.terminate(); resolve(ROBOTAXI_SERVICES.map(buildRobotaxiModel)) }
     }))
     const life = streetOf({
-      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, fine: (x, z) => !STREAM || holds(inner, x - 40, z - 40, x + 40, z + 40, 1), hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
+      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, fine: (x, z) => !STREAM || holds(inner, x - 40, z - 40, x + 40, z + 40, 1), hour: () => hour ?? 11, rain: () => march.rain, lights: () => march.lights, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
       faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) },
       robotaxis,
       onNearMiss: (info) => {
@@ -2256,7 +2344,7 @@ async function main() {
     moverAge++
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
-    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
+    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0; placedLamps.length = 0
     heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
     spoiled.push(...world.swap([]))
     farModel.forget()
@@ -2404,7 +2492,7 @@ async function main() {
     }
     watchers.add(hatch)
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, get neighborhood() { return neighborhood }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** Dynamic local lights stats (vehicles, SF street lamps, systemic emissives; active preset budget). */ get localLights() { return march.localLights.stats }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, get neighborhood() { return neighborhood }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   const carSummon = createCarSummon({
@@ -2542,6 +2630,7 @@ async function main() {
     Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring, enterRealm: (id: string) => enterRealm(id) })
   }
   portalDraw = gate ? (encoder, to, v, time, timing) => { gate.walk(); return gate.draw(encoder, to, v, flags, time, timing) } : null
+  portalLights = gate ? (sink) => gate.emitLights(sink) : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })
 
   if (flying) {
