@@ -348,7 +348,7 @@ Add these to the page's address. "Realm" means the San Francisco realm, as `./wo
 | `lobbies=1`, `master=`, `lobby=` | Both | Find and join lobbies through a master server |
 | `fly=1`, `breaks=0`, `seconds=` | Server | The measuring flight (the default at `/`) and its settings |
 | `shadows=0`, `mirrors=0`, `maps=0`, `heat=1`, `flat=1` | Both | Drawing switches, as the keys give |
-| `scale`, `detail`, `rest=0` | Both | Fixed resolution scale, march detail, no resting at 30 fps when still |
+| `scale`, `detail`, `rest=0`, `suntiles`, `ahead=0` | Both | Fixed resolution scale, march detail, no resting at 30 fps when still, a fixed number of sun-map tiles a frame ([the sun's share](/engine-page#the-suns-share-of-a-frame)), bodies drawn as the mover last said them ([where a moving thing is drawn](/engine-page#where-a-moving-thing-is-drawn)) |
 | `bricks`, `finesun`, `fine`, `levels`, `pool`, `grid`, `workers` | Both | World size and finer cells, for measuring |
 | `panes`, `through`, `tries`, `fog`, `walk=loop` | Both | Glass, finer-cell and sea-fog settings, and a march variant, for measuring |
 | `far`, `farreach`, `farnear`, `fardetail`, `farfaces`, `farlight`, `farcutfit`, `farthest`, `farlanding` | Both | The far model's source and limits, for measuring |

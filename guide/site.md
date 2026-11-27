@@ -50,12 +50,12 @@ The dev server runs through `cf dev`, the Workers runtime, and falls back to a N
 | `/blog/<slug>/` | A post, with every file from its folder beside it. |
 | `/blog/tags/`, `/blog/tags/<tag>/` | Tags. |
 | `/blog/voxelmorphism/` | The Signal Desk, the kit's showcase. |
-| `/blog/llms.txt` | An [llms.txt](https://llmstxt.org) index that links every page's Markdown twin. |
+| `/blog/llms.txt` | An [llms.txt](https://llmstxt.org) index that links every page's Markdown twin, the front page's `/index.md` first when it is built. |
 | `/blog/feed.xml` | An Atom feed of the newest 30 posts, full content. |
-| `/blog/sitemap.xml` | Every page route. |
+| `/blog/sitemap.xml` | Every page route, `/` first when the front page is built. |
 | `/robots.txt` | Allows everyone, names the AI crawlers it welcomes, and points at the sitemap. |
 | `/404.html` | "Lost in the fog", the host's not-found page. It has no Markdown twin. |
-| `/_headers` | `static/_headers` with every path moved under the base, because the host reads it only at the top. |
+| `/_headers` | `static/_headers` with every path moved under the base, because the host reads it only at the top. Its `/*` rule stays `/*`: the security headers cover the whole origin. |
 
 <Note>
 Every page route has a Markdown twin at the same address with `.md` in place of the trailing slash: `/blog/hello/` is `/blog/hello.md`, and the base itself is `/blog/index.md`. Each HTML page links its twin with `<link rel="alternate" type="text/markdown">`. Keep that mapping in `lib/paths.mjs` and nowhere else; the dev server and the Worker read it too.
@@ -123,3 +123,18 @@ It carries easter eggs: break the B off BLOG to leave LOG, IDDQD, the moon that 
 ## Markdown by Accept header
 
 `site/src/worker.mjs` answers `Accept: text/markdown` on page routes with the page's twin. It runs only under `npm --prefix site run dev`. The deployed zahynailo.dev is static assets with no Worker code (see [deploy](/deploy)). The `.md` addresses and alternate links work either way.
+
+## Security headers
+
+`static/_headers` sets these on every file of the origin, and `src/worker.mjs` sets the same (`SECURITY_HEADERS`) on what it answers, HTML and Markdown alike:
+
+| Header | Value |
+| --- | --- |
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `Content-Security-Policy` | `frame-ancestors 'self'; object-src 'none'; base-uri 'self'` |
+
+The CSP limits framing, plugins and `<base>` only. It has no `script-src`, so the pages' inline scripts (the speculation rules, the early theme script) keep working; `test/security.test.mjs` checks both, and that the two lists agree.

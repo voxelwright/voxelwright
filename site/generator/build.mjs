@@ -113,10 +113,12 @@ export async function build({ outDir, drafts = false, dev = false, personalHome 
     fs.mkdirSync(dir, { recursive: true });
     for (const name of landingVideos) fs.copyFileSync(path.join(eggOverlay, name), path.join(dir, name));
   }
-  // the host reads _headers only at the top of its assets, so a mounted site's rules move there
+  // the host reads _headers only at the top of its assets, so a mounted site's rules move there. The "/*" rule
+  // (the security headers) is the whole origin's: it stays "/*", so the front page and 404.html get it too.
   if (mounted) {
     fs.rmSync(path.join(siteDir, "_headers"));
-    write(outDir, "_headers", mountHeaders(fs.readFileSync(path.join(ROOT, "static", "_headers"), "utf8"), base));
+    const rules = fs.readFileSync(path.join(ROOT, "static", "_headers"), "utf8");
+    write(outDir, "_headers", rules.split("\n").map((line) => (line === "/*" ? line : mountHeaders(line, base))).join("\n"));
   }
 
   for (const page of pages) {
@@ -134,19 +136,21 @@ export async function build({ outDir, drafts = false, dev = false, personalHome 
     }
   }
 
-  write(outDir, sitePath(base, "/llms.txt"), llmsTxt(site, posts, pages));
-  write(outDir, sitePath(base, "/feed.xml"), atomFeed(site, posts, rendered));
-  write(outDir, sitePath(base, "/sitemap.xml"), sitemap(site, pages, posts));
-  // crawlers read robots.txt only at the origin's root, wherever the site is mounted
-  write(outDir, "robots.txt", robotsTxt(site));
-
-  // Optional personal front page at "/" while the blog stays mounted under its base.
+  // Optional personal front page at "/" while the blog stays mounted under its base. The sitemap and llms.txt
+  // list it first: it is the origin's own page, though it lives outside the base.
+  let home = null;
   if (front) {
     const frontCss = await buildFrontAssets(outDir, base);
-    const home = frontPage(site, { dev, css: frontCss });
+    home = frontPage(site, { dev, css: frontCss });
     write(outDir, "index.html", home.html);
     write(outDir, "index.md", home.markdown);
   }
+
+  write(outDir, sitePath(base, "/llms.txt"), llmsTxt(site, posts, pages, home));
+  write(outDir, sitePath(base, "/feed.xml"), atomFeed(site, posts, rendered));
+  write(outDir, sitePath(base, "/sitemap.xml"), sitemap(site, pages, posts, home));
+  // crawlers read robots.txt only at the origin's root, wherever the site is mounted
+  write(outDir, "robots.txt", robotsTxt(site));
 
   // Feature files go in last, so they can be checked against everything the site itself wrote.
   const taken = [];

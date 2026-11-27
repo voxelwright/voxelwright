@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import cloudflareConfig from './cloudflare.config.ts'
+import { securityHeaders } from './worker.mjs'
+
+const DEPLOY_FILES = ['assemble.mjs', 'alpha.js', 'notice.mjs', 'worker.mjs', 'encoding.mjs', 'og-world.png']
 
 test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwright.world (realm only)', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'world-assembly-'))
@@ -14,7 +18,8 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
     writeFileSync(join(root, path), text)
   }
   const read = (path) => readFileSync(join(root, path), 'utf8')
-  const realm = '<html><head></head><body><script type="application/json">{"to":"/blog/"}</script></body></html>'
+  const loader = '\n(() => { document.title = "loading" })()\n'
+  const realm = `<html><head><title>San Francisco</title><link rel="icon" href="data:,"></head><body><script>${loader}</script><script type="application/json">{"to":"/blog/"}</script><script type="module" src="../page/main.js"></script></body></html>`
   put('realm/sf/index.html', realm)
   put('realm/sf/eggs/clip.mp4', 'clip')
   put('realm/sf/releases/p/manifest.json', '{"version":1}')
@@ -23,18 +28,20 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
   put('realm/sf/releases/p/tiles/0/1_2.bay.br', 'compressed tile')
   put('realm/sf/releases/p/far/0/1_2.far', 'uncompressed far')
   put('realm/sf/releases/p/far/0/1_2.far.br', 'compressed far')
+  put('realm/sf/releases/p/graph/1_2.json', '{"graph":1}')
+  put('realm/sf/releases/p/graph/1_2.json.br', 'compressed graph')
+  put('realm/sf/loading-wide-0123456789ab.webp', 'picture')
   put('realm/bay/map.bin', 'uncompressed map')
   put('realm/bay/map.bin.br', 'compressed map')
   put('realm/bay/plain-only.bin', 'plain only')
   put('site/index.html', '<html><body>Personal</body></html>')
   put('site/index.md', '# Personal\n')
   put('site/blog/index.html', '<html><body>Blog</body></html>')
+  put('site/blog/favicon.svg', '<svg/>')
   put('site/404.html', '<html><body>Not found</body></html>')
   put('site/robots.txt', 'personal robots')
   put('site/_headers', '/blog/*\n  Example: personal\n')
-  for (const file of ['assemble.mjs', 'alpha.js', 'notice.mjs']) {
-    cpSync(new URL(file, import.meta.url), join(root, file))
-  }
+  for (const file of DEPLOY_FILES) cpSync(new URL(file, import.meta.url), join(root, file))
   execFileSync(process.execPath, [join(root, 'assemble.mjs'), '--realm', join(root, 'realm'), '--site', join(root, 'site')])
 
   // deploy/dist: site alone, no realm files, no alpha notice
@@ -71,6 +78,49 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
   assert.equal(read('dist-world/bay/map.bin.br'), 'compressed map')
   assert.equal(read('dist-world/bay/plain-only.bin'), 'plain only')
   assert.equal(existsSync(join(root, 'dist-world/alpha.js')), true)
+
+  // the street graphs stay out, plain and Brotli
+  assert.equal(existsSync(join(root, 'dist-world/releases/p/graph')), false)
+
+  // its own share card, favicon, title and social metadata
+  assert.deepEqual(readFileSync(join(root, 'dist-world/og.png')), readFileSync(new URL('og-world.png', import.meta.url)))
+  assert.equal(read('dist-world/favicon.svg'), '<svg/>')
+  const index = read('dist-world/index.html')
+  assert.match(index, /<title>Voxelwright — San Francisco<\/title>/)
+  assert.match(index, /<link rel="icon" href="\/favicon\.svg" type="image\/svg\+xml">/)
+  assert.doesNotMatch(index, /href="data:,"/)
+  for (const [key, value] of [
+    ['og:site_name', 'Voxelwright'], ['og:title', 'Voxelwright — San Francisco'], ['og:image', 'https://voxelwright.world/og.png'],
+    ['og:image:type', 'image/png'], ['og:image:width', '1200'], ['og:image:height', '630'],
+    ['twitter:card', 'summary_large_image'], ['twitter:title', 'Voxelwright — San Francisco'], ['twitter:image', 'https://voxelwright.world/og.png'],
+  ]) assert.ok(index.includes(`="${key}" content="${value}"`), `${key} is ${value}`)
+  for (const key of ['description', 'og:description', 'og:image:alt', 'twitter:description', 'twitter:image:alt']) {
+    assert.match(index, new RegExp(`="${key}" content="[^"]{20,}"`), `${key} is set`)
+  }
+  assert.doesNotMatch(index, /zahynailo\.dev\/blog\/og/, 'the world no longer borrows the blog\'s card')
+
+  // a dark 404 with no inline script
+  const missing = read('dist-world/404.html')
+  assert.match(missing, /background: #10141a/)
+  assert.doesNotMatch(missing, /<script>/)
+
+  // security headers on everything; the CSP allows the page's inline scripts by hash and nothing inline otherwise
+  const headers = read('dist-world/_headers')
+  const all = headers.slice(headers.indexOf('/*\n'), headers.indexOf('/current.json'))
+  const sha = (text) => `'sha256-${createHash('sha256').update(text).digest('base64')}'`
+  const csp = all.match(/^ {2}Content-Security-Policy: (.+)$/m)[1]
+  assert.ok(csp.includes(sha(loader)), 'the loader script is allowed by its hash')
+  assert.ok(csp.includes(sha('{"to":"https://zahynailo.dev/blog/"}')), 'hashes are of the published bytes, after the blog links move')
+  const scriptSrc = csp.split('; ').find((d) => d.startsWith('script-src '))
+  assert.match(scriptSrc, /^script-src 'self' 'wasm-unsafe-eval' 'sha256-/)
+  assert.doesNotMatch(scriptSrc, /unsafe-inline/)
+  assert.match(csp, /frame-ancestors 'self' https:\/\/zahynailo\.dev/)
+  for (const [name, value] of Object.entries(securityHeaders())) {
+    if (name !== 'Content-Security-Policy') assert.ok(all.includes(`  ${name}: ${value}\n`), `${name} on /*`)
+  }
+  assert.match(headers, /\/loading-\*\.webp\n {2}Cache-Control: public, max-age=31536000, immutable/)
+  assert.match(headers, /\/kit\/fonts\/\*\n {2}Cache-Control: public, max-age=604800, stale-while-revalidate=2592000/)
+  assert.doesNotMatch(read('dist/_headers'), /Content-Security-Policy: script-src/, 'zahynailo.dev keeps its own headers')
 })
 
 test('assemble refuses a site build missing its personal page at /', (t) => {
@@ -82,9 +132,7 @@ test('assemble refuses a site build missing its personal page at /', (t) => {
   }
   put('realm/sf/index.html', '<html><body>Realm</body></html>')
   put('site/blog/index.html', '<html><body>Blog</body></html>')
-  for (const file of ['assemble.mjs', 'alpha.js', 'notice.mjs']) {
-    cpSync(new URL(file, import.meta.url), join(root, file))
-  }
+  for (const file of DEPLOY_FILES) cpSync(new URL(file, import.meta.url), join(root, file))
   assert.throws(
     () => execFileSync(process.execPath, [join(root, 'assemble.mjs'), '--realm', join(root, 'realm'), '--site', join(root, 'site')], { stdio: 'pipe' }),
     /holds no personal page at \//,
@@ -102,6 +150,8 @@ test('cloudflare.config.ts deploys zahynailo as assets-only and voxelwright with
   assert.equal(world.name, 'voxelwright')
   assert.equal(world.entrypoint, './world-worker.mjs')
   assert.deepEqual(world.assets.runWorkerFirst, ['/releases/*', '/bay/*', '/weather'])
+  assert.equal(personal.workersDev, false)
+  assert.equal(world.workersDev, false)
 })
 
 test('the two zahynailo-realm rules use only Free-plan constructs and redirect only realm queries at /', () => {

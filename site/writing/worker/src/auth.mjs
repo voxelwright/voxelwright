@@ -18,6 +18,9 @@ const SESSION_COOKIE = "__Host-edit";
 const CHALLENGE_COOKIE = "__Host-chal";
 const SESSION_SECONDS = 12 * 60 * 60;
 const CHALLENGE_SECONDS = 5 * 60;
+// Signing in is open to anyone, so the live challenges it may leave in D1 are capped: past this many, a new
+// sign-in waits for the oldest to expire (at most CHALLENGE_SECONDS).
+export const MAX_PENDING_CHALLENGES = 32;
 
 export const b64url = {
   encode(bytes) {
@@ -122,6 +125,10 @@ export async function registerVerify(req, env, body) {
 }
 
 export async function loginOptions(req, env) {
+  const pending = await env.DB.prepare("SELECT COUNT(*) AS n FROM challenges WHERE expires_at >= ?").bind(Date.now()).first();
+  if ((pending?.n ?? 0) >= MAX_PENDING_CHALLENGES) {
+    return [429, { error: "too many sign-ins started; try again in a few minutes" }, { "retry-after": String(CHALLENGE_SECONDS) }];
+  }
   const options = await generateAuthenticationOptions({ rpID: env.RP_ID, userVerification: "required" });
   return [200, options, { "set-cookie": await newChallenge(env, "login", options.challenge) }];
 }
@@ -183,7 +190,9 @@ export async function verifyAccessJwt(token, env, now = Date.now() / 1000) {
   } catch {
     return null;
   }
-  if (header.alg !== "RS256") return null;
+  if (header?.alg !== "RS256") return null;
+  // A key is picked by its id only: without one, a key with no kid would match a token with none.
+  if (typeof header.kid !== "string" || header.kid.length === 0) return null;
   const jwk = (await accessKeys(env)).find((k) => k.kid === header.kid);
   if (!jwk) return null;
   const key = await crypto.subtle.importKey("jwk", { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);

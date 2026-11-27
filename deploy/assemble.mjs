@@ -3,14 +3,19 @@
 //     the blog under "/blog/", robots.txt, 404.html and the site's own _headers. No realm files and no alpha notice.
 //   - deploy/dist-world (voxelwright.world): the SF realm (engine/dist-sf, from `node engine/sf/build.mjs`) at the root:
 //     its sf/ folder (the page, the release pointer, the release, kept things, eggs, credits) becomes "/", beside the
-//     engine's page/, kit/, blocks/ and bay/, with the alpha notice and world canonical/social metadata.
+//     engine's page/, kit/, blocks/ and bay/, with the alpha notice, the world's own share card (og-world.png at
+//     /og.png), the site's favicon, social metadata, a dark 404 and security headers whose CSP names each inline
+//     script of the pages by its SHA-256 (worker.mjs holds the policy). The release's street graphs stay out: the
+//     page never asks for them (sf/build.mjs reads them from ~/.village to draw the road's marks).
 // The Brotli copies are kept only where worker.mjs sends them (releases/, bay/); the platform compresses the rest.
 //
 //   node deploy/assemble.mjs [--realm engine/dist-sf] [--site site/dist]
+import { createHash } from 'node:crypto'
 import { constants as fsConstants, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { withNotice } from './notice.mjs'
+import { securityHeaders } from './worker.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url)), repo = dirname(here)
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return resolve(repo, at > 0 ? process.argv[at + 1] : fallback) }
@@ -27,6 +32,8 @@ const SENT_BY_WORKER = (path) => path.startsWith('releases/') || path.startsWith
 // Accept-Encoding: br): drop their uncompressed copies when a quality-11 .br sibling exists so dist-world stays
 // compact (~800 MB / ~6,800 files instead of ~6.7 GB / ~12,400 files). Text and JSON keep both plain and .br.
 const BROTLI_ONLY_BINARY = (path) => SENT_BY_WORKER(path) && /\.(bay|far|bin)$/.test(path)
+// releases/<pin>/graph/: the street graphs, plain and .br. No page code reads them (engine/page has no reference).
+const UNUSED = (path) => /^releases\/[^/]+\/graph\//.test(path)
 const worldFiles = new Map()
 const placeWorld = (from, path) => {
   if (worldFiles.has(path)) fail(`/${path} comes from both ${relative(repo, worldFiles.get(path))} and ${relative(repo, from)}`)
@@ -37,9 +44,11 @@ for (const file of files(realm)) {
   if (path.startsWith('sf/')) path = path.slice(3)
   if (path.endsWith('.br') && !SENT_BY_WORKER(path)) continue
   if (BROTLI_ONLY_BINARY(path) && existsSync(`${file}.br`)) continue
+  if (UNUSED(path)) continue
   placeWorld(file, path)
 }
 placeWorld(join(here, 'alpha.js'), 'alpha.js')
+placeWorld(join(here, 'og-world.png'), 'og.png')
 
 const siteFiles = new Map()
 let siteHeaders = ''
@@ -48,18 +57,65 @@ for (const file of files(site)) {
   if (path === '_headers') { siteHeaders = readFileSync(file, 'utf8'); continue }
   siteFiles.set(path, file)
 }
+// The site's favicon, as its build published it under the blog.
+const favicon = siteFiles.get('blog/favicon.svg')
+if (!favicon) fail(`${relative(repo, site)} holds no blog/favicon.svg: cd site && npm run build`)
+placeWorld(favicon, 'favicon.svg')
 const personal = 'https://zahynailo.dev'
 const worldOrigin = 'https://voxelwright.world'
+const TITLE = 'Voxelwright — San Francisco'
+const DESCRIPTION = 'San Francisco at true size in 10 cm voxels, drawn live with WebGPU in the browser. Walk it, drive it, or make things in it by talking to your own AI.'
+const CARD_ALT = 'The Voxelwright plate over San Francisco’s voxel skyline: “San Francisco in 10 cm WebGPU voxels”, voxelwright.world.'
+const attr = (text) => text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 function worldPage(html) {
   // The built realm embeds its board destinations as JSON. Leave third-party and realm asset URLs alone.
-  return html.replace(/(["'])\/blog\//g, `$1${personal}/blog/`).replace('</head>', `<link rel="canonical" href="${worldOrigin}/">
+  const page = html.replace(/(["'])\/blog\//g, `$1${personal}/blog/`)
+    .replace(/<title>[^<]*<\/title>/, `<title>${attr(TITLE)}</title>`)
+    .replace('<link rel="icon" href="data:,">', '<link rel="icon" href="/favicon.svg" type="image/svg+xml">')
+  return page.replace('</head>', `<link rel="canonical" href="${worldOrigin}/">
+<meta name="description" content="${attr(DESCRIPTION)}">
 <meta property="og:type" content="website">
-<meta property="og:title" content="San Francisco">
+<meta property="og:site_name" content="Voxelwright">
+<meta property="og:title" content="${attr(TITLE)}">
+<meta property="og:description" content="${attr(DESCRIPTION)}">
 <meta property="og:url" content="${worldOrigin}/">
-<meta property="og:image" content="${personal}/blog/og/home.png">
+<meta property="og:image" content="${worldOrigin}/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="${attr(CARD_ALT)}">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="${personal}/blog/og/home.png">
+<meta name="twitter:title" content="${attr(TITLE)}">
+<meta name="twitter:description" content="${attr(DESCRIPTION)}">
+<meta name="twitter:image" content="${worldOrigin}/og.png">
+<meta name="twitter:image:alt" content="${attr(CARD_ALT)}">
 </head>`)
+}
+
+// The world's 404, in the realm's dark (#10141a) with the kit's plate colours. No inline script, so nothing to hash.
+const NOT_FOUND = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found · Voxelwright</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><meta name="robots" content="noindex">
+<style>
+:root { color-scheme: dark; }
+html, body { margin: 0; min-height: 100%; background: #10141a; color: #e8ebf2; }
+body { display: grid; place-items: center; min-height: 100vh; padding: 16px; box-sizing: border-box; font: 400 1rem/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { box-sizing: border-box; inline-size: min(30rem, 100%); padding: 28px 28px 28px 24px; background: #1a2029; border-inline-start: 8px solid #fff600; box-shadow: 4px 5px 0 rgb(0 0 0 / 0.45); }
+p.code { margin: 0 0 8px; font: 600 0.75rem/1.4 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.08em; text-transform: uppercase; color: #fff600; }
+h1 { margin: 0 0 12px; font-size: 1.5rem; line-height: 1.25; font-weight: 650; }
+p { margin: 0; color: #b4bccb; text-wrap: pretty; }
+a { color: #e8ebf2; text-underline-offset: 3px; }
+a:hover, a:focus-visible { color: #fff600; }
+a.home { display: inline-block; margin-top: 20px; padding: 10px 16px; background: #fff600; color: #0a0f3d; font-weight: 650; text-decoration: none; }
+a.home:hover, a.home:focus-visible { background: #fbfcff; color: #0a0f3d; }
+</style></head><body><main><p class="code">404</p><h1>Page not found</h1>
+<p>Nothing lives at this address. The city is still here, and so is <a href="${personal}/blog/">Pavlo’s blog</a>.</p>
+<a class="home" href="/">Return to San Francisco</a></main></body></html>`
+
+/** `'sha256-…'` of each inline script (one with no src) in the page, its exact bytes between the tags. */
+function inlineScriptHashes(html) {
+  return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)]
+    .filter(([, attrs]) => !/\bsrc\s*=/i.test(attrs))
+    .map(([, , body]) => `'sha256-${createHash('sha256').update(body, 'utf8').digest('base64')}'`)
 }
 
 const cloneOrCopy = (from, to) => {
@@ -72,25 +128,42 @@ const cloneOrCopy = (from, to) => {
 function assemble(folder, entries, headers, world) {
   const out = join(here, folder)
   rmSync(out, { recursive: true, force: true })
+  const hashes = new Set()
+  const page = (path, html) => {
+    const published = withNotice(html)
+    for (const hash of inlineScriptHashes(published)) hashes.add(hash)
+    writeFileSync(join(out, path), published)
+  }
   for (const [path, from] of entries) {
     mkdirSync(dirname(join(out, path)), { recursive: true })
     if (!world || !path.endsWith('.html')) { cloneOrCopy(from, join(out, path)); continue }
-    let html = readFileSync(from, 'utf8')
-    if (path === 'index.html') html = worldPage(html)
-    writeFileSync(join(out, path), withNotice(html))
+    const html = readFileSync(from, 'utf8')
+    page(path, path === 'index.html' ? worldPage(html) : html)
   }
 
   if (world) {
+    page('404.html', NOT_FOUND)
+    writeFileSync(join(out, 'robots.txt'), 'User-agent: *\nAllow: /\n')
+    const security = Object.entries(securityHeaders([...hashes].sort())).map(([name, value]) => `  ${name}: ${value}`)
+    // Workers static assets reads at most 2,000 characters a line.
+    if (security.some((line) => line.length > 2000)) fail('a security header line is over 2,000 characters: too many inline scripts')
     writeFileSync(join(out, '_headers'), [
-      '# The realm (engine/dist-sf). The release pointer is asked for every time, so a new pin shows at once; the release',
-      '# itself and the binary files are sent by worker.mjs, which sets their headers.',
+      '# The realm (engine/dist-sf). Security headers on everything (worker.mjs holds them; the CSP names the inline',
+      '# scripts of the pages above by hash). The release pointer is asked for every time, so a new pin shows at once; the',
+      '# release itself and the binary files are sent by worker.mjs, which sets their headers.',
+      '/*',
+      ...security,
       '/current.json',
       '  Cache-Control: no-cache',
+      '# The loader\'s pictures are named by their content.',
+      '/loading-*.webp',
+      '  Cache-Control: public, max-age=31536000, immutable',
+      '# Fonts keep their names but almost never change: a week, then checked in the background for a month.',
+      '/kit/fonts/*',
+      '  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000',
       '',
       headers,
     ].join('\n'))
-    writeFileSync(join(out, 'robots.txt'), 'User-agent: *\nAllow: /\n')
-    writeFileSync(join(out, '404.html'), withNotice(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Page not found · San Francisco</title></head><body><main><h1>Page not found</h1><p><a href="/">Return to San Francisco</a> or visit <a href="${personal}/blog/">Pavlo’s blog</a>.</p></main></body></html>`))
   } else if (headers) {
     writeFileSync(join(out, '_headers'), headers)
   }
