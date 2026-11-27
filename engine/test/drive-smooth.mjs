@@ -398,7 +398,8 @@ function report(r) {
   console.log(`    going    ${rowOf(s)}   (over 50 ms: ${s.over50}, over 100 ms: ${s.over100})`)
   if (r.heard.length > 2) {
     // How evenly the eye moved: each frame's speed over its own gap against the last one's, as a share (a car that waits and then jumps reads 0 then 2).
-    const eyeSpeed = all.slice(1).map((f, i) => Math.hypot(f.eye[0] - all[i].eye[0], f.eye[2] - all[i].eye[2]) / Math.max(1, f.gap))
+    // (The eye a frame is handed is the one the frame before drew, so the way it came belongs to that frame's gap.)
+    const eyeSpeed = all.slice(1).map((f, i) => Math.hypot(f.eye[0] - all[i].eye[0], f.eye[2] - all[i].eye[2]) / Math.max(1, all[i].gap))
     const jerk = eyeSpeed.slice(1).map((v, i) => Math.abs(v - eyeSpeed[i]) / Math.max(1e-6, (v + eyeSpeed[i]) / 2)).sort((a, b) => a - b), gaps = r.heard.slice(1).map((t, i) => t - r.heard[i]).sort((a, b) => a - b)
     console.log(`  the eye's speed from one frame to the next differs by ${round(jerk[jerk.length >> 1] ?? 0, 2)} of itself at the median, ${round(jerk[Math.floor(jerk.length * 0.95)] ?? 0, 2)} at the 95th; the mover answered ${r.heard.length} times, ${round(gaps[gaps.length >> 1] ?? 0)} ms apart at the median, ${round(gaps[Math.floor(gaps.length * 0.99)] ?? 0)} at the 99th, ${round(gaps.at(-1) ?? 0)} at most`)
     const even = evenness(all), steps = all.map((f) => f.step).sort((a, b) => a - b)

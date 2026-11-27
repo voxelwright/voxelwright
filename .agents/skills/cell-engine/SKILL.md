@@ -66,11 +66,13 @@ earlier street of cells learned is in `voxel-world`.
    tile is redrawn when there is room. Where no tile is drawn the shader asks the next coarser
    box's map, and traces as before only where none has one.
    This took shadows at street level from about 15 ms to 0.3 ms.
-   A tile is dear (4,096 rays through everything up-sun; 0.5 ms in San Francisco, 2.5 ms in
-   the town, whose far boxes hold land): on a GPU with no time to spare, eight in a frame made
-   one frame in twelve late whenever the eye moved, at any speed from 60 km/h, with the page's
-   thread at 2 ms (#73, `test/drive-smooth.mjs --curve --sun-most 8,own`: none late with the
-   tiles held to their share, in the same session; on a quiet GPU neither was late).
+   A tile is dear (4,096 rays through everything up-sun; 0.4 ms in San Francisco at midday,
+   3.5 ms there with the sun low, 2.5 to 3 ms in the town, whose far boxes hold land): in the
+   town, on a GPU other work was drawing on, eight in a frame made one frame in twelve late
+   whenever the eye moved, at any speed from 60 km/h, with the page's thread at 2 ms (#73,
+   `test/drive-smooth.mjs --curve --sun-most 8,own`: none late with the tiles held to their
+   share, in the same session; on a quiet GPU neither was late, and in San Francisco at midday
+   the share changed nothing measured, quiet or with a second page drawing beside).
    While the eye moves the tiles have a twelfth of the frame's GPU time, counted in what a
    tile was last measured to take (`main.ts` `sunMost`); standing, eight as before. A map is
    drawn once its own box and every coarser one is nearly whole (`world.ts` `wholeFrom`): its
@@ -503,6 +505,10 @@ size, not 0.40.
   them: the sun's tile passes are not in `gpuMs`. Pin the picture's size (`engine.scale`) before
   timing anything that moves, or the steer turns the cost into fewer pixels and hides it; and
   hold one suspect at a time to none in the same session (#73).
+- A frame on time is not a thing shown moving evenly. A car was drawn where the mover last said
+  it, so a late answer showed it standing a frame and then jumping; the gaps between frames said
+  nothing of it. Measure where the thing is drawn each frame against its speed and the frame's
+  gap (`test/drive-smooth.mjs --ahead`), and draw it on to the frame's time (`main.ts` `drawAhead`).
 
 ## Checks, and the bar
 

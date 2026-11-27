@@ -614,10 +614,12 @@ async function main() {
   } : null
   // ── The sun's maps and the frame (#73) ──
   // A tile of the sun's maps is 4,096 rays through everything up-sun of them (sun.ts). Eight were drawn in any frame
-  // that had eight to draw, and whenever the eye moves there are. On a GPU with no time to spare (other pages drawing
-  // on it; the picture's size is steered to fill it) that made one frame in twelve late at any speed from 60 km/h,
-  // and none with the tiles held back (test/drive-smooth.mjs `--curve --sun-most 8,own`). So while the eye moves the
-  // tiles have a share of the frame's time on the GPU, a twelfth of it, counted in what a tile was last measured to take there.
+  // that had eight to draw, and whenever the eye moves there are. What a tile takes of the GPU depends on the place and
+  // the hour: 0.4 ms in San Francisco at midday, 3.5 ms there with the sun low, 2.5 to 3 ms in the town, whose far
+  // boxes hold land. In the town, on a GPU other work was drawing on, eight a frame made one frame in twelve late at any
+  // speed from 60 km/h, and none with the tiles held back, in the same session (test/drive-smooth.mjs `--curve
+  // --sun-most 8,own`); in San Francisco at midday neither way was a frame more late. So while the eye moves the tiles
+  // have a share of the frame's time on the GPU, a twelfth of it, counted in what a tile was last measured to take there.
   // What a frame does not use is kept, up to one tile's worth: a tile dearer than the share is drawn every few frames.
   // The picture is right meanwhile: a place whose tile is not drawn is answered from the next coarser box's map.
   // An eye that stands has eight a frame as before: nothing passes for a late frame to be seen in, and the first
