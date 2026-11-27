@@ -270,7 +270,7 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var brokenLamp = 0.0;
   if (in.hasSmooth != 0u && in.wear.x > 0.001) {
     if (stuff == 15u) {
-      brokenLamp = smoothstep(0.58, 0.88, in.wear.x);
+      brokenLamp = deformLamp(in.wear.x);
       albedo = mix(albedo, vec3f(0.026, 0.029, 0.034), brokenLamp);
       rough = mix(rough, 0.68, brokenLamp);
     } else if (polished) {

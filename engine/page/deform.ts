@@ -304,6 +304,8 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
   return result;
 }
 fn deformPaint(albedo: vec3f, scuff: f32, crease: f32, p: vec3f) -> DeformPaint { return deformPaintSeen(albedo, scuff, crease, p, 1.0); }
+// At the crushed centre a lamp loses its light. A lamp on the shoulder of the dent stays lit.
+fn deformLamp(scuff: f32) -> f32 { return smoothstep(0.58, 0.88, scuff); }
 // Three unequal, tapered scores in a rub mark. The path is in 10 cm cells relative
 // to contact. Each score ends on the panel, even when repeated blows widen the dent.
 fn gouge(p: vec2f, length: f32, width: f32, bend: f32) -> f32 {

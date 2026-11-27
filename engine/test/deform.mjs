@@ -283,7 +283,7 @@ struct Answer { pos: vec4f, norm: vec4f, damage: vec4f, paint: vec4f }
   let p = points[i]; let def = fleet.cars[u32(p.w)];
   let d = deformPoint(p.xyz, vec3f(0.0, 1.0, 0.0), def);
   let paint = deformPaint(vec3f(0.7, 0.12, 0.04), d.scuff, d.crease, (p.xyz-def.posR[0].xyz).xzy);
-  answers[i] = Answer(vec4f(d.pos, 1.0), vec4f(d.norm, 0.0), vec4f(d.scuff, d.crease, paint.roughBoost, paint.clearcoatKeep), vec4f(paint.albedo, deformGlass(def.status.w, d.scuff, p.xyz - def.posR[0].xyz)));
+  answers[i] = Answer(vec4f(d.pos, 1.0), vec4f(d.norm, deformLamp(d.scuff)), vec4f(d.scuff, d.crease, paint.roughBoost, paint.clearcoatKeep), vec4f(paint.albedo, deformGlass(def.status.w, d.scuff, p.xyz - def.posR[0].xyz)));
 }
 @compute @workgroup_size(64) fn base(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x; if (i >= arrayLength(&points)) { return; }
@@ -380,6 +380,8 @@ struct ViewOut { @builtin(position) clip: vec4f, @location(0) p: vec3f, @locatio
       if (Math.abs(row[4]) + Math.abs(row[6]) > 0.03) tilted++
       assert.ok(row[8] > 0 && row[9] > 0 && row[10] > 0 && row[11] <= 1); scuffed++
       if (row[15] > 0) cracked++
+      if (row[8] > 0.35 && row[8] < 0.55) assert.equal(row[7], 0, 'a lamp beside the impact keeps its light')
+      if (row[8] > 0.92) assert.equal(row[7], 1, 'a directly crushed lamp goes dark')
       if (distance > 0) assert.ok(distBox(want, s.cabin) > 0, 'deformed metal stays outside cabin')
     }
     for (const j of [8,9,10,11,15]) assert.ok(row[j] >= 0 && row[j] <= 1)
