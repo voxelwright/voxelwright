@@ -14,7 +14,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { brotliCompressSync, constants as Z } from 'node:zlib'
-import { pack } from './pack-bench.mjs'
+import { pack } from './pack.mjs'
 
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const dist = resolve(arg('dist', '')), out = resolve(arg('out', '')), k = Number(arg('squares', '8'))

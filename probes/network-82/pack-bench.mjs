@@ -7,12 +7,12 @@
 //
 //   node probes/network-82/pack-bench.mjs --release <dir> [--only landing] [--write <dir>]
 //
-// The pack ("VXPK1"): 8 bytes of magic and index length, a JSON index { name: [offset, length] }, then the files'
-// bytes end to end. Sent as ONE object, compressed as a whole (Content-Encoding: br, or by the client).
+// The pack is pack.mjs's: sent as ONE object, compressed as a whole (Content-Encoding: br, or by the client).
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { brotliCompressSync, brotliDecompressSync, constants as Z, gzipSync, zstdCompressSync } from 'node:zlib'
+import { pack, unpack } from './pack.mjs'
 
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const release = arg('release', null), only = arg('only', ''), write = arg('write', null)
@@ -21,22 +21,6 @@ const manifest = JSON.parse(readFileSync(join(release, 'manifest.json'), 'utf8')
 const br = (bytes, lgwin = 24, quality = 11) => brotliCompressSync(bytes, { params: { [Z.BROTLI_PARAM_QUALITY]: quality, [Z.BROTLI_PARAM_LGWIN]: lgwin, [Z.BROTLI_PARAM_SIZE_HINT]: bytes.length, ...(lgwin > 24 ? { [Z.BROTLI_PARAM_LARGE_WINDOW]: 1 } : {}) } })
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`, pct = (a, b) => `${(((a - b) / b) * 100).toFixed(1)}%`
 const sha = (b) => createHash('sha256').update(b).digest('hex')
-
-/** The pack of some files, in the order given. */
-export function pack(entries) {
-  const index = {}
-  let at = 0
-  for (const [name, bytes] of entries) { index[name] = [at, bytes.length]; at += bytes.length }
-  const head = Buffer.from(JSON.stringify(index)), lead = Buffer.alloc(8)
-  lead.write('VXPK', 0, 'latin1'); lead.writeUInt32LE(head.length, 4)
-  return Buffer.concat([lead, head, ...entries.map(([, b]) => b)])
-}
-/** A pack read back: name -> bytes (views, no copies). */
-export function unpack(bytes) {
-  if (bytes.toString('latin1', 0, 4) !== 'VXPK') throw Error('not a pack')
-  const length = bytes.readUInt32LE(4), index = JSON.parse(bytes.toString('utf8', 8, 8 + length)), from = 8 + length
-  return new Map(Object.entries(index).map(([name, [at, n]]) => [name, bytes.subarray(from + at, from + at + n)]))
-}
 
 /** One row: these files each as its own request (the q11 `.br` beside each, as the Worker sends it now) against one pack. */
 function row(label, files, { order = (a, b) => (a < b ? -1 : 1), variants = true } = {}) {
