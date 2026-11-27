@@ -141,6 +141,10 @@ pub struct Live {
     surf_cell: [i32; 2],
     surf_base: f32,
     wheelbase: f32,
+    /// What another rolling vehicle meets it as (hull.rs): made when it is given a motor that rides. And how much of
+    /// its speed other vehicles' hulls took from it in the step.
+    pub(super) hull: Option<Box<super::hull::Hull>>,
+    pub(super) given: V,
 }
 
 impl Live {
@@ -151,7 +155,7 @@ impl Live {
             steer_now: 0.0, prev_rolls: 0.0, long_acc: 0.0, lat_acc: 0.0,
             burnout_charge: 0.0, launch_timer: 0.0, launch_power: 0.0,
             boost_ask: false, boost_fuel: 1.0, boost_on: false, boost_cd: 0.0, air_time: 0.0,
-            wetness: 0.0, surface_grip: 0.0, surf_cell: [i32::MIN; 2], surf_base: 1.0, wheelbase: 28.0,
+            wetness: 0.0, surface_grip: 0.0, surf_cell: [i32::MIN; 2], surf_base: 1.0, wheelbase: 28.0, hull: None, given: [0.0; 3],
         }
     }
 
@@ -258,7 +262,7 @@ fn kick(b: &mut Body, r: V, j: V) {
 }
 
 /// How far along a line from `p` the standing world begins, within `reach`: none if it does not.
-fn ray(ground: &mut Ground, p: V, way: V, reach: f32) -> Option<f32> {
+pub(super) fn ray(ground: &mut Ground, p: V, way: V, reach: f32) -> Option<f32> {
     let steps = (reach * 4.0).ceil() as i32;
     for k in 0..=steps {
         let s = (k as f32 * 0.25).min(reach);
@@ -999,6 +1003,8 @@ impl Bodies {
             !feet.iter().any(|(at, reach)| q[1] < at[1] && (q[0] - at[0]).abs() <= *reach && (q[2] - at[2]).abs() <= *reach)
         });
         b.asleep = false;
+        let hull = b.live.as_ref().unwrap().rides().then(|| Box::new(super::hull::Hull::of(b)));
+        b.live.as_mut().unwrap().hull = hull;
         true
     }
 
@@ -1039,7 +1045,9 @@ impl Bodies {
     }
 
     /// Puts a living thing where it was: its middle of mass at a place, turned so, still. For a world that is
-    /// started again, whose bodies are lost: each thing gets up where it last slept.
+    /// started again, whose bodies are lost: each thing gets up where it last slept. And for a drawn car that comes
+    /// to life where it was drawn (#72): a rolling vehicle put where another is coming in is moved out ahead of it,
+    /// and what stands where that takes it is moved on (`clear`). Put where nothing moves, it is where it was put.
     pub fn place(&mut self, id: u32, pos: V, rot: Q) -> bool {
         let long = (rot[0] * rot[0] + rot[1] * rot[1] + rot[2] * rot[2] + rot[3] * rot[3]).sqrt();
         if !(long > 0.5 && long < 2.0) || pos.iter().any(|v| !v.is_finite()) {
@@ -1065,6 +1073,8 @@ impl Bodies {
         for foot in &mut live.feet {
             (foot.road, foot.rise) = (f32::NAN, 0.0);
         }
+        // A vehicle is put clear of whatever is coming into the place (hull.rs): by now a car that struck it is there.
+        self.clear(id);
         true
     }
 

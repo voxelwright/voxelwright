@@ -20,7 +20,10 @@ use crate::{Edit, SETTLE, WIDE, city, fill_of};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
+mod hull;
 mod living;
+#[cfg(test)]
+mod pileup;
 pub use living::{Foot, Live, Struck};
 
 /// How fast things fall faster: cells a second, each second.
@@ -924,6 +927,9 @@ pub struct Bodies {
     next: u32,
     pub out: Vec<u32>,
     touches: Vec<Touch>,
+    /// The pairs of vehicles that touch this step, each eased apart as one (hull.rs): the two, the way the first is
+    /// pushed, and how far they are into each other.
+    parted: Vec<(usize, usize, V, f32)>,
     /// Time owed to the solver that was not a whole step.
     owed: f32,
     /// How many steps the last call took, and what was counted in them: for measuring.
@@ -973,7 +979,7 @@ struct Found {
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new(), fuses: Vec::new(), since_lit: 0.0, struck: Vec::new(), spawned: 0 }
+        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), parted: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new(), fuses: Vec::new(), since_lit: 0.0, struck: Vec::new(), spawned: 0 }
     }
 
     /// How many bodies move, and wide boxes still to be asked about: while it is not nothing the solver is to be
@@ -1574,6 +1580,7 @@ impl Bodies {
         // What lives is moved by its motor; then what pulls and what touches.
         self.motors(h);
         self.touches.clear();
+        self.parted.clear();
         let mut found: Vec<(V, V, V, f32)> = Vec::new();
         let mut ploughed: Vec<[i32; 3]> = Vec::new();
         for i in 0..self.list.len() {
@@ -1652,7 +1659,16 @@ impl Bodies {
                 if dot(apart, apart) > reach * reach {
                     continue;
                 }
-                for (one, other, flip) in [(i, j, false), (j, i, true)] {
+                // Two rolling vehicles meet as whole hulls, parted one way (hull.rs): cell by cell a car in another's
+                // hollow cabin touched nothing, and its shell was pushed the short way, into the cabin or up over the roof.
+                let hulls = a.live.as_ref().and_then(|live| live.hull.as_ref()).zip(b.live.as_ref().and_then(|live| live.hull.as_ref()));
+                if let Some((ha, hb)) = hulls {
+                    self.paired += (a.points.len() + b.points.len()) as u32;
+                    if let Some((n, deep)) = hull::meet(a, ha, b, hb, &mut found) {
+                        self.parted.push((i, j, n, deep));
+                    }
+                }
+                for (one, other, flip) in [(i, j, false), (j, i, true)].into_iter().take(if hulls.is_some() { 0 } else { 2 }) {
                     let (a, b) = (&self.list[one], &self.list[other]);
                     self.paired += a.points.len() as u32;
                     for &ra in &a.turned {
@@ -1698,9 +1714,17 @@ impl Bodies {
         // two bodies.
         // Legs handle figures' traction (0.03 body friction); tyres handle rolling vehicles' traction.
         // Metal bodywork glances at 0.24, while masonry/debris keeps 0.7.
+        for b in &mut self.list {
+            if let Some(live) = &mut b.live {
+                live.given = [0.0; 3];
+            }
+        }
         let person = |i: usize| i != NONE && self.list[i].live.as_ref().is_some_and(|live| live.figure);
         let rides = |i: usize| i != NONE && self.list[i].live.as_ref().is_some_and(|live| live.rides());
         let vehicles: Vec<bool> = self.touches.iter().map(|t| rides(t.a) || rides(t.b)).collect();
+        // Hull against hull (hull.rs): what each of the two loses to the other is kept, for what breaks it below.
+        let hulled = |i: usize| i != NONE && self.list[i].live.as_ref().is_some_and(|live| live.hull.is_some());
+        let hulls: Vec<bool> = self.touches.iter().map(|t| hulled(t.a) && hulled(t.b)).collect();
         let rubs: Vec<f32> = self.touches.iter().enumerate().map(|(i, t)|
             if person(t.a) || person(t.b) { 0.03 } else if vehicles[i] { 0.24 } else { 0.7 }).collect();
         // Store approach speeds before any contact is solved. Otherwise earlier points hide the hit from later ones.
@@ -1758,6 +1782,13 @@ impl Bodies {
                     self.list[b].knock = self.list[b].knock.max(knock);
                 }
                 push(&mut self.list, 0, now - was);
+                if hulls[t] {
+                    for (who, by) in [(a, now - was), (b, was - now)] {
+                        let given = scale(n, by * self.list[who].inv_mass);
+                        let live = self.list[who].live.as_mut().unwrap();
+                        live.given = add(live.given, given);
+                    }
+                }
                 // Rubbing, across the touch, no more than the push allows.
                 for k in 0..2 {
                     let d = ds[k + 1];
@@ -1792,6 +1823,12 @@ impl Bodies {
                 self.list[t.a].pos = add(self.list[t.a].pos, scale(t.n, ease * ma / (ma + mb)));
                 self.list[t.b].pos = sub(self.list[t.b].pos, scale(t.n, ease * mb / (ma + mb)));
             }
+        }
+        for &(a, b, n, deep) in &self.parted {
+            let (ma, mb) = (self.list[a].inv_mass, self.list[b].inv_mass);
+            let ease = hull::ease(deep);
+            self.list[a].pos = add(self.list[a].pos, scale(n, ease * ma / (ma + mb)));
+            self.list[b].pos = sub(self.list[b].pos, scale(n, ease * mb / (ma + mb)));
         }
         // What met hard enough to be told of (living.rs), before anything of it is broken.
         let met = self.meetings();
@@ -1831,7 +1868,8 @@ impl Bodies {
             // Rolling bodies spend their crumple reserve; other motors retain their original threshold.
             let (knock, takes) = match &b.live {
                 None => (b.knock, breaks_at(b.stuff) * (1.0 + b.broken as f32)),
-                Some(live) => { let lost = sub(b.vel, live.was); (if live.hurt { f32::MAX } else { dot(lost, lost).sqrt() }, live.tough) }
+                // Bodywork gives against bodywork: of what another vehicle's hull took from it, `hull::YIELDS` is not counted.
+                Some(live) => { let lost = sub(sub(b.vel, live.was), scale(live.given, hull::YIELDS)); (if live.hurt { f32::MAX } else { dot(lost, lost).sqrt() }, live.tough) }
             };
             #[cfg(test)]
             if b.live.as_ref().is_some_and(|l| l.rides()) && knock > 30.0 && std::env::var_os("CRASH_TRACE").is_some() {

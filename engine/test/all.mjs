@@ -65,6 +65,7 @@ let checks = [
   ['seat-view', 'node', ['test/seat-view.mjs'], true],
   ['deform', 'node', ['test/deform.mjs'], true],
   ['dents', 'node', ['test/dents.mjs'], true],
+  ['crash-stack', 'node', ['test/crash-stack.mjs'], true],
   ['robotaxi-shape', 'node', ['test/robotaxi-shape.mjs'], false],
   ['sculpt-cars', 'node', ['test/sculpt-cars.mjs'], false],
   ['drives', 'node', ['test/drives.mjs'], true],
