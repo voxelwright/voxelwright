@@ -17,6 +17,8 @@ export interface SteerInput {
   gap: number
   frameMs: number
   cpuMs: number
+  /** Main-thread JS/encode work excluding WebGPU swapchain/submit wait (#155). Falls back to `cpuMs` when omitted. */
+  workCpuMs?: number
   gpuMs: number
   marchMs: number
   clocked: boolean
@@ -31,11 +33,14 @@ const quantize = (v: number) => Math.round(Math.max(0.3, Math.min(1, v)) * 20) /
  *
  * On clocked desktops, GPU timestamps steer directly toward 60% of the frame budget.
  * On unclocked touch devices (phones), scale only backs off when late frames are NOT already
- * CPU-bound (`cpuMs <= budget * 0.72`), uses a deadband before stepping back up (`frameMs <= budget * 1.04`),
+ * CPU-bound (`workCpuMs <= budget * 0.72`), uses a deadband before stepping back up (`frameMs <= budget * 1.04`),
  * and holds longer after a drop so `fit()` does not reallocate GPU targets every ~0.8 s.
+ * Using `workCpuMs` (excluding `getCurrentTexture()` / `queue.submit()` blocking wait) prevents
+ * iOS Metal swapchain backpressure from masquerading as CPU-bound work and locking scale at 1.0 (#155).
  */
 export function steerScale(s: SteerState, input: SteerInput): boolean {
-  const { budget, gap, frameMs, cpuMs, gpuMs, marchMs, clocked, calm, fixed } = input
+  const { budget, gap, frameMs, cpuMs, workCpuMs, gpuMs, marchMs, clocked, calm, fixed } = input
+  const mainCpuMs = workCpuMs ?? cpuMs
   if (fixed || s.held > 1e6) return false
 
   if (calm) {
@@ -60,9 +65,9 @@ export function steerScale(s: SteerState, input: SteerInput): boolean {
   if (--s.held > 0) return false
 
   const late = frameMs > budget * 1.12
-  // Shrinking render resolution cannot relieve a CPU-bound main thread; slashing scale when CPU already
-  // consumes >72% of the frame budget only degrades sharpness and reallocates GPU targets.
-  const cpuBound = cpuMs > budget * 0.72 && (!clocked || gpuMs < budget * 0.65)
+  // Shrinking render resolution cannot relieve a CPU-bound main thread; slashing scale when real JS/encode
+  // work already consumes >72% of the frame budget only degrades sharpness and reallocates GPU targets.
+  const cpuBound = mainCpuMs > budget * 0.72 && (!clocked || gpuMs < budget * 0.65)
 
   let want: number
   if (late) {
@@ -71,8 +76,8 @@ export function steerScale(s: SteerState, input: SteerInput): boolean {
   } else if (clocked && gpuMs > 0) {
     want = s.scale * Math.sqrt((0.6 * budget) / gpuMs)
   } else {
-    // Unclocked (phone) ramp-up deadband: only step up when frames and CPU are comfortably inside budget.
-    if (frameMs > budget * 1.04 || cpuMs > budget * 0.65) { s.held = 30; return false }
+    // Unclocked (phone) ramp-up deadband: only step up when frames and real CPU work are comfortably inside budget.
+    if (frameMs > budget * 1.04 || mainCpuMs > budget * 0.65) { s.held = 30; return false }
     want = s.scale + 0.05
   }
 

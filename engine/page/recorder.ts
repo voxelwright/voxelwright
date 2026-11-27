@@ -96,6 +96,8 @@ export interface Keyframe {
     frameMs: number
     gpuMs: number
     cpuMs: number
+    workCpuMs?: number
+    presentWaitMs?: number
     scale: number
     wanted: number
     stale: number
@@ -213,6 +215,7 @@ export interface SessionTrace {
     tiles?: { fetched: number; failed: number; retried: number; timedOut: number; shared: number; water: number; held: number; bytes: number }
     mover?: { ticking: boolean; waitMs: number; bodies: number; waiting: number }
     workers?: { busy: number[]; maxAskMs: number; crashed: number; lacking: number }
+    spent?: Record<string, number>
     notes?: string[]
   }
 }
@@ -296,7 +299,7 @@ export interface RecorderDeps {
   worldStats: () => { wanted: number; stale: number; ready: number; poolUsed: number; poolWords: number; full: number; crashed: number }
   mended: () => { movers: number; makers: number }
   tileFails: () => number
-  perf: () => { frameMs: number; gpuMs: number; cpuMs: number; scale: number; bodies: number; loose: number; burning: number; resting: boolean; paused: boolean; mapOpen: boolean; firstStill: boolean }
+  perf: () => { frameMs: number; gpuMs: number; cpuMs: number; workCpuMs?: number; presentWaitMs?: number; scale: number; bodies: number; loose: number; burning: number; resting: boolean; paused: boolean; mapOpen: boolean; firstStill: boolean }
   settings: () => { hour: number | null; rain: number; fog: number; graphics: string; hud: string | null }
   clock: () => number
   groundAt: (x: number, z: number) => number
@@ -911,7 +914,12 @@ export function createRecorder(deps: RecorderDeps): Recorder {
             'frame_stall',
             'medium',
             `Frame stall ${Math.round(gapMs)} ms (gpu ${p.gpuMs.toFixed(1)} ms, bodies ${p.bodies})`,
-            { gapMs: r1(gapMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs), scale: r2(p.scale), bodies: p.bodies, loose: p.loose },
+            {
+              gapMs: r1(gapMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs),
+              ...(p.workCpuMs !== undefined ? { workCpuMs: r1(p.workCpuMs) } : {}),
+              ...(p.presentWaitMs !== undefined ? { presentWaitMs: r1(p.presentWaitMs) } : {}),
+              scale: r2(p.scale), bodies: p.bodies, loose: p.loose,
+            },
             playerCell(),
             'frame_stall',
             5000,
@@ -985,7 +993,10 @@ export function createRecorder(deps: RecorderDeps): Recorder {
               dents: dmg?.dentCount ?? 0,
             } : null,
             perf: {
-              frameMs: r1(p.frameMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs), scale: r2(p.scale),
+              frameMs: r1(p.frameMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs),
+              ...(p.workCpuMs !== undefined ? { workCpuMs: r1(p.workCpuMs) } : {}),
+              ...(p.presentWaitMs !== undefined ? { presentWaitMs: r1(p.presentWaitMs) } : {}),
+              scale: r2(p.scale),
               wanted: stats.wanted, stale: stats.stale,
               poolPct: stats.poolWords ? Math.round((stats.poolUsed / stats.poolWords) * 100) : 0,
               poolFull: stats.full, bodies: p.bodies, loose: p.loose, burning: p.burning,
@@ -1008,16 +1019,34 @@ export function createRecorder(deps: RecorderDeps): Recorder {
         try {
           const sw = canvas.width, sh = canvas.height
           if (sw < 2 || sh < 2) { req.resolve(null); continue }
-          const scale = sw > req.maxWidth ? req.maxWidth / sw : 1
+          // Cap the longest edge (not only width) so tall portrait phones don't copy & encode ~1.6 MP (#155).
+          const longest = Math.max(sw, sh)
+          const scale = longest > req.maxWidth ? req.maxWidth / longest : 1
           const dw = Math.max(2, Math.round(sw * scale)), dh = Math.max(2, Math.round(sh * scale))
           const out = document.createElement('canvas')
           out.width = dw; out.height = dh
           const ctx = out.getContext('2d')
           if (!ctx) { req.resolve(null); continue }
           ctx.drawImage(canvas, 0, 0, dw, dh)
-          let url = out.toDataURL('image/webp', 0.82)
-          if (!url.startsWith('data:image/webp')) url = out.toDataURL('image/png')
-          req.resolve(url)
+          // Encode off the rAF critical path using async JPEG (iOS WebKit has no WebP encoder and previously
+          // fell back to encoding a full PNG synchronously twice, stalling ~970 ms on high-DPR phones, #155).
+          setTimeout(() => {
+            try {
+              if (typeof out.toBlob === 'function') {
+                out.toBlob((blob) => {
+                  if (!blob) { req.resolve(null); return }
+                  const reader = new FileReader()
+                  reader.onload = () => req.resolve(typeof reader.result === 'string' ? reader.result : null)
+                  reader.onerror = () => req.resolve(null)
+                  reader.readAsDataURL(blob)
+                }, 'image/jpeg', 0.84)
+              } else {
+                req.resolve(out.toDataURL('image/jpeg', 0.84))
+              }
+            } catch {
+              req.resolve(null)
+            }
+          }, 0)
         } catch {
           req.resolve(null)
         }

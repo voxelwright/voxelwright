@@ -166,6 +166,29 @@ export function sweptPathNear(
 }
 
 /**
+ * Returns `true` when stepping a vehicle from `prev` to `next` creates or deepens an oriented-box overlap
+ * (`boxGap < -0.5` cells) with another vehicle `other` (#155). Prevents turning long vehicles (such as a city bus
+ * bending out of lane 2 onto a corner curve) from sweeping their flank/tail into an adjacent-lane car.
+ */
+export function stepDeepensOverlap(
+  prev: { x: number; z: number; heading: number; halfL: number; halfW: number },
+  next: { x: number; z: number; heading: number; halfL: number; halfW: number },
+  other: { x: number; z: number; heading: number; halfL: number; halfW: number },
+): boolean {
+  if (Math.abs(next.x - other.x) > 220 || Math.abs(next.z - other.z) > 220) return false
+  const gapNext = boxGap(
+    next.x, next.z, Math.cos(next.heading), Math.sin(next.heading), next.halfL, next.halfW,
+    other.x, other.z, Math.cos(other.heading), Math.sin(other.heading), other.halfL, other.halfW,
+  )
+  if (gapNext >= -0.5) return false
+  const gapPrev = boxGap(
+    prev.x, prev.z, Math.cos(prev.heading), Math.sin(prev.heading), prev.halfL, prev.halfW,
+    other.x, other.z, Math.cos(other.heading), Math.sin(other.heading), other.halfL, other.halfW,
+  )
+  return gapNext < gapPrev - 0.05
+}
+
+/**
  * Bumper-to-obstacle following/crossing gap (cells) for a traffic vehicle relative to one obstacle, or `Infinity` when
  * clear. Uses exact swept-path OBB checks for long transit vehicles AND for oblique-crossing cars (`-0.82 <= dot < -0.25`)
  * so diagonal intersections (like Columbus Ave) never drive through turning cross-traffic.
@@ -1741,6 +1764,18 @@ export function street(o: {
       if (moved || o.alive.riding === c.thing) { if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined } continue }
       if (!feet || Math.hypot(w.at[0] - feet[0], w.at[2] - feet[2]) > 260) sleep(c)
     }
+    // Keep simultaneously awake thrown/crashed traffic cars bounded so multi-car pileups don't stall the mover worker (#155).
+    const thrown = [...living].filter((l) => l.thrown && l.thing && l.thing !== o.alive.riding)
+    const maxThrown = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 ? 4 : 6
+    if (thrown.length > maxThrown && lastEye) {
+      thrown.sort((a, b) => {
+        const wa = o.alive.where(a.thing!), wb = o.alive.where(b.thing!)
+        const da = wa ? Math.hypot(wa.at[0] - lastEye![0], wa.at[2] - lastEye![2]) : Infinity
+        const db = wb ? Math.hypot(wb.at[0] - lastEye![0], wb.at[2] - lastEye![2]) : Infinity
+        return db - da
+      })
+      for (let k = 0; k < thrown.length - maxThrown; k++) sleep(thrown[k])
+    }
     if (!feet || o.alive.riding) return
     // The nearest three parked within a dozen metres come to life.
     const near = [...parked.values()].filter((c) => !c.thing && !c.waking && Math.hypot(c.x - feet[0], c.z - feet[2]) < 120).sort((a, b) => Math.hypot(a.x - feet[0], a.z - feet[2]) - Math.hypot(b.x - feet[0], b.z - feet[2])).slice(0, 3)
@@ -2553,6 +2588,7 @@ export function street(o: {
       c.v = Math.max(0, Math.min(v0 * 1.05, c.v + Math.max(-BRAKE * 3, acc) * dt))
       if (nudged && !c.rtStuck && why !== 'lights' && gap > 8 && c.v < 18) c.v = Math.min(gap * 1.4, c.v + GATHER * 1.6 * dt)
       if (gap < 5) c.v = Math.min(c.v, Math.max(0, gap) * 2)
+      const prevPose = { x: c.x, z: c.z, y: c.y, heading: c.heading, pitch: c.pitch, roll: c.roll, s: c.s!, road: c.road, prev: c.prev, next: c.next, lane: c.lane, route: c.route ? { ...c.route } : undefined }
       c.s! += c.v * dt
       // Waiting on a control — or queued behind a vehicle waiting on one (red light, stop sign, bus stop, turn, or frozen robotaxi) — is not stuck.
       const queued = held || why === 'bus stop' || why === 'lights' || why === 'stop sign' || why === 'oncoming' || why === 'its turn' || (why === 'car' && !!(leadCar?.queued || leadCar?.rtStuck))
@@ -2642,6 +2678,36 @@ export function street(o: {
       // Someone held a junction a long time without moving (a person stands in front of them): let it go.
       if (c.stuck! > 6) letGo(c)
       pose(c)
+      // Corner-sweep OBB guard (#155): if advancing onto a bend (e.g. a long bus turning from lane 2) sweeps into
+      // an adjacent traffic vehicle's OBB, revert the step and yield instead of penetrating it.
+      if (c.v > 0.1) {
+        const pBox = { x: prevPose.x, z: prevPose.z, heading: prevPose.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
+        const nBox = { x: c.x, z: c.z, heading: c.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
+        let sweptHit: Car | null = null
+        for (let j = 0; j < traffic.length; j++) {
+          const oCar = traffic[j]
+          if (oCar === c || Math.abs(oCar.y - c.y) > 25) continue
+          if (stepDeepensOverlap(pBox, nBox, { x: oCar.x, z: oCar.z, heading: oCar.heading, halfL: oCar.model.long / 2, halfW: oCar.model.wide / 2 })) {
+            sweptHit = oCar; break
+          }
+        }
+        if (sweptHit) {
+          c.x = prevPose.x; c.z = prevPose.z; c.y = prevPose.y
+          c.heading = prevPose.heading; c.pitch = prevPose.pitch; c.roll = prevPose.roll
+          c.s = prevPose.s; c.road = prevPose.road; c.prev = prevPose.prev; c.next = prevPose.next; c.lane = prevPose.lane
+          if (prevPose.route) c.route = prevPose.route
+          c.v = 0; c.wait = 'car'; c.stuck = (c.stuck ?? 0) + dt
+        }
+      } else if (c.stuck! > 2.5) {
+        // If two stopped vehicles are already overlapping (e.g. from a tight junction), clear the higher-id one before it lingers for 4+ s.
+        const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
+        for (let j = 0; j < traffic.length; j++) {
+          const oCar = traffic[j]
+          if (oCar === c || oCar.v >= 2 || c.id <= oCar.id || Math.abs(oCar.x - c.x) > 150 || Math.abs(oCar.z - c.z) > 150 || Math.abs(oCar.y - c.y) > 25) continue
+          const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
+          if (g < -2) { letGo(c); hide(c); traffic.splice(i, 1); break }
+        }
+      }
     }
   }
 
