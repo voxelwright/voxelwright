@@ -10,6 +10,7 @@
 //        [--walk 40]                    then walk that many seconds (after --explore), frame gaps and what stalls
 //        [--glide 4000]                 or carry the eye that many metres through the city at 15 m/s, memory as it goes
 //        [--passes]                     each render pass's GPU time, every eighth frame, with every turn on the GPU held
+//        [--alone]                      with every turn on the GPU held (kit.mjs `quiet`): no other lane's check draws beside it
 //        [--out file.json] [--headed] [--bare]   (`--bare`: no probe in the workers)
 //
 // A cold visit is a browser started for it, with an empty profile. The driver's own cache of compiled shaders is the
@@ -66,13 +67,14 @@ async function holding(page, browser) {
     return {
       heap: performance.memory.usedJSHeapSize, heapTotal: performance.memory.totalJSHeapSize, cores: { page: m.page, workers: m.workers }, tilesHeld: m.tiles,
       workers: [...last].map(([who, s]) => ({ who, wasm: s.wasm, heap: s.heap })),
+      pool: { usedMb: (e.world.stats.poolUsed * 4) / 2 ** 20, mb: (e.world.stats.poolWords * 4) / 2 ** 20, sectors: e.world.stats.ready }, farStats: e.far?.stats ? { faces: e.far.stats.faces, fetched: e.far.stats.fetched, held: e.far.held?.().length } : null,
       gpu: L.held(), canvas: [document.querySelector('canvas').width, document.querySelector('canvas').height], scale: e.scale, pose: [Math.round(e.pose.x), Math.round(e.pose.y), Math.round(e.pose.z)],
       far: e.far ? { tiles: e.far.tiles?.size ?? e.far.held ?? null } : null,
     }
   })
   return { ...inPage, processes: await processes(browser) }
 }
-const heldLine = (h) => `JS heap ${mb(h.heap)} MB, cores ${mb(h.cores.page + h.cores.workers.reduce((a, b) => a + b, 0))} MB (page ${mb(h.cores.page)}, workers ${h.cores.workers.map(mb).join(' ')}), tiles held ${mb(h.tilesHeld)} MB, GPU asked ${mb(h.gpu.bytes)} MB in ${h.gpu.live} (peak ${mb(h.gpu.peak)}), processes ${JSON.stringify(h.processes)}`
+const heldLine = (h) => `JS heap ${mb(h.heap)} MB, cores ${mb(h.cores.page + h.cores.workers.reduce((a, b) => a + b, 0))} MB (page ${mb(h.cores.page)}, workers ${h.cores.workers.map(mb).join(' ')}), tiles held ${mb(h.tilesHeld)} MB, tree pool ${round(h.pool.usedMb)} of ${round(h.pool.mb)} MB used, GPU asked ${mb(h.gpu.bytes)} MB in ${h.gpu.live} (peak ${mb(h.gpu.peak)}), processes ${JSON.stringify(h.processes)}`
 
 /** Frame gaps and what stalled between two times, from what the probe kept. */
 const paced = (page, from, to) => page.evaluate(({ from, to }) => {
@@ -191,7 +193,7 @@ async function visit(query) {
       jsonParses: raw.json.n, jsonMs: round(raw.json.ms), messageMs: round(raw.messages.ms),
       wireToFirst: sentBy(raw.seen.first), wireToNear: sentBy(raw.seen.near), wireToWhole: sentBy(whole),
     }
-    const result = { query, device, tier: raw.device, hardwareConcurrency: raw.cores, canvas: raw.canvases.at(-1)?.size, stages, cores, workers: workers.map((w) => ({ url: w.url, made: round(w.made), first: round(w.first) })), errors,
+    const result = { query, device, tier: raw.device, hardwareConcurrency: raw.cores, canvas: raw.canvases.map((c) => c.size).sort((a, b) => b[0] * b[1] - a[0] * a[1])[0], stages, cores, workers: workers.map((w) => ({ url: w.url, made: round(w.made), first: round(w.first) })), errors,
       bigTasks: raw.loaf.filter((f) => f.ms > 80).map((f, i) => ({ at: round(at(f.at)), ms: round(f.ms), scripts: f.scripts, top: profile?.windows[i] })).filter((f) => f.at < whole).slice(0, 30),
       profile: profile ? { self: profile.self, inclusive: profile.inclusive } : undefined,
       bigJson: raw.json.big.map((j) => ({ at: round(at(j.at)), ms: round(j.ms, 1), kb: round(j.chars / 1024), by: j.by })).slice(0, 30),
@@ -214,9 +216,8 @@ async function visit(query) {
       const seconds = Number(arg('walk'))
       let give = null
       if (has('passes')) { give = await quiet(); await page.evaluate(() => { globalThis.__launch.passesOn = true }) }
-      await page.mouse.click(640, 360).catch(() => {})
       const from = await page.evaluate(() => performance.timeOrigin + performance.now())
-      const start = await page.evaluate(() => { const e = globalThis.engine; return { feet: e.me.feet ? [...e.me.feet] : null, pose: { ...e.pose } } })
+      const start = await page.evaluate(() => { const e = globalThis.engine; return { feet: e.me.feet?.at ? [...e.me.feet.at] : null, pose: { ...e.pose } } })
       const scales = [], clocks = []
       await page.keyboard.down('KeyW')
       for (let s = 0; s < seconds; s++) {
@@ -227,7 +228,7 @@ async function visit(query) {
       }
       await page.keyboard.up('KeyW')
       const to = await page.evaluate(() => performance.timeOrigin + performance.now())
-      const end = await page.evaluate(() => { const e = globalThis.engine; return { feet: e.me.feet ? [...e.me.feet] : null, pose: { ...e.pose } } })
+      const end = await page.evaluate(() => { const e = globalThis.engine; return { feet: e.me.feet?.at ? [...e.me.feet.at] : null, pose: { ...e.pose } } })
       const p = await paced(page, from, to)
       const passes = await page.evaluate(() => { const L = globalThis.__launch; L.passesOn = false; return { frames: L.passFrames, passes: [...L.passes].map(([name, e]) => { const s = e.all.slice().sort((a, b) => a - b); return { name, n: e.n, perFrame: e.n / Math.max(1, L.passFrames), mean: e.ms / e.n, p50: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)], worst: e.worst, msPerFrame: e.ms / Math.max(1, L.passFrames) } }).sort((a, b) => b.msPerFrame - a.msPerFrame) } })
       give?.()
@@ -283,7 +284,7 @@ async function visit(query) {
 const more = (arg('variants', arg('ab', '')) || '').split(';').filter(Boolean)
 const queries = [arg('query', ''), ...more.map((v) => [arg('query', ''), v].filter(Boolean).join('&'))]
 // One turn on the GPU for the whole run (kit.mjs): the visits come one after another.
-const back = await turn()
+const back = has('alone') ? await quiet() : await turn()
 const results = queries.map(() => [])
 console.log(`launch-perf: ${device}, ${samples} cold visit${samples > 1 ? 's' : ''}${queries.length > 1 ? ` each of ${queries.map((q) => q || 'as it is').join(' | ')}, in turn` : ''}${mbit ? `, ${mbit} Mbit/s` : ''}; ${round(freeGb(), 1)} GB of disk free`)
 for (let i = 0; i < samples; i++) for (const q of queries.keys()) {
