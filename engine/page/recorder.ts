@@ -23,6 +23,9 @@ export type AnomalyKind =
   | 'vehicle_overlap'
   | 'vehicle_stuck'
   | 'vehicle_in_solid'
+  | 'vehicle_flipped'
+  | 'vehicle_ground_glitch'
+  | 'physics_explosion'
   | 'pool_exhausted'
   | 'tile_load_failure'
   | 'frame_stall'
@@ -331,6 +334,7 @@ export interface Recorder {
 }
 
 const KEYFRAME_MS = 200 // 5 Hz
+const FAST_WATCH_MS = 100 // 10 Hz fast vehicle overlap / tunneling / solid check
 const KEYFRAMES_MAX = 150 // 30 seconds at 5 Hz
 const EVENTS_MAX = 300
 const EDITS_MAX = 100
@@ -339,6 +343,7 @@ const GAPS_MAX = 600
 const STUCK_SECONDS = 2.5
 const STUCK_CELLS = 3.5 // 0.35 m
 const OVERLAP_MIN_CELLS = 4.0 // 40 cm overlap threshold
+const OVERLAP_DEEP_CELLS = 8.0 // 80 cm instant overlap / high-speed tunneling threshold
 const STALL_MS = 150
 
 export function createRecorder(deps: RecorderDeps): Recorder {
@@ -359,6 +364,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
 
   // Counters & state trackers
   let frames = 0
+  let lastFlushedFrames = -1000
   let stalls = 0
   let worstGapMs = 0
   let distanceCells = 0
@@ -377,13 +383,16 @@ export function createRecorder(deps: RecorderDeps): Recorder {
   const seenStruck = new WeakSet<object>()
 
   let lastKeyMs = -Infinity
+  let lastFastMs = -Infinity
   let lastWatchMs = -Infinity
   let hiddenUntil = 0
 
-  // Stuck / solid / overlap persistence trackers
+  // Stuck / solid / overlap / flip / explosion persistence trackers
   let stuckOrigin: [number, number] | null = null
   let stuckElapsed = 0
   let solidElapsed = 0
+  let flippedElapsed = 0
+  let lastRidePos: { id: number; at: [number, number, number] } | null = null
   const overlapStreak = new Map<string, number>()
 
   // Pending one-shot canvas capture callbacks resolved synchronously inside `onPresented()`
@@ -464,12 +473,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
 
   const nearbyVehicles = (center: readonly [number, number, number], radius = 900): VehicleSnap[] => {
     const out: VehicleSnap[] = []
-    const st = deps.street()
-    if (st) {
-      const snaps = st.snapshot(center[0], center[2], radius)
-      snaps.sort((a, b) => Math.hypot(a.x - center[0], a.z - center[2]) - Math.hypot(b.x - center[0], b.z - center[2]))
-      for (const s of snaps.slice(0, 20)) out.push(s)
-    }
+    // Always include active living bodies first so player/crashed cars are never dropped by the 24-car cap.
     for (const t of deps.alive.things) {
       if (!t.alive) continue
       const w = deps.alive.where(t)
@@ -489,7 +493,16 @@ export function createRecorder(deps: RecorderDeps): Recorder {
         road: '', lane: 0, s: 0, wait: '', stuck: 0, blocked: false, living: true,
       })
     }
-    return out.slice(0, 24)
+    const st = deps.street()
+    if (st) {
+      const snaps = st.snapshot(center[0], center[2], radius)
+      snaps.sort((a, b) => Math.hypot(a.x - center[0], a.z - center[2]) - Math.hypot(b.x - center[0], b.z - center[2]))
+      for (const s of snaps) {
+        if (out.length >= 24) break
+        out.push(s)
+      }
+    }
+    return out
   }
 
   // Global browser error & gameplay event listeners
@@ -522,7 +535,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
       pushEvent('nearmiss', detail ?? {})
     })
     window.addEventListener('pagehide', () => {
-      if (enabled && deps.endpointBase && (frames > 60 || anomalies.length > 0)) {
+      if (enabled && deps.endpointBase !== null && frames - lastFlushedFrames >= 30 && (frames > 60 || anomalies.length > 0)) {
         void self.flush('pagehide', true)
       }
     })
@@ -673,71 +686,6 @@ export function createRecorder(deps: RecorderDeps): Recorder {
       stuckElapsed = 0
     }
 
-    // 9. Vehicle-vehicle overlap (car passed through car!) & traffic anomalies
-    const activePairs = new Set<string>()
-    // Filter out street cars that are currently awake (`living === true` with a paired core body) to avoid self-pairing
-    const checkable = cars.filter((c) => !(c.kind !== 'living' && c.living))
-    for (let i = 0; i < checkable.length; i++) {
-      const a = checkable[i]
-      // Traffic car stuck / gridlocked on unblocked road
-      if (a.kind === 'traffic' && a.stuck > 12 && !a.blocked && !['lights', 'stop sign', 'bus stop', 'blast', 'person'].includes(a.wait)) {
-        pushAnomaly(
-          'vehicle_stuck',
-          'medium',
-          `Traffic ${a.name} stuck ${a.stuck.toFixed(1)} s on road ${a.road || '?'} (wait: ${a.wait || 'none'})`,
-          { id: a.id, name: a.name, model: a.model, road: a.road, lane: a.lane, s: a.s, stuck: a.stuck, wait: a.wait },
-          [a.x, a.y, a.z],
-          `vehicle_stuck:${a.id}`,
-          15000,
-        )
-      }
-      // Vehicle embedded inside solid building wall
-      if ((a.kind === 'traffic' || a.kind === 'living') && a.v > 2) {
-        const bodyMat = deps.worldKind(Math.floor(a.x), Math.floor(a.y + 7), Math.floor(a.z)) & 15
-        if (BUILDING_MATERIALS.has(bodyMat)) {
-          pushAnomaly(
-            'vehicle_in_solid',
-            'high',
-            `Vehicle ${a.name} moving inside solid building material (${bodyMat})`,
-            { id: a.id, kind: a.kind, name: a.name, model: a.model, road: a.road, v: a.v, material: bodyMat },
-            [a.x, a.y, a.z],
-            `vehicle_in_solid:${a.id}`,
-            8000,
-          )
-        }
-      }
-      for (let j = i + 1; j < checkable.length; j++) {
-        const b = checkable[j]
-        if (Math.abs(a.x - b.x) > 120 || Math.abs(a.z - b.z) > 120 || Math.abs(a.y - b.y) > 25) continue
-        // Ignore two parked cars (static layout) unless at least one is moving/living
-        if (a.kind === 'parked' && b.kind === 'parked') continue
-        const pen = obbPenetration(a.x, a.z, a.heading, a.long * 0.5, a.wide * 0.5, b.x, b.z, b.heading, b.long * 0.5, b.wide * 0.5)
-        if (pen >= OVERLAP_MIN_CELLS) {
-          const pairKey = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`
-          activePairs.add(pairKey)
-          const streak = (overlapStreak.get(pairKey) ?? 0) + 1
-          overlapStreak.set(pairKey, streak)
-          if (streak >= 2) {
-            const mid: [number, number, number] = [(a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5]
-            pushAnomaly(
-              'vehicle_overlap',
-              'high',
-              `Vehicles overlapping (${a.name} [${a.kind}] & ${b.name} [${b.kind}], depth ${(pen / 10).toFixed(2)} m)`,
-              {
-                penetrationCells: r1(pen),
-                a: { id: a.id, kind: a.kind, model: a.model, name: a.name, x: a.x, y: a.y, z: a.z, heading: a.heading, v: a.v, road: a.road, lane: a.lane, s: a.s },
-                b: { id: b.id, kind: b.kind, model: b.model, name: b.name, x: b.x, y: b.y, z: b.z, heading: b.heading, v: b.v, road: b.road, lane: b.lane, s: b.s },
-              },
-              mid,
-              `vehicle_overlap:${pairKey}`,
-              6000,
-            )
-          }
-        }
-      }
-    }
-    for (const k of overlapStreak.keys()) if (!activePairs.has(k)) overlapStreak.delete(k)
-
     // 10. Record high-impulse solver impacts from `alive.struck`
     for (const s of deps.alive.struck) {
       if (seenStruck.has(s)) continue
@@ -749,6 +697,187 @@ export function createRecorder(deps: RecorderDeps): Recorder {
         }
       }
     }
+  }
+
+  // Fast 10 Hz vehicle invariants (overlap / tunneling, 5-point building clipping, floating/sunk, flipped, explosion)
+  const checkVehiclesFast = (fastDt: number, cars: VehicleSnap[]) => {
+      const riding = deps.alive.riding
+      const rw = riding ? deps.alive.where(riding) : null
+
+      // 9a. Ridden vehicle flipped upside-down or physics explosion
+      if (riding && rw && rw.at.every(Number.isFinite) && rw.rot.every(Number.isFinite)) {
+        const upY = 1 - 2 * (rw.rot[0] * rw.rot[0] + rw.rot[2] * rw.rot[2])
+        const speed = Math.abs(riding.state?.speed ?? 0)
+        if (upY < -0.35 && speed < 8) {
+          flippedElapsed += fastDt
+          if (flippedElapsed >= 2.0) {
+            pushAnomaly(
+              'vehicle_flipped',
+              'medium',
+              `Vehicle "${riding.name}" rolled over / upside down for ${flippedElapsed.toFixed(1)} s`,
+              { id: riding.id, name: riding.name, upY: r2(upY), speed: r1(speed), at: rw.at.map(r1) },
+              rw.at,
+              `vehicle_flipped:${riding.id}`,
+              8000,
+            )
+            flippedElapsed = 0
+          }
+        } else {
+          flippedElapsed = 0
+        }
+
+        if (speed > 1100) {
+          pushAnomaly(
+            'physics_explosion',
+            'critical',
+            `Vehicle "${riding.name}" hit impossible speed ${Math.round(speed * 0.36)} km/h`,
+            { id: riding.id, name: riding.name, speedCells: r1(speed), kmh: Math.round(speed * 0.36), at: rw.at.map(r1) },
+            rw.at,
+            `physics_explosion:speed:${riding.id}`,
+            4000,
+          )
+        }
+        if (lastRidePos && lastRidePos.id === riding.id && fastDt > 0 && fastDt < 0.25) {
+          const jump = Math.hypot(rw.at[0] - lastRidePos.at[0], rw.at[1] - lastRidePos.at[1], rw.at[2] - lastRidePos.at[2])
+          if (jump > 200) { // > 20 m in <= 0.1 s = > 720 km/h instantaneous teleport/launch
+            pushAnomaly(
+              'physics_explosion',
+              'critical',
+              `Vehicle "${riding.name}" jumped ${(jump / 10).toFixed(1)} m in ${Math.round(fastDt * 1000)} ms`,
+              { id: riding.id, name: riding.name, jumpCells: r1(jump), dtMs: Math.round(fastDt * 1000), from: lastRidePos.at.map(r1), to: rw.at.map(r1) },
+              rw.at,
+              `physics_explosion:jump:${riding.id}`,
+              4000,
+            )
+          }
+        }
+        lastRidePos = { id: riding.id, at: [rw.at[0], rw.at[1], rw.at[2]] }
+      } else {
+        flippedElapsed = 0
+        lastRidePos = null
+      }
+
+      // 9b. Vehicle-vehicle overlap / high-speed tunneling, 5-point building clipping, floating/sunk
+      const activePairs = new Set<string>()
+      const checkable = cars.filter((c) => !(c.kind !== 'living' && c.living))
+      for (let i = 0; i < checkable.length; i++) {
+        const a = checkable[i]
+        // Traffic car stuck / gridlocked on unblocked road
+        if (a.kind === 'traffic' && a.stuck > 12 && !a.blocked && !['lights', 'stop sign', 'bus stop', 'blast', 'person'].includes(a.wait)) {
+          pushAnomaly(
+            'vehicle_stuck',
+            'medium',
+            `Traffic ${a.name} stuck ${a.stuck.toFixed(1)} s on road ${a.road || '?'} (wait: ${a.wait || 'none'})`,
+            { id: a.id, name: a.name, model: a.model, road: a.road, lane: a.lane, s: a.s, stuck: a.stuck, wait: a.wait },
+            [a.x, a.y, a.z],
+            `vehicle_stuck:${a.id}`,
+            15000,
+          )
+        }
+
+        // 5-point solid building intrusion check (living cars at any speed + moving traffic cars)
+        if (a.kind === 'living' || (a.kind === 'traffic' && a.v > 2)) {
+          const fx = Math.cos(a.heading), fz = Math.sin(a.heading)
+          const rx = -fz, rz = fx
+          const hl = a.long * 0.38, hw = a.wide * 0.38
+          const by = Math.floor(a.kind === 'living' ? a.y : a.y + 8)
+          const pts: [number, number][] = [
+            [a.x, a.z],
+            [a.x + fx * hl + rx * hw, a.z + fz * hl + rz * hw],
+            [a.x + fx * hl - rx * hw, a.z + fz * hl - rz * hw],
+            [a.x - fx * hl + rx * hw, a.z - fz * hl + rz * hw],
+            [a.x - fx * hl - rx * hw, a.z - fz * hl - rz * hw],
+          ]
+          let hitMat = 0, hitPts = 0
+          for (const [px, pz] of pts) {
+            const m = deps.worldKind(Math.floor(px), by, Math.floor(pz)) & 15
+            if (BUILDING_MATERIALS.has(m)) { hitMat = m; hitPts++ }
+          }
+          // Require >= 2 sample points inside building voxels (or center embedded) so grazing a kerb never false-positives
+          const centerMat = deps.worldKind(Math.floor(a.x), by, Math.floor(a.z)) & 15
+          if (BUILDING_MATERIALS.has(centerMat) || hitPts >= 2) {
+            pushAnomaly(
+              'vehicle_in_solid',
+              'high',
+              `Vehicle ${a.name} [${a.kind}] embedded in solid building (mat ${hitMat}, ${hitPts}/5 pts)`,
+              { id: a.id, kind: a.kind, name: a.name, model: a.model, road: a.road, v: a.v, material: hitMat, hitPts },
+              [a.x, a.y, a.z],
+              `vehicle_in_solid:${a.id}`,
+              6000,
+            )
+          }
+        }
+
+        // Street vehicle floating in mid-air or sunk deep into terrain
+        if (a.kind === 'traffic' || a.kind === 'parked') {
+          const g = deps.groundAt(Math.round(a.x), Math.round(a.z))
+          const topMat = deps.topAt(Math.round(a.x), Math.round(a.z)) & 15
+          if (Number.isFinite(g) && topMat !== 13) {
+            const dy = a.y - g
+            if (dy < -8) {
+              pushAnomaly(
+                'vehicle_ground_glitch',
+                'medium',
+                `${a.kind} ${a.name} sunk ${(Math.abs(dy) / 10).toFixed(1)} m into ground`,
+                { id: a.id, kind: a.kind, name: a.name, model: a.model, road: a.road, y: a.y, ground: r1(g), deltaCells: r1(dy) },
+                [a.x, a.y, a.z],
+                `vehicle_ground_glitch:${a.id}`,
+                15000,
+              )
+            } else if (dy > 12) {
+              // Confirm empty air below wheels (not standing on a bridge/overpass deck)
+              let support = false
+              for (let k = 1; k <= 8; k++) {
+                if ((deps.worldKind(Math.floor(a.x), Math.floor(a.y) - k, Math.floor(a.z)) & 15) !== 0) { support = true; break }
+              }
+              if (!support) {
+                pushAnomaly(
+                  'vehicle_ground_glitch',
+                  'medium',
+                  `${a.kind} ${a.name} floating ${(dy / 10).toFixed(1)} m above ground`,
+                  { id: a.id, kind: a.kind, name: a.name, model: a.model, road: a.road, y: a.y, ground: r1(g), deltaCells: r1(dy) },
+                  [a.x, a.y, a.z],
+                  `vehicle_ground_glitch:${a.id}`,
+                  15000,
+                )
+              }
+            }
+          }
+        }
+
+        // Pairwise 2D SAT overlap / high-speed pass-through detection
+        for (let j = i + 1; j < checkable.length; j++) {
+          const b = checkable[j]
+          if (Math.abs(a.x - b.x) > 120 || Math.abs(a.z - b.z) > 120 || Math.abs(a.y - b.y) > 25) continue
+          if (a.kind === 'parked' && b.kind === 'parked') continue
+          const pen = obbPenetration(a.x, a.z, a.heading, a.long * 0.5, a.wide * 0.5, b.x, b.z, b.heading, b.long * 0.5, b.wide * 0.5)
+          if (pen >= OVERLAP_MIN_CELLS) {
+            const pairKey = a.id < b.id ? `${a.id}:${b.id}` : `${b.id}:${a.id}`
+            activePairs.add(pairKey)
+            const streak = (overlapStreak.get(pairKey) ?? 0) + 1
+            overlapStreak.set(pairKey, streak)
+            // Deep overlap (>= 0.8 m) fires immediately to catch high-speed tunneling; >= 0.4 m requires 2 ticks (0.2 s)
+            if (pen >= OVERLAP_DEEP_CELLS || streak >= 2) {
+              const mid: [number, number, number] = [(a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5]
+              pushAnomaly(
+                'vehicle_overlap',
+                'high',
+                `Vehicles overlapping (${a.name} [${a.kind}] & ${b.name} [${b.kind}], depth ${(pen / 10).toFixed(2)} m)`,
+                {
+                  penetrationCells: r1(pen),
+                  streak,
+                  a: { id: a.id, kind: a.kind, model: a.model, name: a.name, x: a.x, y: a.y, z: a.z, heading: a.heading, v: a.v, road: a.road, lane: a.lane, s: a.s },
+                  b: { id: b.id, kind: b.kind, model: b.model, name: b.name, x: b.x, y: b.y, z: b.z, heading: b.heading, v: b.v, road: b.road, lane: b.lane, s: b.s },
+                },
+                mid,
+                `vehicle_overlap:${pairKey}`,
+                5000,
+              )
+            }
+          }
+        }
+      }
+      for (const k of overlapStreak.keys()) if (!activePairs.has(k)) overlapStreak.delete(k)
   }
 
   const self: Recorder = {
@@ -807,51 +936,60 @@ export function createRecorder(deps: RecorderDeps): Recorder {
         lastDistAt = [c[0], c[2]]
       }
 
-      // 5 Hz keyframe + passive invariant monitoring
-      if (now - lastKeyMs >= KEYFRAME_MS) {
-        const watchDt = lastWatchMs > 0 ? Math.min(1, (now - lastWatchMs) / 1000) : dt
-        lastKeyMs = now
-        lastWatchMs = now
+      // 10 Hz fast vehicle overlap / tunneling / solid check, sharing `cars` on 5 Hz keyframe ticks
+      const wantKey = now - lastKeyMs >= KEYFRAME_MS
+      const wantFast = now - lastFastMs >= FAST_WATCH_MS
+      if (wantKey || wantFast) {
         const cars = nearbyVehicles(c, 900)
-        const stats = deps.worldStats()
-        const f = deps.me.feet
-        const rw = riding ? deps.alive.where(riding) : null
-        const tel = deps.alive.telemetry
-        const dmg = riding ? deps.alive.damage(riding) : null
-        const held = ['typing', 'feedback'].includes(deps.input.top) ? [] : TRACKED_KEYS.filter((k) => deps.input.held(k))
-        const st = deps.street()
+        if (wantFast) {
+          const fastDt = lastFastMs > 0 ? Math.min(0.5, (now - lastFastMs) / 1000) : dt
+          lastFastMs = now
+          checkVehiclesFast(fastDt, cars)
+        }
+        if (wantKey) {
+          const watchDt = lastWatchMs > 0 ? Math.min(1, (now - lastWatchMs) / 1000) : dt
+          lastKeyMs = now
+          lastWatchMs = now
+          const stats = deps.worldStats()
+          const f = deps.me.feet
+          const rw = riding ? deps.alive.where(riding) : null
+          const tel = deps.alive.telemetry
+          const dmg = riding ? deps.alive.damage(riding) : null
+          const held = ['typing', 'feedback'].includes(deps.input.top) ? [] : TRACKED_KEYS.filter((k) => deps.input.held(k))
+          const st = deps.street()
 
-        keyframes.push({
-          t: nowT(),
-          dt: r1(dt * 1000),
-          clock: r2(deps.clock()),
-          mode: riding ? 'riding' : deps.me.on ? 'foot' : 'flying',
-          inputTop: deps.input.top,
-          pose: [r2(deps.pose.x), r2(deps.pose.y), r2(deps.pose.z), r3(deps.pose.yaw), r3(deps.pose.pitch), r1(deps.fov())],
-          input: { held, stick: [r2(deps.input.stick[0]), r2(deps.input.stick[1])] },
-          foot: f ? { at: [r1(f.at[0]), r1(f.at[1]), r1(f.at[2])], yaw: r3(f.yaw), speed: r1(f.speed), aloft: deps.me.aloft, canopy: deps.me.canopy } : null,
-          ride: riding && rw ? {
-            id: riding.id, name: riding.name, ...(riding.ref ? { ref: riding.ref } : {}),
-            at: [r1(rw.at[0]), r1(rw.at[1]), r1(rw.at[2])],
-            rot: [r3(rw.rot[0]), r3(rw.rot[1]), r3(rw.rot[2]), r3(rw.rot[3])],
-            front: [r3(rw.front[0]), r3(rw.front[1]), r3(rw.front[2])],
-            kmh: r1(tel?.kmh ?? Math.abs(riding.state?.speed ?? 0) * 0.36),
-            gear: tel?.gear ?? 0, rpm: r2(tel?.rpm ?? 0), slip: r2(tel?.slip ?? 0),
-            drifting: !!tel?.drifting, surface: tel?.surface ?? 'paved',
-            dents: dmg?.dents.length ?? 0,
-          } : null,
-          perf: {
-            frameMs: r1(p.frameMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs), scale: r2(p.scale),
-            wanted: stats.wanted, stale: stats.stale,
-            poolPct: stats.poolWords ? Math.round((stats.poolUsed / stats.poolWords) * 100) : 0,
-            poolFull: stats.full, bodies: p.bodies, loose: p.loose, burning: p.burning,
-          },
-          cars,
-          streetRng: st ? st.rng : null,
-        })
-        if (keyframes.length > KEYFRAMES_MAX) keyframes.shift()
+          keyframes.push({
+            t: nowT(),
+            dt: r1(dt * 1000),
+            clock: r2(deps.clock()),
+            mode: riding ? 'riding' : deps.me.on ? 'foot' : 'flying',
+            inputTop: deps.input.top,
+            pose: [r2(deps.pose.x), r2(deps.pose.y), r2(deps.pose.z), r3(deps.pose.yaw), r3(deps.pose.pitch), r1(deps.fov())],
+            input: { held, stick: [r2(deps.input.stick[0]), r2(deps.input.stick[1])] },
+            foot: f ? { at: [r1(f.at[0]), r1(f.at[1]), r1(f.at[2])], yaw: r3(f.yaw), speed: r1(f.speed), aloft: deps.me.aloft, canopy: deps.me.canopy } : null,
+            ride: riding && rw ? {
+              id: riding.id, name: riding.name, ...(riding.ref ? { ref: riding.ref } : {}),
+              at: [r1(rw.at[0]), r1(rw.at[1]), r1(rw.at[2])],
+              rot: [r3(rw.rot[0]), r3(rw.rot[1]), r3(rw.rot[2]), r3(rw.rot[3])],
+              front: [r3(rw.front[0]), r3(rw.front[1]), r3(rw.front[2])],
+              kmh: r1(tel?.kmh ?? Math.abs(riding.state?.speed ?? 0) * 0.36),
+              gear: tel?.gear ?? 0, rpm: r2(tel?.rpm ?? 0), slip: r2(tel?.slip ?? 0),
+              drifting: !!tel?.drifting, surface: tel?.surface ?? 'paved',
+              dents: dmg?.dents.length ?? 0,
+            } : null,
+            perf: {
+              frameMs: r1(p.frameMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs), scale: r2(p.scale),
+              wanted: stats.wanted, stale: stats.stale,
+              poolPct: stats.poolWords ? Math.round((stats.poolUsed / stats.poolWords) * 100) : 0,
+              poolFull: stats.full, bodies: p.bodies, loose: p.loose, burning: p.burning,
+            },
+            cars,
+            streetRng: st ? st.rng : null,
+          })
+          if (keyframes.length > KEYFRAMES_MAX) keyframes.shift()
 
-        checkAnomalies(watchDt, now, cars)
+          checkAnomalies(watchDt, now, cars)
+        }
       }
     },
 
@@ -1067,10 +1205,15 @@ export function createRecorder(deps: RecorderDeps): Recorder {
         if (body.length > 58_000) body = JSON.stringify({ ...compact, keyframes: compact.keyframes.slice(-8) })
       }
       if (beacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-        try { return navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })) } catch { return false }
+        try {
+          const ok = navigator.sendBeacon(url, new Blob([body], { type: 'application/json' }))
+          if (ok) lastFlushedFrames = frames
+          return ok
+        } catch { return false }
       }
       try {
         const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, ...(beacon ? { keepalive: true } : {}) })
+        if (res.ok) lastFlushedFrames = frames
         return res.ok
       } catch {
         return false
@@ -1097,6 +1240,9 @@ export function createRecorder(deps: RecorderDeps): Recorder {
       stuckOrigin = null
       stuckElapsed = 0
       solidElapsed = 0
+      flippedElapsed = 0
+      lastRidePos = null
+      lastFastMs = -Infinity
     },
   }
 

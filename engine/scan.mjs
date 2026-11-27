@@ -60,10 +60,10 @@ export function anomalySignature(a) {
     const loc = d.a?.road || d.b?.road || a.where?.tile || bucketCell(a.where?.cell, 200)
     return `vehicle_overlap:${pair}:${loc}`
   }
-  if (kind === 'vehicle_stuck' || kind === 'vehicle_in_solid') {
-    return `${kind}:${d.model || '?'}:${d.road || bucketCell(a.where?.cell, 200)}`
+  if (kind === 'vehicle_stuck' || kind === 'vehicle_in_solid' || kind === 'vehicle_ground_glitch' || kind === 'vehicle_flipped') {
+    return `${kind}:${d.model || d.name || '?'}:${d.road || a.where?.tile || bucketCell(a.where?.cell, 200)}`
   }
-  if (kind === 'player_stuck' || kind === 'fell_under_ground' || kind === 'inside_solid') {
+  if (kind === 'player_stuck' || kind === 'fell_under_ground' || kind === 'inside_solid' || kind === 'physics_explosion') {
     return `${kind}:${a.where?.tile || bucketCell(a.where?.cell, 100)}`
   }
   return `${kind}:${a.where?.tile || 'global'}`

@@ -80,13 +80,12 @@ export async function replayBundle(bundlePath, options = {}) {
 
     // If SF landing first-view is up, engage directly so pose/streetLife are live.
     if (useSf) {
-      await page.evaluate(async () => {
+      await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine?.explore, null, { timeout: 120_000 }).catch(() => {})
+      await page.evaluate(() => {
         const e = globalThis.engine
-        if (e.first && !e.first.engaged && e.explore?.go) {
-          void e.explore.go()
-        }
+        if (e.explore && e.explore.state !== 'in') void e.explore.go()
       })
-      await page.waitForFunction(() => !globalThis.engine.first || globalThis.engine.first.engaged, null, { timeout: 45_000 }).catch(() => {})
+      await page.waitForFunction(() => !globalThis.engine.explore || globalThis.engine.explore.state === 'in', null, { timeout: 60_000 }).catch(() => {})
     }
 
     // 1. Replay recorded world edits (up to last reset, then edits after)

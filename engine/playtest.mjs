@@ -28,6 +28,21 @@ export class PlaytestDriver {
     this.page = page
     this.outDir = outDir
     this.shots = []
+    this.seenAnomalies = 0
+  }
+
+  /** Captures a screenshot immediately whenever new high/critical anomalies fire during play. */
+  async captureNewAnomalies(tag = 'auto') {
+    const fresh = await this.page.evaluate((seen) => {
+      const all = globalThis.engine.recorder.anomalies
+      return { total: all.length, items: all.slice(seen).filter((a) => a.severity === 'critical' || a.severity === 'high') }
+    }, this.seenAnomalies)
+    this.seenAnomalies = fresh.total
+    if (fresh.items.length) {
+      const kind = fresh.items[0].kind
+      await this.screenshot(`anomaly-${this.shots.length + 1}-${kind}-${tag}`)
+    }
+    return fresh.items
   }
 
   async mark(name, data = {}) {
@@ -259,15 +274,70 @@ export const SCENARIOS = {
     await d.mark('scenario:steal-drive:end')
   },
 
-  /** GTA Scenario 3: Full-throttle crash into another car AND straight into a building wall. */
+  /** GTA Scenario 3: Full-throttle oncoming traffic chaos & multi-car pileups (SF street traffic + parked cars). */
+  async 'oncoming-traffic-chaos'(d) {
+    await d.mark('scenario:oncoming-traffic-chaos:start')
+    const res = await d.stealOrSummonCar()
+    await d.mark('scenario:oncoming-traffic-chaos:mounted', res)
+    await sleep(300)
+    // Accelerate hard straight down the street, then swerve aggressively across lanes into traffic and kerbs
+    await d.drive({ throttle: 1, boost: true, durationMs: 2200 })
+    await d.captureNewAnomalies('traffic-run1')
+    await d.screenshot('traffic-chaos-1')
+    await d.drive({ throttle: 1, steer: -1, boost: true, horn: true, durationMs: 900 })
+    await d.drive({ throttle: 1, steer: 1, boost: true, durationMs: 1300 })
+    await d.captureNewAnomalies('traffic-run2')
+    await d.drive({ throttle: -1, steer: 1, durationMs: 900 })
+    await d.drive({ throttle: 1, boost: true, durationMs: 1800 })
+    await d.captureNewAnomalies('traffic-run3')
+    await d.screenshot('traffic-chaos-2')
+    await d.dismount()
+    await d.mark('scenario:oncoming-traffic-chaos:end')
+  },
+
+  /** GTA Scenario 4: Full-speed boosted head-on ram into building facades & corners (wall clipping / deformation test). */
+  async 'building-ram-crash'(d) {
+    await d.mark('scenario:building-ram-crash:start')
+    await d.stealOrSummonCar()
+    await sleep(250)
+    // Turn sharply off the road straight into building walls at full boost, back up, and ram again
+    await d.drive({ throttle: 1, boost: true, durationMs: 1600 })
+    await d.drive({ throttle: 1, steer: 1, boost: true, durationMs: 1200 })
+    await d.captureNewAnomalies('building-ram1')
+    await d.screenshot('building-ram-1')
+    await d.drive({ throttle: -1, durationMs: 1100 })
+    await d.drive({ throttle: 1, steer: -1, boost: true, durationMs: 1600 })
+    await d.captureNewAnomalies('building-ram2')
+    await d.screenshot('building-ram-2')
+    await d.dismount()
+    await d.mark('scenario:building-ram-crash:end')
+  },
+
+  /** GTA Scenario 5: Full-throttle crash into another car AND straight into a building wall. */
   async 'high-speed-crash'(d) {
     await d.mark('scenario:high-speed-crash:start')
-    // Position on a clear street line with a second parked car right ahead, and a building beyond
+    // Position on a clear street line with a second parked car right ahead, and a building beyond.
+    // In SF (`e.street`), snap to a real flat road segment aligned along +x (car spawn front=0) instead of spawning into a building.
     const setup = await d.page.evaluate(async () => {
       const e = globalThis.engine
       if (e.alive.riding) e.alive.mount(null)
       if (e.me.on) e.me.walk(false)
-      const bx = Math.round(e.pose.x * 10), bz = Math.round(e.pose.z * 10)
+      let bx = Math.round(e.pose.x * 10), bz = Math.round(e.pose.z * 10)
+      if (e.street) {
+        const roads = e.street.roads(bx, bz, 3000)
+        for (const r of roads) {
+          for (let i = 0; i + 3 < r.line.length; i += 2) {
+            const dx = r.line[i + 2] - r.line[i], dz = r.line[i + 3] - r.line[i + 1]
+            const len = Math.hypot(dx, dz)
+            if (len > 300 && dx / len > 0.92 && Math.abs(dz / len) < 0.35) {
+              bx = Math.round(r.line[i] + dx * 0.2)
+              bz = Math.round(r.line[i + 1] + dz * 0.2)
+              Object.assign(e.pose, { x: bx / 10, y: e.ground(bx / 10, bz / 10) + 2, z: bz / 10 })
+              break
+            }
+          }
+        }
+      }
       const g1 = Math.round(e.ground(bx / 10, bz / 10) * 10) + 4
       const g2 = Math.round(e.ground((bx + 220) / 10, bz / 10) * 10) + 4
       // Target parked vehicle 22 m east (+x, car front=0 points +x)
@@ -362,9 +432,11 @@ export async function runPlaytest(options = {}) {
     await page.waitForFunction(() => globalThis.engine?.recorder && globalThis.engine?.world?.stats?.ready > 0, null, { timeout: 90_000 })
 
     if (useSf) {
-      await page.evaluate(() => { if (globalThis.engine.explore?.go) void globalThis.engine.explore.go() })
-      await page.waitForFunction(() => globalThis.engine.first?.engaged && globalThis.engine.me?.feet, null, { timeout: 90_000 })
-      await sleep(1000)
+      await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine?.explore, null, { timeout: 120_000 })
+      await page.evaluate(() => { void globalThis.engine.explore.go() })
+      await page.waitForFunction(() => globalThis.engine.explore?.state === 'in' && globalThis.engine.me?.feet, null, { timeout: 90_000 })
+      await still(page, { limit: 60_000 }).catch(() => {})
+      await sleep(1800)
     } else {
       await still(page, { limit: 60_000 })
     }
@@ -387,6 +459,7 @@ export async function runPlaytest(options = {}) {
         const t0 = Date.now()
         console.log(`  playtest: running "${name}"…`)
         await fn(driver)
+        await driver.captureNewAnomalies(name)
         const st = await driver.state()
         results.push({ scenario: name, ms: Date.now() - t0, summary: st.summary, anomalyCount: st.anomalies.length })
       }
