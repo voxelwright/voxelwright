@@ -72,7 +72,8 @@ export function videoPicture(media: HTMLVideoElement, aspect: () => number, { ou
   ctx.imageSmoothingQuality = 'high'
   let frames = 0, drawn = -1
   let lastAspect = -1
-  const rect: [number, number, number, number] = [0, 0, 1, 1]
+  const band0 = aspect() < 1 ? BAND_TALL : BAND_WIDE
+  const rect: [number, number, number, number] = [0, band0[0], 1, band0[1]]
   const watch = typeof media.requestVideoFrameCallback === 'function'
   let handle = 0
   const tick = () => { frames++; handle = media.requestVideoFrameCallback(tick) }
