@@ -83,9 +83,9 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
 | `ask.ts`, `making.ts`, `kept.ts`, `maker.ts`, `models.ts` | The ask bar's wishes: the helper, the ghost of what is kept, and making in the page with a visitor's own AI ([making](/making)). |
-| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car, the gamepad, stunts and the EXPLORE board ([gameplay](/gameplay)). |
+| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `entry.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car, the gamepad, stunts, the 3D Map-to-Reality Optical Dive world entry and map fast travel (`entry.ts`), and the EXPLORE board ([gameplay](/gameplay)). |
 | `car-sculpt.ts` | The GT coupe sculpted from continuous shapes (`fineCar`, the `G` summon and the SF library coupe), plus `coarser` and the edge-leak sealer that keep vehicle shells closed across levels. |
-| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen map and GPS routes ([gameplay](/gameplay)). |
+| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen 2D/3D map, GPS routes, and 0-frame-lag Map-to-Reality dive rendering ([gameplay](/gameplay)). |
 | `realms.ts`, `portal.ts`, `wheel.ts` | Stepping between realms without a reload ([realms](/engine-plugins#realms)). |
 | `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
@@ -105,7 +105,7 @@ Crashes at 2.8 m/s or more throw sparks, dust, chips of the struck paint and, wh
 
 ## Invariants
 
-- Keys, pointer and touch for play go through `input.ts`: a lane pushes a mode on its stack and pops it, rather than reading keys itself. Some DOM panels, such as the EXPLORE board (`explore.ts`) and the AI dialog (`connect.ts`), still listen for their own events.
+- Keys, pointer and touch for play go through `input.ts`: a lane pushes a mode on its stack and pops it, rather than reading keys itself. Some DOM panels, such as the EXPLORE board (`explore.ts`), world entry (`entry.ts`), and the AI dialog (`connect.ts`), still listen for their own events.
 - A pass records into the encoder it is given and reads the target's depth to sit behind nearer things.
 - A page in a shared world applies changes only as the world's stream orders them.
 

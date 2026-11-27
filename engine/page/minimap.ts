@@ -8,6 +8,23 @@ import type { MapData, MapPlace } from './nav-data.ts'
 import type { Input } from './input.ts'
 import type { Hud } from './hud.ts'
 
+export interface MapDiveState {
+  cam: MapCamera
+  /** Overlay opacity (0..1): 1 = full stylized 3D map, 0 = fully dissolved into live voxel world. */
+  opacity: number
+  /** Optional target marker drawn cleanly over the diving 3D map. */
+  target?: { x: number; z: number; name?: string }
+}
+
+export interface MapCameraSnapshot {
+  cx: number
+  cz: number
+  yaw: number
+  tilt: number
+  span: number
+  extrude: number
+}
+
 export interface MapSystemOptions {
   device: GPUDevice
   format: GPUTextureFormat
@@ -23,8 +40,10 @@ export interface MapSystemOptions {
   paused(): boolean
   /** Called once when the visitor first engages (triggers lazy MAP1 load with zero cold-load bytes). */
   onEngage?(): void
-  /** Optional fast-travel handler: lets the visitor jump directly to the chosen destination on the map. */
-  onVisit?(x: number, z: number, name: string): Promise<void> | void
+  /** Called right before the fullscreen map opens (lets an active optical dive cancel cleanly). */
+  onOpen?(): void
+  /** Optional fast-travel handler: lets the visitor dive straight to the chosen destination from the map camera. */
+  onVisit?(x: number, z: number, name: string, cam: MapCameraSnapshot): Promise<boolean | void> | boolean | void
 }
 
 export interface MapSystem {
@@ -37,6 +56,12 @@ export interface MapSystem {
   readonly route: GpsRoute | null
   readonly progress: RouteProgress | null
   readonly stats: { nodes: number; edges: number; buildings: number; places: number; renderMs: number; span: number; zoom: number; lookAhead: number }
+  /** Current parsed map data (null until MAP1 has loaded). */
+  readonly data: MapData | null
+  /** Current fullscreen map camera state (for seamless Map-to-Reality dives). */
+  camera(): MapCameraSnapshot
+  /** Drives `#world-map` directly during an optical 3D Map-to-Reality dive (pass `null` to end). */
+  setDive(state: MapDiveState | null): void
   toggle(open?: boolean): void
   setMode(mode: '2d' | '3d'): void
   setDestination(x: number, z: number, name?: string): GpsRoute | null
@@ -186,11 +211,30 @@ html.has-mapillary #minimap .mm-mly { display: inline-flex; }
   font: 500 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "IBM Plex Sans", system-ui, sans-serif;
   color: #eef3f8;
 }
+@keyframes wm-open {
+  from { opacity: 0.04; transform: scale(0.988); }
+  to { opacity: 1; transform: scale(1); }
+}
 #world-map[hidden] { display: none !important; }
 #world-map.open {
   opacity: 1;
   transform: scale(1);
   pointer-events: auto;
+  transition: none;
+  animation: wm-open 0.16s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+#world-map.dive {
+  background: transparent;
+  transform: none;
+  transition: none;
+  pointer-events: none;
+}
+#world-map.dive .wm-head,
+#world-map.dive .wm-tools,
+#world-map.dive .wm-dock {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease-out;
 }
 #world-map .wm-stage {
   position: absolute;
@@ -433,7 +477,7 @@ html.has-mapillary #minimap .mm-mly { display: inline-flex; }
   #world-map .wm-title-card { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #minimap, #world-map { transition: none !important; }
+  #minimap, #world-map { transition: none !important; animation: none !important; }
 }
 `
 
@@ -634,6 +678,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   let streetLabels: StreetLabel[] = []
   let engagedOnce = false
   let isOpen = false
+  let diveState: MapDiveState | null = null
+  let diveDrawn = false
   let openedAt = 0
   let hideTimer: ReturnType<typeof setTimeout> | null = null
   let leaveInput: (() => void) | null = null
@@ -785,9 +831,14 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     const want = next ?? !isOpen
     if (want === isOpen) return
     if (want && !opts.engaged()) return
+    if (want) opts.onOpen?.()
     isOpen = want
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
     if (isOpen) {
+      diveState = null
+      wmRoot.classList.remove('dive')
+      html.classList.remove('map-dive')
+      wmRoot.style.removeProperty('opacity')
       openedAt = performance.now()
       document.exitPointerLock?.()
       html.classList.add('map-open')
@@ -847,7 +898,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       wmRoot.classList.remove('open')
       html.classList.remove('map-open')
       leaveInput?.(); leaveInput = null
-      hideTimer = setTimeout(() => { if (!isOpen) wmRoot.hidden = true }, 200)
+      if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) wmRoot.hidden = true }, 200)
     }
   }
 
@@ -874,9 +925,11 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   wmVisitBtn.addEventListener('click', () => {
     if (!destination || !opts.onVisit) return
     const { x, z, name } = destination
+    const snap: MapCameraSnapshot = { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
     clearDestination()
+    // Close interactive map controls cleanly (if onVisit initiates an optical dive, setDive keeps wmRoot live without a flash).
     toggle(false)
-    void opts.onVisit(x, z, name)
+    void opts.onVisit(x, z, name, snap)
   })
   wmClearBtn.addEventListener('click', () => clearDestination())
   wmCloseBtn.addEventListener('click', () => toggle(false))
@@ -1544,6 +1597,70 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
   }
 
+  const drawDiveOverlay = (vp: Float32Array, state: MapDiveState) => {
+    const cssW = wmStage.clientWidth, cssH = wmStage.clientHeight
+    if (cssW < 10 || cssH < 10) return
+    const dpr = Math.min(2, devicePixelRatio || 1)
+    const pw = Math.round(cssW * dpr), ph = Math.round(cssH * dpr)
+    if (wmOv.width !== pw || wmOv.height !== ph) { wmOv.width = pw; wmOv.height = ph }
+    const ctx = wmCtx
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, cssW, cssH)
+    const target = state.target
+    if (!target || state.opacity < 0.08) return
+    const proj = projectMapPoint(vp, target.x, 4, target.z, cssW, cssH)
+    if (!proj) return
+    const [dx, dy] = proj
+    const alpha = Math.min(1, state.opacity * 1.15)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    const pulse = (time * 1.6) % 1
+    ctx.beginPath()
+    ctx.arc(dx, dy, 12 + pulse * 26, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(255, 45, 136, ${(1 - pulse) * 0.85})`
+    ctx.lineWidth = 2.2
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(dx, dy, 6.5, 0, Math.PI * 2)
+    ctx.fillStyle = '#ff2a85'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = '#ffffff'
+    ctx.stroke()
+    if (target.name) {
+      ctx.font = '700 12px -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif'
+      const label = target.name.toUpperCase()
+      const tw = ctx.measureText(label).width + 20
+      ctx.fillStyle = 'rgba(10, 15, 22, 0.82)'
+      ctx.beginPath()
+      ctx.roundRect(dx - tw * 0.5, dy - 38, tw, 23, 8)
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, dx, dy - 26.2)
+    }
+    ctx.restore()
+  }
+
+  const renderDive = (state: MapDiveState) => {
+    if (!mmRoot.hidden) mmRoot.hidden = true
+    if (!map || opts.paused()) return
+    const gpuDpr = Math.min(1.5, devicePixelRatio || 1)
+    const w = Math.round((wmStage.clientWidth || innerWidth) * gpuDpr)
+    const h = Math.round((wmStage.clientHeight || innerHeight) * gpuDpr)
+    const t0 = performance.now()
+    const vp = gpu.render(wmGpu, w, h, state.cam)
+    renderMs = renderMs * 0.85 + (performance.now() - t0) * 0.15
+    if (vp) {
+      lastWmVP = vp
+      drawDiveOverlay(vp, state)
+    }
+  }
+
   // ── Per-Frame Update & Render ──
   const frame = (dtRaw: number) => {
     const dt = clamp(dtRaw || 0.016, 0.001, 0.05)
@@ -1554,12 +1671,20 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       engagedOnce = true
       opts.onEngage?.()
     }
+
+    // 0. Optical Map-to-Reality Dive Mode (rendered synchronously in setDive for 0-frame parallax lag; fallback here if idle).
+    if (diveState) {
+      if (!diveDrawn) renderDive(diveState)
+      diveDrawn = false
+      return
+    }
+
     if (!engaged) {
       if (!mmRoot.hidden) mmRoot.hidden = true
       if (isOpen) toggle(false)
       return
     }
-    if (mmRoot.hidden && map) mmRoot.hidden = false
+    if (engaged && mmRoot.hidden && map) mmRoot.hidden = false
     if (!map || opts.paused()) return
 
     const p = opts.player()
@@ -1701,10 +1826,40 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     if (vp) drawMinimapOverlay(vp, mmCam, p.yaw, mmSpeedNorm, mmDriftNorm)
   }
 
+  const setDive = (state: MapDiveState | null) => {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+    diveState = state
+    if (state) {
+      if (isOpen) {
+        isOpen = false
+        wmHeld.clear()
+        wmRoot.classList.remove('open')
+        html.classList.remove('map-open')
+        leaveInput?.(); leaveInput = null
+      }
+      wmRoot.hidden = false
+      wmRoot.classList.add('dive')
+      html.classList.add('map-dive')
+      wmRoot.style.opacity = String(clamp(state.opacity, 0, 1))
+      renderDive(state)
+      diveDrawn = true
+    } else {
+      diveDrawn = false
+      wmRoot.classList.remove('dive')
+      html.classList.remove('map-dive')
+      wmRoot.style.removeProperty('opacity')
+      if (!isOpen) wmRoot.hidden = true
+    }
+  }
+
   return {
     get open() { return isOpen },
-    get opaque() { return isOpen && performance.now() - openedAt > 220 },
+    get opaque() {
+      if (diveState) return false
+      return isOpen && performance.now() - openedAt > 220
+    },
     get ready() { return !!map },
+    get data() { return map },
     get mode() { return viewMode },
     get destination() { return destination ? { ...destination } : null },
     get route() { return route },
@@ -1721,6 +1876,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         lookAhead: Math.round(mmLookAhead * 10) / 10,
       }
     },
+    camera(): MapCameraSnapshot {
+      return { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
+    },
+    setDive,
     toggle,
     setMode,
     setDestination,
