@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
-import { verifyAccessJwt, b64url } from "./worker/src/auth.mjs";
+import { verifyAccessJwt, b64url, loginOptions, MAX_PENDING_CHALLENGES } from "./worker/src/auth.mjs";
 import { checkSubmission } from "./core.mjs";
 import { setupGit, publishGit } from "./store-git.mjs";
 
@@ -38,6 +38,49 @@ test("Access tokens with a bad signature, audience, issuer, expiry, email or alg
   assert.equal(await verifyAccessJwt(await jwt({}, { header: { alg: "RS256", kid: "unknown" } }), env), null);
   assert.equal(await verifyAccessJwt("not.a.jwt", env), null);
   assert.equal(await verifyAccessJwt(null, env), null);
+});
+
+test("an Access token with no key id, or an empty one, is refused even when a key has no id either", async () => {
+  const { kid, ...unnamed } = jwk;
+  const anyKey = { ...env, ACCESS_JWKS: JSON.stringify({ keys: [unnamed] }) };
+  assert.equal(await verifyAccessJwt(await jwt({}, { header: { alg: "RS256" } }), anyKey), null);
+  assert.equal(await verifyAccessJwt(await jwt({}, { header: { alg: "RS256", kid: "" } }), { ...env, ACCESS_JWKS: JSON.stringify({ keys: [{ ...unnamed, kid: "" }] }) }), null);
+  assert.equal(await verifyAccessJwt(await jwt({}, { header: { alg: "RS256", kid: 1 } }), { ...env, ACCESS_JWKS: JSON.stringify({ keys: [{ ...unnamed, kid: 1 }] }) }), null);
+});
+
+/** A D1 stand-in holding only the challenges table, for the statements auth.mjs runs on it. */
+function challengeDb() {
+  const rows = [];
+  const statement = (sql) => ({
+    args: [],
+    bind(...args) { this.args = args; return this; },
+    async first() {
+      if (/^SELECT COUNT\(\*\) AS n FROM challenges WHERE expires_at >= \?$/.test(sql)) return { n: rows.filter((r) => r.expires_at >= this.args[0]).length };
+      throw new Error(`unexpected first(): ${sql}`);
+    },
+    async run() {
+      if (/^DELETE FROM challenges WHERE expires_at < \?$/.test(sql)) { for (let i = rows.length - 1; i >= 0; i--) if (rows[i].expires_at < this.args[0]) rows.splice(i, 1); return {}; }
+      if (/^INSERT INTO challenges/.test(sql)) { const [id, challenge, kind, expires_at] = this.args; rows.push({ id, challenge, kind, expires_at }); return {}; }
+      throw new Error(`unexpected run(): ${sql}`);
+    },
+  });
+  return { rows, prepare: statement, async batch(list) { for (const s of list) await s.run(); return []; } };
+}
+
+test("sign-in challenges are capped: past the cap a new one is refused with 429 until the old ones expire", async () => {
+  const DB = challengeDb();
+  const authEnv = { DB, RP_ID: "localhost" };
+  const req = new Request("https://localhost/auth/login/options", { method: "POST" });
+  for (let i = 0; i < MAX_PENDING_CHALLENGES; i++) assert.equal((await loginOptions(req, authEnv))[0], 200);
+  assert.equal(DB.rows.length, MAX_PENDING_CHALLENGES);
+  const [status, body, headers] = await loginOptions(req, authEnv);
+  assert.equal(status, 429);
+  assert.match(body.error, /too many/);
+  assert.ok(Number(headers["retry-after"]) > 0);
+  assert.equal(DB.rows.length, MAX_PENDING_CHALLENGES, "a refused sign-in stores nothing");
+  for (const row of DB.rows) row.expires_at = Date.now() - 1;
+  assert.equal((await loginOptions(req, authEnv))[0], 200, "expired challenges free the room and are swept");
+  assert.equal(DB.rows.length, 1);
 });
 
 const MD = '---\ntitle: "T"\ndate: 2026-11-16\nsummary: "S."\ntags: [x]\ndraft: false\n---\n\nBody.\n';
@@ -78,6 +121,12 @@ test("the git store commits a post and refuses a stale edit", () => {
     const stale = publishGit(editor, { slug: "p", files: { "index.md": MD.replace("Body.", "Lost update.") }, baseCommit: first.commit });
     assert.equal(stale.ok, false);
     assert.equal(stale.status, 409);
+    // baseCommit goes to git log: only a full commit id, never an option or a revision expression
+    for (const baseCommit of ["--output=/tmp/x", "HEAD~1", first.commit.slice(0, 12), `${first.commit}..HEAD`, first.commit.toUpperCase(), 42]) {
+      const odd = publishGit(editor, { slug: "p", files: { "index.md": MD.replace("Body.", "Odd.") }, baseCommit });
+      assert.equal(odd.ok, false, String(baseCommit));
+      assert.equal(odd.status, 422, String(baseCommit));
+    }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
