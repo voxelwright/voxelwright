@@ -309,6 +309,7 @@ export function eggs(page: EggsPage) {
       current.blocked = true
       m.muted = true
       void m.play().catch(() => {})
+      chosen = true
       tuck(false)
       showPlayer()
       tell('Playing muted: Unmute on the player brings the sound.')
@@ -346,8 +347,9 @@ export function eggs(page: EggsPage) {
     banner(`Now playing: ${v.title}`)
     tell(`Tuning in: ${v.title}…`)
     try {
-      const [{ videoPicture, wakeVideoAudio }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
+      const [{ videoPicture, wakeVideoAudio, videoRect }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
       wakeAudioFn = wakeVideoAudio
+      fitted = videoRect
       if (running !== current || started !== clock) return
       current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true, windowEffect: getWindowEffect, clear: strip })
       m.src = url
@@ -512,6 +514,7 @@ export function eggs(page: EggsPage) {
     if (!running?.media) return
     laidOn().append(player)
     player.hidden = false
+    settle()
     anchor()
     const title = TITLES(running.egg), source = SOURCES[running.egg]
     link.firstElementChild!.textContent = title
@@ -525,27 +528,31 @@ export function eggs(page: EggsPage) {
     where()
   }
   const hidePlayer = () => { if (player.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); player.hidden = true }
+  /** How a video stands on the view (eggs-pictures.ts), once one has been asked for. */
+  let fitted: typeof import('./eggs-pictures.ts').videoRect | null = null
   /**
-   * What of the view the video stays off (videoRect): the player's strip, top or bottom as it stands, with a gap. Its
-   * box as laid, so hidden to its key it keeps the strip: the picture does not jump under the hand.
+   * What of the view the video stays off (videoRect): the player's strip, top or bottom as it stands, with a gap; none
+   * where the player is beside the video, not over or under it (its key alone in a corner, as a rule). Hidden to its
+   * key, the picture has back the room the row took: that is what hiding it is for.
    */
   const strip = (): Clear | undefined => {
-    if (player.hidden || !player.isConnected) return undefined
+    const m = running?.media
+    if (player.hidden || !player.isConnected || !m?.videoWidth) return undefined
     const v = page.canvas.getBoundingClientRect(), p = player.getBoundingClientRect()
     if (!v.height || !p.height) return undefined
-    // (Hidden, the row as it was open: its key stays at the end the row stands by, the top or the bottom.)
-    if (!tucked) openTall = p.height
-    const tall = tucked && openTall ? openTall : p.height, GAP = 8
+    if (fitted) {
+      const whole = fitted(page.aspect(), m.videoWidth / m.videoHeight), x0 = (p.left - v.left) / v.width, x1 = (p.right - v.left) / v.width
+      if (x1 <= whole.x || x0 >= whole.x + whole.w) return undefined
+    }
+    const GAP = 8
     if (p.top < v.top + v.height / 2) {
       // In the first view the banner's plane flies just over the top of a video with a sky (boards.ts `above`): a lane
       // for it under the row, its 3% margin, its cloth and the room round its target.
       const lane = document.documentElement.classList.contains('first') && running?.picture?.sky ? 0.03 * v.height + 56 : 0
-      return { top: (p.top + tall + GAP + lane - v.top) / v.height, bottom: 1 }
+      return { top: (p.bottom + GAP + lane - v.top) / v.height, bottom: 1 }
     }
-    return { top: 0, bottom: (p.bottom - tall - GAP - v.top) / v.height }
+    return { top: 0, bottom: (p.top - GAP - v.top) / v.height }
   }
-  /** How tall the row is open (it is measured so while it is, and kept while it is hidden). */
-  let openTall = 0
   muteKey.addEventListener('click', () => {
     if (!running?.media) return
     const m = running.media
@@ -567,9 +574,15 @@ export function eggs(page: EggsPage) {
     tell(r.paused ? 'Paused.' : 'Playing.')
   })
   // Hidden: the row folds into its last key, where that key was, to watch with only that key over the picture; the
-  // key brings the row back. It stays hidden for the next egg too, until the key is tapped (or the sound is held back,
-  // when the row comes back for its Unmute).
+  // key brings the row back. Once the key has been tapped the row stays as it was left, for the next egg too (or until
+  // the sound is held back, when the row comes back for its Unmute). Until then it starts hidden where the picture is
+  // short and the row would take much of it: the first view on a phone held wide (owner, November 27).
   let tucked = false
+  /** Whether the row is hidden or shown by a hand (the key, or the sound held back), not by where the page is. */
+  let chosen = false
+  const wideTouch = matchMedia('(pointer: coarse) and (min-aspect-ratio: 1/1)')
+  /** Hidden or shown as the page asks, until a hand has chosen. */
+  const settle = () => { if (!chosen && !player.hidden) tuck(wideTouch.matches && document.documentElement.classList.contains('first')) }
   const tuck = (on: boolean) => {
     if (tucked === on) return
     tucked = on
@@ -585,9 +598,10 @@ export function eggs(page: EggsPage) {
     if (player.dataset.side !== (left ? 'left' : 'right')) player.dataset.side = left ? 'left' : 'right'
   }
   // (Again for the screen turned, and for the page gone in from the first view: its place is by the page's classes.)
-  addEventListener('resize', anchor)
-  new MutationObserver(anchor).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-  tuckKey.addEventListener('click', () => tuck(!tucked))
+  const relay = () => { settle(); anchor() }
+  addEventListener('resize', relay)
+  new MutationObserver(relay).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  tuckKey.addEventListener('click', () => { chosen = true; tuck(!tucked) })
   nextKey.addEventListener('click', () => act('meme'))
   stopKey.addEventListener('click', () => stop())
   fader.addEventListener('pointerdown', () => { scrubbing = true })

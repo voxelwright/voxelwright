@@ -364,23 +364,26 @@ const SAFE = { phone: { top: 59, bottom: 34, left: 0, right: 0 }, landscape: { t
  * player at the top.
  */
 /**
- * Hidden and back (#134): the row folds into its hide key where that key was, the only thing of it left, the video
- * where it was; the key brings the row back as it was.
+ * Hidden and shown again (#134), from whichever it is: the row folds into its hide key where that key was, the only
+ * thing of it left, and the video has at least the room it had; the key brings it back as it was.
  */
 const foldsInPlace = async (page, press) => {
   const laid = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), k = p.querySelector('.tuck'), q = k.getBoundingClientRect(), v = globalThis.engine.eggs.screen
     return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), key: [q.left, q.top, q.right, q.bottom].map(Math.round), x: q.left + q.width / 2, y: q.top + q.height / 2, name: k.getAttribute('aria-label'),
-      onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)?.closest('.tuck') === k, seen: [...p.querySelectorAll('button, a, input')].filter((e) => e.checkVisibility({ visibilityProperty: true, opacityProperty: true })).length, screen: v && [v.left, v.top, v.right, v.bottom].map(Math.round).join(' ') } })
-  const open = await laid()
-  await press(open.x, open.y)
+      onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)?.closest('.tuck') === k, seen: [...p.querySelectorAll('button, a, input')].filter((e) => e.checkVisibility({ visibilityProperty: true, opacityProperty: true })).length,
+      screen: v && [v.left, v.top, v.right, v.bottom].map(Math.round), area: v ? (v.right - v.left) * (v.bottom - v.top) : 0 } })
+  const a = await laid()
+  await press(a.x, a.y)
   await page.waitForTimeout(600)
-  const folded = await laid()
-  await press(folded.x, folded.y)
+  const b = await laid()
+  await press(b.x, b.y)
   await page.waitForTimeout(600)
-  const back = await laid()
+  const c = await laid()
+  const [folded, open] = a.seen === 1 ? [a, b] : [b, a]
   const kept = folded.key.every((v, i) => Math.abs(v - open.key[i]) <= 2)
-  return { ok: folded.seen === 1 && folded.onTop && folded.name === 'Show the player' && kept && folded.screen === open.screen && back.seen === open.seen && String(back.box) === String(open.box),
-    says: `hidden, its one key (${folded.seen} shown) at ${folded.key.join(' ')} (was ${open.key.join(' ')}), the video at ${folded.screen} (was ${open.screen}); back, ${back.seen} controls at ${back.box.join(' ')} (were ${open.seen} at ${open.box.join(' ')})` }
+  return { ok: folded.seen === 1 && open.seen > 1 && folded.onTop && folded.name === 'Show the player' && kept && folded.area >= open.area - 1 && c.seen === a.seen && String(c.box) === String(a.box) && String(c.screen) === String(a.screen),
+    startedHidden: a.seen === 1,
+    says: `${a.seen === 1 ? 'started hidden' : 'started open'}; hidden, its one key (${folded.seen} shown) at ${folded.key.join(' ')} (open, ${open.key.join(' ')}), the video at ${folded.screen?.join(' ')} (open, ${open.screen?.join(' ')}); and back as it was (${c.seen} shown at ${c.box.join(' ')})` }
 }
 const planeClear = (page) => page.evaluate(async () => {
   const plane = globalThis.engine.boards?.plane, p = document.querySelector('.egg-player').getBoundingClientRect(), hit = []
@@ -439,7 +442,15 @@ const fromFirst = async () => {
       const flown = await planeClear(page)
       check(!flown.hit.length, `${kind}: Bad Apple!!: the banner's plane, held at ${flown.seen} places on its round in the picture, is clear of the player${flown.hit.length ? `, but under it at ${flown.hit.join('; ')}` : ''}`)
       const fold = await foldsInPlace(page, press)
-      check(fold.ok, `${kind}: the player ${fold.says}`)
+      check(fold.ok && fold.startedHidden, `${kind}: the player ${fold.says} (asked: started hidden, the picture short)`)
+      // Opened by a hand: the row too clear of the boards, the video and the plane.
+      const key = await page.locator('.egg-player .tuck').boundingBox()
+      await press(key.x + key.width / 2, key.y + key.height / 2)
+      await page.waitForTimeout(800)
+      const opened = await page.evaluate(() => { const p = document.querySelector('.egg-player').getBoundingClientRect(), b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
+        return { box: [p.left, p.top, p.right, p.bottom].map(Math.round), under: b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id) } })
+      const clearOpen = await clearOfVideo(page)
+      check(!opened.under.length && clearOpen.ok, `${kind}: opened, ${saysClear(clearOpen)}, over ${opened.under.join(', ') || 'no board'}`)
       await page.screenshot({ path: join(dir, `${kind}-apple.png`) })
       await page.evaluate(() => globalThis.engine.eggs.say('stop'))
       await page.waitForTimeout(500)
@@ -938,7 +949,7 @@ try {
   await page.waitForTimeout(500)
   s = await state(page)
   const kept = away.key.every((v, i) => Math.abs(v - row.key[i]) <= 2) && away.box.every((v, i) => v >= 0 && v <= [1280, 720][i % 2])
-  check(away.seen.length === 1 && away.name === 'Show the player' && away.onTop && kept && String(away.screen) === String(row.screen) && s.playing && s.time > t1, `the player hides to its one key (${away.seen.join(', ')}, at ${away.key.join(' ')}, was ${row.key.join(' ')}; its box ${away.box.join(' ')} on the screen, on top ${away.onTop}), the video playing on (${round(s.time)} s) where it was (${away.screen?.join(' ')})`)
+  check(away.seen.length === 1 && away.name === 'Show the player' && away.onTop && kept && ((q) => q ? (q[2] - q[0]) * (q[3] - q[1]) : 0)(away.screen) >= ((q) => q ? (q[2] - q[0]) * (q[3] - q[1]) : 0)(row.screen) - 1 && s.playing && s.time > t1, `the player hides to its one key (${away.seen.join(', ')}, at ${away.key.join(' ')}, was ${row.key.join(' ')}; its box ${away.box.join(' ')} on the screen, on top ${away.onTop}), the video playing on (${round(s.time)} s) with at least the room it had (${away.screen?.join(' ')}, open ${row.screen?.join(' ')})`)
   await page.click('.egg-player .tuck')
   await page.waitForTimeout(700)
   const back = await laid()
