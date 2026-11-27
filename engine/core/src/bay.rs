@@ -134,6 +134,8 @@ struct Building {
     base: i32,
     /// True when the surveyed footprint already traces bay windows or faceted street projections.
     has_surveyed_bays: bool,
+    /// Clean median eave/wall-top height (in cells) derived from valid roof samples, for uniform roof slopes.
+    eave_med: i32,
     low: [i32; 2],
     high: [i32; 2],
 }
@@ -321,12 +323,14 @@ fn read(b: &[u8]) -> Option<Pack> {
             seed: style >> 24,
             base: r[5],
             has_surveyed_bays,
+            eave_med: r[5] + 2 * ((style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 }),
             low: [own.iter().map(|v| v[0]).min()?, own.iter().map(|v| v[1]).min()?],
             high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
         });
     }
     let under_leaf_road = road_greys(&class, &tint, tw);
     let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    repair_building_roofs(&mut p);
     // Which buildings and trunks reach into each patch.
     let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
@@ -530,7 +534,7 @@ fn join_cornices(ring_verts: &mut [[i32; 3]]) {
 /// Propagates street-facing and open-air flags across recessed porches and faceted bay-window segments that erosion or
 /// setback distance left unmarked, and ensures no standalone building outer ring is completely windowless (#60).
 fn propagate_fronts(ring_verts: &mut [[i32; 3]]) {
-    const FACET_MAX: f32 = 45.0; // 4.5 m
+    const FACET_MAX: f32 = 22.0; // 2.2 m (bay facets & recessed porch jogs, never 3+ m side party walls)
     let mut start = 0;
     let mut outer = true;
     while start < ring_verts.len() {
@@ -627,6 +631,203 @@ fn ring_has_surveyed_bays(ring_verts: &[[i32; 3]]) -> bool {
         }
     }
     faceted_street >= 3 || (faceted_street >= 2 && angled_bends >= 1)
+}
+
+/// Repairs collapsed perimeter ground-level lidar dropouts (where a surveyed footprint extends 0.5–1.5 m past the
+/// lidar roof return edge), denoises single-cell rooftop spikes/potholes with a 3x3 building-interior median, and
+/// fills missing horizontal eaves on street-facing edges so houses never render as broken/demolished stubs (#60).
+fn repair_building_roofs(p: &mut Pack) {
+    if p.tstep <= 0 || p.tstep > 10 || p.buildings.is_empty() {
+        return;
+    }
+    let (tw, tstep, tx0, tz0) = (p.tw, p.tstep, p.tx0, p.tz0);
+    let nb = p.buildings.len();
+    for bi in 0..nb {
+        if p.buildings[bi].special != 0 {
+            continue;
+        }
+        let b_low = p.buildings[bi].low;
+        let b_high = p.buildings[bi].high;
+        let b_base = p.buildings[bi].base;
+        let b_first = p.buildings[bi].first;
+        let b_count = p.buildings[bi].count;
+        let i0 = ((b_low[0] - tx0).div_euclid(tstep)).clamp(0, tw - 1);
+        let i1 = ((b_high[0] - tx0).div_euclid(tstep)).clamp(0, tw - 1);
+        let j0 = ((b_low[1] - tz0).div_euclid(tstep)).clamp(0, tw - 1);
+        let j1 = ((b_high[1] - tz0).div_euclid(tstep)).clamp(0, tw - 1);
+        let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+        if w == 0 || h == 0 || w * h > 12000 {
+            continue;
+        }
+        let mut inside = vec![false; w * h];
+        let mut repaired = vec![NONE; w * h];
+        let mut valid_heights = Vec::new();
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            let cz = tz0 + j * tstep + tstep / 2;
+            for li in 0..w {
+                let i = i0 + li as i32;
+                let cx = tx0 + i * tstep + tstep / 2;
+                if p.probe(&p.buildings[bi], cx, cz).inside {
+                    let k = lj * w + li;
+                    inside[k] = true;
+                    let v = p.top[(j * tw + i) as usize];
+                    repaired[k] = v;
+                    if v != NONE && (v as i32) >= b_base + 24 {
+                        valid_heights.push(v);
+                    }
+                }
+            }
+        }
+        if valid_heights.is_empty() {
+            continue;
+        }
+        valid_heights.sort_unstable();
+        let roof_lo = valid_heights[valid_heights.len() / 4];
+        // Pass A: Fill collapsed perimeter dropouts (< base + 24, i.e. ground/car/missing lidar inside the footprint)
+        // by sampling straight inward from the outer edge into the same building's valid roof.
+        let mut filled = repaired.clone();
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            let cz = tz0 + j * tstep + tstep / 2;
+            for li in 0..w {
+                let k = lj * w + li;
+                if !inside[k] {
+                    continue;
+                }
+                let v = repaired[k];
+                if v != NONE && (v as i32) >= b_base + 24 {
+                    continue;
+                }
+                let i = i0 + li as i32;
+                let cx = tx0 + i * tstep + tstep / 2;
+                let pr = p.probe(&p.buildings[bi], cx, cz);
+                if pr.far >= 24.0 {
+                    continue;
+                }
+                let far = pr.far.max(0.01);
+                let (ix, iz) = ((cx as f32 + 0.5 - pr.on[0]) / far, (cz as f32 + 0.5 - pr.on[1]) / far);
+                let mut found = None;
+                for &d in &[8.0f32, 14.0, 20.0, 26.0] {
+                    let sx = ((cx as f32 + 0.5 + ix * d).floor() as i32 - tx0).div_euclid(tstep) - i0;
+                    let sz = ((cz as f32 + 0.5 + iz * d).floor() as i32 - tz0).div_euclid(tstep) - j0;
+                    if sx >= 0 && sz >= 0 && (sx as usize) < w && (sz as usize) < h {
+                        let sk = sz as usize * w + sx as usize;
+                        if inside[sk] && repaired[sk] != NONE && (repaired[sk] as i32) >= b_base + 26 {
+                            found = Some(repaired[sk]);
+                            break;
+                        }
+                    }
+                }
+                if found.is_none() && pr.looks & 128 != 0 {
+                    let eave = (pr.looks >> 8) as i16;
+                    if (eave as i32) >= b_base + 26 {
+                        found = Some(eave);
+                    }
+                }
+                if found.is_none() && (roof_lo as i32) >= b_base + 28 {
+                    found = Some(roof_lo);
+                }
+                if let Some(fv) = found {
+                    filled[k] = fv;
+                }
+            }
+        }
+        // Pass B: 3x3 edge-preserving building-interior median to strip lidar vents, poles, potholes and jagged teeth.
+        let mut nbrs = [0i16; 9];
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            for li in 0..w {
+                let k = lj * w + li;
+                if !inside[k] {
+                    continue;
+                }
+                let cur = filled[k];
+                if cur == NONE || (cur as i32) < b_base + 24 {
+                    continue;
+                }
+                let mut n = 0usize;
+                for dj in -1i32..=1 {
+                    let nj = lj as i32 + dj;
+                    if nj < 0 || nj >= h as i32 { continue; }
+                    for di in -1i32..=1 {
+                        let ni = li as i32 + di;
+                        if ni < 0 || ni >= w as i32 { continue; }
+                        let nk = nj as usize * w + ni as usize;
+                        if inside[nk] && filled[nk] != NONE && (filled[nk] as i32) >= b_base + 24 {
+                            nbrs[n] = filled[nk];
+                            n += 1;
+                        }
+                    }
+                }
+                let mut out = cur;
+                if n >= 4 {
+                    nbrs[..n].sort_unstable();
+                    let med = nbrs[n / 2];
+                    let flat = nbrs[..n].iter().filter(|&&nv| (nv - med).abs() <= 8).count();
+                    if (cur - med).abs() <= 18 || flat >= 5 {
+                        out = med;
+                    }
+                }
+                let i = i0 + li as i32;
+                p.top[(j * tw + i) as usize] = out;
+            }
+        }
+        // Pass C: Fill missing or collapsed surveyed eaves on street-facing edges using the repaired roof grid.
+        let mut best_street: Option<(f32, i32)> = None;
+        let mut ring_start = 0usize;
+        for ei in 0..b_count {
+            let a = p.verts[b_first + ei];
+            let last = a[2] & 4 != 0 || ei == b_count - 1;
+            let c = p.verts[b_first + if last { ring_start } else { ei + 1 }];
+            if last {
+                ring_start = ei + 1;
+            }
+            if a[2] & 2 == 0 {
+                continue;
+            }
+            let (dx, dz) = ((c[0] - a[0]) as f32, (c[1] - a[1]) as f32);
+            let long = (dx * dx + dz * dz).sqrt();
+            if long < 7.0 {
+                continue;
+            }
+            let has_valid = a[2] & 128 != 0 && ((a[2] >> 8) as i16 as i32) >= b_base + 28;
+            if has_valid {
+                let ev = (a[2] >> 8) as i16 as i32;
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, ev));
+                }
+                continue;
+            }
+            let (tx, tz) = (dx / long, dz / long);
+            let (mx, mz) = ((a[0] + c[0]) as f32 * 0.5, (a[1] + c[1]) as f32 * 0.5);
+            let n1 = (-tz, tx);
+            let inward = if p.probe(&p.buildings[bi], (mx + n1.0 * 5.0) as i32, (mz + n1.1 * 5.0) as i32).inside {
+                n1
+            } else {
+                (tz, -tx)
+            };
+            let mut samples = Vec::new();
+            for &t in &[0.15f32, 0.32, 0.50, 0.68, 0.85] {
+                let sx = (a[0] as f32 + dx * t + inward.0 * 6.0) as i32;
+                let sz = (a[1] as f32 + dz * t + inward.1 * 6.0) as i32;
+                if let Some(top_v) = p.top(sx, sz) {
+                    if top_v >= b_base + 28 {
+                        samples.push(top_v);
+                    }
+                }
+            }
+            if samples.len() >= 3 {
+                samples.sort_unstable();
+                let med_eave = samples[samples.len() / 2];
+                p.verts[b_first + ei][2] = (a[2] & !0xff_ff00) | 128 | ((med_eave & 0xffff) << 8);
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, med_eave));
+                }
+            }
+        }
+        p.buildings[bi].eave_med = best_street.map_or(roof_lo as i32, |(_, ev)| ev);
+    }
 }
 
 impl Pack {
@@ -844,14 +1045,45 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         };
     }
     let detail = p.looks >> 24;
-    // Place the entry beside the garage, with both meeting the local street grade.
-    if detail != 0 && over_ground < 30 {
+    // Place the entry beside the garage, recessed cleanly inside trim jambs & lintels; never fall through to cut a
+    // Floor-0 window straight across the top of a garage door or front entry door (#60).
+    if detail != 0 && over_ground < storey {
         let entry = (p.long * 0.22).clamp(7.0, 18.0);
-        if detail & 8 != 0 && (p.along - entry).abs() <= 5.0 && (4..=26).contains(&over_ground) {
-            return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+        if detail & 8 != 0 && (p.along - entry).abs() <= 5.5 {
+            if (4..=27).contains(&over_ground) {
+                let jamb = (p.along - entry).abs() > 4.2;
+                if over_ground == 27 || jamb {
+                    return b.trim;
+                }
+                if deep < 1.1 && size == 1 {
+                    return 0;
+                }
+                return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+            }
+            return b.wall;
         }
-        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() < (p.long * 0.23).min(19.0) && over_ground < 23 {
-            return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+        let half_g = (p.long * 0.23).min(19.0);
+        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() <= half_g {
+            if over_ground <= 23 {
+                let jamb = (p.along - p.long * 0.66).abs() > half_g - 1.2;
+                if over_ground == 23 || jamb {
+                    return b.trim;
+                }
+                if deep < 1.0 && size == 1 {
+                    return 0;
+                }
+                return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+            }
+            return b.wall;
+        }
+        // On a residential garage+entry ground floor, never squeeze a broken narrow window sliver into the small
+        // pier between the entry door and garage door (or beside them when < 1.2 m of wall remains) (#60).
+        if detail & 12 == 12 {
+            let lo = (entry - 5.5).min(p.long * 0.66 - half_g) - 4.0;
+            let hi = (entry + 5.5).max(p.long * 0.66 + half_g) + 4.0;
+            if p.along >= lo && p.along <= hi {
+                return b.wall;
+            }
         }
     }
     // The cornice: the wall's last cells are trim (slim 1-cell verge on pitched gables so gable slopes stay clean).
@@ -1012,8 +1244,9 @@ struct Column<'a> {
 enum What<'a> {
     Open,
     /// In a building: its roof's cell, colour, whether its roof rises into a pitched gable behind the front,
-    /// and (for stepped-back upper walls behind a lower garage/porch) the lower roof height and depth into the step.
-    In(&'a Building, Probe, i32, u8, bool, i32, f32),
+    /// its clean wall-top eave height (above which interior roof slopes are painted `ROOFING` rather than stucco),
+    /// and (for stepped-back upper walls behind a lower wing) the lower roof height and depth into the step.
+    In(&'a Building, Probe, i32, u8, bool, i32, i32, f32),
     /// Just outside one, where its bays and cornice stand: how high its wall is there, and whether a pitched gable
     /// or taller upper wall rises directly behind it.
     By(&'a Building, Probe, i32, bool),
@@ -1094,25 +1327,29 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             // On pitched gables where lidar rises > 0.6 m above the eave, keep the gable slope intact instead of
             // decapitating it flat at `eave + 3` (#60).
             let mut pitched = false;
-            let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
+            let (roof, wall_top) = if probe.looks & 128 != 0 && probe.far < 15.0 {
                 let eave = (probe.looks >> 8) as i16 as i32;
                 let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
                 let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
                 pitched = raster > eave + 6;
-                if probe.looks >> 24 & 2 != 0 && !pitched { blended.min(eave + 3) } else { blended }
+                let r = if probe.looks >> 24 & 2 != 0 && !pitched { blended.min(eave + 3) } else { blended };
+                (r, eave)
             } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
                 let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
                 match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
                     Some(eave) => {
                         pitched = raster > eave + 6;
-                        if pitched { raster } else { raster.min(eave + 3) }
+                        (if pitched { raster } else { raster.min(eave + 3) }, eave)
                     }
-                    None => raster,
+                    None => (raster, b.eave_med),
                 }
-            } else { raster }.max(g + 22);
-            // Exposed stepped-back upper walls (e.g. a 2nd storey rising behind a protruding 1-storey garage or porch)
-            // sit past `probe.far >= 3*size` from the outer footprint; detect the vertical cliff facing the street edge
-            // so `front()` still cuts windows into the recessed upper storey instead of leaving it blank stucco (#60).
+            } else {
+                let eave = if probe.looks & 128 != 0 { (probe.looks >> 8) as i16 as i32 } else { b.eave_med };
+                (raster, eave)
+            };
+            let roof = roof.max(g + 22);
+            // Exposed stepped-back upper walls (e.g. a genuine 2nd storey rising behind a lower 1-storey wing) sit past
+            // `probe.far >= 3*size`; probe 3 depths so recessed glass gets real dark interior backing instead of stucco (#60).
             let (mut step_below, mut step_far) = (i32::MAX, 1e9f32);
             if probe.far >= 3.0 * size as f32 && size <= 4 && probe.looks & 2 != 0 {
                 let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
@@ -1120,17 +1357,22 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                 let (ox, oz) = ((probe.on[0] - cx) / far, (probe.on[1] - cz) / far);
                 let d1 = 1.4 * size as f32;
                 let d2 = 2.6 * size as f32;
+                let d3 = 3.8 * size as f32;
                 let f1 = p.top((cx + ox * d1).floor() as i32, (cz + oz * d1).floor() as i32);
                 let f2 = p.top((cx + ox * d2).floor() as i32, (cz + oz * d2).floor() as i32);
-                if let Some(low) = f1.filter(|&fr| roof > fr + 10) {
+                let f3 = p.top((cx + ox * d3).floor() as i32, (cz + oz * d3).floor() as i32);
+                if let Some(low) = f1.filter(|&fr| roof > fr + 14) {
                     step_below = low;
                     step_far = if size == 1 { 0.5 } else { 1.5 };
-                } else if let Some(low) = f2.filter(|&fr| roof > fr + 10) {
+                } else if let Some(low) = f2.filter(|&fr| roof > fr + 14) {
                     step_below = low;
                     step_far = 1.6;
+                } else if let Some(low) = f3.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 2.5;
                 }
             }
-            What::In(b, probe, roof, tint, pitched, step_below, step_far)
+            What::In(b, probe, roof, tint, pitched, wall_top, step_below, step_far)
         }
         Some((b, probe)) if size <= 2 && probe.looks & 2 != 0 => {
             // The wall's height where this column is nearest it: a little way in from the outline.
@@ -1321,10 +1563,12 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     }
     match &c.what {
         What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
-        What::In(b, p, roof, tint, pitched, step_below, step_far) => {
+        What::In(b, p, roof, tint, pitched, wall_top, step_below, step_far) => {
+            let on_roof_slope = (p.far >= 3.0 * size as f32 || (b.home && p.looks & 2 == 0))
+                && *roof - *wall_top <= 30 && mid > *wall_top && mid <= *step_below;
             if mid > *roof {
                 0
-            } else if mid > *roof - size {
+            } else if mid > *roof - size || on_roof_slope {
                 if material(b.wall) == GLASS {
                     kind(GLASS, colour(14, 7))
                 } else if living_roof_foliage(*tint) {
@@ -1336,7 +1580,7 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 form
             } else if p.far < 3.0 * size as f32 && size <= 8 {
                 front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size, *pitched)
-            } else if mid > step_below.saturating_add(2) && *step_far < 3.0 * size as f32 && size <= 4 {
+            } else if mid >= b.base + b.storey && mid > step_below.saturating_add(4) && *step_far < 3.0 * size as f32 && size <= 4 {
                 front(b, p, mid - b.base, *roof - b.base, (mid - c.g).max(32), *step_far, size, *pitched)
             } else {
                 b.wall
@@ -1460,9 +1704,9 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
         match c.what {
-            What::In(b, ref probe, _, _, _, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
+            What::In(b, ref probe, _, _, _, _, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
                 (c.g + 1, true, 0),
-            What::In(_, _, roof, _, _, _, _) => (roof + 1, false, 0),
+            What::In(_, _, roof, _, _, _, _, _) => (roof + 1, false, 0),
             _ => (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
         }
     })
@@ -2003,7 +2247,7 @@ mod tests {
         let b = Building {
             first: 0, count: 4, wall: kind(PLASTER, WHITE), trim: kind(PLASTER, grey(2)), glass: None,
             storey: 32, module: 30, home: true, special: 0, ground_floor: 0, seed: 1, base: 100,
-            has_surveyed_bays: true, low: [0, 0], high: [100, 100],
+            has_surveyed_bays: true, eave_med: 180, low: [0, 0], high: [100, 100],
         };
         let p_pane = Probe { inside: true, far: 1.5, along: 5.0, round: 23.0, long: 14.0, looks: 3, side: 1, on: [5.0, 0.0] };
         assert_eq!(material(front(&b, &p_pane, 48, 96, 48, 1.5, 1, false)), GLASS);
@@ -2019,7 +2263,7 @@ mod tests {
         // Living green roofs and glass roofs render as GRASS / GLASS rather than grey ROOFING shingles.
         let c_green = Column {
             g: 100, road_top4: None, ground: kind(GRASS, OWN), kerb: 0,
-            what: What::In(&b, p, 180, colour(8, 5), false, i32::MAX, 1e9), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
         };
         assert_eq!(material(kind_at(&c_green, 10, 180, 10, 1)), GRASS);
         // 2-story Outer Sunset house (5.9 m tall, storey 34): floor 1 must get real GLASS windows below its cornice,
@@ -2027,18 +2271,80 @@ mod tests {
         let sunset = Building {
             first: 0, count: 4, wall: kind(PLASTER, colour(6, 7)), trim: kind(PLASTER, WHITE), glass: None,
             storey: 34, module: 30, home: true, special: 0, ground_floor: 0, seed: 2, base: 585,
-            has_surveyed_bays: false, low: [0, 0], high: [100, 100],
+            has_surveyed_bays: false, eave_med: 643, low: [0, 0], high: [100, 100],
         };
         let p_sun = Probe { inside: true, far: 1.5, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
         let glass_cells = (34..58).filter(|&up| material(front(&sunset, &p_sun, up, 58, up, 1.5, 1, false)) == GLASS).count();
         assert!(glass_cells >= 8, "2-story 5.8 m house floor 1 should have real windows, got {glass_cells}");
-        // Stepped-back 2nd-floor wall behind a lower protruding garage (probe.far = 18.0 >= 3.0) still gets windows!
+        // Stepped-back 2nd-floor wall behind a lower wing (probe.far = 18.0 >= 3.0) still gets windows on floor >= 1!
         let p_setback = Probe { inside: true, far: 18.0, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
         let c_setback = Column {
             g: 585, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
-            what: What::In(&sunset, p_setback, 643, 0, false, 611, 1.6), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
         };
         let setback_glass = (619..643).filter(|&y| material(kind_at(&c_setback, 22, y, 18, 1)) == GLASS).count();
-        assert!(setback_glass >= 8, "stepped-back 2nd floor behind garage should have windows, got {setback_glass}");
+        assert!(setback_glass >= 8, "stepped-back 2nd floor behind wing should have windows, got {setback_glass}");
+    }
+
+    #[test]
+    fn collapsed_front_lidar_and_garage_overlap_are_repaired() {
+        // Reproduces the exact Outer Sunset fault (owner feedback on IMG_6768.png, #60):
+        // (1) Front 1.0 m of building footprint has ground-level lidar dropouts (base+6) while interior is base+56..68,
+        // (2) Single-cell +3.0 m rooftop spike, (3) Sloped roof rising from eave+0 to eave+14, (4) Garage+entry front.
+        let mut bytes = Vec::new();
+        let (gw, tw, gstep, tstep) = (33i32, 64i32, 10i32, 5i32);
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 4, 0, 0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        // Building spans x=60..180, z=60..140 (base=100, storey=32); west front at x=60 faces street.
+        for j in 12..28 {
+            for i in 12..36 {
+                let k = (j * tw + i) as usize;
+                cls[k] = BUILT | PAVEMENT;
+                if i < 14 {
+                    // Front 1.0 m lidar dropout: ground-level returns (base + 6) that collapsed the front wall to 2.2 m!
+                    top[k] = 106;
+                } else {
+                    // Sloped hip roof rising cleanly from 154 at front to 168 at ridge.
+                    top[k] = (154 + ((i - 14) * 4).min(14)) as i16;
+                }
+            }
+        }
+        // Single-cell rooftop antenna/vent spike (+3.0 m above surrounding roof).
+        top[(20 * tw + 24) as usize] = 198;
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![grey(9); (tw * tw) as usize]);
+        // Building record: first=0, count=4, wall=cream plaster, trim=white, storey=32, mod=28, home=1, base=100
+        let style = 32 | (28 << 8) | (1 << 16);
+        for v in [0i32, 4, kind(PLASTER, colour(3, 1)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes.extend(v.to_le_bytes());
+        }
+        // 4 corners: west front (60,140)->(60,60) has street + garage + entry + cornice (0xf << 24), NO eave bit!
+        let front_looks: i32 = 3 | (0xf << 24);
+        for [x, z, l] in [[60i32, 140, front_looks], [60, 60, 1], [180, 60, 1], [180, 140, 4 | 1]] {
+            for v in [x, z, l] { bytes.extend(v.to_le_bytes()); }
+        }
+        let pack = read(&bytes).expect("valid pack");
+        let packs = [pack];
+        // 1. Collapsed front 1.0 m wall is restored up to the real ~5.4 m eave, never left as a 2.2 m stub!
+        let c_front = column(&packs, 62, 100, 1);
+        match c_front.what {
+            What::In(_, _, roof, _, _, _, _, _) => assert!(roof >= 150, "front wall collapsed to {roof}"),
+            _ => panic!("expected What::In at front wall"),
+        }
+        // 2. Single-cell +3.0 m rooftop spike at (122, 102) is denoised down to the roof plane (~168).
+        assert!(packs[0].top(122, 102).unwrap() <= 172, "rooftop spike survived: {:?}", packs[0].top(122, 102));
+        // 3. Interior sloped roof voxels above the eave render as ROOFING, never flashing bright stucco risers!
+        let c_slope = column(&packs, 92, 100, 1);
+        assert_eq!(material(kind_at(&c_slope, 92, 158, 100, 1)), ROOFING, "sloped roof step flashed wall stucco");
+        // 4. Garage header (over_ground = 23..30) directly above the garage door must NEVER cut a Floor-0 glass window!
+        let p_gar = Probe { inside: true, far: 1.5, along: 52.0, round: 52.0, long: 80.0, looks: front_looks, side: 0, on: [60.0, 88.0] };
+        let b0 = &packs[0].buildings[0];
+        let clipped_glass = (23..31).filter(|&y| material(front(b0, &p_gar, y, 56, y, 1.5, 1, false)) == GLASS).count();
+        assert_eq!(clipped_glass, 0, "window clipped straight into top of garage door ({clipped_glass} cells)");
     }
 }
