@@ -172,12 +172,15 @@ function position(p, s) {
     if (d.radius <= 0.0001 || r >= d.radius || d.depth <= 0) continue
     const [dx, dy, dz] = d.dir
     const envelope = (r) => Math.max(0, 1 - (r / d.radius) ** 2) ** 2
-    const compression = d.depth * envelope(r)
-    for (let a = 0; a < 3; a++) q[a] += d.dir[a] * compression
-    const v = q.map((x, a) => x - d.center[a])
-    const along = ((1.75*dx + 1.65*dz)*v[0] + 0.95*v[1] + (1.75*dz - 1.65*dx)*v[2]) / d.radius - 0.9
-    const lift = d.depth * envelope(Math.hypot(...v)) * Math.max(0, 1 - along*along) ** 2
-    for (let a = 0; a < 3; a++) q[a] += (0.60 * ((a === 1 ? 1 : 0) - dy*d.dir[a]) - 0.49 * (1-dy*dy) * d.dir[a]) * lift
+    const h = 1 - dy*dy, rel = q.map((x,i)=>(x-d.center[i])/d.radius)
+    const a = (1.75*dx+1.65*dz)*rel[0] + 0.95*rel[1] + (1.75*dz-1.65*dx)*rel[2] - 0.72
+    const ridge = Math.max(0,1.08-Math.hypot(a,Math.sqrt(0.008)))
+    const inward = d.depth * envelope(r) * (1 - 0.44*h*ridge*ridge)
+    for (let i=0; i<3; i++) q[i] += d.dir[i]*inward
+    const v = q.map((x,i)=>x-d.center[i])
+    const t = Math.min(1,Math.max(0,3.2*(0.20-v[1]/d.radius)))
+    const drop = d.depth * envelope(Math.hypot(...v)) * (t*t*(3-2*t))**2
+    for (let i=0; i<3; i++) q[i] += (-0.59*((i===1?1:0)-dy*d.dir[i])-0.40*h*d.dir[i])*drop
   }
   return q
 }
@@ -197,12 +200,12 @@ assert.equal(multi.dentCount, 6); safe(multi)
 // A side strike must gather metal into a ridge. Measure the volume change as well as
 // the travel and normals. A positive determinant means neighbours stay in order.
 const side = tracker.recordImpact(705, body, hood, [1, 0, 0], 150, 10000, cabin)
-let highest = 0, minVolume = Infinity
+let lowest = 0, highest = 0, minVolume = Infinity
 const dent = side.dents[0]
 for (let x = -6; x <= 6; x++) for (let y = -6; y <= 6; y++) for (let z = -6; z <= 6; z++) {
   const p = [x,y,z].map((v,i) => dent.center[i] + v * dent.radius / 6)
   const q = deformPointCpu(p, [0,1,0], side).pos
-  highest = Math.max(highest, q[1]-p[1])
+  lowest = Math.min(lowest, q[1]-p[1]); highest = Math.max(highest, q[1]-p[1])
   assert.ok(Math.hypot(...q.map((v,i) => v-p[i])) <= dent.depth + 1e-6)
   const [a,b,c] = [0,1,2].map(axis => {
     const ahead = [...p]; ahead[axis] += 0.0001
@@ -210,7 +213,7 @@ for (let x = -6; x <= 6; x++) for (let y = -6; y <= 6; y++) for (let z = -6; z <
   })
   minVolume = Math.min(minVolume, a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
 }
-assert.ok(highest > 0.32 * dent.depth && minVolume > 0, 'a lateral hit raises a bounded crease without folding the mesh')
+assert.ok(lowest < -0.32 * dent.depth && highest <= 1e-6 && minVolume > 0, 'the lower panel yields, the hood stays below the sightline, and the skin never folds')
 const states = [undefined, state, multi, protectedState, windshield, side]
 const uniforms = new Float32Array(52 * 64)
 for (let i = 0; i < 64; i++) packDeformUniforms(states[i % states.length], uniforms, i * 52)

@@ -34,6 +34,9 @@ export interface Dent { center: Float64Array; radius: number; dir: Float64Array;
 export interface DeformState {
   readonly dents: readonly Dent[]
   dentCount: number
+  /** Changes on impact or repair so attached effects can reuse a point on the bent skin. */
+  revision: number
+  front: 0 | 1 | 2 | 3
   health: number
   hoodDamage: number
   /** Front, rear, left, right (relative to motor.front). */
@@ -46,7 +49,7 @@ export interface DeformState {
 const clamp = (v: number, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, v))
 const finite3 = (v: ArrayLike<number>) => Number.isFinite(v[0]) && Number.isFinite(v[1]) && Number.isFinite(v[2])
 function fresh(): DeformState {
-  return { dents: Array.from({ length: MAX_DENTS }, () => ({ center: new Float64Array(3), radius: 0, dir: new Float64Array(3), depth: 0 })), dentCount: 0, health: 1, hoodDamage: 0, glassCrack: new Float64Array(4), scuff: 0, cabin: new Float64Array(6), maxCrushCells: 0 }
+  return { dents: Array.from({ length: MAX_DENTS }, () => ({ center: new Float64Array(3), radius: 0, dir: new Float64Array(3), depth: 0 })), dentCount: 0, revision: 0, front: 0, health: 1, hoodDamage: 0, glassCrack: new Float64Array(4), scuff: 0, cabin: new Float64Array(6), maxCrushCells: 0 }
 }
 function distanceToCabin(p: ArrayLike<number>, box: Float64Array) {
   return Math.hypot(Math.max(box[0] - p[0], 0, p[0] - box[3]), Math.max(box[1] - p[1], 0, p[1] - box[4]), Math.max(box[2] - p[2], 0, p[2] - box[5]))
@@ -54,7 +57,7 @@ function distanceToCabin(p: ArrayLike<number>, box: Float64Array) {
 /** No moving support ball, even after displacement, can enter the survival box:
  * radius <= .8 * distance, depth <= .2 * radius, displacement <= depth (the 1.18 factor is conservative). Thus
  * radius + 1.18 * depth < distance. Composition preserves this for all six dents.
- * Each of the two component maps has displacement slope < 1 at depth/radius <= .2.
+ * At this depth the compression and the lower-panel drop both preserve orientation.
  * This deliberately gives up crumpling right against/inside the cabin, without
  * needing extra uniform fields. Supply the seat/head envelope INCLUDING camera travel.
  * The fallback protects the central upper body; custom seating MUST supply its box.
@@ -99,7 +102,7 @@ export class VehicleDeformation {
   repairVehicle(id: number): void {
     const s = this.vehicles.get(id)
     if (!s) return
-    s.dentCount = 0; s.health = 1; s.hoodDamage = 0; s.scuff = 0; s.maxCrushCells = 0
+    s.revision++; s.dentCount = 0; s.health = 1; s.hoodDamage = 0; s.scuff = 0; s.maxCrushCells = 0
     s.glassCrack.fill(0); s.cabin.fill(0)
     for (let i = 0; i < MAX_DENTS; i++) { const d = s.dents[i]; d.center.fill(0); d.dir.fill(0); d.radius = 0; d.depth = 0 }
   }
@@ -162,12 +165,14 @@ export class VehicleDeformation {
     s.health = Math.max(0, s.health - (0.002 + severity * severity * 0.3))
     s.scuff = clamp(s.scuff + 0.04 + severity * 0.5)
     const front = body.front ?? 0, axis = front < 2 ? 0 : 2, sign = front % 2 === 0 ? 1 : -1
+    s.front = front
     const along = ((axis === 0 ? px : pz) / size[axis] - 0.5) * 2 * sign
     const across = ((axis === 0 ? pz / size[2] : -px / size[0]) - (axis === 0 ? 0.5 : -0.5)) * 2 * sign
     s.hoodDamage = clamp(s.hoodDamage + severity * severity * 0.45 * clamp((along + 0.1) / 0.8))
     const glass = clamp((severity - 0.2) / 0.8) * clamp(py / size[1] * 2) * 0.55
     const zone = Math.abs(along) >= Math.abs(across) ? (along >= 0 ? 0 : 1) : (across >= 0 ? 3 : 2)
     s.glassCrack[zone] = clamp(s.glassCrack[zone] + glass)
+    s.revision++
     if (!old) this.vehicles.set(id, s)
     return s
   }
@@ -201,23 +206,26 @@ export function deformPointCpu(
     let x = (px - d.center[0]) * inv, y = (py - d.center[1]) * inv, z = (pz - d.center[2]) * inv
     let support = 1 - x * x - y * y - z * z
     if (support <= 0 || d.depth <= 0) continue
-    const depth = d.depth
-    const slope = -4 * support * depth * inv
-    push(dx, dy, dz, depth * support * support, slope * x, slope * y, slope * z)
+    const depth = d.depth, horizontal = 1 - dy * dy
+    // The skin compresses either side of an oblique crease. Its crest stays below the original hood.
+    const ax = 1.75 * dx + 1.65 * dz, az = 1.75 * dz - 1.65 * dx
+    const along = ax * x + 0.95 * y + az * z - 0.72
+    const tip = Math.sqrt(along * along + 0.008), ridge = Math.max(0, 1.08 - tip)
+    const compression = 1 - 0.44 * horizontal * ridge * ridge
+    const slope = -4 * support * depth * inv * compression
+    const crest = depth * inv * support * support * 0.88 * horizontal * ridge * along / tip
+    push(dx, dy, dz, depth * support * support * compression,
+      slope * x + crest * ax, slope * y + crest * 0.95, slope * z + crest * az)
 
-    // The compressed metal gathers into a diagonal ridge just behind the contact.
+    // The struck lower panel gives at the joint and drops. Material above the joint keeps its height.
     x = (px - d.center[0]) * inv; y = (py - d.center[1]) * inv; z = (pz - d.center[2]) * inv
     support = 1 - x * x - y * y - z * z
-    const ax = 1.75 * dx + 1.65 * dz, az = 1.75 * dz - 1.65 * dx
-    const along = ax * x + az * z + 0.95 * y - 0.9, ridge = 1 - along * along
-    if (support <= 0 || ridge <= 0 || Math.abs(dy) === 1) continue
-    const shape = support * ridge
-    // The lip turns back out as it rises. This is the CPU form of the shader's lip vector.
-    const returned = 0.49 * (1 - dy * dy) + 0.60 * dy
-    const g = -4 * shape * depth * inv
-    push(-dx * returned, 0.60 - dy * returned, -dz * returned, depth * shape * shape,
-      g * (ridge * x + support * along * ax), g * (ridge * y + support * along * 0.95), g * (ridge * z + support * along * az))
-
+    if (support <= 0 || horizontal <= 0) continue
+    const t = clamp((0.20 - y) * 3.2), sag = t * t * (3 - 2 * t), shape = support * sag
+    const back = 0.59 * dy - 0.40 * horizontal
+    const g = 2 * depth * inv * shape
+    push(dx * back, dy * back - 0.59, dz * back, depth * shape * shape,
+      g * (-2 * sag * x), g * (-2 * sag * y - 19.2 * support * t * (1-t)), g * (-2 * sag * z))
   }
   const norm = Math.hypot(nx, ny, nz) || 1
   return { pos: [px, py, pz], norm: [nx / norm, ny / norm, nz / norm] }
@@ -272,32 +280,37 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
     let core = support * support;
     let dir = crush.xyz;
     let depth = crush.w;
-    let grad = (-4.0 * support * depth / zone.w) * u;
+    // A crease keeps a narrow strip proud of the compressed metal on either side.
+    // Its crest stays at or below the undamaged hood. The derivative of the compression
+    // envelope is bounded by (1.54 + 0.88 * 2.60) / radius, so the map never folds at depth/radius <= 0.2.
+    let horizontal = 1.0 - dir.y * dir.y;
+    let axis = vec3f(1.75 * dir.x + 1.65 * dir.z, 0.95, 1.75 * dir.z - 1.65 * dir.x);
+    let along = dot(u, axis) - 0.72;
+    let tip = sqrt(along * along + 0.008);
+    let ridge = max(0.0, 1.08 - tip);
+    let compression = 1.0 - 0.44 * horizontal * ridge * ridge;
+    let grad = (depth / zone.w) * (-4.0 * support * compression * u + core * 0.88 * horizontal * ridge * along/tip * axis);
     result.norm -= grad * (dot(dir, result.norm) / (1.0 + dot(dir, grad)));
-    result.pos += dir * (depth * core);
+    result.pos += dir * (depth * core * compression);
 
-    // A horizontal strike shortens the panel, then lifts a diagonal ridge behind its crushed lip.
-    // Both displacements vanish at the support boundary. |grad(core)| <= 1.54/r and the
-    // ridge coordinate has slope < 2.59/r. Each map's displacement slope stays below one
-    // at depth <= 0.2r. The raised lip returns some compression, so total travel stays <= depth.
-    var shape = 0.0;
-    if (abs(dir.y) < 1.0 && crush.w > 0.0) {
+    // The lower fascia drops and rolls back at a horizontal joint. This downward step
+    // stretches the joint vertically. Only the compact radial envelope can reduce the Jacobian.
+    if (horizontal > 0.0 && depth > 0.0) {
       let v = (result.pos - zone.xyz) / zone.w;
       let edge = max(0.0, 1.0 - dot(v, v));
-      let axis = vec3f(1.75 * dir.x + 1.65 * dir.z, 0.95, 1.75 * dir.z - 1.65 * dir.x);
-      let along = dot(v, axis) - 0.9;
-      let ridge = max(0.0, 1.0 - along * along);
-      shape = edge * ridge;
-      let lip = 0.60 * (vec3f(0, 1, 0) - dir * dir.y) - 0.49 * (1.0 - dir.y * dir.y) * dir;
-      let gradLift = (-4.0 * shape * depth / zone.w) * (ridge * v + edge * along * axis);
-      result.norm -= gradLift * (dot(lip, result.norm) / (1.0 + dot(lip, gradLift)));
+      let t = clamp((0.20 - v.y) * 3.2, 0.0, 1.0);
+      let sag = t*t*(3.0 - 2.0*t);
+      let shape = edge * sag;
+      let lip = -0.59 * (vec3f(0,1,0) - dir.y * dir) - 0.40 * horizontal * dir;
+      let gradSag = (2.0 * depth * shape / zone.w) * (-2.0*sag*v - vec3f(0.0, 19.2*edge*t*(1.0-t), 0.0));
+      result.norm -= gradSag * (dot(lip,result.norm) / (1.0 + dot(lip,gradSag)));
       result.pos += lip * (depth * shape * shape);
     }
 
     // A protected window can still be marked by a zero-depth impact.
     let strength = select(min(crush.w / zone.w * 7.5, 1.0), min((1.0 - def.status.y) * 3.0, 1.0), crush.w <= 0.0);
     result.scuff = max(result.scuff, strength * core);
-    result.crease = max(result.crease, strength * core * (0.25 + 0.75 * shape));
+    result.crease = max(result.crease, strength * core * (0.25 + 0.75 * ridge));
 
   }
   result.norm = normalize(result.norm);
@@ -306,27 +319,22 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
 fn deformPaint(albedo: vec3f, scuff: f32, crease: f32, p: vec3f) -> DeformPaint { return deformPaintSeen(albedo, scuff, crease, p, 1.0); }
 // At the crushed centre a lamp loses its light. A lamp on the shoulder of the dent stays lit.
 fn deformLamp(scuff: f32) -> f32 { return smoothstep(0.58, 0.88, scuff); }
-// Three unequal, tapered scores in a rub mark. The path is in 10 cm cells relative
-// to contact. Each score ends on the panel, even when repeated blows widen the dent.
-fn gouge(p: vec2f, length: f32, width: f32, bend: f32) -> f32 {
-  let x = p.x / length;
-  let taper = max(0.0, 1.0 - x*x);
-  let edge = abs(p.y - bend * x * (1.0 - 0.4*x)) - width * taper;
-  return taper * (1.0 - smoothstep(-0.025, 0.065, edge));
-}
+// A crushed paint edge lifts in a short, irregular patch. Only its deepest chips expose metal.
 fn deformPaintSeen(albedo: vec3f, scuff: f32, crease: f32, p: vec3f, detail: f32) -> DeformPaint {
   if (scuff <= 0.0 && crease <= 0.0) { return DeformPaint(albedo, 0.0, 1.0); }
-  let grain = deformNoise(p * vec3f(2.1, 4.5, 2.2));
-  let uv = vec2f(p.x, p.y + (grain - 0.5) * 0.11);
-  let cut = max(gouge(uv, 3.8, 0.12, -0.19),
-    max(gouge(uv - vec2f(0.65, 0.34), 2.15, 0.07, -0.07),
-        gouge(uv + vec2f(1.3, 0.28), 1.25, 0.08, -0.14)));
-  let rubbed = smoothstep(0.12, 0.50, scuff) * cut * detail;
-  let steel = smoothstep(0.25, 0.73, grain) * rubbed;
-  let primer = albedo * 0.28 + vec3f(0.080, 0.074, 0.065);
-  let colour = mix(albedo, mix(primer, vec3f(0.22, 0.22, 0.21), steel), rubbed);
-  let rough = min(0.82, scuff * 0.22 + crease * 0.09 + rubbed * 0.55);
-  return DeformPaint(colour, rough, 1.0 - min(0.94, scuff * 0.38 + rubbed * 0.80));
+  let x = (p.x + 0.35) / 3.25;
+  let tip = max(0.0, 1.0 - x*x);
+  let grain = deformNoise(p * vec3f(2.8,5.3,2.2));
+  let flake = deformNoise(p * vec3f(1.1,1.9,1.1) + vec3f(9.4,2.5,0.3));
+  let path = 0.11*x - 0.10*x*x + 0.25*(flake - 0.5);
+  let edge = abs(p.y - path) - tip * (0.13 + 0.26*(1.0 - smoothstep(-0.65,0.66,x)) + 0.32*(flake - 0.5));
+  let scar = tip * (1.0 - smoothstep(-0.06,0.06,edge + 0.15*(grain-0.5)));
+  let rubbed = smoothstep(0.12,0.52,scuff) * scar * detail;
+  let steel = smoothstep(0.58,0.80,grain) * smoothstep(0.30,0.73,scuff);
+  let primer = albedo * 0.42 + vec3f(0.044,0.037,0.033);
+  let colour = mix(albedo, mix(primer,vec3f(0.23,0.22,0.20),steel), rubbed);
+  let rough = min(0.85, scuff*0.21 + crease*0.10 + rubbed*0.57);
+  return DeformPaint(colour,rough,1.0 - min(0.94,scuff*0.36 + rubbed*0.80));
 }
 // p is window-local, relative to the impact center, in the same fine cells as scuff.
 fn deformGlass(crack: f32, scuff: f32, p: vec3f) -> f32 {

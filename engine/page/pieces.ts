@@ -360,7 +360,12 @@ fn crackNet(p: vec2f, px: f32) -> vec2f {
 // right) from its own per-window origin u.cracks[w], returning (crackIntensity, facetTilt).
 // Compact crushed impact bullseye + piecewise-straight jagged radial rays + straight-chord cobweb
 // arcs + tight shatter mosaic near the core, clipped to each window plane and distance anti-aliased.
-// Inside the cabin (hasSmooth == 0), keeps the narrow ~15-degree forward road corridor clear.
+// The camera and window share the same local coordinate frame.
+fn eyeInsidePiece() -> bool {
+  let eye = u.com + transpose(mat3x3f(u.c0,u.c1,u.c2)) * (u.eye-u.pos) / u.cell;
+  let mid = vec3f(u.midX,u.midY,u.midZ);
+  return all(abs(eye-mid) < mid);
+}
 fn paneCrack(in: Out) -> vec2f {
   if (u.deform.status.w <= 0.01) { return vec2f(0.0); }
   let viewDist = length(in.seen);
@@ -374,7 +379,7 @@ fn paneCrack(in: Out) -> vec2f {
     let origin = cr.xyz;
     // In cells of 2.5 cm, whatever the piece's own: a web is as fine on a cabin of 1.25 cm cells.
     let p = (in.at - origin) * u.cell * 4.0;
-    let maxReach = 24.0 + 38.0 * crack;
+    let maxReach = 19.2 + 30.4 * crack;
     if (length(p) >= maxReach) { continue; }
     // Unwrap around the cabin. A side blow can crack the edge of the windshield:
     // projecting that pane along the impact direction collapsed the web into horizontal lines.
@@ -431,9 +436,8 @@ fn paneCrack(in: Out) -> vec2f {
       bestTilt = net.y * netMask * clamp(crack * 1.2, 0.0, 1.0);
     }
   }
-  // Interior cabin glass (hasSmooth == 0): show crisp delicate cracks matching the exterior while
-  // keeping the central ~15-degree road corridor clean and preventing bright flare near the bullseye.
-  if (in.hasSmooth == 0u && bestTotal > 0.0) {
+  // Seen from inside, keep the narrow forward road corridor clear of glare.
+  if (bestTotal > 0.0 && eyeInsidePiece()) {
     let rd = normalize(in.seen);
     let centerCone = smoothstep(0.955, 0.992, dot(rd, u.forward));
     bestTotal *= mix(1.0, 0.28, centerCone);
@@ -448,7 +452,7 @@ fn paneCrack(in: Out) -> vec2f {
   let n = select(in.facing, litBy(in, rd), soft);
   // A crack scatters light and lets less through; interior cabin glass keeps dark fracture contrast while staying drivable.
   let cracked = paneCrack(in).x;
-  let block = select(0.76, 0.74, in.hasSmooth != 0u);
+  let block = select(0.74, 0.48, cracked > 0.0 && eyeInsidePiece());
   let through = 1.0 - block * cracked;
   let mirrored = select(0.0, paneMirror(rd, n, soft), u.mirrors > 0.5);
   return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - mirrored) * through, vec3f(0.4545)), 1.0);
@@ -477,7 +481,7 @@ fn paneCrack(in: Out) -> vec2f {
   let own = shade(m.colour, n, rd, u.sun, direct, in.open, m.rough, 0.0);
   // Crisp white-silver internal reflection along laminated fracture planes; interior faces are
   // strictly capped below glow.ts's bloom threshold so cracks never bloom into a lens-flare starburst.
-  let crackStrength = select(0.62, 0.85, in.hasSmooth != 0u);
+  let crackStrength = select(0.85, 0.38, cracked > 0.0 && eyeInsidePiece());
   let litCrack = shade(vec3f(0.60, 0.64, 0.68), n, rd, u.sun, max(direct, 0.34), max(in.open, 0.74), 0.38, 0.0);
   let transmitted = vec3f(0.68, 0.72, 0.76) * max(g.lightSun.a, 0.32);
   let crackLight = select(min(max(litCrack, transmitted), vec3f(0.76)), min(litCrack, vec3f(1.25)), in.hasSmooth != 0u);
