@@ -37,13 +37,14 @@ try {
   page.on('pageerror', (err) => errors.push(err.message))
   // A change to the cell rules can change the picture while every terrain tile keeps its digest.
   let coreHash
-  page.on('response', async (r) => {
+  page.on('response', (r) => {
     if (new URL(r.url()).pathname.endsWith('/core.wasm') && r.ok()) {
       coreHash ??= r.body().then((bytes) => createHash('sha256').update(bytes).digest('hex'))
     }
   })
-  let pin
+  let pin, runtime
   for (const { name, view, camera, file } of views) {
+    coreHash = undefined
     const params = new URLSearchParams({ first: '0', street: '0', people: '0', sound: '0', scale: '1',
       hour: values.hour, fov: '65', at: camera.slice(0, 3).join(','), look: camera.slice(3).join(',') })
     const url = new URL('sf/index.html', base)
@@ -53,20 +54,22 @@ try {
       const e = globalThis.engine
       return e?.seen?.whole && e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.far?.whole
     }, null, { timeout: 180_000, polling: 250 })
-    const { release, tilesFailed, farFailed } = await page.evaluate(async () => {
+    const { release, tilesFailed, farFailed, eye, forward } = await page.evaluate(async () => {
       const e = globalThis.engine
       e.scale = 1
-      return { release: (await e.tiles.where()).release, tilesFailed: e.tiles.tally.failed, farFailed: e.far.stats.failed }
+      const { eye, forward } = e.view()
+      return { eye: [...eye], forward: [...forward], release: (await e.tiles.where()).release, tilesFailed: e.tiles.tally.failed, farFailed: e.far.stats.failed }
     })
     const wasm = await coreHash
-    if (!release || !wasm || tilesFailed || farFailed || errors.length || (pin && pin !== release)) {
+    if (!release || !wasm || tilesFailed || farFailed || errors.length || (pin && pin !== release) || (runtime && runtime !== wasm)) {
       throw Error(`Incomplete capture at ${name}, ${view}: ${JSON.stringify({ release, wasm, tilesFailed, farFailed, errors })}`)
     }
     pin = release
+    runtime = wasm
     await page.addStyleTag({ content: '#hud,#aim,#boom,#tools,#over,#where,#realm,#first,.minimap-root,#minimap,#ui{display:none!important}' })
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))))
     await page.screenshot({ path: join(out, file + '.png') })
-    writeFileSync(join(out, file + '.json'), JSON.stringify({ name, view, camera, hour: values.hour, fov: 65, release, wasm }) + '\n')
+    writeFileSync(join(out, file + '.json'), JSON.stringify({ name, view, camera, eye, forward, hour: values.hour, fov: 65, release, wasm }) + '\n')
     console.log(`${name}, ${view}: ${file}.png (${release.slice(0, 12)})`)
   }
 } finally {
