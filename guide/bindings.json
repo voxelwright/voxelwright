@@ -412,7 +412,7 @@
     ],
     "scripts/docs.mjs": "lines:^const usage =|^const schema = ",
     "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\[",
-    "scripts/hygiene.sh": "lines:^REPO=|^WORKTREES=|^LOG=|^STALE_DAYS=|^GRACE_S=|^MIN_FREE_GIB=|^JUNK=|feature-450|^--dry-run\\)|^--install\\)",
+    "scripts/hygiene.sh": "lines:^REPO=|^WORKTREES=|^fold_case\\(\\)|cannot check file times|^LOG=|^STALE_DAYS=|^GRACE_S=|^MIN_FREE_GIB=|^JUNK=|feature-450|^--dry-run\\)|^--install\\)",
     "scripts/checks.mjs": "checks"
   },
   "guide/cells.md": {
