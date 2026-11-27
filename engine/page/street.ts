@@ -74,7 +74,7 @@ interface Car {
   /** Impatience timer (seconds) while blocked behind a stuck robotaxi, and high-beam flash end timestamp. */
   annoyedAt?: number; beamFlash?: number
   /** Robotaxi charging-station depot circulation state: charging in a bay, exiting to the street, or entering a bay. */
-  depot?: { serviceId: string; phase: 'charging' | 'exiting' | 'entering'; bay: number; until: number; pts: [number, number][]; cum: number[]; s: number }
+  depot?: { serviceId: string; phase: 'charging' | 'exiting' | 'entering'; bay: number; until: number; pts: [number, number][]; cum: number[]; s: number; retryRoadAt?: number }
 }
 /** A piece of a bus route in these squares: its roads in order, and its stops as [road index, cells along that road]. */
 interface BusPiece { keys: string[]; stops: [number, number][]; seed: number; apart: number; kind: 'bus' | 'trolley'; hours: [number, number]; ref: string }
@@ -156,7 +156,7 @@ export interface Street {
   readonly robotaxis: {
     readonly services: { id: string; name: string; badge: string; station: string }[]
     readonly stations: { serviceId: string; serviceName: string; name: string; cx: number; cz: number; visit: readonly [number, number]; bays: number; occupied: number; exiting: number; entering: number; arrivals: number; departures: number; shown: boolean }[]
-    readonly stuck: { id: number; serviceId: string; serviceName: string; kind: 'intersection' | 'narrow'; x: number; y: number; z: number; heading: number; age: number; hazardOn: boolean; hazardPhase: number }[]
+    readonly stuck: { id: number; serviceId: string; serviceName: string; kind: 'intersection' | 'narrow'; x: number; y: number; z: number; heading: number; pitch: number; age: number; hazardOn: boolean; hazardPhase: number }[]
     readonly reactions: { honks: number; shouts: number; filmers: number; yellers: number }
     triggerStuck(kind?: 'intersection' | 'narrow', serviceId?: string): { id: number; serviceId: string; serviceName: string; kind: 'intersection' | 'narrow'; x: number; y: number; z: number; heading: number } | null
   }
@@ -1738,9 +1738,13 @@ export function street(o: {
             depot.arrivals++
             settle(c)
           } else {
-            depotCars.splice(i, 1)
-            if (attachToCityRoad(c)) depot.departures++
-            else hide(c)
+            // The street graph can still be loading when a car first reaches the gate.
+            const [x, z] = d.pts[d.pts.length - 1]
+            c.x = x; c.z = z; c.v = 0; d.s = total
+            if (now >= (d.retryRoadAt ?? 0)) {
+              if (attachToCityRoad(c)) { depotCars.splice(i, 1); depot.departures++ }
+              else { d.retryRoadAt = now + 0.5; settle(c) }
+            }
           }
           continue
         }
@@ -2669,7 +2673,7 @@ export function street(o: {
         stuck: traffic.filter((c) => !!c.rtStuck).map((c) => {
           const svc = serviceOf(c)
           const hazardPhase = ((now - c.rtStuck!.at) * 2.2) % 1
-          return { id: c.id, serviceId: svc.id, serviceName: svc.name, kind: c.rtStuck!.kind, x: c.x, y: c.y, z: c.z, heading: c.heading, age: Math.round((now - c.rtStuck!.at) * 10) / 10, hazardOn: hazardPhase < 0.65, hazardPhase }
+          return { id: c.id, serviceId: svc.id, serviceName: svc.name, kind: c.rtStuck!.kind, x: c.x, y: c.y, z: c.z, heading: c.heading, pitch: c.pitch, age: Math.round((now - c.rtStuck!.at) * 10) / 10, hazardOn: hazardPhase < 0.65, hazardPhase }
         }),
         reactions: { honks: stuckHonksStat, shouts: crowdShoutsStat, filmers: rtFilmersStat, yellers: rtYellersStat },
         triggerStuck(kind: 'intersection' | 'narrow' = 'intersection', serviceId?: string) {

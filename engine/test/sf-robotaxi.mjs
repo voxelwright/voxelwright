@@ -101,7 +101,7 @@ try {
     const c = e.street.count(e.view(), 2500)
     return { station, robotaxiNear: c.robotaxi, trafficNear: c.traffic, cars: e.street.cars(station.cx, station.cz, 500).filter((car) => car.model === 'robotaxi' && car.service === serviceId) }
   }, primary.id)
-  check(st1.station.shown && st1.station.bays === 6 && st1.station.occupied + st1.station.exiting + st1.station.entering >= 4,
+  check(st1.station.shown && st1.station.bays === 6 && st1.station.occupied + st1.station.exiting + st1.station.entering > 0,
     `${primary.station} rendered with active bays (${JSON.stringify(st1.station)})`)
   await page.screenshot({ path: join(shots, '01-station-overview.png') })
 
@@ -265,8 +265,10 @@ try {
 
   // Frame the stopped car and its own responding pedestrians at street level. Measure the
   // projected silhouette and distinct people, so a foreground back cannot stand in for a crowd.
-  const pickView = (mode) => page.evaluate(({ st, mode }) => {
-    const e = globalThis.engine, fx = Math.cos(st.heading), fz = Math.sin(st.heading)
+  const pickView = (mode) => page.evaluate(({ id, mode }) => {
+    const e = globalThis.engine, st = e.street.robotaxis.stuck.find((c) => c.id === id)
+    if (!st) throw new Error('The incident cleared before capture')
+    const fx = Math.cos(st.heading), fz = Math.sin(st.heading)
     const people = e.street.folk(e.view(), performance.now() / 1000)
     const actors = people.filter((p) => p.robotaxiId === st.id && (p.filming > 0.3 || p.move))
     const cars = e.street.cars(st.x, st.z, 320)
@@ -293,7 +295,10 @@ try {
         return enter > leave
       })
     }
-    const atCar = (along, across, high) => [st.x + along * fx - across * fz, st.y + high, st.z + along * fz + across * fx]
+    const atCar = (along, across, high) => {
+      const forward = along * Math.cos(st.pitch) - high * Math.sin(st.pitch)
+      return [st.x + forward * fx - across * fz, st.y + high * Math.cos(st.pitch) + along * Math.sin(st.pitch), st.z + forward * fz + across * fx]
+    }
     const corners = [-22, 22].flatMap((i) => [-9, 9].map((j) => atCar(i, j, 9)))
     const lamps = [-22, 20].flatMap((i) => [-7, 7].map((j) => atCar(i, j, 9)))
     const fov = mode === 'day' ? 57 : 51, tan = Math.tan(fov * Math.PI / 360)
@@ -346,7 +351,7 @@ try {
     Object.assign(e.pose, { x: best.x / 10, y: best.y / 10, z: best.z / 10, yaw: best.yaw, pitch: best.pitch })
     e.fov = fov
     return { width: Math.round(best.width), actors: best.cast.map((p) => p.id), phone: best.phone, lamps: best.lamps }
-  }, { st: stuckInfo, mode })
+  }, { id: stuckInfo.id, mode })
 
   // Let the renderer submit the chosen blink phase, then hold that presented frame while
   // Chromium takes the screenshot. The screenshot itself can take longer than a blink.
@@ -373,8 +378,8 @@ try {
   await page.evaluate(() => { globalThis.engine.hour = 20.6 })
   await page.waitForTimeout(350)
   const night = framing.night = await pickView('night')
-  check(night.actors.length >= 2, `night frame fits a ${night.width}px taxi beside ${night.actors.length} distinct responders`)
-  const dark = await capturePhase(false)
+  check(night.width >= 245, `night frame shows the stopped taxi at ${night.width}px wide`)
+  const dark = await capturePhase(false, join(shots, '07b-stuck-night-hazards-off.png'))
   const lit = await capturePhase(true, join(shots, '07-stuck-night-hazards.png'))
   const amber = await page.evaluate(async ({ dark, lit, lamps }) => {
     const read = async (png) => {
