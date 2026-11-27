@@ -106,8 +106,100 @@ const DRAWN = 3600, DRIVEN = 2600, PARKED = 2200, CURVE = 60
 const CYCLE = 60, GREEN = 26, AMBER = 3, WALK = 16
 /** Cells a second: a car's top speed on a small street, an ordinary one and a wide one; how fast it gathers and stops. */
 const SLOW = 70, ORDINARY = 110, FAST = 130, GATHER = 18, BRAKE = 30
-/** A cable car's speed (9.5 mph, as the cable runs) and how far apart they come. */
-const CABLE_SPEED = 42, CABLE_APART = 4200
+/** A cable car's speed (9.5 mph, as the cable runs) and cycle-aligned departure period (2 light cycles = 120 s, ~500 m apart). */
+const CABLE_SPEED = 42, CABLE_EVERY = CYCLE * 2
+
+/** 2D SAT minimum separation gap between two oriented boxes (negative = overlapping penetration depth, cells). */
+export function boxGap(ax: number, az: number, afx: number, afz: number, ahl: number, ahw: number, bx: number, bz: number, bfx: number, bfz: number, bhl: number, bhw: number): number {
+  const arx = -afz, arz = afx, brx = -bfz, brz = bfx, dx = bx - ax, dz = bz - az
+  let gap = -Infinity
+  const axis = (ux: number, uz: number) => {
+    const d = Math.abs(dx * ux + dz * uz)
+    const pA = Math.abs(afx * ux + afz * uz) * ahl + Math.abs(arx * ux + arz * uz) * ahw
+    const pB = Math.abs(bfx * ux + bfz * uz) * bhl + Math.abs(brx * ux + brz * uz) * bhw
+    const g = d - (pA + pB)
+    if (g > gap) gap = g
+  }
+  axis(afx, afz); axis(arx, arz); axis(bfx, bfz); axis(brx, brz)
+  return gap
+}
+
+/**
+ * Picks a departure phase offset `base` in `[0, every)` for each cable car line so cars sharing a corridor
+ * (Powell–Hyde and Powell–Mason on Powell & Washington Sts) or crossing (California St) keep positive OBB
+ * clearance throughout the entire shared period. Deterministic from each line's seed.
+ */
+export function coordinateCablePhases<L extends { p: ArrayLike<number>; cum: ArrayLike<number>; len: number; seed: number }>(
+  lines: readonly L[],
+  timetableAt: (l: L, left: number) => ArrayLike<number>,
+  { every = CABLE_EVERY, cycle = CYCLE, step = 0.25, halfL = 44, halfW = 13, phaseStep = 4 }: { every?: number; cycle?: number; step?: number; halfL?: number; halfW?: number; phaseStep?: number } = {},
+): Map<L, number> {
+  const bases = new Map<L, number>()
+  if (!lines.length) return bases
+  const placed: { x: number; z: number; tx: number; tz: number }[][][] = []
+  const Q = { x: 0, z: 0, tx: 1, tz: 0 }
+  const sample = (l: L, base: number) => {
+    const tt = timetableAt(l, ((base % cycle) + cycle) % cycle)
+    const frames: { x: number; z: number; tx: number; tz: number }[][] = Array.from({ length: every }, () => [])
+    for (let t = 0; t < every; t++) {
+      for (let dt = ((t - base) % every + every) % every; ; dt += every) {
+        const f = dt / step, i = Math.floor(f)
+        if (i + 1 >= tt.length) break
+        const s = tt[i] + (tt[i + 1] - tt[i]) * (f - i)
+        along(l.p, l.cum, s, Q)
+        frames[t].push({ x: Q.x, z: Q.z, tx: Q.tx, tz: Q.tz })
+      }
+    }
+    return frames
+  }
+  const minGap = (cand: ReturnType<typeof sample>) => {
+    let worst = Infinity
+    for (const prev of placed) {
+      for (let t = 0; t < every; t++) {
+        const a = cand[t], b = prev[t]
+        for (let i = 0; i < a.length; i++) {
+          const ci = a[i]
+          for (let j = 0; j < b.length; j++) {
+            const cj = b[j]
+            if (Math.abs(ci.x - cj.x) > 200 || Math.abs(ci.z - cj.z) > 200) continue
+            const g = boxGap(ci.x, ci.z, ci.tx, ci.tz, halfL, halfW, cj.x, cj.z, cj.tx, cj.tz, halfL, halfW)
+            if (g < worst) worst = g
+          }
+        }
+      }
+    }
+    return worst
+  }
+  for (let li = 0; li < lines.length; li++) {
+    const l = lines[li]
+    const seedStart = Math.floor(chance(l.seed, 1) * (every / phaseStep)) * phaseStep
+    if (li === 0) {
+      bases.set(l, seedStart)
+      placed.push(sample(l, seedStart))
+      continue
+    }
+    let bestBase = seedStart, bestGap = -Infinity, bestFrames: ReturnType<typeof sample> | null = null
+    for (let k = 0; k < every; k += phaseStep) {
+      const b = (seedStart + k) % every
+      const cand = sample(l, b)
+      const g = minGap(cand)
+      if (g > bestGap) { bestGap = g; bestBase = b; bestFrames = cand }
+    }
+    // If coarse search landed tight (< 5 cells), refine +-3 s at 1 s resolution around the best phase.
+    if (bestGap < 5 && phaseStep > 1) {
+      for (let d = -phaseStep + 1; d < phaseStep; d++) {
+        if (d === 0) continue
+        const b = ((bestBase + d) % every + every) % every
+        const cand = sample(l, b)
+        const g = minGap(cand)
+        if (g > bestGap) { bestGap = g; bestBase = b; bestFrames = cand }
+      }
+    }
+    bases.set(l, bestBase)
+    placed.push(bestFrames ?? sample(l, bestBase))
+  }
+  return bases
+}
 
 /** Where along a line a distance is, and which way it runs there. */
 function along(p: ArrayLike<number>, cum: ArrayLike<number>, s: number, into: { x: number; z: number; tx: number; tz: number }): number {
@@ -289,11 +381,11 @@ export function street(o: {
     for (const l of [...tramLines, ...lines]) { l.lights!.length = 0; lightsDone.delete(l) }
     // A junction on a seam is whole only now: walks timed against half of it are timed again, and the cable cars'
     // timetables.
-    routes.clear(); junctions.clear(); timetables.clear()
+    routes.clear(); junctions.clear(); timetables.clear(); cableBases.clear()
   }
   /** The cable car lines: track pieces joined end to end where only two meet, longest first. */
   const joinRails = () => {
-    lines.length = 0
+    lines.length = 0; cableBases.clear()
     const ends = new Map<number, number[]>()
     rails.forEach((r, i) => { for (const n of [r.a, r.b]) { let l = ends.get(n); if (!l) ends.set(n, l = []); l.push(i) } })
     const used = new Set<number>()
@@ -333,7 +425,7 @@ export function street(o: {
     if (!i.transit) return
     void fetch(new URL(i.transit.path, o.life)).then((r) => r.json()).then((t: { routes: { ref: string; kind: string; lines: number[][] }[]; buses?: { ref: string; kind: string; operator: string; hours: [number, number]; pieces: { roads: string[]; stops: [number, number][] }[] }[] }) => {
       // The cable cars run their routes as OSM orders them, one way each; the streetcars are driven.
-      lines.length = 0
+      lines.length = 0; cableBases.clear()
       for (const route of t.routes) for (const flat of route.lines) {
         const l = line(flat, 0)
         if (l.len < 3000) continue
@@ -2145,13 +2237,19 @@ export function street(o: {
   }
 
   // ── Cable cars: a rule of the line and the clock ──
-  // Each line's cars leave its start a whole number of seconds apart, at the cable's speed, and stop at each red light
-  // on the way (the lights a line passes, as a streetcar's: lightsOf). The lights repeat each minute, so where a car is
-  // a while after it left depends only on the second of the minute it left in: a timetable per line and second, made
-  // once (and again when a square comes and a junction is whole). Where every car is stays a rule of the clock.
+  // Every line leaves on a shared cycle-aligned period (CABLE_EVERY = 2 * CYCLE = 120 s) with phases coordinated across
+  // all lines (`coordinateCablePhases`) so Powell–Hyde and Powell–Mason never drift into each other on shared tracks
+  // and California St clears Powell St crossings. Each departure obeys red lights along the line (`lightsOf`). Because
+  // CABLE_EVERY is a multiple of CYCLE, every car on a line hits lights at the same phase and stays a rule of the clock.
   const cables: Car[] = []
-  /** A line's departures: a whole number of seconds apart, and the first's second. */
-  const departures = (l: Line) => { const count = Math.max(1, Math.floor(l.len / CABLE_APART)), every = Math.max(30, Math.round(l.len / count / CABLE_SPEED)); return { every, base: Math.round(chance(l.seed, 1) * every) } }
+  let cableBases = new Map<Line, number>()
+  const ensureCablePhases = () => {
+    for (const ln of lines) freshLights(ln)
+    if (cableBases.size === lines.length) return
+    cableBases = coordinateCablePhases(lines, timetable)
+  }
+  /** A line's departures: shared cycle-aligned period, and its coordinated phase offset. */
+  const departures = (l: Line) => { ensureCablePhases(); return { every: CABLE_EVERY, base: cableBases.get(l) ?? 0 } }
   /** Cells along the line each quarter second after leaving, for a car leaving at a second of the minute. */
   const timetables = new Map<Line, Map<number, Float32Array>>()
   const STEP = 0.25, CABLE_GATHER = 9, CABLE_BRAKE = 14
@@ -2193,11 +2291,10 @@ export function street(o: {
   const freshLights = (l: Line) => {
     if (!cableLights || lightsDone.has(l)) return
     const sig = lightsOf(l as (typeof tramLines)[number]).map((L) => { const j = junctionOf(L.node); return `${L.node}:${L.s}:${phaseOf(j, L.dx, L.dz)}:${j.offset}` }).join()
-    if (lightsSeen.get(l) !== sig) { lightsSeen.set(l, sig); timetables.delete(l) }
+    if (lightsSeen.get(l) !== sig) { lightsSeen.set(l, sig); timetables.delete(l); cableBases.clear() }
   }
   /** Each car on a line at a moment: how far along it is and how fast it goes. */
   const cableAt = (l: Line, t: number, each: (s: number, v: number) => void) => {
-    freshLights(l)
     const { every, base } = departures(l), most = (2 * l.len) / CABLE_SPEED + 300
     for (let n = Math.ceil((t - most - base) / every); n <= Math.floor((t - base) / every); n++) {
       const t0 = base + n * every, tt = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE), f = (t - t0) / STEP, i = Math.floor(f)
@@ -2216,6 +2313,12 @@ export function street(o: {
       cableAt(l, t, (s, v) => {
         along(l.p, l.cum, s, P)
         if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > DRAWN) return
+        // Hard invariant: never emit two cable cars overlapping on a shared track or crossing.
+        for (let k = 0; k < n; k++) {
+          const prev = cables[k]
+          if (Math.abs(P.x - prev.x) > 140 || Math.abs(P.z - prev.z) > 140) continue
+          if (obbOverlap(P.x, P.z, P.tx, P.tz, m.long / 2, m.wide / 2, prev.x, prev.z, Math.cos(prev.heading), Math.sin(prev.heading), prev.model.long / 2, prev.model.wide / 2) < 1) return
+        }
         const c = (cables[n] ??= { id: ids++, model: m, paint: -1, kind: 'cable', seed: n, x: 0, y: 0, z: 0, heading: 0, pitch: 0, v: 0, piece: null, shown: '' })
         c.x = P.x; c.z = P.z; c.heading = Math.atan2(P.tz, P.tx); c.v = v
         settle(c)
@@ -3097,7 +3200,7 @@ export function street(o: {
     },
     rules: {
       get yieldLeft() { return yieldLeft }, set yieldLeft(v: boolean) { yieldLeft = v },
-      get cableLights() { return cableLights }, set cableLights(v: boolean) { cableLights = v; timetables.clear() },
+      get cableLights() { return cableLights }, set cableLights(v: boolean) { cableLights = v; timetables.clear(); cableBases.clear() },
     },
     get onNearMiss() { return nearMissCb },
     set onNearMiss(fn: ((info: NearMiss) => void) | undefined) { nearMissCb = fn },
