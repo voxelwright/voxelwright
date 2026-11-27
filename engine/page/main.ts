@@ -46,6 +46,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
 import { far as farOf, samePath } from './far.ts'
 import { fog } from './fog.ts'
+import { eggSky } from './eggs-sky.ts'
 import { BAY, BUDGET, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
@@ -275,6 +276,7 @@ async function main() {
   loading.step('skyline')
   // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
   const marine = await fog(device, gpu.format, march)
+  const skyEggs = await eggSky(device, gpu.format, march)
   // The shade under each living thing (#245, under.ts): pieces cast nothing into the sun's maps.
   const shade = await under(device, gpu.format)
   // Tire skidmarks and ground vehicle light pools (tracks.ts).
@@ -870,6 +872,7 @@ async function main() {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
       windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       farModel.draw(encoder, to, v)
+      skyEggs.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
       marine.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)

@@ -2142,7 +2142,7 @@ export interface Marcher {
    * much of a pane's own lamp it puts out), how far it is up (0: off, and no window asks it), and how much larger
    * than its own the moon's disc is drawn (0: its own).
    */
-  readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number }
+  readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number; sky: boolean; rect: [number, number, number, number] }
   /** The moon (#524): how its disc is drawn and how much light it gives. Set after `light`; WHOLE_MOON is the hour's own. */
   moon: Moon
 }
@@ -2206,7 +2206,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
   const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT })
-  const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0 }
+  const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0, sky: false, rect: [0, 0, 1, 1] as [number, number, number, number] }
   // The road's marks (marks.ts), empty until `marks` is told them.
   let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   const binding = () => device.createBindGroup({
