@@ -54,7 +54,7 @@ pub fn reach(sort: u32) -> Option<[f32; 6]> {
         CITY_HALL => Some([-CH_LONG - 2.0, -2.0, -CH_WIDE - 8.0, CH_LONG + 2.0, CH_TOP + 1.0, CH_WIDE + 8.0]),
         FINE_ARTS => Some([-PF_ARC - 8.0, -2.0, -86.0, 98.0, PF_TOP + 2.0, 86.0]),
         FORT_POINT => Some([-54.0, -5.0, -34.0, 54.0, 25.0, 34.0]),
-        ACADEMY_SCIENCES => Some([-82.0, -7.0, -66.0, 82.0, 24.0, 66.0]),
+        ACADEMY_SCIENCES => Some([-81.0, -7.0, -66.5, 81.0, 24.0, 36.5]),
         JAPANESE_TEA_GARDEN => Some([-66.0, -10.0, -66.0, 66.0, 26.0, 66.0]),
         BOTANICAL_GARDEN => Some([-80.0, -10.0, -60.0, 80.0, 26.0, 60.0]),
         CONSERVATORY => Some([-50.0, -10.0, -22.0, 50.0, 24.0, 94.0]),
@@ -68,8 +68,9 @@ pub fn reach(sort: u32) -> Option<[f32; 6]> {
 /// say an arch or a lattice, are not), or only adds to what the map has there (a bridge over the water).
 pub fn owns(sort: u32, u: f32, y: f32, w: f32) -> bool {
     match sort {
-        SALESFORCE | TRANSAMERICA | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FORT_POINT | ACADEMY_SCIENCES
+        SALESFORCE | TRANSAMERICA | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FORT_POINT
         | PAINTED_LADIES | DE_YOUNG => true,
+        ACADEMY_SCIENCES => academy_canopy(u, w),
         // Suspension spans over land or shore carry lidar cable/deck returns that otherwise extrude to ground as solid
         // curtains; below 22 m under the arch, Fort Point stays. Also claim the south anchorage block (eliminating the
         // embedded DataSF building at u=-1149 m), the south tower pier fender ring (eliminating the lidar spike beside
@@ -1522,115 +1523,103 @@ fn fort_point(u: f32, y: f32, w: f32, s: f32) -> Kind {
     if hash3((u * 1.4).floor() as i32, (y * 2.4).floor() as i32, (w * 1.4).floor() as i32, 41) % 7 == 0 { brick_dark } else { brick }
 }
 
-// ── California Academy of Sciences (Renzo Piano, 2008). Frame: u along the long building axis (158 m), w across
-// (126 m, -w facing Music Concourse), y up from plaza datum 73.0 m. Signature cantilevered solar-glass canopy,
-// 11 m sheer glass curtain walls, board-formed concrete corner piers, central open glass piazza, and 7 lush green
-// rolling living-roof hills punctuated by circular glazed porthole skylights (#60).
+// California Academy of Sciences. In the DataSF footprint the canopy ends at w=36.2 m. The narrow path
+// to w=66.2 belongs to the landscape. Its two outer corners on each end step in by about three metres.
+fn academy_canopy(u: f32, w: f32) -> bool {
+    u.abs() <= 80.5 && (-66.2..=36.3).contains(&w)
+        && (u.abs() <= 77.5 || (-63.1..=33.1).contains(&w))
+}
+
+// Retained 0.25 m lidar from square 546.7_4179.5. Each entry is the median of a 2 m patch, in decimetres
+// above the landmark datum. Rows start at w=-55, columns at u=-65, five metres apart (bay/roof_samples.py).
+const ACADEMY_ROOF: [[u8; 27]; 17] = [
+    [144, 142, 143, 141, 141, 142, 137, 142, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 144, 140, 142, 143, 141, 141, 143, 142, 144],
+    [147, 147, 154, 146, 146, 146, 146, 156, 147, 147, 150, 145, 145, 145, 145, 145, 147, 149, 147, 147, 147, 147, 147, 147, 147, 146, 147],
+    [146, 148, 147, 149, 148, 148, 156, 157, 132, 156, 150, 151, 150, 150, 150, 151, 151, 149, 150, 149, 149, 149, 148, 148, 147, 147, 146],
+    [176, 148, 148, 148, 148, 156, 156, 156, 207, 156, 155, 164, 159, 153, 156, 166, 157, 151, 151, 151, 150, 150, 149, 148, 148, 147, 146],
+    [145, 148, 149, 149, 151, 153, 152, 153, 154, 152, 160, 174, 166, 152, 160, 175, 165, 154, 153, 152, 152, 151, 150, 149, 148, 148, 147],
+    [144, 149, 149, 150, 151, 153, 161, 168, 166, 160, 156, 153, 145, 138, 142, 150, 155, 157, 165, 168, 163, 154, 150, 149, 149, 148, 147],
+    [144, 149, 149, 149, 152, 163, 188, 201, 197, 176, 153, 134, 141, 146, 143, 131, 148, 171, 195, 202, 192, 168, 153, 149, 149, 148, 147],
+    [144, 149, 148, 149, 153, 175, 206, 220, 216, 193, 154, 126, 144, 151, 147, 122, 147, 187, 213, 220, 211, 183, 157, 149, 149, 149, 147],
+    [145, 148, 149, 150, 153, 176, 207, 221, 218, 194, 156, 125, 145, 151, 147, 123, 147, 187, 214, 221, 211, 185, 157, 149, 149, 148, 147],
+    [145, 149, 150, 150, 151, 163, 188, 202, 199, 178, 154, 133, 140, 150, 142, 129, 150, 171, 196, 203, 193, 170, 153, 149, 148, 148, 147],
+    [145, 149, 149, 150, 151, 152, 161, 170, 168, 159, 153, 148, 141, 140, 140, 143, 153, 158, 165, 169, 163, 155, 151, 149, 148, 148, 147],
+    [145, 148, 149, 149, 149, 150, 152, 153, 155, 155, 154, 156, 164, 173, 167, 157, 154, 155, 156, 153, 152, 152, 150, 149, 149, 148, 147],
+    [147, 148, 148, 148, 150, 150, 151, 152, 162, 169, 158, 161, 186, 201, 191, 167, 156, 167, 168, 153, 150, 150, 150, 149, 148, 148, 146],
+    [146, 148, 148, 148, 149, 149, 149, 160, 165, 174, 158, 162, 190, 203, 195, 170, 156, 172, 171, 154, 150, 149, 149, 148, 149, 148, 146],
+    [149, 149, 147, 147, 149, 148, 149, 149, 153, 155, 152, 155, 171, 185, 175, 158, 152, 154, 154, 150, 148, 148, 149, 148, 147, 147, 146],
+    [147, 147, 147, 148, 147, 147, 147, 147, 148, 148, 149, 149, 153, 157, 155, 151, 149, 149, 149, 148, 148, 148, 147, 147, 147, 147, 146],
+    [150, 146, 147, 149, 148, 146, 146, 146, 147, 149, 148, 148, 148, 148, 149, 150, 148, 150, 147, 147, 146, 146, 146, 146, 145, 145, 145],
+];
+
+fn academy_roof_height(u: f32, w: f32) -> f32 {
+    let col = ((u + 65.0) / 5.0).clamp(0.0, 26.0);
+    let row = ((w + 55.0) / 5.0).clamp(0.0, 16.0);
+    let (i, j) = ((col as usize).min(25), (row as usize).min(15));
+    let across = |r: usize| {
+        let a = f32::from(ACADEMY_ROOF[r][i]);
+        a + (f32::from(ACADEMY_ROOF[r][i + 1]) - a) * (col - i as f32)
+    };
+    let a = across(j);
+    (a + (across(j + 1) - a) * (row - j as f32)) * 0.1
+}
+
 fn academy_sciences(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if !(-6.5..23.5).contains(&y) || u.abs() > 80.5 || w.abs() > 64.5 {
-        return 0;
-    }
+    if !(-6.5..24.0).contains(&y) || !academy_canopy(u, w) { return 0; }
     let concrete = kind(CONCRETE, grey(3));
-    let white_steel = kind(STEEL, WHITE);
+    let white_steel = kind(STEEL, grey(2));
     let dark_steel = kind(STEEL, grey(12));
-    let solar_glass = kind(GLASS, colour(15, 6));
-    let clear_glass = kind(GLASS, colour(13, 1));
-    let skylight_glass = kind(GLASS, colour(14, 9));
-    let (au, aw) = (u.abs(), w.abs());
-    if y < 0.0 {
-        return if au <= 75.0 && aw <= 58.0 { concrete } else { 0 };
+    let clear_glass = kind(GLASS, colour(13, 7));
+    // The registry origin lies about 15 m off the centre of the rectangular roof.
+    let (au, aw) = (u.abs(), (w + 15.0).abs());
+    let overhang = au > 70.0 || aw > 41.0;
+    if y < 0.0 { return if overhang { 0 } else { concrete }; }
+    let in_piazza = (u + 0.5).abs() < 10.8 && (w + 19.0).abs() < 14.4;
+    if overhang && y >= 13.9 {
+        if y > 14.55 { return 0; }
+        let rib = line(u, 4.8, 0.0, 0.22, s) || line(w, 4.8, 0.0, 0.22, s);
+        return if au > 79.4 || aw > 50.1 || rib { white_steel } else { kind(GLASS, colour(14, 7)) };
     }
-    // Boldly sculpted 7-hill rolling living roof over the main roof slab (y = 11.4 m):
-    // Morrison Planetarium dome (-28, +5, +9.6 m), Osher Rainforest dome (+28, -5, +9.2 m) + 5 native meadow hills!
-    let hills: [(f32, f32, f32, f32); 7] = [
-        (-28.0, 5.0, 23.0, 9.6),
-        (28.0, -5.0, 22.0, 9.2),
-        (-52.0, -20.0, 15.0, 5.4),
-        (-50.0, 25.0, 15.0, 5.2),
-        (52.0, 22.0, 15.0, 5.5),
-        (50.0, -24.0, 14.0, 5.0),
-        (0.0, 35.0, 16.0, 5.8),
-    ];
-    let mut hill_h = 0.0f32;
-    let mut skylight = 0u8; // 0=none, 1=glass, 2=white frame ring
-    for &(hu, hw, hr, hh) in &hills {
-        let d2 = (u - hu).powi(2) + (w - hw).powi(2);
-        if d2 < hr * hr {
-            let k = (1.0 - d2 / (hr * hr)).powf(1.15);
-            hill_h = hill_h.max(hh * k);
-            // Iconic circular porthole skylights with crisp white steel rings across the Planetarium & Rainforest domes!
-            if hh > 8.0 && d2 < (hr * 0.72).powi(2) {
-                let lu = (u - hu + 3.2).rem_euclid(6.4) - 3.2;
-                let lw = (w - hw + 3.2).rem_euclid(6.4) - 3.2;
-                let pr = (lu * lu + lw * lw).sqrt();
-                if pr < 1.35 {
-                    skylight = 1;
-                } else if pr < 1.75 {
-                    skylight = skylight.max(2);
-                }
-            }
-        }
-    }
-    let in_piazza = au < 16.0 && aw < 16.0;
-    let roof_base = 11.4;
-    if y >= roof_base - 0.2 {
-        let over_edge = au > 72.5 || aw > 55.5;
-        if over_edge {
-            if y <= roof_base + 0.65 {
-                let outer_rim = au > 79.0 || aw > 63.0;
-                let truss_bar = s <= 0.8 && (line(u, 4.8, 0.0, 0.28, s) || line(w, 4.8, 0.0, 0.28, s));
-                return if outer_rim || truss_bar { white_steel } else { solar_glass };
-            }
-            return 0;
-        }
+    if !overhang && y >= 10.0 {
+        let top = academy_roof_height(u, w);
+        if y > top { return 0; }
         if in_piazza {
-            if y <= roof_base + 0.55 {
-                return if line(u, 3.2, 0.0, 0.25, s) || line(w, 3.2, 0.0, 0.25, s) { white_steel } else { clear_glass };
+            if y < top - s.max(0.4) { return 0; }
+            let rib = line(u + w, 4.0, 0.0, 0.18, s) || line(u - w, 4.0, 0.0, 0.18, s);
+            return if rib { white_steel } else { clear_glass };
+        }
+        if y >= top - 0.7f32.max(s) {
+            // The aerial shows a broad field of skylights on the rainforest dome and a small cluster on the
+            // other dome. Both flank the glazing over the piazza. Their individual positions are approximate.
+            let (du, dw, radius) = if u < 0.0 { (u + 30.0, w + 18.0, 12.0) } else { (u - 28.0, w + 19.0, 3.7) };
+            if du * du + dw * dw <= radius * radius {
+                let row = (dw / 2.6).round();
+                let dx = (du - row.rem_euclid(2.0) * 1.3 + 1.3).rem_euclid(2.6) - 1.3;
+                let d = dx.hypot(dw - row * 2.6);
+                if d < 0.68 { return kind(GLASS, colour(14, 8)); }
+                if d < 0.86 { return white_steel; }
             }
-            return 0;
+            let patch = hash3((u / 3.0).floor() as i32, 0, (w / 3.0).floor() as i32, 37);
+            return kind(GRASS, if patch % 5 == 0 { colour(5, 8) } else { colour(6, 8) });
         }
-        if au < 21.0 && aw < 21.0 && y <= roof_base + 0.9 {
-            return if y > roof_base + 0.35 && (au > 20.2 || aw > 20.2 || au < 16.4 || aw < 16.4) { clear_glass } else { kind(WOOD, colour(3, 7)) };
-        }
-        let top_y = roof_base + 0.55 + hill_h;
-        if y <= top_y {
-            if y >= top_y - 0.7f32.max(s) {
-                if skylight == 1 {
-                    return skylight_glass;
-                }
-                if skylight == 2 {
-                    return white_steel;
-                }
-                // Lush natural velvety California meadow greens (deep emerald, olive-sage & subtle golden-poppy flecks).
-                let h = hash3((u * 2.0) as i32, (y * 2.0) as i32, (w * 2.0) as i32, 37);
-                return match h % 29 {
-                    0 => kind(LEAVES, colour(3, 4)),  // California golden poppy accent
-                    1 => kind(LEAVES, colour(19, 2)), // native lupine fleck
-                    2..=11 => kind(GRASS, colour(8, 5)),
-                    12..=20 => kind(GRASS, colour(7, 5)),
-                    _ => kind(GRASS, colour(7, 8)),
-                };
-            }
-            return concrete;
-        }
-        return 0;
+        if y >= 13.0 { return concrete; }
     }
     // ── Slender white perimeter canopy support columns along the Music Concourse & garden porticos.
-    if au > 72.5 || aw > 55.5 {
-        if ((aw - 61.5).abs() < 0.45 && au <= 75.0 && line(u, 10.0, 0.0, 0.55, s))
-            || ((au - 77.5).abs() < 0.45 && aw <= 58.0 && line(w, 10.0, 0.0, 0.55, s))
+    if overhang {
+        if ((aw - 48.0).abs() < 0.45 && au <= 75.0 && line(u, 10.0, 0.0, 0.55, s))
+            || ((au - 77.5).abs() < 0.45 && aw <= 48.0 && line(w, 10.0, 0.0, 0.55, s))
         {
             return white_steel;
         }
         return 0;
     }
-    // ── Main museum volume (145 x 111 m): board-formed concrete corner pavilions + 11.4 m sheer glazed halls.
+    // ── Main museum volume (140 x 82 m): board-formed concrete corner pavilions + 11.4 m sheer glazed halls.
     if in_piazza {
         return if y < 0.4 { kind(CONCRETE, colour(3, 0)) } else { 0 };
     }
-    let face = (72.5 - au).min(55.5 - aw);
+    let face = (70.0 - au).min(41.0 - aw);
     // Board-formed architectural concrete corner anchor blocks.
-    let corner_mass = au > 54.0 && aw > 38.0;
+    let corner_mass = au > 54.0 && aw > 29.0;
     if corner_mass {
         if face < 1.2 && (y - 5.8).abs() < 0.3 {
             return dark_steel;
@@ -1639,16 +1628,16 @@ fn academy_sciences(u: f32, y: f32, w: f32, s: f32) -> Kind {
     }
     // Sheer floor-to-ceiling clear glass curtain wall with slim vertical steel mullions & subtle interior floors.
     if face <= 0.9f32.max(s) {
-        let along = if 72.5 - au < 55.5 - aw { w } else { u };
+        let along = if 70.0 - au < 41.0 - aw { w } else { u };
         let mullion = s <= 0.6 && (line(along, 2.6, 0.0, 0.18, s) || line(y, 3.8, 0.0, 0.2, s));
         return if mullion { dark_steel } else { clear_glass };
     }
     // Warm interior exhibit floors & planetarium/rainforest drums glimpsed through the glass walls.
     let floor_slab = (y - 0.2).rem_euclid(5.4) < 0.45;
-    if floor_slab || ((u + 26.0).powi(2) + (w - 4.0).powi(2) < 18.0 * 18.0) {
+    if floor_slab || ((u + 26.0).powi(2) + (w + 18.0).powi(2) < 18.0 * 18.0) {
         return concrete;
     }
-    if (u - 26.0).powi(2) + (w + 4.0).powi(2) < 16.5 * 16.5 && y > 1.0 && y < 10.0 {
+    if (u - 26.0).powi(2) + (w + 19.0).powi(2) < 16.5 * 16.5 && y > 1.0 && y < 10.0 {
         let h = hash3((u * 1.5) as i32, (y * 1.5) as i32, (w * 1.5) as i32, 71);
         if h % 3 == 0 {
             return kind(LEAVES, colour(8, 5)); // rainforest dome greenery visible inside glass!
@@ -2865,11 +2854,14 @@ mod tests {
         // Fort Point: red brick casemates + open central parade courtyard.
         assert_eq!(material(fort_point(30.0, 8.0, 0.0, 0.2)), BRICK);
         assert_eq!(fort_point(0.0, 8.0, 0.0, 0.2), 0);
-        // California Academy of Sciences: living green roof hills + circular porthole skylight + white rim + sheer glass wall.
-        assert!(matches!(material(academy_sciences(-24.8, 21.0, 8.2, 0.2)), GRASS | LEAVES));
-        assert_eq!(material(academy_sciences(-28.0, 21.4, 5.0, 0.2)), GLASS);
-        assert_eq!(material(academy_sciences(-28.0, 21.4, 6.55, 0.2)), STEEL);
-        assert_eq!(material(academy_sciences(1.3, 6.0, -55.2, 0.2)), GLASS);
+        // The measured high domes flank the glazed piazza at the same depth. The plaza path behind the
+        // museum is only 5.5 m wide, so the canopy must release the gardens to either side of it.
+        let surface = |u, w| academy_sciences(u, academy_roof_height(u, w) - 0.1, w, 0.2);
+        assert_eq!(material(surface(-30.0, -18.0)), GLASS);
+        assert_eq!(material(surface(-29.25, -18.0)), STEEL);
+        assert_eq!(material(surface(0.0, -19.0)), GLASS);
+        assert_eq!(material(surface(19.0, -19.0)), GRASS);
+        assert_eq!(material(academy_sciences(1.3, 6.0, -55.8, 0.2)), GLASS);
         // Japanese Tea Garden: koi pond water surface, 5-story pagoda, and arched Drum Bridge.
         assert_eq!(surface_at(JAPANESE_TEA_GARDEN, 2.0, 13.0, 75.0, 0.2).map(material), Some(WATER));
         assert_ne!(japanese_tea_garden(-16.0, 14.0, -12.0, 0.2), 0);
@@ -2893,5 +2885,14 @@ mod tests {
         assert_ne!(de_young(-66.4, 42.5, 29.2, 0.2), 0);
         // Palace of Fine Arts lagoon turns concrete-coded basin east of rotunda into real WATER.
         assert_eq!(surface_at(FINE_ARTS, 55.0, 0.0, 0.6, 0.2).map(material), Some(WATER));
+    }
+    #[test]
+    fn academy_roof_matches_the_surveyed_domes_and_south_canopy_edge() {
+        // In the raw lidar both summits are about 22.3 m above the registry datum. At w=52 m
+        // the DataSF ring is only the narrow central walkway. The garden 40 m to its side is open.
+        assert_ne!(kind_at(ACADEMY_SCIENCES, -30.0, 21.5, -18.0, 0.2), 0);
+        assert_ne!(kind_at(ACADEMY_SCIENCES, 30.0, 21.5, -18.0, 0.2), 0);
+        assert!(!owns(ACADEMY_SCIENCES, 40.0, 12.0, 52.0));
+        assert_eq!(kind_at(ACADEMY_SCIENCES, 40.0, 12.0, 52.0, 0.4), 0);
     }
 }

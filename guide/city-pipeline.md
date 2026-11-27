@@ -97,7 +97,30 @@ Every city follows three tiers so ordinary streets, parks and iconic landmarks a
 
 1. **Semantic ingest (`earth.py`, `street_sources.py`, `street_detail_sources.py`, `street_detail.py`).** Overture Maps and OpenStreetMap already carry building materials, colours, roof shapes, inland water bodies and garden polygons. `earth.py` preserves `facade_material`, `facade_color`, `roof_shape`, `roof_material` and `roof_color` (sculpting gabled, hipped, pyramidal and domed roofs rather than flattening them, and rendering living green roofs and glazed conservatories in their true materials). `street_sources.py` and `street_detail_sources.py` retain those tags plus inland water and garden polygons alongside road geometry in the same OSM pass, and `street_detail.py` stamps inland ponds and lagoons as `WATER` so elevated park basins ripple and reflect in `core/src/bay.rs` rather than turning into concrete yards.
 2. **Ordinary-house facade rules (`core/src/bay.rs`, `street_detail.py`, `page/march.ts`).** Surveyed bay windows and recessed porches inherit street-facing windows across faceted chains, narrow angled bay panes centre a single sash window rather than falling blank, footprints that already trace bays skip duplicate synthetic bay extrusion, and stepped lower porches or pitched gables never protrude floating parapet cornice slabs or get sliced flat. Painted plaster walls render as smooth stucco with subtle course tooling rather than heavy horizontal clapboard ribs across every neighbourhood.
-3. **Parametric landmarks and landscape heroes (`core/src/heroes.rs`, `sf/heroes.json`, `sf/landmark-tiles.mjs`).** Iconic bridges, civic buildings, museums, conservatories, stepped historic rows and botanical or tea gardens are built from reusable architectural and landscape primitives (arches, ribbed domes, pagoda eaves, pitched gables, arched footbridges, stone lanterns, specimen trees, ponds and floral parterres). `bay.rs` supports overlapping heroes (such as Fort Point beneath the Golden Gate Bridge's south arch) and terrain-hugging ground-surface overrides (such as the Palace of Fine Arts lagoon, Japanese Tea Garden koi ponds, San Francisco Botanical Garden ponds and Conservatory Valley parterres). `sf/landmark-tiles.mjs` covers both ends of suspension bridges (including Marin Headlands and Yerba Buena Island) so no bridge terminates in open water.
+3. **Parametric landmarks and landscape heroes (`core/src/heroes.rs`, `sf/heroes.json`, `sf/landmark-tiles.mjs`).** Iconic bridges, civic buildings, museums, conservatories, stepped historic rows and botanical or tea gardens are built from reusable architectural and landscape primitives (arches, ribbed domes, pagoda eaves, pitched gables, arched footbridges, stone lanterns, specimen trees, ponds and floral parterres). `bay.rs` supports overlapping heroes (such as Fort Point beneath the Golden Gate Bridge's south arch) and terrain-hugging ground-surface overrides (such as the Palace of Fine Arts lagoon, Japanese Tea Garden koi ponds, San Francisco Botanical Garden ponds and Conservatory Valley parterres). `sf/landmark-tiles.mjs` covers both ends of suspension bridges (including Marin Headlands and Yerba Buena Island) so the approach roads have ground underfoot.
+
+## Place and check a landmark
+
+Start with the footprint, ground datum and an identifiable feature in a survey or photograph. Register what was measured and what was drawn by eye in `sf/heroes.json`. Read a footprint with the aerial beside it. At the California Academy of Sciences the rectangular canopy measures about 161 by 102 metres. A 5.5-metre-wide walkway extends another 30 metres. Treating its bounding box as the roof used to cover part of the garden.
+
+For a broad roof, sample the original lidar in the landmark's own coordinate frame. This reproduces the Academy's five-metre grid. Each value is the median return over a two-metre patch, in decimetres above its datum. The aerial shows the large field of circular skylights over one dome and the smaller cluster over the other. [Architect's aerial photograph](https://www.fondazionerenzopiano.org/en/project/california-academy-of-sciences/image-717.pdf)
+
+```sh
+~/.village/engine/bay/venv/bin/python engine/bay/roof_samples.py \
+  ~/.village/engine/bay/sf-450-city/inputs/546.7_4179.5.zip \
+  'California Academy of Sciences' --u -65 65 --w -55 25 --spacing 5
+```
+
+Keep a fixed review camera for each registered landmark in `sf/landmark-views.json`. Use separate output directories for the pinned build and the candidate. The same command can draw the neighbourhood panel using its saved poses. It reads the actual release and renderer from the loaded page, waits for the near cells and distant mesh, and records both digests beside each PNG.
+
+```sh
+node engine/sf/landmark-shots.mjs --dist "$BASELINE" --out "$SHOTS/before"
+node engine/sf/landmark-shots.mjs --dist "$CANDIDATE" --out "$SHOTS/after"
+node engine/sf/landmark-shots.mjs --dist "$CANDIDATE" --out "$SHOTS/panel" \
+  --poses ~/.village/engine/bay/450-panel/fixed-poses.json --hour 15
+```
+
+For one place add `--place 'Golden Gate Bridge'`. A private server reached over a local tunnel can be captured with `--server http://127.0.0.1:PORT`. Compare the full-size frames alongside a reference with a known pose. Record which features the reference actually shows. For ordinary houses, check adjacent frontages as well. A repair can smooth one roof while adding steps to the next.
 
 ## Check a change
 

@@ -76,6 +76,8 @@ Beside each ZIP are gzip JSON sidecars, each naming its `square`:
 - **Trees.** Trunks are aligned to the DataSF tree inventory, crown heights reject isolated returns, and the leaf colour comes from NAIP colour and near-infrared.
 - **Fixtures.** Lamps, poles, signs and wires go in each pack's `SFST` trailer. Heights of masts, signs and hydrants are typical values, not measured. A utility span inferred from lidar needs narrow raised returns along it and photo-supported poles at both ends.
 
+For a fixed-camera comparison of two built releases, run `node engine/sf/landmark-shots.mjs --dist /path/to/dist-sf --out /path/to/shots` from the repository root for each build. Each image records its camera, release digest and renderer digest in a sibling JSON file. The [city pipeline](../../guide/city-pipeline.md#place-and-check-a-landmark) shows how to reproduce a surveyed roof surface and use the neighbourhood poses.
+
 ## The recognition panel
 
 Every release with new tiles is judged at 16 fixed places (`neighbourhoods.json`), each at street level and from 100 m, against a solved Mapillary panorama and a NAIP crop. `panel-floors.json` holds the lowest score each view may have.

@@ -17,6 +17,7 @@ const { values: { manifest } } = parseArgs({ options: { manifest: { type: 'strin
 const wasm = readFileSync(join(ENGINE, 'page', 'core.wasm'))
 const core = (await WebAssembly.instantiate(wasm, {})).instance.exports
 const heroes = JSON.parse(readFileSync(join(HERE, 'heroes.json'), 'utf8'))
+const cameras = JSON.parse(readFileSync(join(HERE, 'landmark-views.json'), 'utf8'))
 
 const failures = []
 const ok = (cond, msg) => { if (!cond) failures.push(msg) }
@@ -24,6 +25,9 @@ const ok = (cond, msg) => { if (!cond) failures.push(msg) }
 const seenSorts = new Set()
 for (const h of heroes) {
   ok(typeof h.name === 'string' && h.name.length > 0, `landmark missing name: ${JSON.stringify(h)}`)
+  const views = Object.values(cameras[h.name] ?? {})
+  ok(views.length > 0 && views.every((v) => Array.isArray(v) && v.length === 5 && v.every(Number.isFinite)),
+    `${h.name}: missing a fixed review camera in landmark-views.json`)
   ok(Number.isInteger(h.sort) && !seenSorts.has(h.sort), `duplicate or invalid sort ${h.sort} (${h.name})`)
   seenSorts.add(h.sort)
   const reach = [0, 1, 2, 3, 4, 5].map((i) => core.hero_reach(h.sort, i))

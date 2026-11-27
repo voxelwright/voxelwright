@@ -87,7 +87,7 @@
     "toward": [37.770327, -122.46513],
     "foot": 73.0,
     "step": 4,
-    "from": "Renzo Piano (2008): 158 by 126 m footprint, cantilevered photovoltaic glass canopy, 11 m glass curtain walls and 7-hill rolling living green roof. Outline and datum from DataSF/Overture Maps and USGS 3DEP. Rule in engine/core/src/heroes.rs."
+    "from": "The DataSF footprint separates the 161 by 102 m canopy from a 5.5 m-wide path. The roof heights come from the 0.25 m lidar in square 546.7_4179.5. NAIP locates the piazza glazing and the two unequal skylight fields. Individual openings and window mullions are illustrative. Roof reference: https://www.fondazionerenzopiano.org/en/project/california-academy-of-sciences/image-717.pdf"
   },
   {
     "name": "Japanese Tea Garden",
