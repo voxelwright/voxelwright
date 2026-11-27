@@ -61,7 +61,7 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 
 ## Quality
 
-From the November 20, 2026 retrospective (`~/.village/retro/2026-11-20-process.md`).
+From the November 20, 2026 retrospective.
 The owner had been first to spot six visible faults in 14 days.
 
 - Look before you score. Before any score, an agent that did not build the work
@@ -84,10 +84,8 @@ The owner had been first to spot six visible faults in 14 days.
 
 ## Agents and models
 
-- A lock file on the maintainer's machine can block agents from `codex`,
-  `gcloud` and related tools. Never work around it (for example with an
-  app-bundled Codex binary). Reach GPT-6.1 Sol only through T3 delegation
-  until the owner authorizes a specific use.
+- Never work around a block on a tool, model or account. Ask the owner
+  instead.
 - Choose each agent's model by how much the work matters, how ambiguous it is
   and how hard it is (owner, November 20, 2026):
   - Claude Opus 5.5 is the default for important work, where reliability,
@@ -114,24 +112,14 @@ The owner had been first to spot six visible faults in 14 days.
     at hand-back, followed the brief, and what review found. After about ten
     runs of a kind, keep it for that kind if it matched the usual model, and
     drop it there if not.
-- Reach a model only by a route its vendor's terms allow. For Neon,
-  Google's own documents disagree: its Antigravity FAQ says wrapping the
-  `agy` tool in other coding agents or apps is not supported on consumer
-  plans, and its Agent Client Protocol documentation says any client may
-  launch the tool. On November 25, 2026 the owner chose T3 Code's
-  Antigravity provider, which uses that protocol. Delegate to Neon through
-  that provider only (`antigravity`, model `gemini-4-neon`, option
-  `thought_level`); never run or wrap `agy` yourself. If Google settles
-  the question against this route, stop and tell the owner. The plan's
-  quota refreshes every five hours under a weekly limit, with no published
-  numbers, and the context there is 512K tokens (1M through the API).
-- Pace Claude usage to the weekly reset, Friday 8am Pacific. If usage runs
-  ahead of the clock (for example half left on a Sunday), shift toward Astra
-  and Sol. On Wednesday and Thursday, plan to use the allowance up by the
-  reset. If no work remains, give Opus or Fable a deep improvement task, such
-  as finding implicit state machines or finding and fixing deep debt. Ask the
-  owner for the usage figure when
-  pacing matters.
+- Reach a model only by a route its vendor's terms allow. Delegate to Neon
+  through T3 Code's Antigravity provider only (`antigravity`, model
+  `gemini-4-neon`, option `thought_level`), and never run or wrap its
+  command-line tool yourself.
+- Pace usage to each plan's limits. When one model family runs short, shift
+  work toward another. If no work remains, give Opus or Fable a deep
+  improvement task, such as finding implicit state machines or finding and
+  fixing deep debt.
 - Start each unit of work in a fresh thread with a self-contained brief. Do not
   hand new work to a long, finished lane thread.
 - A lead coordinating other agents follows `.agents/skills/lead-orchestration`.
@@ -160,8 +148,8 @@ Before building or changing UI, read [DESIGN.md](DESIGN.md).
 ## Privacy and authority
 
 - Use synthetic data until the operating-system and application boundaries
-  between family members are proven. Do not claim that same-user processes or
-  prompts isolate family members. Helping someone does not grant access to
+  between users are proven. Do not claim that same-user processes or prompts
+  isolate one user from another. Helping someone does not grant access to
   their private content.
 - Never print credentials or environment values. Do not copy personal login
   files into the repo, containers, logs, fixtures or evidence.
@@ -172,9 +160,9 @@ Before building or changing UI, read [DESIGN.md](DESIGN.md).
 - A self-improvement changes a candidate checkout, never the running trusted
   controller or its permission policy.
 - Granted (November 10, 2026): merging to main, creating repositories,
-  pushing branches, pull requests, the Ally for isolated Linux proofs,
-  tailnet-only serving from the owner's Mac.
-- Still the owner's to decide, because they protect him and his family rather
-  than the code: anything reachable from the public internet, changes to who
-  can reach his machines or accounts, spending money, accounts on outside
-  services in his name, and real family data.
+  pushing branches, pull requests, isolated Linux machines for proofs, and
+  serving only on the owner's private network.
+- Still the owner's to decide, because they protect people rather than code:
+  anything newly reachable from the public internet, changes to who can reach
+  the owner's machines or accounts, spending money, accounts on outside
+  services in the owner's name, and any real personal data.

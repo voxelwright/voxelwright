@@ -6,6 +6,7 @@
 // Usage: node run.mjs [--port 4433] [--http 4434] [--host 127.0.0.1]... [--name host.ts.net]...
 //          [--crates 120] [--balls 24] [--snap 30] [--awake]
 //          [--maker stub|haiku|sonnet|opus]  who makes things from sentences (none: making is off); a model spends the signed-in Claude Code's usage
+//          [--allow-claude]                   required with a model maker: anyone who reaches the street, which has no sign-in, spends that usage
 //          [--world <dir>]                    where made things are kept (default ~/.village/street; "none" keeps nothing)
 //          [--agent-key-file <path>]          writes one agent's key there at start (mode 600), for a script that brings an agent
 import { Http3Server } from '@fails-components/webtransport'
@@ -32,6 +33,7 @@ const port = one('port', 4433), httpPort = one('http', 4434), snapEvery = Math.m
 const MAX_SEATS = 16, TICK_MS = 1000 / 60
 const text1 = (name: string) => all(name)[0]
 const makerName = text1('maker')
+if (makerName && makerName !== 'stub' && !args.includes('--allow-claude')) throw new Error(`--maker ${makerName} lets anyone who reaches this street, which has no sign-in, spend the signed-in Claude Code's usage. Add --allow-claude to allow it, or use --maker stub.`)
 const maker: Maker | null = !makerName ? null : makerName === 'stub' ? stubMaker() : claudeMaker(makerName)
 const dir = text1('world') === 'none' ? undefined : text1('world') ?? join(homedir(), '.village', 'street')
 /** `--problems` puts the street's three residents who want something on it (problems.ts); `--rest <seconds>` is how long one stays solved. */
@@ -286,7 +288,7 @@ const LINES = 'You speak for one person standing on a hill street in San Francis
 
 const keyFile = text1('agent-key-file')
 if (keyFile) {
-  writeFileSync(keyFile, agents.issue('the world\'s keeper').key, { mode: 0o600 })
+  writeFileSync(keyFile, agents.issue('the world\'s keeper', true).key, { mode: 0o600 })
   chmodSync(keyFile, 0o600)
 }
 

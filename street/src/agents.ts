@@ -44,9 +44,11 @@ export interface Street {
 }
 
 interface Walk { to: [number, number]; started: number; checked: number; from: Vec3; stuck: number; done: (how: string) => void }
-interface Session { by: string; expires: number; seat?: number; name: string; yaw: number; last: number; walk?: Walk }
+interface Session { by: string; expires: number; seat?: number; name: string; yaw: number; last: number; walk?: Walk; kept?: boolean }
 
 const KEY_HOURS = 12
+/** Keys held at once. Asking for one more drops the expired ones, then the oldest without a seat, then the oldest. */
+const MAX_KEYS = 64
 /** A seat nobody has called for this long is given up; the key still works and sits down again. */
 const IDLE_MS = 5 * 60_000
 const ARRIVED = 0.45
@@ -63,11 +65,41 @@ export class Agents {
 
   constructor(private street: Street, private log: (line: string) => void = () => {}) {}
 
-  /** A new key, for one agent, asked for by `by`. The key is a secret: hand it to whoever asked and nobody else, and never log it. */
-  issue(by: string): { key: string; hours: number } {
+  /** A new key, for one agent, asked for by `by`. The key is a secret: hand it to whoever asked and nobody else, and never log it.
+   * A `kept` key (the world's keeper's, written at start) is never dropped to make room. */
+  issue(by: string, kept = false): { key: string; hours: number } {
+    this.makeRoom()
     const key = `street_${randomBytes(24).toString('base64url')}`
-    this.sessions.set(key, { by, expires: Date.now() + KEY_HOURS * 3600_000, name: '', yaw: 0, last: 0 })
+    this.sessions.set(key, { by, expires: Date.now() + KEY_HOURS * 3600_000, name: '', yaw: 0, last: 0, kept })
     return { key, hours: KEY_HOURS }
+  }
+
+  /** How many keys are held now. */
+  get keys() { return this.sessions.size }
+
+  /** Below MAX_KEYS: expired keys go first, then the oldest key without a seat, then the oldest (a map keeps its order). */
+  private makeRoom() {
+    const now = Date.now()
+    for (const [key, session] of this.sessions) if (now >= session.expires) this.drop(key, session)
+    const droppable = () => [...this.sessions].filter(([, session]) => !session.kept)
+    while (this.sessions.size >= MAX_KEYS) {
+      const all = droppable()
+      const oldest = all.find(([, session]) => session.seat === undefined) ?? all[0]
+      if (!oldest) break
+      this.drop(...oldest)
+    }
+  }
+
+  /** Forgets a key, and gives up its seat and any walk in progress. */
+  private drop(key: string, session: Session) {
+    this.sessions.delete(key)
+    session.walk?.done('this key was replaced by a newer one')
+    session.walk = undefined
+    if (session.seat !== undefined) {
+      this.log(`${session.name} (an agent) left`)
+      this.street.leave(session.seat)
+      session.seat = undefined
+    }
   }
 
   private sessionFor(req: IncomingMessage): Session | null {
@@ -76,7 +108,7 @@ export class Agents {
       const want = Buffer.from(key)
       if (given.length === want.length && timingSafeEqual(given, want)) {
         if (Date.now() < session.expires) return session
-        this.sessions.delete(key)
+        this.drop(key, session)
       }
     }
     return null

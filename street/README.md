@@ -17,7 +17,7 @@ World options (from the header of `src/server.ts`), passed after `npm run world 
 
 | Option | Effect |
 | --- | --- |
-| `--maker stub\|haiku\|sonnet\|opus` | Turns making on. A model spends the signed-in Claude Code's usage; `stub` makes a crate of anything, for checks. |
+| `--maker stub\|haiku\|sonnet\|opus` | Turns making on. A model spends the signed-in Claude Code's usage and needs `--allow-claude`, because anyone who reaches the street can use it; `stub` makes a crate of anything, for checks. |
 | `--world <dir>` | Where made things are kept (default `~/.village/street`; `none` keeps nothing). |
 | `--problems`, `--rest <seconds>` | Puts the block's three residents who want something on it; how long one stays solved (180). |
 | `--cells` | Everything on the block is made of 10 cm cells that `hammer` and `boom` can break. |
@@ -25,7 +25,7 @@ World options (from the header of `src/server.ts`), passed after `npm run world 
 | `--host <address>`, `--name <host name>` | Listen on a tailnet address as well. The server refuses every interface (`0.0.0.0`, `::`). |
 | `--port`, `--http` | The WebTransport and HTTP ports (4433, 4434). |
 
-Over the tailnet: `npm run world -- --host 127.0.0.1 --host <tailnet address> --name <tailnet name>`, then `tailscale serve --bg --https=10118 http://localhost:5318`. WebTransport is QUIC, which `tailscale serve` does not carry, so the page comes through `serve` and the session goes straight to the tailnet address, accepted by the certificate's hash.
+Over the tailnet: `npm run world -- --host 127.0.0.1 --host <tailnet address> --name <tailnet name>`, start the page with `STREET_ALLOWED_HOST=<tailnet name> npm run page` (it answers only local names otherwise), then `tailscale serve --bg --https=10118 http://localhost:5318`. WebTransport is QUIC, which `tailscale serve` does not carry, so the page comes through `serve` and the session goes straight to the tailnet address, accepted by the certificate's hash.
 
 ## Play
 

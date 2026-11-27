@@ -7,10 +7,13 @@
 //                                as release `sf-data-<digest>` (once: an existing one is left as it is) and writes
 //                                deploy/data.json, which is committed with the pin
 //   node deploy/data.mjs pack-local PIN DIRECTORY   writes DIRECTORY/TAG/data.tar and DIRECTORY/data.json for a staged release
-//   node deploy/data.mjs fetch   in CI: downloads the bundle deploy/data.json names, checks it is for the pin and that
-//                                every file is the one packed, and writes it all under $HOME/.village
+//   node deploy/data.mjs fetch [--force]   in CI and ./world: downloads the bundle deploy/data.json names, checks it is
+//                                for the pin and that every file is the one packed, writes it all under $HOME/.village
+//                                and records that in a stamp there. A later fetch whose stamp, manifest and files still
+//                                match skips the download; --force downloads again
 import { brotliCompressSync, brotliDecompressSync, constants } from 'node:zlib'
 import { createWriteStream } from 'node:fs'
+import { Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
@@ -62,12 +65,42 @@ async function download(tag, archive) {
   }
   const response = await fetch(url, { headers })
   if (!response.ok) throw new Error(`Cannot download ${tag}/data.tar (HTTP ${response.status}). Check VOXELWRIGHT_DATA_URL.`)
-  await pipeline(response.body, createWriteStream(archive))
+  await pipeline(response.body, progress(Number(response.headers.get('content-length')) || 0), createWriteStream(archive))
 }
+
+/** Passes the download through and prints MB received at most every two seconds, then once at the end. */
+function progress(total) {
+  const mb = (bytes) => (bytes / 1e6).toFixed(1)
+  const line = (got) => console.log(`data: ${mb(got)}${total ? ` / ${mb(total)}` : ''} MB`)
+  let got = 0, shown = performance.now()
+  return new Transform({
+    transform(chunk, _encoding, done) {
+      got += chunk.length
+      if (performance.now() - shown >= 2000) { shown = performance.now(); line(got) }
+      done(null, chunk)
+    },
+    flush(done) { line(got); done() },
+  })
+}
+
+/** A member path from the index, as a safe relative path: no absolute path, backslash, or empty, `.` or `..` part. */
+const safePath = (path) => typeof path === 'string' && !path.startsWith('/') && !path.includes('\\') && path.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
 
 // What the build reads, under ~/.village/engine (sf/build.mjs: STAGED, GRAPHS and SHELF).
 const RELEASE = `bay/450-city-paint/sf/releases/${pin}`
 const INPUTS = [RELEASE, 'bay/sf-450-city/packs/graph', 'kept-cars/shelf/1cb43f52cfc96e74e974e0a7.json']
+/** What the last verified fetch restored: the pin, the bundle's index digest and each file's path and size. */
+const STAMP = join(VILLAGE, 'sf-data.stamp.json')
+
+/** True when the stamp names this bundle, the manifest hashes to the pin and every recorded file has its size. */
+function restored(record) {
+  try {
+    const stamp = JSON.parse(readFileSync(STAMP, 'utf8'))
+    if (stamp.pin !== record.pin || stamp.digest !== record.digest || !Array.isArray(stamp.files)) return false
+    if (sha(readFileSync(join(VILLAGE, RELEASE, 'manifest.json'))) !== pin) return false
+    return stamp.files.every(([path, bytes]) => safePath(path) && statSync(join(VILLAGE, path)).size === bytes)
+  } catch { return false }
+}
 
 if (localPack || process.argv[2] === 'pack') {
   if (sha(readFileSync(join(VILLAGE, RELEASE, 'manifest.json'))) !== pin) fail('staged manifest differs from pin')
@@ -125,6 +158,12 @@ if (localPack || process.argv[2] === 'pack') {
 } else if (process.argv[2] === 'fetch') {
   const record = JSON.parse(readFileSync(RECORD, 'utf8'))
   if (record.pin !== pin) fail(`deploy/data.json is for pin ${record.pin.slice(0, 12)} but engine/sf/pilot/current.json pins ${pin.slice(0, 12)}: run node deploy/data.mjs pack and commit deploy/data.json`)
+  if (!process.argv.includes('--force') && restored(record)) {
+    console.log(`${record.tag}: already restored for pin ${pin.slice(0, 12)} under ${VILLAGE} (--force downloads again)`)
+    process.exit(0)
+  }
+  // A stamp is only ever written after a complete, verified restore; drop the old one before touching any file.
+  rmSync(STAMP, { force: true })
   const work = mkdtempSync(join(tmpdir(), 'sf-data-'))
   try {
     await download(record.tag, join(work, 'data.tar'))
@@ -134,6 +173,8 @@ if (localPack || process.argv[2] === 'pack') {
     const { files: index } = JSON.parse(listing)
     // The pinned index determines which members tar can restore. Older archives also hold private clips.
     const publicFiles = index.filter(f => INPUTS.some(path => f.path === path || f.path.startsWith(path + '/')))
+    const unsafe = publicFiles.find(f => !safePath(f.path))
+    if (unsafe) throw new Error(`index.json names an unsafe path: ${JSON.stringify(unsafe.path)}`)
     const members = join(work, 'members')
     writeFileSync(members, publicFiles.map(f => `files/${f.path}.br\n`).join(''))
     execFileSync('tar', ['-xf', archive, '-C', work, '-T', members], { stdio: ['ignore', 'ignore', 'pipe'] })
@@ -149,6 +190,7 @@ if (localPack || process.argv[2] === 'pack') {
       if (f.q11) writeFileSync(cached(body), brotli)
       rmSync(member, { force: true })
     }
+    writeFileSync(STAMP, JSON.stringify({ pin, digest: record.digest, tag: record.tag, files: publicFiles.map(f => [f.path, f.bytes]) }) + '\n')
     console.log(`${record.tag}: ${publicFiles.length} files restored for pin ${pin.slice(0, 12)} under ${VILLAGE}`)
   } catch (error) {
     console.error(`data: ${error.message}`)
@@ -156,4 +198,4 @@ if (localPack || process.argv[2] === 'pack') {
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
-} else fail('usage: node deploy/data.mjs pack|pack-local PIN DIRECTORY|fetch')
+} else fail('usage: node deploy/data.mjs pack|pack-local PIN DIRECTORY|fetch [--force]')
