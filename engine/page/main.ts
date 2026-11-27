@@ -11,6 +11,7 @@ import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
 import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
 import type { Heavens } from './almanac.ts'
+import type { WindowEffect } from './eggs-pictures.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
 import { space } from './space.ts'
@@ -620,6 +621,14 @@ async function main() {
   // at the slider's scale. Independent of Graphics presets: neither affects the other.
   let rate = 60
   const RATES = [30, 60, 0] as const
+  const WINDOW_EFFECTS: readonly WindowEffect[] = ['ambilight', 'equalizer', 'off']
+  let windowEffect: WindowEffect = 'ambilight'
+  const setWindowEffect = (mode: WindowEffect, keep = true) => {
+    if (!WINDOW_EFFECTS.includes(mode)) return
+    windowEffect = mode
+    if (keep) try { localStorage.setItem('village.windowEffect', mode) } catch { /* this visit only */ }
+    ;(globalThis as unknown as { engine: { eggs?: { wakeAudio?(): void } } }).engine.eggs?.wakeAudio?.()
+  }
   const steered = () => !fixed && held < 1e6
   const keepResolution = () => { try { localStorage.setItem('village.resolution', JSON.stringify({ auto: steered(), scale, target: rate })) } catch { /* this visit only */ } }
   const draws = (p: Preset, keep = true) => {
@@ -641,6 +650,8 @@ async function main() {
     try {
       const kept = localStorage.getItem('village.graphics')
       if (kept && kept in PRESETS) draws(kept as Preset, false)
+      const keptFx = localStorage.getItem('village.windowEffect')
+      if (keptFx && (WINDOW_EFFECTS as readonly string[]).includes(keptFx)) setWindowEffect(keptFx as WindowEffect, false)
       const res = JSON.parse(localStorage.getItem('village.resolution') ?? 'null') as { auto?: unknown; scale?: unknown; target?: unknown } | null
       if (res && typeof res === 'object') {
         const next: { scale?: number; auto?: boolean; target?: number } = {}
@@ -2294,7 +2305,8 @@ async function main() {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     keptGraphics()
-    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, report: () => void feedback?.open(), install: pwa.install, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
+    const windowEffectSetting = document.body.hasAttribute('data-egg-media') ? { modes: WINDOW_EFFECTS, get: () => windowEffect, set: (m: WindowEffect) => setWindowEffect(m) } : undefined
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, windowEffect: windowEffectSetting, report: () => void feedback?.open(), install: pwa.install, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
       modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}), ...(query.get('sound') !== '0' ? { radio: () => openRadioPicker() } : {}),
       // The servers (#526, lobbies.ts): where the realm's rule allows lobbies and a master is known, out of any lobby; fetched when first pressed.
@@ -2309,6 +2321,7 @@ async function main() {
     first?.during(() => { realmUi.fold(true); return () => { if (!joined) realmUi.rest() } })
     if (joined || directLL) realmUi.fold(true)
     Object.assign((globalThis as unknown as { engine: object }).engine, { pwa, realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
+    Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'windowEffect', { get: () => windowEffect, set: (m: WindowEffect) => setWindowEffect(m), configurable: true, enumerable: true })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
     playedHud = played
@@ -2378,7 +2391,7 @@ async function main() {
           notice: (text, ms) => over.notice(text, ms), aspect: () => laid.w / Math.max(1, laid.h),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
           canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), darkBoards: (on) => { if (signboards) signboards.dark = on }, still: firstStill,
-          pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)), far: farModel,
+          pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)), far: farModel, windowEffect: () => windowEffect,
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.
           hush: (on) => {
             const voice = ears?.voice

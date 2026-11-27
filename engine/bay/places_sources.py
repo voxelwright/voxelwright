@@ -44,6 +44,7 @@ DEFAULT_GRAPHS = Path.home() / ".village" / "engine" / "bay" / "sf-450-city" / "
 DEFAULT_CACHE = Path.home() / ".village" / "engine" / "bay" / "places-cache"
 
 OVERTURE_RELEASE = "2026-11-18.0"
+CACHE_VERSION = 2
 OVERTURE_PLACES_URL = f"https://tiles.overturemaps.org/{OVERTURE_RELEASE}/places.pmtiles"
 DATASF_PARKS_URL = "https://data.sfgov.org/resource/gtr9-ntp6.json?$limit=1000"
 OVERPASS_MIRRORS = [
@@ -96,6 +97,7 @@ CATEGORY_PRIORITY = {
     "florist": 92,
     "supermarket": 92,
     "grocery": 88,
+    "urgent_care": 86,
     "corner_store": 84,
     "bar": 82,
     "restaurant": 80,
@@ -109,6 +111,48 @@ CATEGORY_PRIORITY = {
     "market": 90,
     "service": 42,
 }
+
+# Street-level walk-in urgent care clinics (kept before skipping upstairs doctors/dentists/specialty clinics)
+URGENT_CARE_OVERTURE_PRIMARIES = {"urgent_care_clinic", "walk_in_clinic"}
+URGENT_CARE_NAME_TOKENS = (
+    "urgent care",
+    "walk-in clinic",
+    "walk in clinic",
+    "walk-in care",
+    "walk in care",
+    "express care",
+    "immediate care",
+    "gohealth",
+    "minuteclinic",
+    "citymd",
+)
+URGENT_CARE_BRAND_TOKENS = (
+    "carbon health",
+    "gohealth",
+    "concentra",
+    "action urgent care",
+    "golden gate urgent care",
+    "city bay urgent care",
+    "sutter urgent care",
+    "sutter walk-in",
+    "sutter walk in",
+    "minuteclinic",
+    "citymd",
+)
+URGENT_CARE_EXCLUDE_NAME_TOKENS = (
+    "ambulance",
+    "laparoscopy",
+    "surgery",
+    "surgical",
+    "dialysis",
+    "imaging",
+    "radiology",
+    "fertility",
+)
+DOCTOR_TITLE_RE = re.compile(
+    r"(?:^|\b)(?:dr\.?|m\.?d\.?|d\.?o\.?|d\.?d\.?s\.?|d\.?m\.?d\.?|n\.?p\.?|p\.?a\.?-?c\.?)(?:\b|$)",
+    re.I,
+)
 
 # Overture primary/hierarchy keywords -> Voxelwright neighborhood category (None = skip non-storefront)
 SKIP_TAXONOMY_TOKENS = {
@@ -124,9 +168,25 @@ SKIP_TAXONOMY_TOKENS = {
 }
 
 
-def classify_overture(primary: str, hierarchy: list[str], basic: str, name: str) -> str | None:
-    joined = " ".join([primary or "", basic or "", *hierarchy]).lower()
+def classify_overture(primary: str, hierarchy: list[str], basic: str, name: str, conf: float = 1.0) -> str | None:
+    primary_l = (primary or "").lower()
+    basic_l = (basic or "").lower()
+    joined = " ".join([primary_l, basic_l, *(h.lower() for h in hierarchy)])
     nl = (name or "").lower()
+    is_health = any(
+        tok in joined
+        for tok in ("health_care", "urgent_care", "walk_in_clinic", "outpatient", "hospital", "emergency_or_urgent", "clinic", "medical")
+    )
+    not_non_urgent_med = (
+        not any(tok in joined for tok in ("veterinar", "animal_hospital", "dental", "dentist", "ambulance"))
+        and not any(tok in nl for tok in URGENT_CARE_EXCLUDE_NAME_TOKENS)
+        and not DOCTOR_TITLE_RE.search(nl)
+    )
+    if is_health and not_non_urgent_med:
+        if primary_l in URGENT_CARE_OVERTURE_PRIMARIES or basic_l in URGENT_CARE_OVERTURE_PRIMARIES:
+            return "urgent_care"
+        if any(tok in nl for tok in URGENT_CARE_NAME_TOKENS) and (primary_l != "hospital" or conf >= 0.75):
+            return "urgent_care"
     if any(tok in joined for tok in SKIP_TAXONOMY_TOKENS):
         return None
     if "pizza" in joined or "pizzeria" in nl or "pizza" in nl:
@@ -182,9 +242,29 @@ def classify_overture(primary: str, hierarchy: list[str], basic: str, name: str)
 
 def classify_osm(tags: dict) -> str | None:
     am = (tags.get("amenity") or "").lower()
+    hc = (tags.get("healthcare") or "").lower()
+    spec = (tags.get("healthcare:speciality") or "").lower()
     sh = (tags.get("shop") or "").lower()
     cu = (tags.get("cuisine") or "").lower()
     nl = (tags.get("name") or "").lower()
+    br = (tags.get("brand") or tags.get("operator") or "").lower()
+    if am.startswith("disused:") or hc.startswith("disused:"):
+        return None
+    if am == "clinic" or hc in ("clinic", "urgent_care"):
+        spec_tokens = {s.strip() for s in re.split(r"[;,]", spec) if s.strip()}
+        is_urgent_spec = "urgent" in spec_tokens and len(spec_tokens) <= 3
+        combined = f"{nl} {br}"
+        if (
+            not any(tok in nl for tok in URGENT_CARE_EXCLUDE_NAME_TOKENS)
+            and not DOCTOR_TITLE_RE.search(nl)
+            and (
+                hc == "urgent_care"
+                or is_urgent_spec
+                or any(tok in combined for tok in URGENT_CARE_NAME_TOKENS)
+                or any(tok in combined for tok in URGENT_CARE_BRAND_TOKENS)
+            )
+        ):
+            return "urgent_care"
     if "pizza" in cu or "pizza" in nl:
         return "pizza"
     if "burger" in cu or "burger" in nl or "hamburger" in nl:
@@ -259,10 +339,10 @@ class CachedHttpRange:
         return b""
 
 
-def fetch_overture_places(bounds: tuple[float, float, float, float], cache_dir: Path) -> list[dict]:
+def fetch_overture_places(bounds: tuple[float, float, float, float], cache_dir: Path, refresh: bool = False) -> list[dict]:
     W, S, E, N = bounds
-    cache_file = cache_dir / f"overture-places-{OVERTURE_RELEASE}.json.gz"
-    if cache_file.exists():
+    cache_file = cache_dir / f"overture-places-{OVERTURE_RELEASE}-v{CACHE_VERSION}.json.gz"
+    if cache_file.exists() and not refresh:
         print(f"  [cache] {cache_file.name}", flush=True)
         return json.loads(gzip.decompress(cache_file.read_bytes()))
 
@@ -320,7 +400,7 @@ def fetch_overture_places(bounds: tuple[float, float, float, float], cache_dir: 
             except Exception:
                 pass
             basic = p.get("basic_category") or ""
-            cat = classify_overture(primary, hierarchy, basic, name)
+            cat = classify_overture(primary, hierarchy, basic, name, conf)
             if not cat:
                 continue
             brand = ""
@@ -396,10 +476,10 @@ def fetch_osm_map_box(w: float, s: float, e: float, n: float) -> list[dict]:
         return json.loads(raw)["elements"]
 
 
-def fetch_osm_sf(bounds: tuple[float, float, float, float], cache_dir: Path) -> dict:
+def fetch_osm_sf(bounds: tuple[float, float, float, float], cache_dir: Path, refresh: bool = False) -> dict:
     W, S, E, N = bounds
-    cache_file = cache_dir / "osm-sf-places-plazas.json.gz"
-    if cache_file.exists():
+    cache_file = cache_dir / f"osm-sf-places-plazas-v{CACHE_VERSION}.json.gz"
+    if cache_file.exists() and not refresh:
         print(f"  [cache] {cache_file.name}", flush=True)
         return json.loads(gzip.decompress(cache_file.read_bytes()))
 
@@ -424,13 +504,15 @@ out tags geom;"""
 out body;"""
     res_furn = run_overpass(q_furn, timeout=55)
 
-    # 3. OSM commercial POIs (adds outdoor_seating, cuisine, local independent shops like Haystack Pizza & Martha & Bros!)
+    # 3. OSM commercial POIs (adds outdoor_seating, cuisine, urgent care clinics & local independent shops!)
     q_pois = f"""[out:json][timeout:55];
 (
   node["name"]["shop"]({bbox});
-  node["name"]["amenity"~"^(restaurant|cafe|fast_food|ice_cream|bar|pub|pharmacy|bank|cinema|theatre|marketplace)$"]({bbox});
+  node["name"]["amenity"~"^(restaurant|cafe|fast_food|ice_cream|bar|pub|pharmacy|clinic|bank|cinema|theatre|marketplace)$"]({bbox});
+  node["name"]["healthcare"~"^(clinic|urgent_care)$"]({bbox});
   way["name"]["shop"]({bbox});
-  way["name"]["amenity"~"^(restaurant|cafe|fast_food|ice_cream|bar|pub|pharmacy|bank|cinema|theatre|marketplace)$"]({bbox});
+  way["name"]["amenity"~"^(restaurant|cafe|fast_food|ice_cream|bar|pub|pharmacy|clinic|bank|cinema|theatre|marketplace)$"]({bbox});
+  way["name"]["healthcare"~"^(clinic|urgent_care)$"]({bbox});
 );
 out tags center;"""
     res_pois = run_overpass(q_pois, timeout=65)
@@ -446,6 +528,7 @@ out tags center;"""
             (37.7515, -122.4295, 0.0045),  # Noe Valley 24th St + Town Square
             (37.7765, -122.4243, 0.0035),  # Hayes Valley / Patricia's Green
             (37.7620, -122.4348, 0.0035),  # Castro / Jane Warner Plaza
+            (37.7699, -122.4264, 0.0035),  # Market & Buchanan / Duboce Triangle
             (37.8007, -122.4100, 0.0040),  # North Beach / Washington Square
             (37.7596, -122.4220, 0.0040),  # Mission / Valencia & Dolores
             (37.7948, -122.4060, 0.0035),  # Chinatown / Portsmouth Square
@@ -457,17 +540,22 @@ out tags center;"""
                 nodes_by_id = {el["id"]: (el["lon"], el["lat"]) for el in els if el["type"] == "node"}
                 for el in els:
                     tags = el.get("tags") or {}
+                    is_poi_tag = (
+                        tags.get("shop")
+                        or tags.get("amenity") in ("restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "clinic", "bank", "cinema", "theatre", "marketplace")
+                        or tags.get("healthcare") in ("clinic", "urgent_care")
+                    )
                     if el["type"] == "node":
                         if tags.get("amenity") in ("bench", "public_bookcase", "drinking_water", "fountain", "marketplace"):
                             furn_els.append(el)
-                        if tags.get("name") and (tags.get("shop") or tags.get("amenity") in ("restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "bank", "cinema", "theatre", "marketplace")):
+                        if tags.get("name") and is_poi_tag:
                             pois_els.append(el)
                     elif el["type"] == "way" and el.get("nodes"):
                         pts = [nodes_by_id[nid] for nid in el["nodes"] if nid in nodes_by_id]
                         if len(pts) >= 3:
                             if tags.get("place") == "square" or (tags.get("highway") == "pedestrian" and tags.get("area") == "yes") or (tags.get("leisure") in ("park", "garden", "common") and tags.get("name")):
                                 plazas_els.append({"type": "way", "id": el["id"], "tags": tags, "geometry": [{"lon": p[0], "lat": p[1]} for p in pts]})
-                            elif tags.get("name") and (tags.get("shop") or tags.get("amenity")):
+                            elif tags.get("name") and is_poi_tag:
                                 cx = sum(p[0] for p in pts) / len(pts)
                                 cy = sum(p[1] for p in pts) / len(pts)
                                 pois_els.append({"type": "way", "id": el["id"], "tags": tags, "center": {"lon": cx, "lat": cy}})
@@ -831,8 +919,10 @@ def fuse_storefronts(overture_raw: list[dict], osm_pois: list[dict], bldgs, bldg
             for dz in (-1, 0, 1):
                 for idx in osm_spatial.get((gx + dx, gz + dz), ()):
                     m = merged[idx]
-                    if math.hypot(m["raw_x"] - x, m["raw_z"] - z) < 32.0:
-                        if m["norm"] == nn or (len(nn) >= 5 and (nn in m["norm"] or m["norm"] in nn)):
+                    d_osm = math.hypot(m["raw_x"] - x, m["raw_z"] - z)
+                    same_clinic = m["cat"] == "urgent_care" and ov["cat"] == "urgent_care" and d_osm < 28.0
+                    if d_osm < 32.0:
+                        if same_clinic or m["norm"] == nn or (len(nn) >= 5 and (nn in m["norm"] or m["norm"] in nn)):
                             if not m["brand"] and ov["brand"]:
                                 m["brand"] = ov["brand"]
                             if not m["addr"] and ov["addr"]:
@@ -843,14 +933,20 @@ def fuse_storefronts(overture_raw: list[dict], osm_pois: list[dict], bldgs, bldg
                     break
         if dup:
             continue
-        # Deduplicate duplicate Overture entries of same business within 22 m
+        # Deduplicate duplicate Overture entries of same business within 22 m (or co-located urgent care rebrands within 28 m)
         for dx in (-1, 0, 1):
             for dz in (-1, 0, 1):
                 for idx in ov_spatial.get((gx + dx, gz + dz), ()):
                     m = merged[idx]
-                    if math.hypot(m["raw_x"] - x, m["raw_z"] - z) < 22.0 and (m["norm"] == nn or (len(nn) >= 6 and (nn in m["norm"] or m["norm"] in nn))):
+                    d_ov = math.hypot(m["raw_x"] - x, m["raw_z"] - z)
+                    same_clinic = m["cat"] == "urgent_care" and ov["cat"] == "urgent_care" and d_ov < 28.0
+                    if same_clinic or (d_ov < 22.0 and (m["norm"] == nn or (len(nn) >= 6 and (nn in m["norm"] or m["norm"] in nn)))):
                         if ov["conf"] > m["conf"]:
                             m["conf"] = ov["conf"]
+                        if not m["brand"] and ov["brand"]:
+                            m["brand"] = ov["brand"]
+                        if not m["addr"] and ov["addr"]:
+                            m["addr"] = ov["addr"]
                         dup = True
                         break
                 if dup:
@@ -1218,15 +1314,16 @@ def main():
     ap.add_argument("--inputs", type=Path, default=DEFAULT_INPUTS)
     ap.add_argument("--graphs", type=Path, default=DEFAULT_GRAPHS)
     ap.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
+    ap.add_argument("--refresh", action="store_true", help="Re-fetch Overture and OSM source caches")
     args = ap.parse_args()
 
     t0 = time.time()
     bounds = sf_bounds_from_squares()
     print(f"SF lidar bounds: W={bounds[0]:.5f} S={bounds[1]:.5f} E={bounds[2]:.5f} N={bounds[3]:.5f}", flush=True)
 
-    overture_raw = fetch_overture_places(bounds, args.cache)
+    overture_raw = fetch_overture_places(bounds, args.cache, refresh=args.refresh)
     datasf_parks = fetch_datasf_parks(args.cache)
-    osm_bundle = fetch_osm_sf(bounds, args.cache)
+    osm_bundle = fetch_osm_sf(bounds, args.cache, refresh=args.refresh)
 
     bldgs, bldg_grid, roads, road_grid, cell = load_local_geometry(args.inputs, args.graphs)
     shops = fuse_storefronts(overture_raw, osm_bundle.get("pois", []), bldgs, bldg_grid, roads, road_grid, cell)

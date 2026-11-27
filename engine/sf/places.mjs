@@ -453,8 +453,8 @@ export function buildPlaces({ rawPath = DEFAULT_RAW, brandsPath = DEFAULT_BRANDS
       }
     }
   }
-  // Surface flagship parody grocery/retail anchors in map search & GPS (e.g. Whole Moods Market, Bullseye Mart)
-  const MAP_BRAND_ANCHORS = new Set(['whole-foods', 'target', 'trader-joes', 'apple-store', 'ikea', 'costco'])
+  // Surface flagship parody grocery/retail/urgent-care anchors in map search & GPS (e.g. Whole Moods Market, Bullseye Mart, Carbonic Health)
+  const MAP_BRAND_ANCHORS = new Set(['whole-foods', 'target', 'trader-joes', 'apple-store', 'ikea', 'costco', 'carbon-health', 'gohealth'])
   const brandSeenNear = []
   for (const sh of shops) {
     if (!sh.br || !MAP_BRAND_ANCHORS.has(sh.br)) continue

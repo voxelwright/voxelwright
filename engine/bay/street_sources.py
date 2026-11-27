@@ -20,10 +20,11 @@ SEMANTIC_BUILDING_TAGS = (
 )
 SEMANTIC_PLACE_TAGS = ("name", "natural", "water", "leisure", "landuse", "amenity", "garden:type", "surface", "wikidata")
 KEEP_POI = set(
-    "name brand operator shop amenity cuisine leisure place area outdoor_seating addr:housenumber addr:street".split()
+    "name brand operator shop amenity healthcare healthcare:speciality cuisine leisure place area outdoor_seating addr:housenumber addr:street".split()
 )
 FURNITURE_AMENITIES = {"bench", "public_bookcase", "drinking_water", "fountain", "marketplace"}
-POI_AMENITIES = {"restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "bank", "cinema", "theatre", "marketplace"}
+POI_AMENITIES = {"restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "clinic", "bank", "cinema", "theatre", "marketplace"}
+POI_HEALTHCARE = {"clinic", "urgent_care"}
 
 
 def extract_semantics(items):
@@ -129,14 +130,22 @@ def acquire(name, path):
                     "lon": item["lon"],
                     "lat": item["lat"],
                 })
-            if tags.get("name") and (tags.get("shop") or tags.get("amenity") in POI_AMENITIES):
+            if tags.get("name") and (
+                tags.get("shop")
+                or tags.get("amenity") in POI_AMENITIES
+                or tags.get("healthcare") in POI_HEALTHCARE
+            ):
                 pois.append({
                     "id": id_,
                     "lon": item["lon"],
                     "lat": item["lat"],
                     "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
                 })
-        if kind == "way" and tags.get("name") and (tags.get("shop") or tags.get("amenity") in POI_AMENITIES):
+        if kind == "way" and tags.get("name") and (
+            tags.get("shop")
+            or tags.get("amenity") in POI_AMENITIES
+            or tags.get("healthcare") in POI_HEALTHCARE
+        ):
             pts = [
                 [items["node", nid]["lon"], items["node", nid]["lat"]]
                 for nid in item.get("nodes", [])

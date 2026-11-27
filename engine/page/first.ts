@@ -61,8 +61,8 @@ html.first #realm .sky .part.acts .foot > :not(.sky-credits-link) { display: non
   html.first #realm.folds .sky header.g { grid-column: 2; grid-row: 3; }
   html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; grid-auto-flow: row; grid-template-columns: 0.85fr 1.15fr; }
   html.first #realm.folds .sky .graphics > label:last-child { grid-column: 1 / -1; }
-  /* (The resolution's rows would take the panel down over BLOG: in the first view they wait for the realm's own panel.) */
-  html.first #realm.folds .sky .part.res > * { display: none; }
+  /* (The resolution's and window glow's rows would take the panel down over BLOG on a short landscape phone: in the first view they wait for portrait or the realm's own panel.) */
+  html.first #realm.folds .sky :is(.part.res > *, .win-fx) { display: none; }
   html.first #realm.folds .sky .part.acts .vx-groove { display: none; }
   html.first #realm.folds .sky .part.acts .foot { grid-column: 1 / -1; }
 }

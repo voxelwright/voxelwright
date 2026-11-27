@@ -34,6 +34,21 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
   const sbux = rules.resolve({ n: 'Starbucks', b: 'Starbucks', c: 'coffee', x: 50200, z: 71600 })
   assert.equal(sbux.name, 'Starbuxx Coffee')
 
+  const carbon = rules.resolve({ n: 'Carbon Health', b: 'Carbon Health', c: 'urgent_care', x: 50522, z: 69570 })
+  assert.equal(carbon.name, 'Carbonic Health')
+  assert.equal(carbon.short, 'CARBONIC HEALTH')
+  assert.equal(carbon.brandId, 'carbon-health')
+  assert.equal(carbon.category, 'urgent_care')
+
+  const gohealth = rules.resolve({ n: 'Ucsf Health-gohealth Urgent Care', c: 'urgent_care', x: 49963, z: 70134 })
+  assert.equal(gohealth.name, 'GoWell Urgent Care')
+  assert.equal(gohealth.brandId, 'gohealth')
+  assert.equal(gohealth.category, 'urgent_care')
+
+  const minute = rules.resolve({ n: 'Minuteclinic At Cvs', c: 'urgent_care', x: 46100, z: 71500 })
+  assert.equal(minute.brandId, 'minuteclinic')
+  assert.equal(minute.category, 'urgent_care')
+
   const indep = rules.resolve({ n: 'Haystack Pizza', c: 'pizza', x: 50290, z: 71590 })
   assert.equal(indep.name, 'Haystack Pizza')
   assert.equal(indep.parodyOf, null)
@@ -81,6 +96,20 @@ for (const want of ['pizza', 'burger', 'ice_cream', 'coffee', 'books', 'florist'
 assert.ok(
   nvShops.some((s) => s.br === 'whole-foods' && s.n === 'WHOLE MOODS'),
   'Whole Foods on 24th St must compile with configured GTA-style parody name',
+)
+
+// 3b. Urgent care clinics across San Francisco, including Market & Buchanan (1998 Market St) (#135)
+const urgentCare = built.data.shops.filter((s) => s.c === 'urgent_care')
+assert.ok(urgentCare.length >= 12, `expected >= 12 citywide urgent care clinics, got ${urgentCare.length}`)
+const mbx = 50522.1, mbz = 69570.5
+const marketBuchananClinic = urgentCare.find((s) => Math.hypot(s.x - mbx, s.z - mbz) < 40)
+assert.ok(marketBuchananClinic, 'Market & Buchanan (1998 Market St) urgent care clinic must exist in compiled storefronts')
+assert.equal(marketBuchananClinic.br, 'carbon-health')
+assert.equal(marketBuchananClinic.n, 'CARBONIC HEALTH')
+assert.ok(urgentCare.some((s) => s.br === 'gohealth'), 'GoHealth urgent care clinics must compile with configured parody brand')
+assert.ok(
+  built.mapPlaces.some((m) => m.name === 'CARBONIC HEALTH' && Math.hypot(m.x / 10 - mbx, m.z / 10 - mbz) < 50),
+  'Market & Buchanan urgent care clinic should appear in map POIs',
 )
 
 // 4. Systemic citywide coverage across multiple SF neighborhoods

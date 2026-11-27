@@ -35,7 +35,7 @@ import type { Marcher, View } from './march.ts'
 import { OWN_HOUR } from './weather.ts'
 import type { Skies, Weather } from './weather.ts'
 import type { Signs } from './signs.ts'
-import type { Picture } from './eggs-pictures.ts'
+import type { Picture, WindowEffect } from './eggs-pictures.ts'
 import type { Hud } from './hud.ts'
 import type { Pieces } from './pieces.ts'
 import { things, type ThingId } from './eggs-things.ts'
@@ -99,6 +99,8 @@ export interface EggsPage {
   ground(x: number, z: number): number
   /** The far model, which lights the windows that hold an egg (far.ts `lockers`). */
   far: Pick<Far, 'lockers' | 'lockerHeader' | 'listing'>
+  /** What the unused lower/outer windows show during video eggs: 'ambilight' (default), 'equalizer', or 'off'. */
+  windowEffect?(): WindowEffect
 }
 
 // Original line drawing from the park's east-southeast view (the site's, the same view).
@@ -288,8 +290,17 @@ export function eggs(page: EggsPage) {
     }
     return files.get(url)!
   }
+  let wakeAudioFn: ((media: HTMLVideoElement | null, effect: WindowEffect) => void) | null = null
+  const getWindowEffect = (): WindowEffect => page.windowEffect?.() ?? 'ambilight'
+  const wakeAudio = () => {
+    const effect = getWindowEffect()
+    if (effect !== 'equalizer' || !media) return
+    if (wakeAudioFn) wakeAudioFn(media, effect)
+    else void import('./eggs-pictures.ts').then((m) => { wakeAudioFn = m.wakeVideoAudio; m.wakeVideoAudio(media, getWindowEffect()) })
+  }
   const run = (current: NonNullable<typeof running>) => {
     const m = current.media!
+    wakeAudio()
     void m.play().catch((e: Error) => {
       if (running !== current || e.name !== 'NotAllowedError') return
       // The browser wants a fresh tap for sound: the video plays muted, and Unmute is that tap.
@@ -321,6 +332,7 @@ export function eggs(page: EggsPage) {
     m.loop = false
     // Started inside the gesture before it has a file: some browsers let an element play sound later only if it was
     // first started from a tap.
+    wakeAudio()
     void m.play().catch(() => {})
     const started = ++clock
     const current: NonNullable<typeof running> = { egg, picture: null, started: performance.now(), media: m }
@@ -328,16 +340,13 @@ export function eggs(page: EggsPage) {
     dress(egg)
     page.hush(true)
     showPlayer()
-    if (v.sky ?? true) {
-      banner(null)
-      const plane = page.plane()
-      if (plane) plane.hidden = true
-    } else banner(`Now playing: ${v.title}`)
+    banner(`Now playing: ${v.title}`)
     say(`Tuning in: ${v.title}…`)
     try {
-      const [{ videoPicture }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
+      const [{ videoPicture, wakeVideoAudio }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
+      wakeAudioFn = wakeVideoAudio
       if (running !== current || started !== clock) return
-      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true })
+      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true, windowEffect: getWindowEffect })
       m.src = url
       // It plays once the windows are its screen (every frame below): a 5 s clip started as the screen comes up was
       // half over before it could be seen. Until then its first frame stands on the windows. (The play started in the
@@ -797,7 +806,7 @@ export function eggs(page: EggsPage) {
   }) : null
   void memesCame.then(() => locks?.relabel())
 
-  // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines and the towers' lamps ──
+  // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines ──
   /** Whether anything of the eggs' is on: what a tap on the banner ends. */
   const on = () => !!(running || shield || moon || moonlit || saying)
   /** The meme the banner said last in the first view. */
@@ -805,15 +814,10 @@ export function eggs(page: EggsPage) {
   const TAPS: Record<Spot, (line: string | null) => void> = {
     // While an egg is on, the banner ends it (Unmute is the player's: a tap here stops). Its line starts its egg; the site's name, a barrel roll.
     banner: (line) => (on() ? undo() : act(line ?? 'roll')),
-    // The Pyramid's lamp: Bad Apple!! in shadow, the lamp the one red light left; again, the lights back.
-    pyramid: () => (running?.egg === 'apple' ? stop() : act('apple')),
-    // The crown of lamps: the Matrix on the city's windows, the crown's own screen among them; again, out of it.
-    crown: () => (running?.egg === 'matrix' ? stop() : void enter()),
   }
   const taps = firstTaps({
     hasMedia,
-    canvas: page.canvas, view: page.view, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
-    beacons: () => march.beacons, fog: () => march.fog,
+    canvas: page.canvas, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
     quiet: () => !on() && !typing,
     // A meme whose title is no longer than the site's name (a line is not: first.ts), not the last one said.
     more: () => {
@@ -839,9 +843,6 @@ export function eggs(page: EggsPage) {
     else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
     // The boards' own light is off while an egg has the windows, from its start to its end.
     if (!!running !== darkened) { darkened = !!running; page.darkBoards(darkened) }
-    // Keep the tow plane and banner clear of the sky while the drone swarm is active (or starting up for a sky video).
-    const plane = page.plane()
-    if (plane) plane.hidden = !!(march.screen.sky && march.screen.up > 0) || !!(running && running.egg !== 'matrix' && (VIDEOS[running.egg]?.sky ?? true))
     const up = running?.picture ? 1 : 0
     // Up over a second, down over two thirds of one.
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)
@@ -857,6 +858,9 @@ export function eggs(page: EggsPage) {
       march.screen.rect[3] = running.picture.rect[3]
     }
     if (march.screen.up === 0 && fading) { fading.dispose(); fading = null; march.screen.sky = false }
+    // Fly the tow plane and banner above the sky-gap drone swarm while it is active.
+    const plane = page.plane()
+    if (plane) plane.above = march.screen.sky && march.screen.up > 0 ? march.screen.rect[1] : null
     if (pending !== null) { page.sky.glide(pending); pending = null }
     // The hour goes home once the fog an egg left has thinned, or after four seconds of waiting for it.
     if (leaving && (march.fog < 0.12 || performance.now() - leaving.since > 4000)) { const hour = leaving.hour; leaving = null; home(hour) }
@@ -893,7 +897,9 @@ export function eggs(page: EggsPage) {
 
   return {
     /** For the checks: what is going on. */
-    get state() { return { memesPlayed, paused: !!running?.paused, running: running?.egg ?? null, up: march.screen.up, shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
+    get state() { return { memesPlayed, paused: !!running?.paused, running: running?.egg ?? null, up: march.screen.up, windowEffect: getWindowEffect(), shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
+    /** Resumes the equalizer's audio tap inside a user gesture (e.g. toggling Window glow -> EQ in Settings). */
+    wakeAudio,
     say: heard,
     /** Opens the line, as Enter or the slash does in the realm (main.ts asks for it in the first view, where they are not heard). */
     open,

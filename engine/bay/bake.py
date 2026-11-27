@@ -105,6 +105,51 @@ def despike_roof(a, mask, radius=2, thresh=2.5):
     return np.where(mask & (a - opened > thresh), opened, a).astype(np.float32)
 
 
+def clean_canopy_grid(canopy, over, street):
+    """Drop tiny sidewalk/tall canopy stubs and narrow roof-spillover spikes before baking crowns and trunks."""
+    from collections import deque
+
+    h, w = canopy.shape
+    can = canopy.copy()
+    ov = over.copy()
+    vis = np.zeros((h, w), dtype=bool)
+    for j in range(h):
+        for i in range(w):
+            if not can[j, i] or vis[j, i]:
+                continue
+            q = deque([(j, i)])
+            vis[j, i] = True
+            cells = []
+            while q:
+                y, x = q.popleft()
+                cells.append((y, x))
+                for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    ny, nx = y + dy, x + dx
+                    if 0 <= ny < h and 0 <= nx < w and can[ny, nx] and not vis[ny, nx]:
+                        vis[ny, nx] = True
+                        q.append((ny, nx))
+            if len(cells) <= 6:
+                if max(float(ov[y, x]) for y, x in cells) >= 1.8 or any(bool(street[y, x]) for y, x in cells):
+                    for y, x in cells:
+                        can[y, x] = False
+
+    # Despike narrow canopy cells jumping > 4.5 m above their 5x5 canopy neighborhood.
+    orig_can = can.copy()
+    orig_ov = ov.copy()
+    ys, xs = np.nonzero(orig_can)
+    for j, i in zip(ys.tolist(), xs.tolist()):
+        t0 = float(orig_ov[j, i])
+        sub_c = orig_can[max(0, j - 2):min(h, j + 3), max(0, i - 2):min(w, i + 3)]
+        sub_o = orig_ov[max(0, j - 2):min(h, j + 3), max(0, i - 2):min(w, i + 3)][sub_c]
+        if int(np.sum(sub_o >= t0 - 4.5)) < 6:
+            lower = sub_o[sub_o < t0 - 4.5]
+            if len(lower) >= 3:
+                ov[j, i] = float(np.median(lower))
+            elif t0 > 6.0:
+                can[j, i] = False
+    return can, ov
+
+
 def rings(geometry):
     polys = geometry['coordinates'] if geometry['type'] == 'MultiPolygon' else [geometry['coordinates']]
     for poly in polys:
@@ -241,7 +286,8 @@ def main():
     # ── What the ground is, what grows, and what colour each top is.
     table = palette()
     water = (g2 < 0.25) & ~inside
-    canopy = leafy & (over > 0.7) & ~inside
+    canopy, over = clean_canopy_grid(leafy & (over > 0.7) & ~inside, over, street)
+    surface = np.where(canopy, g2 + over, surface)
     cls = np.full((half, half), YARD, np.uint8)
     cls[street] = PAVEMENT
     cls[road] = ROAD
