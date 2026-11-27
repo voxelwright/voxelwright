@@ -90,11 +90,15 @@ for (const [name, s] of Object.entries(screens)) {
 }
 check(bad === 0, `${laid} layouts (4 steerings, 2 gases, 2 hands, 3 sizes, 4 screens, and tilt waiting): keys 44 px or more, in the safe area, none on another, the two thumbs 24 px or more apart, the driving thumb's in the lower half`)
 
-// Under the YouTube player (its foot 244 px down a phone on its side): the steering keys stay below it, 44 px or more.
-for (const steer of ['arrows', 'wheel', 'tilt']) for (const hand of ['right', 'left']) for (const ask of [false, true]) {
-  const ks = layout({ ...DEFAULTS, steer, hand, gas: 'pedals' }, steer, { width: 844, height: 390, portrait: false, below: 244 }, ask && steer === 'arrows').filter((k) => k.side !== hand)
+// Under the YouTube player (top left, its foot 244 px down a phone on its side): that corner's keys, steering or driving, stay below it.
+for (const steer of ['arrows', 'wheel', 'tilt']) for (const gas of ['pedals', 'auto']) for (const hand of ['right', 'left']) for (const ask of [false, true]) {
+  if (ask && steer !== 'arrows') continue
+  const all = layout({ ...DEFAULTS, steer, hand, gas }, steer, { width: 844, height: 390, portrait: false, below: 244 }, ask)
+  const ks = all.filter((k) => k.side === 'left')
   const tops = ks.map((k) => 390 - 21 - 14 - k.y - k.h)
-  check(ks.length > 0 && tops.every((t) => t >= 244) && ks.every((k) => k.w >= 44 && k.h >= 44), `${steer}${ask ? ' asking for tilt' : ''}, ${hand}-handed: the steering keys stand under the YouTube player (${ks.map((k, i) => `${k.act} top ${tops[i]}`).join(', ')})`)
+  const rect = (k) => { const left = k.side === 'left' ? 73 + k.x : 844 - 73 - k.x - k.w; return [left, left + k.w, 355 - k.y - k.h, 355 - k.y] }
+  const meet = all.some((a, i) => all.some((b, j) => j > i && rect(a)[0] < rect(b)[1] && rect(a)[1] > rect(b)[0] && rect(a)[2] < rect(b)[3] && rect(a)[3] > rect(b)[2]))
+  check(tops.every((t) => t >= 244) && ks.every((k) => k.w >= 44 && k.h >= 44) && !meet, `${steer}+${gas}${ask ? ' asking for tilt' : ''}, ${hand}-handed: the keys in the top-left player's corner stand under it, none on another (${ks.map((k, i) => `${k.act} top ${tops[i]}`).join(', ')})`)
 }
 
 // Each size is its own size on every screen (on a phone on its side the height once made Large the same as Medium).

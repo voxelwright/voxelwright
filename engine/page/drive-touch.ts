@@ -170,31 +170,47 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
   // The driving thumb's cluster: the main pedal tall at the edge; drift beside it (brake below drift with pedals);
   // boost over the main pedal. With tilt and pedals, brake goes under the steering thumb, which has nothing else to do.
   const mainW = px(80), mainH = px(108), sideW = px(74), smallH = px(56)
-  put(s.gas === 'auto' ? 'brake' : 'gas', drive, 0, 0, mainW, mainH)
-  if (s.gas === 'pedals' && !brakeAcross) {
-    // Four keys, two by two: Boost over Gas, Drift over Brake.
+  // `below` (px from the top): the foot of what stands over the top left corner (the YouTube player); that corner's keys go under it.
+  const under = view.below ? Math.max(44, view.height - view.below - 35 - 8) : Infinity
+  const main = s.gas === 'auto' ? 'brake' : 'gas'
+  if (drive === 'left' && mainH + gap + smallH > under) {
+    // Under the player: the same cluster in two short rows (a row as wide as four keys would reach the car).
+    const h = Math.max(44, Math.floor((under - gap) / 2))
+    put(main, drive, 0, 0, mainW, h)
+    if (s.gas === 'pedals' && !brakeAcross) {
+      put('brake', drive, mainW + gap, 0, sideW, h)
+      put('boost', drive, 0, h + gap, mainW, h)
+      put('drift', drive, mainW + gap, h + gap, sideW, h)
+    } else {
+      put('drift', drive, mainW + gap, 0, sideW, h)
+      put('boost', drive, 0, h + gap, mainW + gap + sideW, h)
+    }
+  } else if (s.gas === 'pedals' && !brakeAcross) {
+    // Four keys, two by two, their tops and feet in line: Boost over Gas, a taller Drift over Brake.
     const brakeH = px(76)
+    put(main, drive, 0, 0, mainW, mainH)
     put('boost', drive, 0, mainH + gap, mainW, smallH)
     put('brake', drive, mainW + gap, 0, sideW, brakeH)
-    put('drift', drive, mainW + gap, brakeH + gap, sideW, smallH)
+    put('drift', drive, mainW + gap, brakeH + gap, sideW, mainH + smallH - brakeH)
   } else {
     // Three: Drift as tall as the main pedal beside it, Boost the width of both over them.
+    put(main, drive, 0, 0, mainW, mainH)
     put('drift', drive, mainW + gap, 0, sideW, mainH)
     put('boost', drive, 0, mainH + gap, mainW + gap + sideW, smallH)
   }
-  // The steering thumb's, under `below` (px from the top) where something stands over that corner (the YouTube player).
-  const under = view.below ? Math.max(44, view.height - view.below - 35 - 8) : Infinity
+  // The steering thumb's (under the player where they are in its corner).
+  const steerRoom = steerSide === 'left' ? under : Infinity
   if (steer === 'arrows') {
-    const a = Math.min(px(84), under), between = Math.round(gap * 1.4)
+    const a = Math.min(px(84), steerRoom), between = Math.round(gap * 1.4)
     put('left', steerSide, steerSide === 'left' ? 0 : a + between, 0, a, a)
     put('right', steerSide, steerSide === 'left' ? a + between : 0, 0, a, a)
     // (Where there is no room for it, the first touch anywhere asks for tilt, and the driving panel says so.)
-    if (tiltAsk && a + gap + 48 <= under) put('tilt-on', steerSide, 0, a + gap, a * 2 + between, 48)
+    if (tiltAsk && a + gap + 48 <= steerRoom) put('tilt-on', steerSide, 0, a + gap, a * 2 + between, 48)
   } else if (steer === 'wheel') {
-    const d = Math.min(px(150), under)
+    const d = Math.min(px(150), steerRoom)
     put('wheel', steerSide, 0, 0, d, d)
   } else if (brakeAcross) {
-    put('brake', steerSide, 0, 0, mainW, Math.min(mainH, under))
+    put('brake', steerSide, 0, 0, mainW, Math.min(mainH, steerRoom))
   }
   return out
 }
@@ -208,6 +224,14 @@ const STYLE = /* css */ `
 [data-panel="living"] .dt-cluster .vx-button[aria-pressed="true"] { opacity: 1; transition: none; }
 [data-panel="living"] .dt-cluster [data-act="tilt-on"] { font: 600 12px/1 var(--hud-font, -apple-system, system-ui, sans-serif); letter-spacing: 0.02em; }
 [data-panel="living"] .dt-cluster [data-act="tilt-on"] .hud-lbl { display: inline !important; }
+[data-panel="living"] .dt-cluster [data-act="boost"] .hud-ic { inline-size: 26px; block-size: 26px; }
+[data-panel="living"] .dt-cluster [data-act="gas"] .hud-ic { color: #a6f0b0; }
+[data-panel="living"] .dt-cluster [data-act="brake"] .hud-ic { color: #ffaaa4; }
+/* Without the play HUD (the city page), the utility keys stand at the top right, clear of the thumbs' clusters. */
+@media (pointer: coarse) {
+  html:not([data-hud]).driving [data-panel="living"] { position: fixed; inset: 0; display: block; max-height: none; pointer-events: none; }
+  html:not([data-hud]).driving [data-panel="living"] .drive-util { position: absolute; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); display: flex; gap: 8px; pointer-events: auto; }
+}
 /* The wheel: a recess the thumb turns, and the cap on its rim where the wheel's top is. */
 [data-panel="living"] .dt-cluster .dt-wheel { border-radius: 50%; opacity: var(--dt-alpha, 0.82); }
 [data-panel="living"] .dt-cluster .dt-wheel[aria-pressed="true"] { opacity: 1; }
@@ -219,8 +243,7 @@ html.thumb-down [data-panel="living"] .dt-cluster .dt-ghost { opacity: 0; }
 /* The Controls sheet. */
 #drive-controls { box-sizing: border-box; inline-size: min(560px, calc(100vw - 24px)); max-block-size: calc(100dvh - 24px - env(safe-area-inset-bottom, 0px)); margin: 12px auto auto; padding: 0; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px; background: rgba(14, 18, 26, 0.9); color: #f2f5f9; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font: 400 13px/1.35 -apple-system, system-ui, sans-serif; overflow: auto; overscroll-behavior: contain; }
 #drive-controls::backdrop { background: rgba(4, 6, 10, 0.42); }
-/* A fade at the foot while there is more to scroll to. */
-#drive-controls .dc-body::after { content: ''; position: sticky; bottom: -14px; grid-column: 1 / -1; block-size: 18px; margin-block-start: -18px; background: linear-gradient(transparent, rgba(14, 18, 26, 0.95)); pointer-events: none; }
+
 #drive-controls[open] { display: grid; }
 #drive-controls * { box-sizing: border-box; }
 #drive-controls [hidden] { display: none !important; }
@@ -248,9 +271,15 @@ html.thumb-down [data-panel="living"] .dt-cluster .dt-ghost { opacity: 0; }
 #drive-controls .dc-tilt { grid-template-columns: 1fr auto; align-items: center; }
 #drive-controls .dc-acts button { flex: 1 1 auto; min-block-size: 44px; padding: 0 14px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 10px; background: rgba(255, 255, 255, 0.08); color: inherit; font: 600 13px/1 -apple-system, system-ui, sans-serif; }
 #drive-controls .dc-acts button:disabled { opacity: 0.4; }
+/* On a phone on its side: Steer the whole width, then Gas, the hand and the size in a row, then the two faders. */
 @media (orientation: landscape) and (max-height: 500px) {
-  #drive-controls .dc-body { grid-template-columns: 1fr 1fr; column-gap: 16px; }
+  #drive-controls .dc-body { grid-template-columns: repeat(7, 1fr); column-gap: 14px; }
+  #drive-controls .dc-row { grid-column: span 2; }
+  #drive-controls .dc-row.dc-three { grid-column: span 3; }
+  #drive-controls .dc-row.dc-half { grid-column: span 3; }
+  #drive-controls .dc-row.dc-half + .dc-row.dc-half { grid-column: span 4; }
   #drive-controls .dc-row.wide { grid-column: 1 / -1; }
+  #drive-controls .dc-seg label small { display: none; }
 }
 `
 
@@ -526,7 +555,7 @@ export function driveTouch(o: {
   // ── The sheet ──
   let sheet: HTMLDialogElement | null = null
   const seg = (name: string, label: string, options: [string, string, string?][]) =>
-    `<div class="dc-row${options.length > 3 ? ' wide' : ''}"><span class="dc-name" id="dc-${name}">${label}</span><div class="dc-seg" role="radiogroup" aria-labelledby="dc-${name}">${options.map(([v, t, sub]) => `<label><input type="radio" name="dc-${name}" value="${v}"><span>${t}</span>${sub ? `<small>${sub}</small>` : ''}</label>`).join('')}</div></div>`
+    `<div class="dc-row${options.length > 3 ? ' wide' : options.length === 3 ? ' dc-three' : ''}"><span class="dc-name" id="dc-${name}">${label}</span><div class="dc-seg" role="radiogroup" aria-labelledby="dc-${name}">${options.map(([v, t, sub]) => `<label><input type="radio" name="dc-${name}" value="${v}"><span>${t}</span>${sub ? `<small>${sub}</small>` : ''}</label>`).join('')}</div></div>`
   const tiltWords = (): [string, 'warn' | ''] => {
     switch (tilt) {
       case 'live': return ['Tilt is on. Hold the phone the way you like and press Center tilt.', '']
@@ -568,10 +597,10 @@ export function driveTouch(o: {
 ${seg('steer', 'Steer with', [['arrows', 'Arrows', 'left & right'], ['wheel', 'Wheel', 'turn it'], ['slide', 'Slide', 'thumb across'], ['tilt', 'Tilt', 'turn the phone']])}
 <div class="dc-row dc-tilt wide"><p class="dc-note" role="status"></p><div class="dc-acts"><button class="dc-center" type="button">Center tilt</button></div></div>
 ${seg('gas', 'Gas', [['pedals', 'Pedals', 'gas & brake'], ['auto', 'Auto', 'brake only']])}
-${seg('hand', 'Driving keys on the', [['right', 'Right'], ['left', 'Left']])}
+${seg('hand', 'Driving keys', [['right', 'Right'], ['left', 'Left']])}
 ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']])}
-<div class="dc-row"><label class="dc-name" for="dc-opacity">Key opacity</label><input id="dc-opacity" name="dc-opacity" type="range" min="30" max="100" step="5"></div>
-<div class="dc-row dc-sens"><label class="dc-name" for="dc-sens">Steering sensitivity</label><input id="dc-sens" name="dc-sens" type="range" min="50" max="200" step="5"></div>
+<div class="dc-row dc-half"><label class="dc-name" for="dc-opacity">Key opacity</label><input id="dc-opacity" name="dc-opacity" type="range" min="30" max="100" step="5"></div>
+<div class="dc-row dc-half dc-sens"><label class="dc-name" for="dc-sens">Steering sensitivity</label><input id="dc-sens" name="dc-sens" type="range" min="50" max="200" step="5"></div>
 </div>`
     document.body.append(d)
     d.addEventListener('change', (e) => {
@@ -615,8 +644,6 @@ ${seg('size', 'Key size', [['0.85', 'Small'], ['1', 'Medium'], ['1.2', 'Large']]
   const applyStick = () => {
     o.input.stickSide = shown ? (steerNow() === 'slide' ? (settings.hand === 'right' ? 'left' : 'right') : null) : 'left'
     html.classList.toggle('steer-slide', shown && steerNow() === 'slide')
-    // (The YouTube player stands over the steering thumb's corner, index.html.)
-    if (shown) html.dataset.driveHand = settings.hand; else delete html.dataset.driveHand
   }
 
   let lastFrame = 0

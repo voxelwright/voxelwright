@@ -243,7 +243,7 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 | --- | --- | --- |
 | Steer with | **Arrows**: Left and Right under the steering thumb. **Wheel**: a wheel with spokes, turned round its middle, which comes back to the middle when let go. **Slide**: a slide that comes where the thumb goes down on its half of the picture, across only. **Tilt**: turn the phone like a wheel. | Arrows |
 | Gas | **Pedals**: Gas and Brake. **Auto**: the car drives itself forward once a key or the picture is first touched; Brake slows it, and held at a stop backs up. | Pedals |
-| Driving keys on the | Right or Left (the steering goes to the other side) | Right |
+| Driving keys | Right or Left (the steering goes to the other side) | Right |
 | Key size | Small, Medium, Large. The keys also shrink to fit the screen: the two clusters stay 24 px apart, the driving cluster stays in the lower half at Medium (a little lower at Small, a little higher at Large), and no key is under 44 px. | Medium |
 | Key opacity | 30% to 100% | 82% |
 | Steering sensitivity | 50% to 200%, for Wheel, Slide and Tilt. At 100% full lock is 110 degrees of the wheel (`WHEEL_LOCK`) or 24 degrees of tilt (`TILT_LOCK`). | 100% |
@@ -252,7 +252,7 @@ The driving cluster has the main pedal tall at the edge (Gas, or Brake with auto
 
 **Tilt** reads the phone's angles (`deviceorientation`) only while it is the scheme and you are driving. It works out which way is up on the screen, so it works upright and on either side, and with the phone held up or leaned back. Of the screen's angle and its opposite it takes the one that puts up on the screen upward, so a browser that reports the angle's sign the other way round still steers the right way. Lying flat, the steering lets go. Center tilt in the sheet makes how you hold the phone straight ahead. Where the browser asks before a page may read the sensor (Safari on iOS), the first touch after getting in asks, and until then a **Tap to steer by tilt** key stands over the arrows (the driving panel says `Tap for tilt`), which steer meanwhile. If access is refused, the device has no sensor, or the page is not served over https, the arrows steer, the sheet says why, and its Tilt choice says `arrows for now`.
 
-While the YouTube Music player shows, it stands at the top of the steering thumb's side and the steering keys shrink to fit under it. The settings are kept in this browser (`localStorage`, `vw.drive-touch.v1`). Anything kept that is out of range is brought back in range, and anything unknown is the default. Desktop keys and a pad drive as before, and their axes add to the touch keys'.
+While the YouTube Music player shows, it stands at the top left (in the minimap's place on a phone on its side, where the minimap steps aside), and the keys in that corner shrink to fit under it: the steering keys, or with the driving keys on the left, the driving cluster in two short rows. The settings are kept in this browser (`localStorage`, `vw.drive-touch.v1`). Anything kept that is out of range is brought back in range, and anything unknown is the default. Desktop keys and a pad drive as before, and their axes add to the touch keys'.
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 

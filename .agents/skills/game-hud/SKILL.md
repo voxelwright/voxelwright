@@ -29,7 +29,7 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
   steer and one way to drive, never two at once (#75's stick steered and, with no pedal held, drove too). The left half of
   the picture turns the head while driving (`input.stickSide = null`), except with Slide, where it is a slide that steers
   across only. Settings → `Controls…` (touch only) opens the sheet (`#drive-controls`): Steer with Arrows (default) /
-  Wheel / Slide / Tilt, Gas Pedals (default) / Auto, Driving keys on the Right (default) / Left, Key size, Key opacity, Steering
+  Wheel / Slide / Tilt, Gas Pedals (default) / Auto, Driving keys Right (default) / Left, Key size, Key opacity, Steering
   sensitivity, Center tilt. `layout()` places every key from the bottom corners: the main pedal tall at the edge
   (`80×108` at Medium on its side), Boost above it, Brake and Drift beside it; arrows `84×84`; the wheel a `150` px
   voxel wheel (`.vx-recess[data-vx-ring]`: rim, three spokes, hub, lit top stripe) turned as a whole. Keys shrink to fit: the clusters stay
@@ -40,7 +40,10 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
   key since Cam cycles through seat, #74) beside Settings (`⚙`) on its side, below `drive-hud` and `⚙` upright. `Repair`
   stays hidden while undamaged (Rule 8) and appears below them only when the car takes damage.
 - **YouTube mini-player (`[data-panel="radio-yt"]`) by touch:** the bottom corners are the thumbs', so it stands at the
-  top left (over the minimap on its side, below it upright). `sf-hud.mjs` counts it among the controls that must not meet.
+  top left (in the minimap's place on its side, the minimap hidden meanwhile; below it upright), and the keys of that
+  corner fit under it (`layout()`'s `below`: the steering keys, or the driving cluster in two short rows when
+  left-handed). `sf-hud.mjs` counts it among the controls that must not meet; `sf-drive-touch.mjs` shows it over
+  each scheme in both hands.
 
 **Direction (owner, November 26, #75):** the Make bar opened must always have a way out by touch: a × key before the
 line, a press anywhere on the picture (its click is swallowed, so it does nothing else), or Escape; each gives the keys
