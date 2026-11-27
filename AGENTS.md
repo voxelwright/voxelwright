@@ -146,7 +146,7 @@ Before building or changing UI, read [DESIGN.md](DESIGN.md).
   silently become successful or be replayed without reconciliation.
 - Keep product language warm and clear. Technical controls belong in the
   Workshop and settings.
-- Write these in Rust (`engine/core`, compiled to `engine/page/core.wasm`) from
+- Write these in Rust (`engine/core`, compiled to WebAssembly) from
   the start instead of prototyping in TypeScript and porting later (#139):
   - Dense 3D voxel/grid kernels (≥ ~50K cells): procedural sculptors, 3D flood
     fills/BFS, shell coarsening/sealing, greedy meshing, and 3D prefix sums /
