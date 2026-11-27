@@ -160,7 +160,7 @@ Changing the workflow, the environment or the redirects changes what the public 
 [publish.sh](https://github.com/voxelwright/voxelwright/blob/main/deploy/publish.sh) then deploys `voxelwright`, then `zahynailo`, and checks each one:
 
 1. `wrangler deployments status` shows the new commit on 100% of traffic.
-2. Pages answer `200`: `/`, `/current.json` and the pinned manifest for voxelwright.world, and `/`, `/blog/` and `/blog/feed.xml` for zahynailo.dev.
+2. Pages answer `200`, retrying briefly while Cloudflare propagates the new Worker version: `/`, `/current.json` (matching the pinned release) and the pinned manifest for voxelwright.world, and `/`, `/blog/` and `/blog/feed.xml` for zahynailo.dev.
 3. For voxelwright.world, the manifest arrives with `Content-Encoding: br` and the same length as its `.br` file in `dist-world`.
 
 If a check fails after the upload, the script runs `wrangler rollback` for that Worker and stops. Each outcome, and the traffic status after an error, goes to the Actions summary. A failure on `zahynailo` leaves `voxelwright` on its new version. `publish.sh` reads `GITHUB_SHA` and `GITHUB_STEP_SUMMARY` and uses GNU `stat`, so it runs only in Actions.
