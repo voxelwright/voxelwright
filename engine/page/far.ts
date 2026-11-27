@@ -417,6 +417,10 @@ export interface Far {
    * draw had it: the reach, or in the wedge through a narrow lens the nearer one. Cells; Infinity where nothing is drawn as faces.
    */
   handover(x: number, z: number): number
+  /** Whether every 500 m far tile overlapping `[x0..x1, z0..z1]` is surveyed `far.ground` owned by the far model, with no overflow edits and no failed fetch (so a 404 immediately falls back to coarse cells via `onFallback`). */
+  covers(x0: number, z0: number, x1: number, z1: number): boolean
+  /** Called with `[x0, z0, x1, z1]` (finest cells) when a surveyed `far.ground` tile fails to fetch or overflows edits so the world streams fallback coarse cells immediately. */
+  onFallback: ((x0: number, z0: number, x1: number, z1: number) => void) | null
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
@@ -424,7 +428,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity, covers: () => false, onFallback: null }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -483,6 +487,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const cover = new Uint32Array(128)
   /** The tiles whose ground the far model draws: the march hands only these over (`grounded`). */
   const owned = grounded(listing)
+  /** Surveyed `owned` tiles whose far geometry failed to fetch (e.g. 404), so coarse cells must stand in until a retry succeeds. */
+  const failedGround = new Set<string>()
   let covered = ''
 
   const load = async (t: Tile, band: number) => {
@@ -527,6 +533,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       t.held[band] = { band, buffer, bytes: faces.byteLength, sections, used: frame }
       stats.fetched++
       t.fails[band] = 0
+      if (failedGround.has(t.key) && t.fails.every((f) => f === 0)) failedGround.delete(t.key)
       stats.fetchedBytes += bytes.length
     } catch (e) {
       // A listed object that does not come is a load error (release.md): said, left out, and tried again later.
@@ -535,6 +542,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       t.held[band] = null
       // Tried again, but not before a while: twice as long after each failure, to a minute.
       t.retry[band] = performance.now() + Math.min(60_000, 1000 * 2 ** Math.min(6, (t.fails[band] = (t.fails[band] ?? 0) + 1)))
+      if (owned.has(t.key) && !failedGround.has(t.key)) {
+        failedGround.add(t.key)
+        self.onFallback?.(t.x * size, t.z * size, (t.x + 1) * size, (t.z + 1) * size)
+      }
     }
     stats.coming--
   }
@@ -619,7 +630,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const near = edits.find((e) => gap(e) <= JOIN)
       if (near) { for (let a = 0; a < 3; a++) { near[a] = Math.min(near[a], b[a]); near[a + 3] = Math.max(near[a + 3], b[a + 3]) } return }
       if (edits.length < EDITS) { edits.push(b); return }
-      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
+      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) {
+        const k = `${x}_${z}`, fresh = !changed.has(k)
+        changed.add(k)
+        if (fresh && owned.has(k)) self.onFallback?.(x * size, z * size, (x + 1) * size, (z + 1) * size)
+      }
     },
     forget() { edits.length = 0; changed.clear() },
     keep(box) { kept = box },
@@ -627,6 +642,17 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       if (!handed) return Infinity
       const w = handed.wedge, dx = w ? x - w[0] : 0, dz = w ? z - w[1] : 0, b = Math.atan2(dx, -dz), bearing = b < 0 ? b + 2 * Math.PI : b
       return w && bearing > w[4] && bearing < w[5] && dx * dx + dz * dz < w[2] * w[2] ? Math.min(handed.reach, w[3]) : handed.reach
+    },
+    onFallback: null,
+    covers(x0, z0, x1, z1) {
+      if (!owned.size || x1 <= x0 || z1 <= z0) return false
+      const tx0 = Math.floor(x0 / size), tx1 = Math.floor((x1 - 1) / size)
+      const tz0 = Math.floor(z0 / size), tz1 = Math.floor((z1 - 1) / size)
+      for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) {
+        const k = `${tx}_${tz}`
+        if (!owned.has(k) || changed.has(k) || failedGround.has(k)) return false
+      }
+      return true
     },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },

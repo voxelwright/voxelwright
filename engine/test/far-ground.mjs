@@ -56,6 +56,22 @@ if ('farDraws' in world) world.farDraws = () => true
 world.update([480100, 40, 657000])
 check(sent.some((m) => m.level === 1 && m.sx === Math.floor(480100 / (2 * SIDE)) && m.sz === Math.floor(657000 / (2 * SIDE))), 'requested the central coarse column even with listed far geometry')
 
+// Surveyed far-model ground skips redundant coarse tile fetches while streaming uncovered ground, and `refreshFar` streams fallback cells immediately if a far tile 404s.
+const sentCovered = []
+globalThis.Worker = class { postMessage(m) { if ('sx' in m) sentCovered.push(m) } terminate() {} }
+const wCovered = new World(device, { grid: [4, 4, 4], levels: 2, poolWords: 1 << 16, workers: 32 })
+wCovered.farFrom = 1
+const cx = Math.floor(480100 / (2 * SIDE)), cz = Math.floor(657000 / (2 * SIDE))
+let centerCovered = true
+wCovered.farCovered = (x0, z0, x1, z1) => centerCovered && x0 === cx * 2 * SIDE && z0 === cz * 2 * SIDE && x1 === (cx + 1) * 2 * SIDE && z1 === (cz + 1) * 2 * SIDE
+wCovered.update([480100, 40, 657000])
+check(!sentCovered.some((m) => m.level === 1 && m.sx === cx && m.sz === cz), 'skipped a coarse column wholly covered by surveyed far ground')
+check(sentCovered.some((m) => m.level === 1 && (m.sx !== cx || m.sz !== cz)), 'still streamed coarse columns outside surveyed far ground')
+centerCovered = false
+wCovered.refreshFar(cx * 2 * SIDE, cz * 2 * SIDE, (cx + 1) * 2 * SIDE, (cz + 1) * 2 * SIDE)
+wCovered.update([480100, 40, 657000])
+check(sentCovered.some((m) => m.level === 1 && m.sx === cx && m.sz === cz), 'refreshFar streamed the fallback coarse column after a far-tile failure')
+
 const supplied = arg('far', null)
 if (supplied) {
   const ground = grounded(listing(supplied))
@@ -108,6 +124,9 @@ if (has('gpu')) {
       const scene = async (name) => {
         const model = await far(device, 'rgba8unorm', march, new URL('/fixture/' + name + '.json', location.href).href)
         model.reach = 0.1
+        const fallbacks = []
+        model.onFallback = (x0, z0, x1, z1) => fallbacks.push([x0, z0, x1, z1])
+        const coveredBefore = model.covers(64, 0, 128, 64)
         const draw = () => {
           const encoder = device.createCommandEncoder()
           march.draw(encoder, to, view, 0, 0)
@@ -121,15 +140,15 @@ if (has('gpu')) {
         await pixel.mapAsync(GPUMapMode.READ)
         const [r, g, b] = new Uint8Array(pixel.getMappedRange())
         pixel.unmap()
-        return { id: r + (g << 8) + (b << 16), cell: await march.pick(view), failed: model.stats.failed }
+        return { id: r + (g << 8) + (b << 16), cell: await march.pick(view), failed: model.stats.failed, coveredBefore, coveredAfter: model.covers(64, 0, 128, 64), fallbacks }
       }
       return { first, behind, edited, ok: await scene('ok'), missing: await scene('404') }
     })
     check(hits.first?.t === 56 && hits.first.material === 8, `front wall drawn at 56 cells: ${JSON.stringify(hits.first)}`)
     check(hits.behind?.t === 184 && hits.behind.material === 7, `uncovered hill behind held tile drawn at 184 cells: ${JSON.stringify(hits.behind)}`)
     check(hits.edited?.t === 88 && hits.edited.material === 8, `edit inside the covered tile drawn at 88 cells: ${JSON.stringify(hits.edited)}`)
-    check(hits.ok.id === 123456 && hits.ok.cell?.material === 7, `packed wall ID and hill behind it: ${JSON.stringify(hits.ok)}`)
-    check(hits.missing.id === 0 && hits.missing.failed === 1 && hits.missing.cell?.material === 8, `404 draws the fallback wall: ${JSON.stringify(hits.missing)}`)
+    check(hits.ok.id === 123456 && hits.ok.cell?.material === 7 && hits.ok.coveredBefore && hits.ok.coveredAfter && hits.ok.fallbacks.length === 0, `packed wall ID and hill behind it: ${JSON.stringify(hits.ok)}`)
+    check(hits.missing.id === 0 && hits.missing.failed === 1 && hits.missing.cell?.material === 8 && hits.missing.coveredBefore && !hits.missing.coveredAfter && hits.missing.fallbacks.length === 1, `404 draws the fallback wall and triggers onFallback: ${JSON.stringify(hits.missing)}`)
   } catch (e) {
     kit.failures.push(String(e))
   } finally { await kit.finish('far-ground', results.every(Boolean) ? 0 : 1, results.every(Boolean) ? 'ok' : 'failed') }

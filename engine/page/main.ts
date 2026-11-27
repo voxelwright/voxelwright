@@ -210,6 +210,8 @@ async function main() {
     ? world.levels.filter((l) => l.index === 0 || ((l.grid[0] * SIDE) << (l.index - 1)) / 2 < farModel.reach * M)
     : world.levels
   world.farFrom = nearLevels.length
+  world.farCovered = (x0, z0, x1, z1) => farModel.covers(x0, z0, x1, z1)
+  farModel.onFallback = (x0, z0, x1, z1) => world.refreshFar(x0, z0, x1, z1)
   loading.step('skyline')
   // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
   const marine = await fog(device, gpu.format, march)

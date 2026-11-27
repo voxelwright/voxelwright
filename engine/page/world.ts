@@ -230,6 +230,24 @@ export class World {
   patience = 10_000
   /** First level past the far reach. Its cells and coarser ones stream after the near columns. */
   farFrom = Infinity
+  /** True when surveyed far-model ground owns `[x0..x1, z0..z1]` with no failed fetch or overflow edit, so coarse columns past `farFrom` with no edits need not stream redundant tiles until `refreshFar` falls back. */
+  farCovered: ((x0: number, z0: number, x1: number, z1: number) => boolean) | null = null
+  /** Re-queue coarse columns past `farFrom` overlapping `[x0..x1, z0..z1]` when far-model ground falls back to cells (e.g. after a 404 or overflow edit). */
+  refreshFar(x0: number, z0: number, x1: number, z1: number) {
+    for (const level of this.levels) {
+      if (level.index < this.farFrom) continue
+      const size = SIDE << level.index, g = level.grid, o = level.origin
+      const sx0 = Math.max(o[0], Math.floor(x0 / size)), sx1 = Math.min(o[0] + g[0] - 1, Math.floor((x1 - 1) / size))
+      const sz0 = Math.max(o[2], Math.floor(z0 / size)), sz1 = Math.min(o[2] + g[2] - 1, Math.floor((z1 - 1) / size))
+      for (let sz = sz0; sz <= sz1; sz++) for (let sx = sx0; sx <= sx1; sx++) {
+        for (let sy = o[1]; sy < o[1] + g[1]; sy++) {
+          const slot = level.slot(sx, sy, sz)
+          if (level.state[slot] === READY) { level.state[slot] = STALE; this.plan = true }
+          else if (level.state[slot] === FLYING) { level.state[slot] = STALE_FLYING; this.plan = true }
+        }
+      }
+    }
+  }
   /** The core the workers were last told to use (`recore`), for one hired after. */
   private core: string | null = null
   /** Columns made while a tile they need had not come (#450): made again when due, a little later each time. */
@@ -430,6 +448,21 @@ export class World {
         }
         if (!any) continue
         const reach = this.reach[ask.level]?.get(column(ask.sx, ask.sz)) ?? []
+        const size = SIDE << ask.level
+        if (ask.level >= this.farFrom && reach.length === 0 && this.farCovered?.(ask.sx * size, ask.sz * size, (ask.sx + 1) * size, (ask.sz + 1) * size)) {
+          // Past the far model's handover where verified far-model ground is already resident: skip fetching redundant coarse tiles.
+          for (let sy = ask.y0; sy <= ask.y1; sy++) {
+            const slot = level.slot(ask.sx, sy, ask.sz)
+            if (level.state[slot] !== FLYING && level.state[slot] !== STALE_FLYING) continue
+            if (level.at[slot] >= 0) { this.pool.give(level.at[slot], level.size[slot]); level.at[slot] = -1; level.size[slot] = 0 }
+            level.state[slot] = READY
+            level.show(slot, 0, 0)
+            this.stats.made++
+            this.stats.boxes[ask.level].made++
+          }
+          level.dirty = true
+          continue
+        }
         if (reach.length >= 8) this.tidy(reach, ask.level, ask.sx, ask.sz)
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
