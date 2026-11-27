@@ -23,7 +23,7 @@ It runs three steps and prints the time of each:
 
 Then it serves the realm on port 5760 and prints the address to open, ending in `/sf/index.html`. Set `PORT` for another port, as in `PORT=8080 ./world`. If the port is taken, `./world` says so before it builds anything. Keep the terminal open while you play and press Ctrl-C there to stop.
 
-The first view looks across the city from Ina Coolbrith Park. Choose the **EXPLORE** board twice to enter the city: the first click arms it, and a second at least 300 ms later goes in.
+The first view looks across the city from Ina Coolbrith Park. Click the **EXPLORE** board to open the interactive 3D map with a scenic starting spot selected (**North Beach**), pick any place you like on the map, and press **Start** (or Enter) to dive into the city.
 
 ## What to try
 

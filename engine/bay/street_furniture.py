@@ -227,11 +227,64 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
         matched.difference_update(group)
     fixtures = resolved
     fixtures.extend(("street_lamp", *p) for p in survey["lamps"])
+    def surface_kind(x, z):
+        i = math.floor((x - h[10]) / 5)
+        j = math.floor((z - h[11]) / 5)
+        if 0 <= i < h[9] and 0 <= j < h[9]:
+            return int(sq.cls[j, i]) & 7, int(sq.top[j, i]) - int(sq.g2[j, i])
+        return -1, 0
+
+    dirs_16 = [
+        (math.cos(a * math.tau / 16.0), math.sin(a * math.tau / 16.0))
+        for a in range(16)
+    ]
+
+    def off_road_spot(ox, oz):
+        """Relocate a road-standing fixture onto nearby pavement or street-grade verge clear of buildings."""
+        base_y = base(ox, oz)
+
+        def valid(x, z, want_pav):
+            s, over = surface_kind(x, z)
+            if s != (1 if want_pav else s) or (not want_pav and s not in (2, 6)):
+                return False
+            if over > 20 or abs(base(x, z) - base_y) > 15:
+                return False
+            return True
+
+        best_pav = None
+        best_verge = None
+        for rad in range(4, 76, 4):
+            for ux, uz in dirs_16:
+                nx = round(ox + ux * rad)
+                nz = round(oz + uz * rad)
+                if best_pav is None and valid(nx, nz, True):
+                    best_pav = (rad, nx, nz, ux, uz)
+                elif best_verge is None and rad <= 48 and valid(nx, nz, False):
+                    best_verge = (rad, nx, nz, ux, uz)
+            if best_pav is not None:
+                break
+        if best_pav is not None and (best_verge is None or best_pav[0] <= best_verge[0] + 12):
+            _, nx, nz, ux, uz = best_pav
+            want_pav = True
+        elif best_verge is not None:
+            _, nx, nz, ux, uz = best_verge
+            want_pav = False
+        else:
+            return None
+        sx, sz = round(nx + ux * 4), round(nz + uz * 4)
+        return (sx, sz) if valid(sx, sz, want_pav) else (nx, nz)
+
+    kept_lamps = [
+        (x, z)
+        for kind, x, z in fixtures
+        if kind == "street_lamp" and surface_kind(x, z)[0] != 0
+    ]
     for kind, x, z in fixtures:
         pt = Point(x, z)
         if not margin.covers(pt):
             continue
         dx, dz = 1.0, 0.0
+        snapped_from = None
         if roads:
             road = roads[road_tree.nearest(pt)]
             a, b = road.coords[0], road.coords[-1]
@@ -262,6 +315,22 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
                             x, z = q.x, q.y
                             stats["signFeetAtStreetGrade"] += 1
                             break
+        if surface_kind(x, z)[0] == 0:
+            spot = off_road_spot(x, z)
+            if spot is None:
+                stats["roadFixturesDropped"] += 1
+                continue
+            if kind == "street_lamp" and any(
+                (spot[0] - lx) ** 2 + (spot[1] - lz) ** 2 <= 25 * 25
+                for lx, lz in kept_lamps
+            ):
+                stats["roadFixturesDropped"] += 1
+                continue
+            snapped_from = (x, z)
+            x, z = spot
+            if kind == "street_lamp":
+                kept_lamps.append((x, z))
+            stats["roadFixturesSnapped"] += 1
         y = base(x, z)
         if kind in ("stop", "observedStop"):
             rod((x, y, z), (x, y + 27, z), 5, steel)
@@ -277,9 +346,13 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
             rod((x - 2, y + 4, z), (x + 2, y + 4, z), 10, white)
             rod((x, y + 7, z), (x, y + 8, z), 12, white)
         elif kind == "street_lamp":
-            # Reach over the carriageway from the surveyed mast.
-            if roads:
-                target = nearest_points(pt, road)[1]
+            # Reach over the carriageway from the mast.
+            if snapped_from is not None:
+                vx, vz = snapped_from[0] - x, snapped_from[1] - z
+                length = max(1, math.hypot(vx, vz))
+                dx, dz = vx / length, vz / length
+            elif roads:
+                target = nearest_points(Point(x, z), road)[1]
                 dx, dz = target.x - x, target.y - z
                 length = max(1, math.hypot(dx, dz))
                 dx, dz = dx / length, dz / length

@@ -45,6 +45,8 @@ export interface RealmPage {
   modes?: Omit<ModesPage, 'sky' | 'hour' | 'setHour'>
   /** Opens the in-game feedback / bug reporter (#64, feedback.ts). */
   report?(): void
+  /** Unobtrusive PWA install action (pwa.ts): shown in Settings only when installable and not yet installed. */
+  install?: { available(): boolean; prompt(): Promise<unknown>; subscribe(fn: () => void): () => void }
 }
 
 const MODE_NAMES: Record<Mode, string> = { light: 'Light', dark: 'Dark', sf: 'SF now' }
@@ -255,7 +257,7 @@ export function realmControls(page: RealmPage) {
       </div>` : ''}
       <div class="part acts" role="group" aria-label="Actions">
       <div class="vx-groove" role="separator"></div>
-      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}${page.report ? '<button class="vx-button report" type="button" aria-haspopup="dialog" title="Report a bug or something that looks off (F8)">Report…</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}${page.report ? '<button class="vx-button report" type="button" aria-haspopup="dialog" title="Report a bug or something that looks off (F8)">Report…</button>' : ''}${page.install ? '<button class="vx-button install" type="button" hidden title="Install Voxelwright for fullscreen and offline play">Install app</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
     </section>
     <div class="vx-toggle-group tools" role="radiogroup" aria-label="Tool">
@@ -307,6 +309,22 @@ export function realmControls(page: RealmPage) {
   root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
   root.querySelector('button.radio')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.radio?.() })
   root.querySelector('button.report')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.report?.() })
+  const installBtn = root.querySelector<HTMLButtonElement>('button.install')
+  if (installBtn && page.install) {
+    const syncInstall = () => {
+      const show = !!page.install?.available()
+      if (installBtn.hidden !== !show) {
+        installBtn.hidden = !show
+        if (show && !panel.hidden && kit) { kit.refresh?.(installBtn); kit.refresh?.(panel) }
+      }
+    }
+    syncInstall()
+    page.install.subscribe(syncInstall)
+    installBtn.addEventListener('click', () => {
+      if (coarse.matches || root.classList.contains('folds')) folded(true)
+      void page.install?.prompt()
+    })
+  }
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
   // Dynamic resolution On/Off: On steers resolution to hold Target FPS; Off pins it where the slider stands.
   let sizing = false

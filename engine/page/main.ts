@@ -22,7 +22,7 @@ import { car, fineCar, living, type Making } from './living.ts'
 import { stunts } from './stunts.ts'
 import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
-import { engineVent, puffs } from './puffs.ts'
+import { engineOut, engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
@@ -65,13 +65,14 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
-import { BREAK, HIT, WORLD as WORLD_SOUND } from './sound/kinds.ts'
+import { WORLD as WORLD_SOUND } from './sound/kinds.ts'
 import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
 import { createCarSummon } from './summon.ts'
 import { createRecorder, type Recorder } from './recorder.ts'
 import { feedbackUi, type FeedbackUi } from './feedback.ts'
+import { initPwa } from './pwa.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -88,6 +89,7 @@ const POOL_MB = BUDGET.pool, WORKERS = phone ? BUDGET.workers : Math.max(2, Math
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
 const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
 const over = hud(controls)
+const pwa = initPwa({ notice: (text, ms) => over.notice(text, ms) })
 
 /** Cells in a metre. */
 const M = 10
@@ -204,7 +206,7 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // The page's own core, behind a handle that stays the same when the core is built again and swapped in (#264,
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
   let inner = await open<Core>(new URL('./core.wasm', import.meta.url).href)
@@ -292,7 +294,7 @@ async function main() {
     const radio = ears.radio
     void (radioPickerPromise ??= import('./radio-ui.ts').then(({ createRadioPicker }) => createRadioPicker({ radio, input: controls }), (e) => { radioPickerPromise = null; throw e })).then((p) => p.open(tab)).catch(() => {})
   }
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)) }).catch(() => {})
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, person: (id) => id !== 0 && id === me.id, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); ears.radio.onOpenPicker((tab) => openRadioPicker(tab)); pwa.bindRadio(ears.radio) }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -350,8 +352,8 @@ async function main() {
   // (it is fetched once the park is shown), or before this (it is heard from the script's first line). Where nothing leads in (a realm with no such board,
   // `?boards=0`, boards or a flow that could not be had) the first view ends as it used to, on a key or a click on
   // the picture: nobody is left before a still picture with no way past it.
-  let way: import('./explore.ts').Explore | null = null, meant = false, openly = false
-  const enter = (host: boolean) => { if (!first || first.engaged) return; if (way) { if (host) void way.go(); else way.act() } else if (openly) first.engage(); else if (host) meant = true }
+  let way: import('./explore.ts').Explore | null = null, meant = false, askedAct = false, openly = false
+  const enter = (host: boolean) => { if (!first || first.engaged) return; if (way) { if (host) void way.go(); else way.act() } else if (openly) first.engage(); else if (host) meant = true; else askedAct = true }
   const noWayIn = () => {
     if (!first || first.engaged || openly) return
     openly = true
@@ -605,6 +607,7 @@ async function main() {
   /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
   let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
+  let playedHud: import('./play-hud.ts').PlayHud | null = null
   // How the picture is drawn, as chosen in the realm's Sky panel (#450) and kept in this browser. Graphics presets
   // control rendering passes (shadows and mirrors) only and never change resolution. What the address says is kept
   // whatever is chosen: shadows or mirrors it turns off (`?shadows=0`, `?mirrors=0`), and a scale it fixes (`?scale=`).
@@ -712,10 +715,10 @@ async function main() {
   const firstStill = () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && atArrival()
   // The first view as it was left needs only its own picture (#523): the far model keeps to the landing's cut of the
   // view, which from that eye draws the skyline every band does (a hundredth of the faces), and street life sleeps,
-  // none of it in sight from there. Both wake at the first ask of EXPLORE or anything else that leaves the first view, for good.
+  // none of it in sight from there. Far model unlocks when the map opens; street life ticks once diving/in-world.
   let landing = true
   const leaveLanding = () => {
-    if (!landing || !seen.near || (first && !first.engaged && (!way || way.state === 'idle') && !!arrive && atArrival())) return
+    if (!landing || !seen.near || (first && !first.engaged && (!way || way.state === 'idle' || way.state === 'picking') && !!arrive && atArrival())) return
     landing = false
     farModel.left()
     if (streetLife) streetLife.enabled = true
@@ -793,7 +796,14 @@ async function main() {
     const gap = now - last
     for (const each of watchers) each(gap)
     telemetry?.frame(dt, gap, now)
-    if (paused || mapSys?.opaque) { last = now; requestAnimationFrame(frame); return }
+    if (paused) { last = now; requestAnimationFrame(frame); return }
+    if (mapSys?.opaque) {
+      // While the fullscreen entry map is open, keep background WASM sector workers building the chosen landing spot!
+      if (ahead) world.update(ahead)
+      last = now
+      requestAnimationFrame(frame)
+      return
+    }
     // Rest is not lateness: the screen's rate, and how long a frame takes, are counted only from frames at that rate.
     if (wasResting && !resting) frameMs = screenMs
     if (!resting) {
@@ -875,7 +885,7 @@ async function main() {
     device.queue.submit([encoder.finish()])
     telemetry?.onPresented(canvas)
     lap('draw')
-    over.frame(project)
+    over.frame(project, playedHud?.parts())
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
@@ -916,10 +926,14 @@ async function main() {
   // The road's paint and rails (#450): lines the march draws over the asphalt (marks.ts), asked for once the place is
   // shown round the eye, so the first picture waits on none of their bytes. Until then a road is bare asphalt.
   // One that fails is asked for again, four times at most, 15 s apart.
-  const markRoads = (tries: number): void => void roadMarks().then((bytes) => {
-    if (bytes) { if (march.marks(bytes) < 0) console.error('marks.bin is not marks') } else if (tries > 1) setTimeout(() => markRoads(tries - 1), 15_000)
-  })
-  if (BAY_ON) { const later = setInterval(() => { if (!seen.near) return; clearInterval(later); markRoads(4) }, 250) }
+  let marksAsked = false
+  const markRoads = (tries: number): void => {
+    marksAsked = true
+    void roadMarks().then((bytes) => {
+      if (bytes) { if (march.marks(bytes) < 0) console.error('marks.bin is not marks') } else if (tries > 1) setTimeout(() => markRoads(tries - 1), 15_000)
+    })
+  }
+  if (BAY_ON) { const later = setInterval(() => { if (!seen.near) return; clearInterval(later); if (!marksAsked) markRoads(4) }, 250) }
   requestAnimationFrame(frame)
 
   // ── Breaking ────────────────────────────────────────────────────────────
@@ -999,7 +1013,7 @@ async function main() {
   }
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
-  let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0, burning = 0
+  let heard = 0, waiting = 0, ticking = false, tickSentAt = 0, moverFailedAt = 0, owed = 0, bodies = 0, burning = 0
   /** Whether water is flowing, or may be: after anything is broken the mover is asked once, and says. */
   let running = false
   /** Where it burns, as the mover last said: some of the burning cells. */
@@ -1041,8 +1055,13 @@ async function main() {
     const step = !far && ticking && !answer.released && answer.spawned === undefined
     if (far) { if (answer.released && asked.shift()) waiting-- }
     else if (answer.released) waiting--
-    else if (answer.spawned === undefined) ticking = false
-    if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
+    else if (answer.spawned === undefined) { ticking = false; tickSentAt = 0 }
+    if (answer.failed) {
+      report.notes.push(`moving failed: ${answer.failed}`)
+      const now = performance.now()
+      if (!far && now - moverFailedAt > 2000) { moverFailedAt = now; loseMover(moverWorker) }
+      return
+    }
     const told = read(answer.words)
     alive.heard(answer, told)
     // What goes fast is seen in flight (shots.ts), once this page is up to date with its world.
@@ -1111,7 +1130,7 @@ async function main() {
     }
   }
   // A world that refuses this page's ask says why, as text: a thing of someone else's in a lobby, or ground that has not come (#526).
-  mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`); if (joined && e.message.startsWith('the world refused: ')) over.notice(`Not done: ${e.message.slice(19, 219)}`, 6000) }
+  mover.onerror = (e) => { waiting = 0; ticking = false; tickSentAt = 0; report.notes.push(`mover: ${e.message}`); if (joined && e.message.startsWith('the world refused: ')) over.notice(`Not done: ${e.message.slice(19, 219)}`, 6000) }
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
   const streaks = shots(smoke, debris)
@@ -1180,7 +1199,7 @@ async function main() {
         debris.burst(at, 1.1, Math.round(1 + strength * 2), [0.06, 0.06, 0.07], 0.30, 15, 0.07 + strength * 0.05, true)
         if (glass) debris.burst([at[0], at[1] + 0.8, at[2]], 1.0, Math.round(2 + strength * 3), [0.48, 0.55, 0.60], 0.20, 14, 0.09 + strength * 0.06, true)
       },
-      engine: (at, level, dt, source) => smoke.engine(engineVent(source, at), level, dt),
+      engine: (at, level, dt, source) => smoke.engine(engineVent(source, at), level, dt, engineOut(source)),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,
@@ -1227,8 +1246,13 @@ async function main() {
   }
   /** The top of what is under a place, looked for down from `y` (cells): a kerb, a roof, a bridge as well as the ground. */
   const groundUnder = (x: number, y: number, z: number) => {
-    const ix = Math.floor(x), iz = Math.floor(z)
-    for (let at = Math.floor(y), end = at - 40; at > end; at--) if (core.world_kind(ix, at, iz)) return at + 1
+    const ix = Math.floor(x), iz = Math.floor(z), iy = Math.floor(y)
+    if (core.world_under) {
+      const hit = core.world_under(ix, iy, iz, 40)
+      if (hit !== -2147483648) return hit
+      return core.ground_at(Math.round(x), Math.round(z))
+    }
+    for (let at = iy, end = at - 40; at > end; at--) if (core.world_kind(ix, at, iz)) return at + 1
     return core.ground_at(Math.round(x), Math.round(z))
   }
   /** Whether the person was on foot when they got on what they ride: they are set down on foot again. */
@@ -1239,8 +1263,11 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
-    if (!far && silent(moverWorker) > moverPatience) loseMover(moverWorker)
+    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickSentAt = performance.now(); tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
+    if (!far && (silent(moverWorker) > moverPatience || (ticking && tickSentAt > 0 && performance.now() - tickSentAt > moverPatience))) {
+      if (ticking && silent(moverWorker) <= moverPatience) report.notes.push(`mover stalled on step (${Math.round(performance.now() - tickSentAt)} ms)`)
+      loseMover(moverWorker)
+    }
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
@@ -2048,9 +2075,7 @@ async function main() {
       onCrash: (info) => {
         debris.burst(info.at, 2.5, Math.round(8 + info.force * 16), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + info.force * 0.5)
         smoke.glint(info.at, 4 + info.force * 6)
-        ears?.carEvent('thump', Math.min(1, 0.45 + info.force * 0.55))
-        ears?.voice.play(HIT.steel, { at: info.at, force: info.force, size: 1.8, reach: 20, travels: false })
-        if (info.speed > 65) ears?.voice.play(BREAK.glass, { at: info.at, force: Math.min(0.85, (info.speed - 55) / 90), size: 0.95, reach: 16, travels: false })
+        ears?.carCrash(info.at, info.force, info.speed)
         window.dispatchEvent(new CustomEvent('voxelwright:crash', { detail: info }))
       },
       onHorn: (info) => {
@@ -2058,7 +2083,6 @@ async function main() {
         if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
       },
       onShout: (info) => {
-        ears?.spoke({ name: info.name, text: info.text, at: info.at }, 'babble')
         window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
       },
     })
@@ -2158,7 +2182,8 @@ async function main() {
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
     moving.clear(); lying = []; putting = []; asked.length = 0
-    heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
+    heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; tickSentAt = 0; owed = 0; flames = new Float32Array(0)
+    if (STREAM) mover.postMessage({ bay: [Math.round(ahead ? ahead[0] : pose.x * M), Math.round(ahead ? ahead[2] : pose.z * M)] } as never)
     const done = world.done()
     if (done.length) mover.postMessage({ edit: stream(done), after: -1 } satisfies Ask)
     if (afoot) me.walk(true)
@@ -2176,19 +2201,24 @@ async function main() {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     keptGraphics()
-    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, report: () => void feedback?.open(), say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, report: () => void feedback?.open(), install: pwa.install, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
       modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}), ...(query.get('sound') !== '0' ? { radio: () => openRadioPicker() } : {}),
       // The servers (#526, lobbies.ts): where the realm's rule allows lobbies and a master is known, out of any lobby; fetched when first pressed.
       ...(MASTER && !joined ? { servers: () => { if (agreed('list')) void import('./lobbies.ts').then((l) => l.open({ master: MASTER!, hud: over, input: controls, door: null })) } } : {}) })
+    // Sync mobile status bar & desktop PWA titlebar theme-color to the live sky zenith, and hold Screen Wake Lock in play.
+    watchers.add(() => pwa.theme.update({ day: march.day, cloud: march.cloud, fog: march.fog, rain: march.rain, ownSky: march.air.sky?.zenith ?? null }))
+    if (first) first.during(() => { pwa.wakeLock.release(); return () => pwa.wakeLock.engage() })
+    if (!first || first.engaged) pwa.wakeLock.engage()
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     // In a lobby it stays folded, as it is on the roof alone (#526).
     first?.during(() => { realmUi.fold(true); return () => { if (!joined) realmUi.rest() } })
     if (joined || directLL) realmUi.fold(true)
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { pwa, realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
+    playedHud = played
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
@@ -2197,7 +2227,7 @@ async function main() {
     // does nothing else. Not from a key, a link or a field in focus (Enter on the board's button is the button's: it
     // asks for the way in), nor a key held until it repeats. What is typed is the line's, and its Enter shuts it.
     if (first && !first.engaged) addEventListener('keydown', (e) => {
-      if (first.engaged || !said || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !['Enter', 'NumpadEnter', 'Slash'].includes(e.code)) return
+      if (first.engaged || mapSys?.open || !said || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !['Enter', 'NumpadEnter', 'Slash'].includes(e.code)) return
       if (e.target instanceof Element && e.target.closest('button, a, input, textarea, select, [contenteditable]')) return
       e.preventDefault()
       way?.disarm()
@@ -2211,6 +2241,7 @@ async function main() {
       // The kept sky, once the park is shown: the loader clears onto the day it was pictured in, and the clock goes on from there.
       realmUi.modes?.start()
       if (first && leads && signboards && !first.engaged) void Promise.all([import('./entry.ts'), lists()]).then(([{ createEntry }, within]) => {
+        let sharedWarmed = false
         entryCtrl = createEntry({
           board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi, home: firstEye, alight: () => { if (alive.riding) alive.mount(null) },
           fov: () => fov, setFov: (v) => { fov = v },
@@ -2224,6 +2255,17 @@ async function main() {
           map: mapSys,
           ensureMap,
           leaveFar: () => farModel.left(),
+          prewarmShared: () => {
+            if (sharedWarmed) return
+            sharedWarmed = true
+            farModel.left()
+            if (BAY_ON && !marksAsked) markRoads(4)
+            streetLife?.prewarm()
+            carSummon.prewarm()
+          },
+          prewarmSpot: (xM, zM) => {
+            streetLife?.warmAt(Math.round(xM * M), Math.round(zM * M))
+          },
           ground: { within, feet: (x, z) => core.feet_at(Math.round(x), Math.round(z)), kind: (x, y, z) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)) },
           terrainAt: (x, z) => core.ground_at(Math.round(x), Math.round(z)),
           hold: (x, z) => { mover.postMessage({ bay: [x, z] } as never); shadow?.postMessage({ bay: [x, z] } as never); return STREAM ? underfoot(inner, x, z) : Promise.resolve(true) },
@@ -2232,6 +2274,7 @@ async function main() {
         way = entryCtrl.explore
         Object.assign((globalThis as unknown as { engine: object }).engine, { explore: way, entry: entryCtrl })
         if (meant) void way.go()
+        else if (askedAct) { askedAct = false; way.act() }
       }).catch((e) => { console.error('entry init failed:', e); noWayIn() })
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: said = eggs({
@@ -2263,6 +2306,18 @@ async function main() {
     origin: () => { const f = me.feet; return f ? { x: f.at[0], z: f.at[2], yaw: f.yaw } : { x: pose.x * M, z: pose.z * M, yaw: pose.yaw } },
     street: () => streetLife,
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
+    onPrewarm: (data) => {
+      for (const f of data.fine ?? []) {
+        if (!(f.cells instanceof Uint16Array)) continue
+        let by = lookFaces.get(f.cells); if (!by) lookFaces.set(f.cells, by = new Map())
+        const key = f.size.join()
+        if (!by.has(key)) {
+          const born = thing(f.cells, f.size)
+          by.set(key, born)
+          if (!born.smooth) smoothen(f.cells, f.size, born)
+        }
+      }
+    },
   })
   const summonCarNow = () => { telemetry?.event('summon'); return carSummon.summon() }
   own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void summonCarNow() })
@@ -2302,6 +2357,12 @@ async function main() {
     topAt: (x, z) => core.top_at(x, z),
     worldKind: (x, y, z) => core.world_kind(x, y, z),
     whereLabel: () => document.querySelector('#where > div')?.textContent?.trim() ?? '',
+    diagnostics: () => ({
+      tiles: { ...tally },
+      mover: { ticking, waitMs: ticking && tickSentAt > 0 ? Math.round(performance.now() - tickSentAt) : 0, bodies, waiting },
+      workers: { ...world.workerHealth(), crashed: world.stats.crashed, lacking: world.stats.lacking },
+      notes: report.notes.slice(-20),
+    }),
     endpointBase: !LOCAL || query.get('telemetry') === '1' ? '' : null,
   })
   feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })

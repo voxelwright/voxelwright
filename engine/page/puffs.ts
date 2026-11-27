@@ -70,6 +70,15 @@ export function engineVent(piece: Piece, bonnet: readonly [number, number, numbe
   const offset = rotate(vent.offset, piece.rot)
   return [piece.pos[0] + offset[0], piece.pos[1] + offset[1], piece.pos[2] + offset[2]]
 }
+/** World horizontal outward direction of a damaged vehicle's nose so steam and smoke clear the hood from every heading (#92). */
+export function engineOut(piece: Piece): readonly [number, number, number] | undefined {
+  const state = piece.deform
+  if (!state) return undefined
+  const local: Point = state.front === 0 ? [1, 0, 0] : state.front === 1 ? [-1, 0, 0] : state.front === 2 ? [0, 0, 1] : [0, 0, -1]
+  const w = rotate(local, piece.rot)
+  const len = Math.hypot(w[0], w[2])
+  return len > 1e-4 ? [w[0] / len, 0, w[2] / len] : undefined
+}
 
 const MOST = 3072
 /** A puff that lives longer than this many seconds is one of the first KEPT. */
@@ -202,8 +211,8 @@ export interface Puffs {
   exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean, boost?: boolean): void
   /** A crash (#37): a little road dust and grit knocked up where two things met, `strength` 0 to 1; gone in two seconds. */
   crash(at: readonly [number, number, number], strength: number): void
-  /** A struck engine under a vehicle's bonnet (#37), for one frame of `dt` seconds: white steam from `level` 0.35, thick dark smoke from 0.7, and flames in it from 0.92. */
-  engine(at: readonly [number, number, number], level: number, dt: number): void
+  /** A struck engine under a vehicle's bonnet (#37, #92), for one frame of `dt` seconds: white steam from `level` 0.35, thick dark smoke from 0.7, and flames in it from 0.92. `out` is the nose's outward world direction. */
+  engine(at: readonly [number, number, number], level: number, dt: number, out?: readonly [number, number, number]): void
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -228,24 +237,25 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3)
   const size = new Float32Array(MOST), grow = new Float32Array(MOST), life = new Float32Array(MOST), span = new Float32Array(MOST)
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
-  const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST)
+  const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST), wind = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
-  let next = 0, lasting = 0, live = 0, flamePhase = 0
+  let next = 0, lasting = 0, live = 0, flamePhase = 0, smokeAcc = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
-  const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number; /** How far through its life it has come before it shows at all. */ late?: number }) => {
+  const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number; /** How far through its life it has come before it shows at all. */ late?: number; /** How strongly world wind pushes this puff (default 1). */ wind?: number; /** Initial horizontal drift added to velocity. */ drift?: readonly [number, number, number] }) => {
     // What lasts has places of its own: a street on fire makes hundreds of flames a second, and they would take the
     // place of the smoke and dust over it within seconds.
     const i = o.life > LASTS ? lasting++ % KEPT : KEPT + (next++ % (MOST - KEPT))
     let dx = 0, dy = 0, dz = 0
     do { dx = Math.random() * 2 - 1; dy = Math.random() * 2 - 1; dz = Math.random() * 2 - 1 } while (dx * dx + dy * dy + dz * dz > 1)
     p[i * 3] = at[0] + dx * spread; p[i * 3 + 1] = at[1] + dy * spread; p[i * 3 + 2] = at[2] + dz * spread
-    v[i * 3] = dx * out; v[i * 3 + 1] = dy * out + up; v[i * 3 + 2] = dz * out
+    v[i * 3] = dx * out + (o.drift?.[0] ?? 0); v[i * 3 + 1] = dy * out + up + (o.drift?.[1] ?? 0); v[i * 3 + 2] = dz * out + (o.drift?.[2] ?? 0)
     size[i] = o.size; grow[i] = o.grow; life[i] = span[i] = o.life; heat[i] = o.heat; cool[i] = o.cool; rise[i] = o.rise; drag[i] = o.drag
     tone.set([o.colour[0], o.colour[1], o.colour[2], o.cover], i * 4)
     seed[i] = Math.floor(Math.random() * 65536)
     late[i] = o.late ?? 0
+    wind[i] = o.wind ?? 1
   }
   return {
     get live() { return live },
@@ -373,28 +383,36 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         puff(at, 1.6, rnd(10, 24) * (0.5 + strength), rnd(3, 9), { size: rnd(1.3, 2.5), grow: rnd(2.8, 4.6), life: rnd(1.0, 1.8), heat: 0, cool: 0, rise: 4, drag: 2.6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.36 })
       }
     },
-    engine(at, level, dt) {
-      // Start in the open socket and let each puff fan out as it rises.
+    engine(at, level, dt, out) {
+      const ox = out ? out[0] : 0, oz = out ? out[2] : 0
+      const forward = (speed: number): readonly [number, number, number] => [ox * speed, 0, oz * speed]
+      // Start in the open nose and drift gently forward/upward so steam and smoke clear the hood from every heading (#92).
       if (level < 0.7) {
         const frac = (level - 0.35) / 0.35
+        const origin: readonly [number, number, number] = out ? [at[0] + ox * 1.45, at[1] + 0.5, at[2] + oz * 1.45] : at
         if (Math.random() < dt * (14 + 12 * frac)) {
           const w = rnd(0.84, 0.95)
-          puff(at, 0, rnd(0.6, 1.7), rnd(12, 18), { size: rnd(0.37, 0.59), grow: rnd(2.6, 3.5), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.19 + 0.06 * frac, late: 0.22 })
+          puff(origin, 0, rnd(0.4, 1.0), rnd(14, 19), { size: rnd(0.35, 0.52), grow: rnd(2.1, 2.9), life: rnd(0.95, 1.45), heat: 0, cool: 0, rise: 18, drag: 1.45, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.19 + 0.06 * frac, late: 0.18, wind: 0.12, drift: forward(rnd(2.8, 4.6)) })
         }
         return
       }
+      const burning = level > 0.92
+      // Emerge clear of the nose lip and directly from the upper flame tongue with no horizontal gap (#92).
+      const smokeAt: readonly [number, number, number] = [at[0] + ox * 1.45, at[1] + (burning ? 1.55 : 0.9), at[2] + oz * 1.45]
       // A few lighter wisps mix with the darker engine smoke.
-      if (Math.random() < dt * 15) {
+      if (Math.random() < dt * 14) {
         const wisp = rnd(0.68, 0.79)
-        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.55, 0.85), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.18, late: 0.12 })
+        puff(smokeAt, 0, rnd(0.35, 0.95), rnd(13, 18), { size: rnd(0.44, 0.66), grow: rnd(1.7, 2.5), life: rnd(1.0, 1.5), heat: 0, cool: 0, rise: 20, drag: 1.4, colour: [wisp, wisp, wisp * 1.02], cover: 0.17, late: 0.02, wind: 0.12, drift: forward(rnd(3.2, 5.0)) })
       }
-      // Oil smoke rises from the same opening and expands as it cools.
-      if (Math.random() < dt * 10) {
+      // Oil smoke rises steadily from the upper flame without random droughts or a visible gap, staying clear of the hood.
+      smokeAcc = Math.min(smokeAcc + dt, 0.14)
+      while (smokeAcc >= 0.042) {
+        smokeAcc -= 0.042
         const grey = rnd(0.30, 0.43)
-        puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.22, late: 0.10 })
+        puff(smokeAt, 0, rnd(0.35, 0.95), rnd(13, 18), { size: rnd(0.45, 0.64), grow: rnd(1.8, 2.7), life: rnd(1.25, 1.75), heat: 0, cool: 0, rise: 21, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.21, late: 0.0, wind: 0.12, drift: forward(rnd(3.2, 5.0)) })
       }
       // Redraw one attached flame while the engine burns. Smoke alone drifts away.
-      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
+      if (burning) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
     },
     step(dt) {
       flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)
@@ -406,7 +424,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         life[i] -= dt
         live++
         const slow = Math.max(0, 1 - drag[i] * dt)
-        v[i * 3] = v[i * 3] * slow + 6 * dt // a light wind along x
+        v[i * 3] = v[i * 3] * slow + 6 * wind[i] * dt // a light wind along x
         v[i * 3 + 1] = v[i * 3 + 1] * slow + rise[i] * dt
         v[i * 3 + 2] *= slow
         for (let a = 0; a < 3; a++) p[i * 3 + a] += v[i * 3 + a] * dt

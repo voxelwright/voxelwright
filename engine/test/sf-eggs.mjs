@@ -560,13 +560,12 @@ const fromFirst = async () => {
     check(muted && unmute?.onTop && (!touch || unmute.h >= 44) && sounded, `${kind}: with the sound held back the lamp plays Bad Apple!! muted, and Unmute (${unmute ? `${unmute.w} x ${unmute.h}, on top ${unmute.onTop}` : 'not shown'}) ${touch ? 'tapped' : 'clicked'} in the first view brings the sound`)
     await page.screenshot({ path: join(dir, `${kind}-unmuted.png`) })
 
-    // And the way in, after it all, with the video still playing: EXPLORE asked twice goes, and the player is then where the realm lays it, clear of its controls.
+    // And the way in, after it all, with the video still playing: EXPLORE opens the map picker and Start goes in.
     await press(w.x, w.y)
-    await page.waitForTimeout(450)
-    const armed = await page.evaluate(() => globalThis.engine.explore.state)
-    await press(w.x, w.y)
+    const picked = await until(() => globalThis.engine.explore.state === 'picking' && globalThis.engine.map?.picking, null, 5000)
+    await page.locator('#world-map .wm-visit').click()
     const went = await until(() => ['going', 'in'].includes(globalThis.engine.explore.state), null, 5000)
-    check(armed === 'armed' && went, `${kind}: after the eggs EXPLORE is asked once (${armed}) and again goes in`)
+    check(picked && went, `${kind}: after the eggs EXPLORE opens the map picker (${picked}) and Start goes in`)
     await page.waitForTimeout(800)
     l = await firstLook(page)
     check(!l.spots.lamps && !l.spots.still, `${kind}: on the way in the lamps are out and the first view's spots are off`)

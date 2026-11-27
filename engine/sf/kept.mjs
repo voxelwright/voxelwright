@@ -8,6 +8,7 @@
 //   node sf/kept.mjs <record.json> <out.json> [--name "a grey saloon"]
 import { readFileSync, writeFileSync } from 'node:fs'
 import { read } from '../make/cells.mjs'
+import { cleanInterior, cleanShell } from './sculpt-cars.mjs'
 
 const [from, to] = process.argv.slice(2)
 const at = process.argv.indexOf('--name'), named = at > 0 ? process.argv[at + 1] : null
@@ -28,7 +29,10 @@ const runs = (values) => {
   }
   return { palette, runs: Buffer.from(bytes).toString('base64') }
 }
-const look = (t.living.look ?? []).map((f) => ({ size: f.size, per: f.per, low: f.low, ...runs(f.kinds) }))
+const rawLooks = t.living.look ?? []
+if (rawLooks[0]) rawLooks[0].kinds = cleanShell(rawLooks[0].kinds, rawLooks[0].size).kinds
+for (let i = 1; i < rawLooks.length; i++) rawLooks[i].kinds = cleanInterior(rawLooks[i].kinds, rawLooks[i].size).kinds
+const look = rawLooks.map((f) => ({ size: f.size, per: f.per, low: f.low, ...runs(f.kinds) }))
 const making = {
   // A make's name is a trademark: a kept library for visitors says what it is, not whose.
   name: named ?? t.name,

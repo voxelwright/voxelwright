@@ -3,12 +3,12 @@ title: Playing San Francisco
 description: Everything a player does in the San Francisco realm, from the first view to driving, the map, the gamepad, the sky and the eggs.
 ---
 
-The San Francisco realm is the engine's own page (`engine/page/main.ts`) run with the realm's record, `engine/sf/realm.json`. A visitor to San Francisco arrives at a still picture of the skyline, dives straight into a sunlit Financial District street through the 3D map via the EXPLORE board, then walks, flies and drives through the city. Every control, every address option and the code behind each are below.
+The San Francisco realm is the engine's own page (`engine/page/main.ts`) run with the realm's record, `engine/sf/realm.json`. A visitor to San Francisco arrives at a still picture of the skyline, clicks the EXPLORE board to open the interactive 3D map with a scenic default spot pre-selected (North Beach, Columbus Ave framing the Transamerica Pyramid), picks any place on the map or confirms Start to dive straight into sunlit 10 cm streets, then walks, flies and drives through the city. Every control, every address option and the code behind each are below.
 
 ```mermaid
 stateDiagram-v2
   [*] --> FirstView
-  FirstView --> OnFoot: EXPLORE, asked twice
+  FirstView --> OnFoot: EXPLORE → Map → Start
   OnFoot --> Flying: B
   Flying --> OnFoot: B
   OnFoot --> Driving: E beside a car
@@ -86,10 +86,10 @@ Riding something other than a car (a flying or hovering thing, or one that jumps
 
 The realm opens on a still picture from Ina Coolbrith Park (`engine/page/first.ts`). No key moves the eye and no click takes the pointer. Only the settings gear (time, weather, graphics), a Credits key and the signs answer. Enter, NumpadEnter and `/` open the eggs' line. `?first=0` skips the first view. The realm hides the line of numbers (frame time, memory, position) unless the address has `?debug=1`.
 
-The EXPLORE board on the roof of 555 California St is the way in (`engine/page/entry.ts`). `engine.explore.state` moves through `idle`, `armed`, `going`, `in` and `leaving`:
+The EXPLORE board on the roof of 555 California St is the way in (`engine/page/entry.ts`). `engine.explore.state` moves through `idle`, `picking`, `going`, `in` and `leaving`:
 
-1. **Asked once** (a click, a tap, or Enter on its button): its letters light, the eye leans toward it and a line says to ask again. Esc, a click elsewhere, moving the mouse well away or six seconds (`STANDS`) puts it back. Financial District street tiles start warming without fetching `map.bin` yet.
-2. **Asked twice**, at least 300 ms later (`AGAIN`), so a double click counts once: the eye lifts off Ina Coolbrith Park into the 3D WebGPU map of San Francisco, locks the live voxel and far-model camera pixel-for-pixel behind it, optically dissolves the stylized map straight into 10 cm streets in the Financial District, and swings behind your body on foot. Any key or tap after 420 ms skips to the end once tiles arrive. With `prefers-reduced-motion` the picture cross-fades straight onto the street.
+1. **Click, tap, or press Enter on EXPLORE**: immediately opens the full-screen 3D WebGPU map of San Francisco (`engine/page/minimap.ts`) with an iconic default scenic spot selected (**North Beach**, Columbus Ave facing the Transamerica Pyramid). As soon as the map opens, location-independent resources (MAP1, citywide far model, road marks, off-thread vehicle smooth faces via `streetLife.prewarm()`, and the sculpted sports coupe via `carSummon.prewarm()`) and the selected spot's tiles, 10 cm voxel sectors and street graph begin preloading in the background. Click any landmark chip or point on the map to pick a different starting spot (which updates background preloading), or press Esc / Back to return cleanly to the park first view.
+2. **Confirm Start** (click **Start** or press Enter): runs the 3D Map-to-Reality Optical Dive straight from the current map camera with zero jump, locking the live voxel and far-model camera pixel-for-pixel behind it, optically dissolving the stylized map into 10 cm streets, and swinging behind your body on foot. Any key or tap after 420 ms skips to the end once tiles arrive. With `prefers-reduced-motion` the picture cross-fades straight onto the street.
 3. **Back to the view** (Backquote, or the button at the foot of the settings panel) arcs smoothly back to the park. You get off any vehicle first. The world is not reloaded: what you broke stays broken.
 
 A realm with no EXPLORE board (`?boards=0`) enters on any key or click on the picture.
@@ -104,7 +104,7 @@ B leaves the body and flies the eye free (`walk` in `engine/page/main.ts`). It s
 
 ### Getting in
 
-Stand within 4.5 m of a car and the cue says `E  drive the` and its name. Press E or tap the cue. The three nearest parked cars within 12 m of your feet are woken so they can be entered, at most four at a time (`engine/page/street.ts`). A traffic car moving slowly enough shows `E  Take the` and its name. Getting off sets you down beside the car. If the car breaks, you are put down where it broke.
+Stand within 4.5 m of a parked car (or 3.5 m of a charging depot robotaxi) and the cue says `E  drive the` or `E  Take the` and its paint-aware name (for example `white saloon` or `yellow taxi`). Press E or tap the cue. The three nearest parked cars within 12 m of your feet are woken so they can be entered, at most four at a time (`engine/page/street.ts`). A stopped live traffic car within 2.8 m on the same level shows `F  Take the` on the desktop play HUD so nearby traffic never steals E from the radial tool wheel (tap the cue on touch, or E in classic mode). Getting off sets you down beside the car. If the car breaks, you are put down where it broke.
 
 **Summoning a car.** On foot, G delivers a sports coupe (`engine/page/summon.ts`) to clear asphalt within 60 m, about 5.5 m away when it can. The spot must be at street level (not under a roof), more than 5.5 m from any other living thing, clear above, and on a grade under about 18%. The coupe parks beside the road and faces along it. Only one summoned car stands at a time: G again replaces it unless you are in it, and Reset world removes it. G does nothing in the first view or in a shared world, where it picks things up. `engine.summonCar()` does the same from the console.
 
@@ -195,7 +195,7 @@ Only lamp cells (material 15) on the car you ride light up (`engine/page/pieces.
 
 Traffic cars are drawn and steered by the page, not simulated as bodies (`engine/page/street.ts`). They drive within 260 m of the eye at speeds set by the street's size, follow the car ahead, slow for turns and obey signals (`CYCLE`, `GREEN`, `AMBER`), stop signs and turn order. How many there are follows the hour (`TRAFFIC`). They stop for a few seconds after a blast nearby.
 
-No vehicle is set down on another. A car, a bus or a streetcar is placed only where its outline is clear of every vehicle that drives or lives there (`taken`). A streetcar's path is its rails, which turn across the traffic's lanes. So it looks for whatever drives or lives along its rails, as its 14 m body will stand there every 2.4 m for 40 m (`railGap`), whichever way that vehicle heads, and stops short of it. A car takes another car coming the other way to keep to its own lane. A streetcar, cable car or bus is in a car's way by where its sides are (`inPath`), whichever way it heads and wherever its middle is.
+No vehicle is set down on another. A car, a bus or a streetcar is placed only where its outline is clear of every vehicle that drives or lives there (`taken`). Opposing traffic lanes beside parallel streetcar tracks are offset right in `engine/sf/life.py` (`clear_opposing_streetcar_rails`, with a runtime `railShiftOf` fallback in `engine/page/street.ts`) so oncoming vehicles pass at least 2.8 m clear of streetcar rails. Cable car lines share a cycle-aligned 120 s departure period (`CABLE_EVERY`) with phases coordinated across all lines (`coordinateCablePhases`) so routes sharing tracks or crossings stay clear of one another through every light cycle, and `cableCars` skips any car whose box would overlap another. A streetcar's path is its rails, which turn across the traffic's lanes. So it looks for whatever drives or lives along its rails, as its 14 m body will stand there every 2.4 m for 40 m (`railGap`), whichever way that vehicle heads, and stops short of it. A car takes another car coming the other way to keep to its own lane. A streetcar, cable car or bus is in a car's way by where its sides are (`inPath`), whichever way it heads and wherever its middle is.
 
 They react to you:
 

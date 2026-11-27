@@ -18,10 +18,42 @@ use std::cell::{Cell, RefCell};
 thread_local! {
     static ON: Cell<bool> = const { Cell::new(false) };
     static PACKS: RefCell<Vec<Pack>> = const { RefCell::new(Vec::new()) };
+    static PACK_GEN: Cell<u32> = const { Cell::new(1) };
     static ROOM: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static HEROES: RefCell<Vec<Hero>> = const { RefCell::new(Vec::new()) };
     static LANDMARKS: Cell<bool> = const { Cell::new(true) };
     static MARKS: RefCell<Marks> = RefCell::new(Marks::default());
+    static SECTOR_COLS: RefCell<SectorColCache> = RefCell::new(SectorColCache::default());
+    static SOLID_CACHE: RefCell<Box<[SolidEntry; 512]>> = RefCell::new(Box::new([SolidEntry::EMPTY; 512]));
+}
+
+#[inline]
+fn bump_gen() {
+    let next = PACK_GEN.get().wrapping_add(1);
+    PACK_GEN.set(if next == 0 { 1 } else { next });
+}
+
+#[derive(Clone, Copy)]
+struct SolidEntry {
+    x: i32,
+    z: i32,
+    epoch: u32,
+    top: i32,
+    g: i32,
+    ground: Kind,
+}
+
+impl SolidEntry {
+    const EMPTY: Self = Self { x: 0, z: 0, epoch: 0, top: 0, g: 0, ground: 0 };
+}
+
+#[derive(Default)]
+struct SectorColCache {
+    low_x: i32,
+    low_z: i32,
+    lod: u32,
+    epoch: u32,
+    cols: Vec<OwnedColumn>,
 }
 
 /// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
@@ -45,6 +77,7 @@ pub fn marks() -> i32 {
     if ns.checked_mul(5).and_then(|n| end.checked_add(n)) != Some(w.len()) { return -1; }
     let covers = w[3..end].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
     MARKS.with_borrow_mut(|held| *held = Marks { covers });
+    bump_gen();
     ns as i32
 }
 
@@ -80,12 +113,14 @@ pub fn hero(sort: u32, x: i32, z: i32, foot: i32, turn: i32) -> i32 {
         }
     }
     HEROES.with_borrow_mut(|h| h.push(Hero { sort, at: [x, foot, z], along, low, high }));
+    bump_gen();
     1
 }
 
 /// Whether landmarks are made as the world's cells: off, the place is as the tiles have it (for what they cost).
 pub fn landmarks(on: bool) {
     LANDMARKS.set(on);
+    bump_gen();
 }
 
 /// Whether the world is the Bay's: a pack has been loaded.
@@ -160,6 +195,8 @@ struct Pack {
     buildings: Vec<Building>,
     /// Corners: x, z, and what the side from this corner on looks at (1 open air, 2 the street; 4 ends a ring).
     verts: Vec<[i32; 3]>,
+    /// Precomputed edge lengths for each vertex in `verts` (avoids per-edge sqrt in `Pack::probe`).
+    edge_len: Vec<f32>,
     /// Trunks: x, z, the crown's top, how thick.
     trunks: Vec<[i32; 4]>,
     near: Vec<Vec<u32>>,
@@ -193,6 +230,7 @@ pub fn load() -> i32 {
         p.len() as i32
     });
     ON.set(true);
+    bump_gen();
     held
 }
 
@@ -200,15 +238,18 @@ pub fn load() -> i32 {
 /// and where none is held yet there is water.
 pub fn begin() {
     ON.set(true);
+    bump_gen();
 }
 
 /// Lets go of the pack whose ground starts at (`x0`, `z0`) with a sample every `gstep` cells. Returns how many
 /// packs are held after. The world stays the Bay's.
 pub fn drop(x0: i32, z0: i32, gstep: i32) -> i32 {
-    PACKS.with_borrow_mut(|p| {
+    let held = PACKS.with_borrow_mut(|p| {
         p.retain(|p| (p.gx0, p.gz0, p.gstep) != (x0, z0, gstep));
         p.len() as i32
-    })
+    });
+    bump_gen();
+    held
 }
 
 /// The pack that answers for a column made of cells `size` wide: the finest that holds it among those no finer
@@ -230,6 +271,7 @@ pub fn least_step(size: i32) -> i32 {
 pub fn clear() {
     PACKS.with_borrow_mut(|p| p.clear());
     ON.set(false);
+    bump_gen();
 }
 
 fn read(b: &[u8]) -> Option<Pack> {
@@ -336,7 +378,23 @@ fn read(b: &[u8]) -> Option<Pack> {
         });
     }
     let under_leaf_road = road_greys(&class, &tint, tw);
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut edge_len = vec![0.0f32; verts.len()];
+    for b in &buildings {
+        let own = &verts[b.first..b.first + b.count];
+        let mut start = 0;
+        for i in 0..own.len() {
+            let a = own[i];
+            let last = a[2] & 4 != 0 || i == own.len() - 1;
+            let c = if last { own[start] } else { own[i + 1] };
+            let (dx, dz) = ((c[0] - a[0]) as f32, (c[1] - a[1]) as f32);
+            edge_len[b.first + i] = (dx * dx + dz * dz).sqrt();
+            if last {
+                start = i + 1;
+            }
+        }
+    }
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    despike_roofs(&mut p.top, &p.class, tw, p.tstep);
     // Which buildings and trunks reach into each patch.
     p.pw = (wide >> PATCH) + 1;
     p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
@@ -387,57 +445,10 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     if !p.fixtures.is_empty() {
-        // Snap stop-sign fixtures (r == 5 cm vertical posts + octagon bars) that landed on asphalt onto the nearest
-        // surveyed pavement within 7.2 m, or drop stray mid-road ones with no adjacent pavement.
+        // Relocate or drop standing street fixtures (street lamps, stop signs, hydrants, utility poles, sensed poles)
+        // whose surveyed or OSM base landed on asphalt (ROAD).
         if p.tstep > 0 {
-            let mut moved: Vec<(i32, i32, Option<(i32, i32, i32)>)> = Vec::new();
-            for r in &p.fixtures {
-                if r[6] != 5 || r[0] != r[3] || r[2] != r[5] || (r[4] - r[1]).abs() < 20 {
-                    continue;
-                }
-                if p.surface(r[0], r[2]).0 & 7 != ROAD {
-                    continue;
-                }
-                let mut dest = None;
-                'search: for rad in (4..=72).step_by(4) {
-                    for a in 0..16 {
-                        let ang = a as f32 * (std::f32::consts::TAU / 16.0);
-                        let nx = r[0] + (ang.cos() * rad as f32).round() as i32;
-                        let nz = r[2] + (ang.sin() * rad as f32).round() as i32;
-                        if p.surface(nx, nz).0 & 7 == PAVEMENT {
-                            let sx = nx + (ang.cos() * 4.0).round() as i32;
-                            let sz = nz + (ang.sin() * 4.0).round() as i32;
-                            let (fx, fz) = if p.surface(sx, sz).0 & 7 == PAVEMENT { (sx, sz) } else { (nx, nz) };
-                            let dy = p.ground(fx, fz) - r[1];
-                            dest = Some((fx - r[0], dy, fz - r[2]));
-                            break 'search;
-                        }
-                    }
-                }
-                moved.push((r[0], r[2], dest));
-            }
-            if !moved.is_empty() {
-                p.fixtures.retain_mut(|r| {
-                    if r[6] != 5 {
-                        return true;
-                    }
-                    let mx = (r[0] + r[3]) / 2;
-                    let mz = (r[2] + r[5]) / 2;
-                    if let Some((_, _, shift)) = moved.iter().find(|&&(px, pz, _)| (mx - px).abs() <= 4 && (mz - pz).abs() <= 4) {
-                        match shift {
-                            Some((dx, dy, dz)) => {
-                                r[0] += *dx; r[3] += *dx;
-                                r[1] += *dy; r[4] += *dy;
-                                r[2] += *dz; r[5] += *dz;
-                                true
-                            }
-                            None => false,
-                        }
-                    } else {
-                        true
-                    }
-                });
-            }
+            p.clean_road_fixtures();
         }
         p.fixtures_near = vec![Vec::new(); (p.pw * p.pw) as usize];
         for (i, r) in p.fixtures.iter().enumerate() {
@@ -459,6 +470,138 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     Some(p)
+}
+
+/// Remove narrow vertical lidar spikes (rooftop light poles, masts, vents, antennas) from building roofs.
+/// At L0 (`tstep == 5`, 0.5 m samples), a separable 5x5 (2.5 m) morphological opening over non-canopy roof
+/// samples removes isolated pillars narrower than 2.5 m that rise more than 2.5 m above the surrounding roof,
+/// while preserving flat/pitched roofs, parapets <= 2.5 m, step edges between wide buildings, standalone
+/// narrow buildings, and tree canopies. At L1 (`tstep == 20`, 2 m samples), a bounded 3-cell connected
+/// component filter removes 1- to 3-cell spikes (poles straddling a 2 m grid line) without flattening
+/// narrow rowhouses.
+fn despike_roofs(top: &mut [i16], class: &[u8], tw: usize, tstep: i32) {
+    const THRESH: i32 = 25; // 2.5 m in 10 cm cells
+    if tstep == 5 && tw >= 5 {
+        let n = tw * tw;
+        let is_roof = |t: &[i16], i: usize| t[i] != NONE && class[i] & CANOPY == 0;
+        let mut hmin = vec![i16::MAX; n];
+        let mut eroded = vec![i16::MAX; n];
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MAX;
+                for x in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let k = row + x;
+                    if is_roof(top, k) { m = m.min(top[k]); }
+                }
+                hmin[row + i] = m;
+            }
+        }
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MAX;
+                for y in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                    m = m.min(hmin[y * tw + i]);
+                }
+                eroded[row + i] = m;
+            }
+        }
+        let mut hmax = vec![i16::MIN; n];
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MIN;
+                for x in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let k = row + x;
+                    if is_roof(top, k) && eroded[k] != i16::MAX { m = m.max(eroded[k]); }
+                }
+                hmax[row + i] = m;
+            }
+        }
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let k = row + i;
+                if !is_roof(top, k) { continue; }
+                let mut opened = i16::MIN;
+                for y in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                    opened = opened.max(hmax[y * tw + i]);
+                }
+                if opened != i16::MIN && top[k] as i32 - opened as i32 > THRESH {
+                    top[k] = opened;
+                }
+            }
+        }
+    } else if tstep == 20 && tw >= 3 {
+        let is_built = |t: &[i16], i: usize| t[i] != NONE && class[i] & BUILT != 0;
+        let tw_i = tw as isize;
+        let mut comp = [(0isize, 0isize); 4];
+        for j in 0..tw_i {
+            for i in 0..tw_i {
+                let idx = (j * tw_i + i) as usize;
+                if !is_built(top, idx) { continue; }
+                let t0 = top[idx] as i32;
+                let mut lo = t0;
+                for (dy, dx) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let (ny, nx) = (j + dy, i + dx);
+                    if ny >= 0 && ny < tw_i && nx >= 0 && nx < tw_i {
+                        let nk = (ny * tw_i + nx) as usize;
+                        if is_built(top, nk) { lo = lo.min(top[nk] as i32); }
+                    }
+                }
+                if t0 - lo <= THRESH { continue; }
+                comp[0] = (j, i);
+                let (mut len, mut head, mut too_big) = (1usize, 0usize, false);
+                while head < len && !too_big {
+                    let (y, x) = comp[head];
+                    head += 1;
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            if dy == 0 && dx == 0 { continue; }
+                            let (ny, nx) = (y + dy, x + dx);
+                            if ny < 0 || ny >= tw_i || nx < 0 || nx >= tw_i { continue; }
+                            let nk = (ny * tw_i + nx) as usize;
+                            if !is_built(top, nk) || top[nk] as i32 <= t0 - THRESH { continue; }
+                            if comp[..len].contains(&(ny, nx)) { continue; }
+                            if len == 3 { too_big = true; break; }
+                            comp[len] = (ny, nx);
+                            len += 1;
+                        }
+                        if too_big { break; }
+                    }
+                }
+                if too_big { continue; }
+                let mut comp_min = i32::MAX;
+                let mut ring_max = i32::MIN;
+                let mut ring = [(0isize, 0isize); 24];
+                let mut ring_cnt = 0usize;
+                for &(y, x) in &comp[..len] {
+                    comp_min = comp_min.min(top[(y * tw_i + x) as usize] as i32);
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let (ny, nx) = (y + dy, x + dx);
+                            if ny < 0 || ny >= tw_i || nx < 0 || nx >= tw_i { continue; }
+                            if comp[..len].contains(&(ny, nx)) || ring[..ring_cnt].contains(&(ny, nx)) { continue; }
+                            let nk = (ny * tw_i + nx) as usize;
+                            if is_built(top, nk) {
+                                ring_max = ring_max.max(top[nk] as i32);
+                                if ring_cnt < ring.len() {
+                                    ring[ring_cnt] = (ny, nx);
+                                    ring_cnt += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if ring_cnt >= 3 && comp_min > ring_max + THRESH {
+                    for &(y, x) in &comp[..len] {
+                        top[(y * tw_i + x) as usize] = ring_max as i16;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// What a building's photographs say of it as evidence (bay/facade_evidence.py, written by bay/evidence_tile.py), in
@@ -612,19 +755,24 @@ impl Pack {
 
     /// The building a column is in, or the nearest one it is just outside of, with where on its outline.
     fn building(&self, x: i32, z: i32) -> Option<(&Building, Probe)> {
+        self.building_idx(x, z).map(|(i, p)| (&self.buildings[i], p))
+    }
+
+    fn building_idx(&self, x: i32, z: i32) -> Option<(usize, Probe)> {
         let patch = (((z - self.gz0) >> PATCH).clamp(0, self.pw - 1) * self.pw + ((x - self.gx0) >> PATCH).clamp(0, self.pw - 1)) as usize;
-        let mut best: Option<(&Building, Probe)> = None;
+        let mut best: Option<(usize, Probe)> = None;
         for &i in &self.near[patch] {
-            let b = &self.buildings[i as usize];
+            let bi = i as usize;
+            let b = &self.buildings[bi];
             if x < b.low[0] - OUT || z < b.low[1] - OUT || x > b.high[0] + OUT || z > b.high[1] + OUT {
                 continue;
             }
             let p = self.probe(b, x, z);
             if p.inside {
-                return Some((b, p));
+                return Some((bi, p));
             }
             if p.far < (if p.looks >> 24 != 0 { OUT } else { 8 }) as f32 && best.as_ref().is_none_or(|(_, q)| p.far < q.far) {
-                best = Some((b, p));
+                best = Some((bi, p));
             }
         }
         best
@@ -635,7 +783,9 @@ impl Pack {
     fn probe(&self, b: &Building, x: i32, z: i32) -> Probe {
         let (px, pz) = (x as f32 + 0.5, z as f32 + 0.5);
         let own = &self.verts[b.first..b.first + b.count];
+        let lens = &self.edge_len[b.first..b.first + b.count];
         let mut p = Probe { inside: false, far: f32::MAX, along: 0.0, round: 0.0, long: 0.0, looks: 0, side: 0, on: [0.0; 2] };
+        let mut best_far2 = f32::MAX;
         let (mut start, mut run) = (0, 0.0f32);
         for i in 0..own.len() {
             let a = own[i];
@@ -646,8 +796,7 @@ impl Pack {
             if (az > pz) != (cz > pz) && px < ax + (pz - az) / (cz - az) * (cx - ax) {
                 p.inside = !p.inside;
             }
-            let (dx, dz) = (cx - ax, cz - az);
-            let long = (dx * dx + dz * dz).sqrt();
+            let long = lens[i];
             run = if last { 0.0 } else { run + long };
             if last {
                 start = i + 1;
@@ -655,12 +804,17 @@ impl Pack {
             if long < 0.5 {
                 continue;
             }
+            let (dx, dz) = (cx - ax, cz - az);
             let t = (((px - ax) * dx + (pz - az) * dz) / (long * long)).clamp(0.0, 1.0);
             let (qx, qz) = (ax + dx * t, az + dz * t);
-            let far = ((px - qx) * (px - qx) + (pz - qz) * (pz - qz)).sqrt();
-            if far < p.far {
-                p = Probe { inside: p.inside, far, along: t * long, round: before + t * long, long, looks: a[2], side: (b.first + i) as u32, on: [qx, qz] };
+            let far2 = (px - qx) * (px - qx) + (pz - qz) * (pz - qz);
+            if far2 < best_far2 {
+                best_far2 = far2;
+                p = Probe { inside: p.inside, far: far2, along: t * long, round: before + t * long, long, looks: a[2], side: (b.first + i) as u32, on: [qx, qz] };
             }
+        }
+        if best_far2 < f32::MAX {
+            p.far = best_far2.sqrt();
         }
         p
     }
@@ -719,8 +873,232 @@ impl Pack {
         let far = |t: &[i32; 4]| (x - t[0]) * (x - t[0]) + (z - t[1]) * (z - t[1]);
         self.stems[patch].iter().map(|&i| self.trunks[i as usize]).min_by_key(far).filter(|t| far(t) <= REACH * REACH).map(|t| ((far(&t) as f32).sqrt(), t))
     }
+
+    /// Whether `(x, z)` lies inside a surveyed building footprint or within `clear` cells of its exterior wall.
+    fn in_building(&self, x: i32, z: i32, clear: f32) -> bool {
+        self.building(x, z).is_some_and(|(_, q)| q.inside || q.far < clear)
+    }
+
+    /// Nearest off-road spot at street grade, clear of buildings, for relocating a road-standing fixture.
+    /// Prefers PAVEMENT (up to 7.2 m); falls back to roadside GRASS/YARD (up to 4.8 m) for park roads without
+    /// sidewalks. Insets 40 cm behind the edge so the mast clears the carriageway.
+    fn off_road_spot(&self, ox: i32, oz: i32, base_y: i32) -> Option<(i32, i32, i32)> {
+        // Exact 16-compass unit directions (no trig calls so wasm and native stay bit-identical).
+        const DIRS: [(f32, f32); 16] = [
+            (1.0, 0.0), (0.9238795, 0.38268343), (0.70710677, 0.70710677), (0.38268343, 0.9238795),
+            (0.0, 1.0), (-0.38268343, 0.9238795), (-0.70710677, 0.70710677), (-0.9238795, 0.38268343),
+            (-1.0, 0.0), (-0.9238795, -0.38268343), (-0.70710677, -0.70710677), (-0.38268343, -0.9238795),
+            (0.0, -1.0), (0.38268343, -0.9238795), (0.70710677, -0.70710677), (0.9238795, -0.38268343),
+        ];
+        let valid = |x: i32, z: i32, want_pav: bool| -> bool {
+            if self.cell(x, z).is_none() {
+                return false;
+            }
+            let s = self.surface(x, z).0 & 7;
+            let ok_surf = if want_pav { s == PAVEMENT } else { s == GRASS_HERE || s == YARD };
+            ok_surf && (self.ground(x, z) - base_y).abs() <= 15 && !self.in_building(x, z, 4.0)
+        };
+        let mut best_pav: Option<(i32, i32, i32, f32, f32)> = None;
+        let mut best_verge: Option<(i32, i32, i32, f32, f32)> = None;
+        for rad in (4..=72).step_by(4) {
+            for &(ux, uz) in &DIRS {
+                let nx = ox + (ux * rad as f32).round() as i32;
+                let nz = oz + (uz * rad as f32).round() as i32;
+                if best_pav.is_none() && valid(nx, nz, true) {
+                    best_pav = Some((rad, nx, nz, ux, uz));
+                } else if best_verge.is_none() && rad <= 48 && valid(nx, nz, false) {
+                    best_verge = Some((rad, nx, nz, ux, uz));
+                }
+            }
+            if best_pav.is_some() {
+                break;
+            }
+        }
+        let (nx, nz, ux, uz, want_pav) = match (best_pav, best_verge) {
+            (Some(p), Some(v)) if p.0 <= v.0 + 12 => (p.1, p.2, p.3, p.4, true),
+            (_, Some(v)) => (v.1, v.2, v.3, v.4, false),
+            (Some(p), None) => (p.1, p.2, p.3, p.4, true),
+            (None, None) => return None,
+        };
+        let sx = nx + (ux * 4.0).round() as i32;
+        let sz = nz + (uz * 4.0).round() as i32;
+        let (fx, fz) = if valid(sx, sz, want_pav) { (sx, sz) } else { (nx, nz) };
+        Some((fx, self.ground(fx, fz), fz))
+    }
+
+    /// Relocate or remove standing street fixtures whose surveyed/OSM base landed on asphalt (ROAD).
+    /// Handles street lamps (mast + bracket arm + luminaire head), stop signs (post + octagon bars),
+    /// fire hydrants (body + nozzles + cap), utility poles (mast + crossarm), and sensed poles (mast + span wires).
+    fn clean_road_fixtures(&mut self) {
+        let orig = self.fixtures.clone();
+        let n = orig.len();
+        let mut keep = vec![true; n];
+
+        let is_lamp_mast = |r: &[i32; 8]| {
+            r[0] == r[3] && r[2] == r[5] && r[6] == 12 && material(r[7] as Kind) == STEEL && r[4] - r[1] >= 60
+        };
+        // Track already-off-road lamps so a snapped road lamp never stacks on top of an existing corner lamp.
+        let mut kept_lamps: Vec<(i32, i32)> = orig
+            .iter()
+            .filter(|r| is_lamp_mast(r) && self.surface(r[0], r[2]).0 & 7 != ROAD)
+            .map(|r| (r[0], r[2]))
+            .collect();
+
+        let shift_seg = |seg: &mut [i32; 8], dx: i32, dy: i32, dz: i32| {
+            seg[0] += dx; seg[3] += dx;
+            seg[1] += dy; seg[4] += dy;
+            seg[2] += dz; seg[5] += dz;
+        };
+
+        for (i, r) in orig.iter().enumerate() {
+            if r[0] != r[3] || r[2] != r[5] {
+                continue;
+            }
+            let (ox, oy, oz) = (r[0], r[1], r[2]);
+            let dh = r[4] - r[1];
+            if dh < 6 || self.surface(ox, oz).0 & 7 != ROAD {
+                continue;
+            }
+
+            if is_lamp_mast(r) {
+                // Street lamp: mast (r=12, STEEL) + arm (r=5 from oy+79) + luminaire head (r=12, LAMP from arm tip).
+                let arms: Vec<usize> = (0..n)
+                    .filter(|&j| j != i && orig[j][6] == 5 && orig[j][0] == ox && orig[j][1] == oy + 79 && orig[j][2] == oz)
+                    .collect();
+                let mut heads: Vec<(usize, usize)> = Vec::new();
+                for &j in &arms {
+                    let a = orig[j];
+                    for k in 0..n {
+                        if orig[k][6] == 12 && material(orig[k][7] as Kind) == LAMP
+                            && orig[k][0] == a[3] && orig[k][1] == a[4] && orig[k][2] == a[5]
+                        {
+                            heads.push((j, k));
+                        }
+                    }
+                }
+                let spot = self.off_road_spot(ox, oz, oy).filter(|&(fx, _, fz)| {
+                    !kept_lamps.iter().any(|&(lx, lz)| (lx - fx) * (lx - fx) + (lz - fz) * (lz - fz) <= 25 * 25)
+                });
+                if let Some((fx, fy, fz)) = spot {
+                    kept_lamps.push((fx, fz));
+                    self.fixtures[i] = [fx, fy, fz, fx, fy + dh, fz, r[6], r[7]];
+                    // Re-aim arm and luminaire back over the carriageway instead of into a building behind the sidewalk.
+                    let (vx, vz) = ((ox - fx) as f32, (oz - fz) as f32);
+                    let len = (vx * vx + vz * vz).sqrt().max(1.0);
+                    let (ux, uz) = (vx / len, vz / len);
+                    let (ax2, ay2, az2) = (fx + (13.0 * ux).round() as i32, fy + 85, fz + (13.0 * uz).round() as i32);
+                    let (hx2, hz2) = (fx + (18.0 * ux).round() as i32, fz + (18.0 * uz).round() as i32);
+                    for &j in &arms {
+                        self.fixtures[j] = [fx, fy + 79, fz, ax2, ay2, az2, orig[j][6], orig[j][7]];
+                    }
+                    for &(_, k) in &heads {
+                        self.fixtures[k] = [ax2, ay2, az2, hx2, ay2, hz2, orig[k][6], orig[k][7]];
+                    }
+                } else {
+                    keep[i] = false;
+                    for &j in &arms { keep[j] = false; }
+                    for &(_, k) in &heads { keep[k] = false; }
+                }
+            } else if r[6] == 5 && dh >= 20 {
+                // Stop sign: post (r=5) + horizontal octagon bars (r=5) around its top.
+                let bars: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && orig[j][6] == 5
+                            && (orig[j][0] != orig[j][3] || orig[j][2] != orig[j][5])
+                            && ((orig[j][0] + orig[j][3]) / 2 - ox).abs() <= 4
+                            && ((orig[j][2] + orig[j][5]) / 2 - oz).abs() <= 4
+                            && orig[j][1] >= oy && orig[j][1] <= r[4] + 4
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in bars { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in bars { keep[j] = false; }
+                }
+            } else if r[6] == 15 && dh == 7 {
+                // Fire hydrant: body (r=15, dh=7) + cross nozzles (r=10 at oy+4) + cap (r=12 at oy+7..oy+8).
+                let parts: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && (
+                            (orig[j][6] == 10 && orig[j][1] == oy + 4 && orig[j][4] == oy + 4
+                                && (orig[j][0] + orig[j][3]) / 2 == ox && orig[j][2] == oz && orig[j][5] == oz)
+                            || (orig[j][6] == 12 && orig[j][0] == ox && orig[j][3] == ox
+                                && orig[j][2] == oz && orig[j][5] == oz && orig[j][1] == oy + 7 && orig[j][4] == oy + 8)
+                        )
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in parts { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in parts { keep[j] = false; }
+                }
+            } else if r[6] == 16 && dh >= 60 {
+                // Utility pole (OSM pole / metalPole): mast (r=16, dh=96) + crossarm (r=8 at oy+88).
+                let cross: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && orig[j][6] == 8 && orig[j][1] == oy + 88 && orig[j][4] == oy + 88
+                            && ((orig[j][0] + orig[j][3]) / 2 - ox).abs() <= 1
+                            && ((orig[j][2] + orig[j][5]) / 2 - oz).abs() <= 1
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in cross { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in cross { keep[j] = false; }
+                }
+            } else if r[6] == 14 && material(r[7] as Kind) == WOOD && dh >= 40 {
+                // Sensed pole (r=14, WOOD) + attached overhead span wire endpoints (r=3 at top-4).
+                let attach = (ox, r[4] - 4, oz);
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in 0..n {
+                        if orig[j][6] == 3 {
+                            if (orig[j][0], orig[j][1], orig[j][2]) == attach {
+                                self.fixtures[j][0] += dx;
+                                self.fixtures[j][1] += dy;
+                                self.fixtures[j][2] += dz;
+                            }
+                            if (orig[j][3], orig[j][4], orig[j][5]) == attach {
+                                self.fixtures[j][3] += dx;
+                                self.fixtures[j][4] += dy;
+                                self.fixtures[j][5] += dz;
+                            }
+                        }
+                    }
+                } else {
+                    keep[i] = false;
+                    for j in 0..n {
+                        if orig[j][6] == 3
+                            && ((orig[j][0], orig[j][1], orig[j][2]) == attach
+                                || (orig[j][3], orig[j][4], orig[j][5]) == attach)
+                        {
+                            keep[j] = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut idx = 0usize;
+        self.fixtures.retain(|_| {
+            let k = keep[idx];
+            idx += 1;
+            k
+        });
+    }
 }
 
+#[derive(Clone, Copy)]
 struct Probe {
     inside: bool,
     far: f32,
@@ -842,6 +1220,7 @@ fn measured_half(b: &Building, foot: i32, head: i32) -> Option<f32> {
 }
 
 /// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
+#[derive(Clone, Copy)]
 struct FixtureSpan {
     low: i32,
     high: i32,
@@ -881,6 +1260,254 @@ impl FixtureSpan {
     }
 }
 
+struct OwnedColumn {
+    g: i32,
+    road_top4: Option<i32>,
+    ground: Kind,
+    kerb: i32,
+    what: OwnedWhat,
+    fixtures: Vec<FixtureSpan>,
+    hero: Option<(Hero, f32, f32)>,
+}
+
+enum OwnedWhat {
+    Open,
+    In(usize, usize, Probe, i32, u8),
+    By(usize, usize, Probe, i32),
+    Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
+    Mass(i32, u8, Kind),
+}
+
+impl OwnedColumn {
+    #[inline]
+    fn as_column<'a>(&'a self, packs: &'a [Pack]) -> Column<'a> {
+        let what = match self.what {
+            OwnedWhat::Open => What::Open,
+            OwnedWhat::In(pi, bi, probe, roof, tint) => What::In(&packs[pi].buildings[bi], probe, roof, tint),
+            OwnedWhat::By(pi, bi, probe, roof) => What::By(&packs[pi].buildings[bi], probe, roof),
+            OwnedWhat::Crown { foot, top, trunk, tint, edge } => What::Crown { foot, top, trunk, tint, edge },
+            OwnedWhat::Mass(roof, tint, wall) => What::Mass(roof, tint, wall),
+        };
+        Column {
+            g: self.g,
+            road_top4: self.road_top4,
+            ground: self.ground,
+            kerb: self.kerb,
+            what,
+            fixtures: Vec::new(),
+            hero: self.hero,
+        }
+    }
+}
+
+#[inline]
+fn hero_from_slice(heroes: &[Hero], x: i32, z: i32, size: i32) -> Option<(Hero, f32, f32)> {
+    if heroes.is_empty() {
+        return None;
+    }
+    let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+    for h in heroes {
+        if x < h.low[0] || z < h.low[1] || x > h.high[0] || z > h.high[1] {
+            continue;
+        }
+        let (dx, dz) = ((x - h.at[0]) as f32 + half, (z - h.at[2]) as f32 + half);
+        let (u, w) = ((dx * h.along[0] + dz * h.along[1]) * 0.1, (dz * h.along[0] - dx * h.along[1]) * 0.1);
+        let Some(r) = heroes::reach(h.sort) else { continue };
+        if u >= r[0] && u < r[3] && w >= r[2] && w < r[5] {
+            return Some((*h, u, w));
+        }
+    }
+    None
+}
+
+fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes: &[Hero], marks: &[[i32; 4]], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
+    let hero = hero_from_slice(heroes, x, z, size);
+    let picked = pack_indices.iter().copied().find(|&pi| packs[pi].gstep >= least && packs[pi].holds(x, z))
+        .or_else(|| pack_indices.iter().copied().find(|&pi| packs[pi].holds(x, z)));
+    let Some(pi) = picked else {
+        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: OwnedWhat::Open, hero };
+    };
+    let p = &packs[pi];
+    let ground_height = p.ground_height(x, z);
+    let g = (ground_height + 0.5).floor() as i32;
+    let (mut class, tint) = p.surface(x, z);
+    let graphed = class & 7 == ROAD && marks.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]);
+    if graphed { class &= !96; }
+    let road_grey = |t: u8| 8 + ((t.clamp(4, 11) - 4) * 4 + 3) / 7;
+    let asphalt = if class & 159 == 128 && (1..=15).contains(&tint) {
+        Some(road_grey(tint))
+    } else if class & 31 == CANOPY && measured_foliage(tint) && !p.under_leaf_road.is_empty() {
+        p.cell(x, z).map(|i| {
+            let w = p.tw as usize;
+            road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
+        })
+    } else { None };
+    let (ground, kerb) = match class & 7 {
+        ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
+        ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
+        ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
+        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        GRASS_HERE => (kind(GRASS, OWN), 0),
+        WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
+        WATER_HERE => (kind(SAND, OWN), 0),
+        YARD => (kind(CONCRETE, tint), 0),
+        _ => (kind(EARTH, OWN), 0),
+    };
+    let what = match p.building_idx(x, z) {
+        Some((bi, probe)) if probe.inside => {
+            let b = &p.buildings[bi];
+            let raster = p.top(x, z).unwrap_or(b.base + 2 * b.storey);
+            let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
+                let eave = (probe.looks >> 8) as i16 as i32;
+                let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
+                if probe.looks >> 24 & 2 != 0 { blended.min(eave + 3) } else { blended }
+            } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
+                let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
+                match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
+                    Some(eave) => raster.min(eave + 3),
+                    None => raster,
+                }
+            } else { raster }.max(g + 22);
+            OwnedWhat::In(pi, bi, probe, roof, tint)
+        }
+        Some((bi, probe)) if size <= 2 && probe.looks & 2 != 0 => {
+            let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
+            let far = probe.far.max(0.01);
+            let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
+            let eave = if probe.looks & 128 != 0 {
+                Some((probe.looks >> 8) as i16 as i32)
+            } else if probe.looks >> 24 & 2 != 0 {
+                p.eave_near(probe.on, [dx / far, dz / far]).or_else(|| p.top(ix, iz))
+            } else {
+                p.top(ix, iz)
+            };
+            match eave {
+                Some(roof) => OwnedWhat::By(pi, bi, probe, roof),
+                None => OwnedWhat::Open,
+            }
+        }
+        _ if class & BUILT != 0 => match (p.top(x, z), p.cell(x, z)) {
+            (Some(roof), Some(here)) if roof > g => OwnedWhat::Mass(roof, tint, match p.walls.get(here) { Some(&w) if w != 0 => w as Kind, _ => kind(PLASTER, OWN) }),
+            _ => OwnedWhat::Open,
+        },
+        _ if class & CANOPY != 0 => match p.top(x, z) {
+            Some(t) if t > g + 4 => {
+                let tall = t - g;
+                let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
+                let on_road = class & 7 == ROAD;
+                match p.trunk(x, z) {
+                    Some((far, trunk)) if tall >= 28 => {
+                        let high = (trunk[2] - g).max(tall);
+                        let measured = trunk[3] >> 8;
+                        let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
+                        if far > rim + 4.0 {
+                            OwnedWhat::Open
+                        } else {
+                            let deep = (high as f32 * 0.55).clamp(16.0, 90.0).min((rim * 2.2).max(20.0));
+                            let middle = g as f32 + high as f32 - deep / 2.0;
+                            let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
+                            let min_foot = if on_road { g + 32 } else { g + 18 };
+                            let foot = (under as i32 + ragged).max(min_foot).min(t - 3);
+                            let crown = ((g as f32 + high as f32 - deep) as i32).max(g + 18);
+                            OwnedWhat::Crown { foot, top: t, trunk: (!on_road && far <= (trunk[3] & 255) as f32 + 0.5).then(|| crown + (t - crown) / 3), tint, edge: (far / rim.max(1.0)).min(1.0) }
+                        }
+                    }
+                    _ if tall < 28 && !on_road => OwnedWhat::Crown { foot: g + 1, top: t, trunk: None, tint, edge: 0.6 },
+                    _ => OwnedWhat::Open,
+                }
+            }
+            _ => OwnedWhat::Open,
+        },
+        _ => OwnedWhat::Open,
+    };
+    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(..) | OwnedWhat::Mass(..));
+    let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
+    OwnedColumn { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x, z, size), what, hero }
+}
+
+/// Fast single-cell kind query for unedited Bay columns (#73). Uses a 512-entry direct-mapped cache for simple open columns.
+pub fn kind_single(x: i32, y: i32, z: i32) -> Kind {
+    let epoch = PACK_GEN.get();
+    let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
+    let cached = SOLID_CACHE.with_borrow(|cache| {
+        let e = cache[idx];
+        (e.epoch == epoch && e.x == x && e.z == z).then_some(e)
+    });
+    if let Some(e) = cached {
+        return if y <= e.g {
+            if y >= e.g - 6 { e.ground } else { kind(EARTH, OWN) }
+        } else if y <= e.top {
+            e.ground
+        } else {
+            0
+        };
+    }
+    PACKS.with_borrow(|packs| {
+        let c = column(packs, x, z, 1);
+        if matches!(c.what, What::Open) && c.hero.is_none() && c.fixtures.is_empty() {
+            SOLID_CACHE.with_borrow_mut(|cache| {
+                cache[idx] = SolidEntry { x, z, epoch, top: c.g + c.kerb, g: c.g, ground: c.ground };
+            });
+        }
+        kind_at(&c, x, y, z, 1)
+    })
+}
+
+/// Fast single-cell solidity query for unedited Bay columns (#73), used by `Ground::solid` so moving cars never build 262k-cell sectors.
+#[inline]
+pub fn solid_single(x: i32, y: i32, z: i32) -> bool {
+    let epoch = PACK_GEN.get();
+    let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
+    let cached = SOLID_CACHE.with_borrow(|cache| {
+        let e = cache[idx];
+        (e.epoch == epoch && e.x == x && e.z == z).then_some(e)
+    });
+    if let Some(e) = cached {
+        return y <= e.top;
+    }
+    kind_single(x, y, z) != 0
+}
+
+/// Fast single-column top solid cell + 1 at or below `y` within `depth` cells (#73), or `i32::MIN` if none.
+pub fn under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
+    let epoch = PACK_GEN.get();
+    let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
+    let cached = SOLID_CACHE.with_borrow(|cache| {
+        let e = cache[idx];
+        (e.epoch == epoch && e.x == x && e.z == z).then_some(e)
+    });
+    if let Some(e) = cached {
+        return if y <= e.top {
+            y + 1
+        } else if e.top > y - depth {
+            e.top + 1
+        } else {
+            i32::MIN
+        };
+    }
+    PACKS.with_borrow(|packs| {
+        let c = column(packs, x, z, 1);
+        if matches!(c.what, What::Open) && c.hero.is_none() && c.fixtures.is_empty() {
+            let top = c.g + c.kerb;
+            SOLID_CACHE.with_borrow_mut(|cache| {
+                cache[idx] = SolidEntry { x, z, epoch, top, g: c.g, ground: c.ground };
+            });
+            return if y <= top { y + 1 } else if top > y - depth { top + 1 } else { i32::MIN };
+        }
+        let end = y - depth;
+        let mut at = y;
+        while at > end {
+            if kind_at(&c, x, at, z, 1) != 0 {
+                return at + 1;
+            }
+            at -= 1;
+        }
+        i32::MIN
+    })
+}
+
+/// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
 struct Column<'a> {
     g: i32,
     road_top4: Option<i32>,
@@ -1322,35 +1949,136 @@ fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
 }
 
 /// Makes one sector of the Bay in `s`, at the coarseness `s` was started with.
+/// Caches the 4,096 column evaluations for the current `(low_x, low_z, lod)` across vertical sectors `sy`,
+/// hoists sector-invariant pack/hero/mark filters outside the loop, and early-exits above open/roof tops (#73).
 pub fn make(s: &mut Scratch) {
     let (k, size) = (s.lod, 1i32 << s.lod);
     let side = SIDE as i32;
     let mut cables = Vec::new();
     let mut road = Vec::new();
+    let epoch = PACK_GEN.get();
+    let x_min = (s.low[0] << k) + size / 2;
+    let z_min = (s.low[2] << k) + size / 2;
+    let x_max = ((s.low[0] + side - 1) << k) + size / 2;
+    let z_max = ((s.low[2] + side - 1) << k) + size / 2;
+    let least = least_step(size);
+    let low_y = s.low[1] << k;
+    let skip_cables = s.finer && k == 0;
+
     PACKS.with_borrow(|packs| {
-        for cz in 0..side {
-            for cx in 0..side {
-                let (x, z) = (((s.low[0] + cx) << k) + size / 2, ((s.low[2] + cz) << k) + size / 2);
-                let mut c = column(packs, x, z, size);
-                if s.finer && k == 0 {
-                    grade_rows(&c, x, z, s.low[1], &mut road);
-                    c.fixtures.retain(|fixture| {
-                        if fixture.rod[6] > 3 { return true; }
-                        fixture.cable_rows(x,z,s.low[1],&mut cables);
-                        false
-                    });
+        SECTOR_COLS.with_borrow_mut(|cache| {
+            if cache.epoch != epoch || cache.low_x != s.low[0] || cache.low_z != s.low[2] || cache.lod != k || cache.cols.len() != SIDE * SIDE {
+                let sector_packs: Vec<usize> = packs.iter().enumerate().filter_map(|(i, p)| {
+                    let wide = (p.gw - 1) * p.gstep;
+                    (x_max >= p.gx0 && z_max >= p.gz0 && x_min < p.gx0 + wide && z_min < p.gz0 + wide).then_some(i)
+                }).collect();
+                let sector_heroes: Vec<Hero> = if size <= heroes::REALM_MOST && LANDMARKS.get() {
+                    HEROES.with_borrow(|all| {
+                        all.iter().copied().filter(|h| x_max >= h.low[0] && z_max >= h.low[1] && x_min <= h.high[0] && z_min <= h.high[1]).collect()
+                    })
+                } else {
+                    Vec::new()
+                };
+                let sector_marks: Vec<[i32; 4]> = MARKS.with_borrow(|m| {
+                    m.covers.iter().copied().filter(|c| x_max >= c[0] && z_max >= c[1] && x_min < c[2] && z_min < c[3]).collect()
+                });
+                cache.cols.clear();
+                cache.cols.reserve(SIDE * SIDE);
+                for cz in 0..side {
+                    let z = ((s.low[2] + cz) << k) + size / 2;
+                    for cx in 0..side {
+                        let x = ((s.low[0] + cx) << k) + size / 2;
+                        cache.cols.push(owned_column(packs, &sector_packs, &sector_heroes, &sector_marks, x, z, size, least));
+                    }
                 }
-                for cy in 0..side {
-                    let v = kind_at(&c, x, (s.low[1] + cy) << k, z, size);
-                    if v != 0 {
-                        s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                cache.low_x = s.low[0];
+                cache.low_z = s.low[2];
+                cache.lod = k;
+                cache.epoch = epoch;
+            }
+
+            let half = size / 2;
+            let ground_band = 3 * size.max(2);
+            for cz in 0..side {
+                let z = ((s.low[2] + cz) << k) + half;
+                let row_base = (cz as usize) * SIDE;
+                for cx in 0..side {
+                    let x = ((s.low[0] + cx) << k) + half;
+                    let oc = &cache.cols[row_base + cx as usize];
+                    let has_fixtures = !oc.fixtures.is_empty();
+                    if skip_cables {
+                        if oc.road_top4.is_some() {
+                            let mut c = oc.as_column(packs);
+                            if has_fixtures { c.fixtures = oc.fixtures.clone(); }
+                            grade_rows(&c, x, z, s.low[1], &mut road);
+                        }
+                        if has_fixtures {
+                            for fixture in &oc.fixtures {
+                                if fixture.rod[6] <= 3 {
+                                    fixture.cable_rows(x, z, s.low[1], &mut cables);
+                                }
+                            }
+                        }
+                    }
+                    let has_solid_fixture = if skip_cables {
+                        oc.fixtures.iter().any(|f| f.rod[6] > 3)
+                    } else {
+                        has_fixtures
+                    };
+                    if matches!(oc.what, OwnedWhat::Open) && oc.hero.is_none() && !has_solid_fixture {
+                        let top = if size == 1 { oc.g + oc.kerb } else { oc.g };
+                        let min_mid = low_y + half;
+                        if min_mid > top {
+                            continue;
+                        }
+                        let cy_end = (((top - min_mid) >> k) + 1).min(side);
+                        let earth_cut = oc.g - ground_band;
+                        for cy in 0..cy_end {
+                            let mid = low_y + (cy << k) + half;
+                            let v = if mid <= oc.g {
+                                if mid >= earth_cut { oc.ground } else { kind(EARTH, OWN) }
+                            } else {
+                                oc.ground
+                            };
+                            if v != 0 {
+                                s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                            }
+                        }
+                        continue;
+                    }
+                    let cy_end = if oc.hero.is_none() && !has_solid_fixture {
+                        let max_mid = match oc.what {
+                            OwnedWhat::Open => if size == 1 { oc.g + oc.kerb } else { oc.g },
+                            OwnedWhat::In(_, _, _, roof, _) | OwnedWhat::Mass(roof, _, _) => roof.max(oc.g),
+                            OwnedWhat::By(_, _, _, roof) => (roof + 3).max(oc.g + oc.kerb),
+                            OwnedWhat::Crown { top, .. } => top.max(oc.g + oc.kerb),
+                        };
+                        let min_mid = low_y + half;
+                        if min_mid > max_mid { continue; }
+                        (((max_mid - min_mid) >> k) + 1).min(side)
+                    } else {
+                        side
+                    };
+                    let mut c = oc.as_column(packs);
+                    if has_solid_fixture {
+                        if skip_cables {
+                            c.fixtures.extend(oc.fixtures.iter().copied().filter(|f| f.rod[6] > 3));
+                        } else {
+                            c.fixtures.extend_from_slice(&oc.fixtures);
+                        }
+                    }
+                    for cy in 0..cy_end {
+                        let v = kind_at(&c, x, low_y + (cy << k), z, size);
+                        if v != 0 {
+                            s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                        }
                     }
                 }
             }
-        }
+        });
     });
-    if !road.is_empty() { s.fine_runs(&road,2); }
-    if !cables.is_empty() { s.fine_runs(&cables,2); }
+    if !road.is_empty() { s.fine_runs(&road, 2); }
+    if !cables.is_empty() { s.fine_runs(&cables, 2); }
 }
 
 #[cfg(test)]
@@ -1770,6 +2498,215 @@ mod tests {
         let packs = [pack];
         let c = column(&packs, 285, 285, 1);
         assert!(matches!(c.what, What::Open), "trunkless tall canopy should not float");
+    }
+
+    #[test]
+    fn road_standing_lamps_hydrants_and_poles_are_snapped_or_dropped_cleanly() {
+        let mut bytes = Vec::new();
+        let (gw, tw) = (5i32, 32i32);
+        // Header: gstep=80, gw=5 (320 cells), tstep=10, tw=32 (320 cells), 1 building, 4 verts, 0 trunks
+        let head = [0x3159_4142i32, 1, 0, 0, 80, gw, 0, 0, 10, tw, 0, 0, 1, 4, 0, 0];
+        for w in head { bytes.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { bytes.extend(100i16.to_le_bytes()); }
+        let top = vec![100i16; (tw * tw) as usize];
+        // x < 220 is ROAD; x >= 220 is PAVEMENT (except z < 80, x >= 220 is GRASS_HERE for park road test).
+        let mut cls = vec![ROAD; (tw * tw) as usize];
+        for j in 0..tw {
+            for i in 22..tw {
+                cls[(j * tw + i) as usize] = if j < 8 { GRASS_HERE } else { PAVEMENT };
+            }
+        }
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![0u8; (tw * tw) as usize]);
+        // Building sitting on pavement at x in [220, 290], z in [250, 310]: fixtures must not snap inside it.
+        for w in [0i32, 4, kind(BRICK, OWN) as i32, kind(CONCRETE, OWN) as i32, 30, 100] {
+            bytes.extend(w.to_le_bytes());
+        }
+        for v in [[220i32, 250, 3], [290, 250, 3], [290, 310, 3], [220, 310, 7]] {
+            for w in v { bytes.extend(w.to_le_bytes()); }
+        }
+
+        let steel = kind(STEEL, grey(9)) as i32;
+        let dark = kind(STEEL, grey(14)) as i32;
+        let wood = kind(WOOD, colour(3, 0)) as i32;
+        let white = kind(CONCRETE, grey(1)) as i32;
+        let lamp = kind(LAMP, colour(3, 0)) as i32;
+
+        let fixtures: Vec<[i32; 8]> = vec![
+            // 1. Road-standing lamp at (185, 100, 140), 3.5 m west of pavement -> snaps to x >= 220, arm aims west (-x).
+            [185, 100, 140, 185, 183, 140, 12, steel],
+            [185, 179, 140, 198, 185, 140, 5, steel],  // originally aimed east (into sidewalk!)
+            [198, 185, 140, 203, 185, 140, 12, lamp],
+            // 2. Mid-intersection lamp at (50, 100, 140), 17 m from pavement -> mast, arm, head all dropped.
+            [50, 100, 140, 50, 183, 140, 12, steel],
+            [50, 179, 140, 50, 185, 153, 5, steel],
+            [50, 185, 153, 50, 185, 158, 12, lamp],
+            // 3. Existing sidewalk lamp at (224, 100, 200) + duplicate road lamp at (195, 100, 200) -> road one dropped.
+            [224, 100, 200, 224, 183, 200, 12, steel],
+            [224, 179, 200, 211, 185, 200, 5, steel],
+            [211, 185, 200, 206, 185, 200, 12, lamp],
+            [195, 100, 200, 195, 183, 200, 12, steel],
+            [195, 179, 200, 182, 185, 200, 5, steel],
+            [182, 185, 200, 177, 185, 200, 12, lamp],
+            // 4. Fire hydrant on road at (200, 100, 100) -> body, nozzles, cap all snap to pavement.
+            [200, 100, 100, 200, 107, 100, 15, white],
+            [198, 104, 100, 202, 104, 100, 10, white],
+            [200, 107, 100, 200, 108, 100, 12, white],
+            // 5. Utility pole on road at (205, 100, 170) -> mast + crossarm snap to pavement.
+            [205, 100, 170, 205, 196, 170, 16, wood],
+            [205, 188, 162, 205, 188, 178, 8, wood],
+            // 6. Sensed pole on road at (205, 100, 225) + span wire -> pole snaps & wire endpoint follows it.
+            [205, 100, 225, 205, 190, 225, 14, wood],
+            [205, 186, 225, 260, 180, 225, 3, dark],
+            // 7. Park-road lamp at (200, 100, 40), 2 m west of GRASS_HERE -> snaps onto GRASS_HERE.
+            [200, 100, 40, 200, 183, 40, 12, steel],
+            [200, 179, 40, 213, 185, 40, 5, steel],
+            [213, 185, 40, 218, 185, 40, 12, lamp],
+            // 8. Road lamp right beside the building wall at (205, 100, 280) -> must NOT snap inside building [220..290, 250..310].
+            [205, 100, 280, 205, 183, 280, 12, steel],
+            [205, 179, 280, 192, 185, 280, 5, steel],
+            [192, 185, 280, 187, 185, 280, 12, lamp],
+        ];
+        bytes.extend(b"SFST");
+        bytes.extend((fixtures.len() as u32).to_le_bytes());
+        for f in &fixtures {
+            for w in f { bytes.extend(w.to_le_bytes()); }
+        }
+
+        let pack = read(&bytes).expect("valid pack");
+        // No standing vertical mast/body may remain on ROAD or inside the building.
+        let masts: Vec<_> = pack.fixtures.iter()
+            .filter(|r| r[0] == r[3] && r[2] == r[5] && (r[4] - r[1]) >= 6)
+            .collect();
+        for m in &masts {
+            assert_ne!(pack.surface(m[0], m[2]).0 & 7, ROAD, "fixture mast stayed on ROAD: {m:?}");
+            assert!(!pack.in_building(m[0], m[2], 0.0), "fixture mast snapped into building: {m:?}");
+        }
+        // Kept street lamps: #1 (snapped to pavement), #3a (already on pavement), #7 (snapped to grass).
+        // Dropped: #2 (mid-road), #3b (duplicate), #8 (blocked by building within 4 m).
+        // Wait: #8 at (205, 280) is 3.5 m north of z=246 pavement outside the building, so check count is 3 or 4 and none inside building.
+        let lamp_masts: Vec<_> = masts.iter().filter(|r| r[6] == 12 && r[4] - r[1] == 83).copied().collect();
+        assert!(lamp_masts.len() >= 3 && lamp_masts.len() <= 4, "unexpected lamp mast count: {lamp_masts:?}");
+        // Every luminaire head must correspond to a kept lamp mast (zero orphaned floating lamp heads).
+        let lamp_heads: Vec<_> = pack.fixtures.iter().filter(|r| r[6] == 12 && material(r[7] as Kind) == LAMP).collect();
+        assert_eq!(lamp_heads.len(), lamp_masts.len(), "lamp head/mast mismatch: heads={lamp_heads:?} masts={lamp_masts:?}");
+        // Lamp #1 snapped to pavement near z=140 and its arm now points west (-x) back over the road.
+        let l1 = lamp_masts.iter().find(|r| (r[2] - 140).abs() <= 4).expect("lamp #1 snapped");
+        assert!(l1[0] >= 220);
+        let a1 = pack.fixtures.iter().find(|r| r[6] == 5 && r[0] == l1[0] && r[1] == l1[1] + 79 && r[2] == l1[2]).expect("lamp #1 arm");
+        assert!(a1[3] < a1[0], "snapped lamp arm should reach west over carriageway: {a1:?}");
+        // Hydrant #4: all 3 segments moved off ROAD onto pavement.
+        let h4 = masts.iter().find(|r| r[6] == 15).expect("hydrant #4 snapped");
+        assert!(h4[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 10 && (r[0] + r[3]) / 2 == h4[0] && r[2] == h4[2]));
+        assert!(pack.fixtures.iter().any(|r| r[6] == 12 && r[0] == h4[0] && r[2] == h4[2] && r[4] - r[1] == 1));
+        // Utility pole #5: mast + crossarm moved off ROAD onto pavement.
+        let p5 = masts.iter().find(|r| r[6] == 16).expect("pole #5 snapped");
+        assert!(p5[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 8 && ((r[0] + r[3]) / 2 - p5[0]).abs() <= 1 && ((r[2] + r[5]) / 2 - p5[2]).abs() <= 1));
+        // Sensed pole #6: mast moved off ROAD and span wire endpoint followed it.
+        let s6 = masts.iter().find(|r| r[6] == 14).expect("sensed pole #6 snapped");
+        assert!(s6[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 3 && r[0] == s6[0] && r[1] == s6[4] - 4 && r[2] == s6[2]));
+    }
+
+    #[test]
+    fn fast_column_queries_and_cached_make_match_reference() {
+        with_pack(|| {
+            let mut s = Scratch::new();
+            // Build sectors across sy = 1..5 in one column (exercising SECTOR_COLS reuse) and compare
+            // every cell against kind_single, solid_single, and under.
+            let (sx, sz) = (4, 4);
+            let mut cached = Vec::new();
+            for sy in 1..5 {
+                s.start(sx, sy, sz, 0);
+                make(&mut s);
+                cached.push(s.cells.clone());
+            }
+            // Invalidate SECTOR_COLS by bumping epoch and rebuild each sy fresh.
+            PACK_GEN.with(|g| g.set(g.get().wrapping_add(1)));
+            for (idx, sy) in (1..5).enumerate() {
+                PACK_GEN.with(|g| g.set(g.get().wrapping_add(1)));
+                s.start(sx, sy, sz, 0);
+                make(&mut s);
+                assert_eq!(s.cells, cached[idx], "cached make drifted at sy={sy}");
+                // Spot-check kind_single / solid_single across the sector (building wall, windows, roof, open road).
+                let x0 = sx * 64;
+                let y0 = sy * 64;
+                let z0 = sz * 64;
+                for lz in (0..64).step_by(7) {
+                    for lx in (0..64).step_by(7) {
+                        for ly in (0..64).step_by(5) {
+                            let expected = s.cells[(lx + 64 * (lz + 64 * ly)) as usize];
+                            let got = kind_single(x0 + lx, y0 + ly, z0 + lz);
+                            assert_eq!(got, expected, "kind_single mismatch at ({},{},{})", x0 + lx, y0 + ly, z0 + lz);
+                            assert_eq!(solid_single(x0 + lx, y0 + ly, z0 + lz), expected != 0);
+                        }
+                    }
+                }
+            }
+            // Verify under(x, y, z, 40) matches a downward scan of kind_single across road, pavement, and roof.
+            for (x, z, y) in [(100, 50, 130), (100, 120, 130), (300, 300, 290), (300, 300, 200), (100, 50, 105)] {
+                let mut expected = i32::MIN;
+                for at in ((y - 39)..=y).rev() {
+                    if kind_single(x, at, z) != 0 {
+                        expected = at + 1;
+                        break;
+                    }
+                }
+                assert_eq!(under(x, y, z, 40), expected, "under mismatch at ({x},{y},{z})");
+            }
+        });
+    }
+
+    #[test]
+    fn rooftop_narrow_pillars_are_despiked_in_fine_and_coarse_packs() {
+        // L0 (tstep=5, 0.5 m samples): a flat roof at 150 with a 2.0 m x 1.5 m (4x3) light-pole pillar at 220,
+        // a 1.5 m parapet at 165, a 4 m x 4 m (8x8) real penthouse at 200, and a tree canopy spike at 240.
+        let (gw, tw) = (5i32, 32i32);
+        let mut b0 = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 160, 40, gw, 0, 0, 5, tw, 0, 0, 0, 0, 0, 0] { b0.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b0.extend(20i16.to_le_bytes()); }
+        let mut top0 = vec![150i16; (tw * tw) as usize];
+        let mut cls0 = vec![YARD; (tw * tw) as usize];
+        for j in 6..9 { for i in 6..10 { top0[(j * tw + i) as usize] = 220; } } // 2.0 m x 1.5 m pillar
+        for i in 4..20 { top0[(12 * tw + i) as usize] = 165; } // 1.5 m parapet
+        for j in 18..26 { for i in 18..26 { top0[(j * tw + i) as usize] = 200; } } // 4 m x 4 m penthouse
+        top0[(3 * tw + 27) as usize] = 240;
+        cls0[(3 * tw + 27) as usize] = YARD | CANOPY; // tree crown must stay untouched
+        for t in &top0 { b0.extend(t.to_le_bytes()); }
+        b0.extend(&cls0);
+        b0.extend(vec![0u8; (tw * tw) as usize]);
+        let p0 = read(&b0).expect("valid L0 pack");
+        for j in 6..9 {
+            for i in 6..10 {
+                assert_eq!(p0.top[(j * tw + i) as usize], 150, "L0 pillar at ({i},{j}) should be removed");
+            }
+        }
+        assert_eq!(p0.top[(12 * tw + 10) as usize], 165, "1.5 m parapet must stay");
+        assert_eq!(p0.top[(21 * tw + 21) as usize], 200, "4 m x 4 m penthouse must stay");
+        assert_eq!(p0.top[(3 * tw + 27) as usize], 240, "canopy spike must stay");
+
+        // L1 (tstep=20, 2.0 m samples): flat BUILT roof at 150 with a 1-cell spike (220), a 2-cell straddling
+        // spike (216), and a 2x5 (4 m x 10 m) taller rowhouse (220).
+        let mut b1 = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 640, 160, gw, 0, 0, 20, tw, 0, 0, 0, 0, 0, 0] { b1.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b1.extend(20i16.to_le_bytes()); }
+        let mut top1 = vec![150i16; (tw * tw) as usize];
+        let cls1 = vec![YARD | BUILT; (tw * tw) as usize];
+        top1[(5 * tw + 5) as usize] = 220; // 1-cell spike
+        top1[(10 * tw + 10) as usize] = 216;
+        top1[(10 * tw + 11) as usize] = 216; // 2-cell straddling spike
+        for j in 16..21 { for i in 16..18 { top1[(j * tw + i) as usize] = 220; } } // 4 m x 10 m rowhouse
+        for t in &top1 { b1.extend(t.to_le_bytes()); }
+        b1.extend(&cls1);
+        b1.extend(vec![0u8; (tw * tw) as usize]);
+        let p1 = read(&b1).expect("valid L1 pack");
+        assert_eq!(p1.top[(5 * tw + 5) as usize], 150, "L1 1-cell spike should be removed");
+        assert_eq!(p1.top[(10 * tw + 10) as usize], 150, "L1 2-cell spike should be removed");
+        assert_eq!(p1.top[(10 * tw + 11) as usize], 150, "L1 2-cell spike should be removed");
+        assert_eq!(p1.top[(18 * tw + 16) as usize], 220, "4 m x 10 m rowhouse must stay");
     }
 }
 

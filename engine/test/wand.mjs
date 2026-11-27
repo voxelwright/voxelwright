@@ -1,5 +1,5 @@
 // The wand's aim, for real (#246): the city page in the installed Chrome with WebGPU. With the wand in hand a look
-// at a parked car gives the car and nothing of the street, its roof is a part of it, one side is fewer cells than
+// at a street tree gives the tree and nothing of the street, its crown is a part of it, one side is fewer cells than
 // the whole and all of them face one way; a house is too big to be one thing and is taken a part at a time; an
 // area lies on the ground and is as big as it is asked to be; a point is where the look meets the world. A hole
 // blown in a thing is not part of it afterwards. Keys, the wheel and a phone's buttons do what the bar says.
@@ -52,26 +52,26 @@ try {
   await page.evaluate(() => { globalThis.engine.wand.held = true })
   check(await page.evaluate(() => document.body.classList.contains('wand') && getComputedStyle(document.querySelector('#tools')).display === 'none'), 'in hand, the wand\'s bar stands where the tools were')
 
-  // A parked car.
-  check(await find(12), 'a parked car is near')
+  // A street tree (freestanding: wood trunk and leaves crown, not joined to the street).
+  check(await find(13), 'a street tree is near')
   const point = await aim({ mode: 'point' })
   check(point?.how === 'point' && point.cell && Math.hypot(...point.at.map((v, a) => v - (point.cell[a] + 0.5))) < 1.5, `a point is on the cell the look meets (${point?.says})`)
-  const car = await aim({ mode: 'thing', share: 'whole' })
-  const across = car ? size(car) : [0, 0, 0]
-  check(car?.how === 'thing' && car.share === 'whole' && !car.partial && car.n > 2000 && car.n < 12000, `the car is one thing (${car?.n} cells: ${car?.says})`)
-  check(car && Math.max(across[0], across[2]) > 30 && Math.max(across[0], across[2]) < 70 && across[1] < 30, `and is as big as a car (${across.join(' by ')} cells)`)
-  check(car && car.low === 0 && car.air === 0 && car.stuff[12] > car.n / 2 && !car.stuff[6], `none of it is the street (${car?.low} cells under foot, ${car?.air} of air, ${car?.stuff[6] ?? 0} of asphalt)`)
+  const tree = await aim({ mode: 'thing', share: 'whole' })
+  const across = tree ? size(tree) : [0, 0, 0]
+  check(tree?.how === 'thing' && tree.share === 'whole' && !tree.partial && tree.n > 1500 && tree.n < 15000, `the tree is one thing (${tree?.n} cells: ${tree?.says})`)
+  check(tree && Math.max(across[0], across[2]) > 15 && Math.max(across[0], across[2]) < 55 && across[1] > 25 && across[1] < 80, `and is as big as a tree (${across.join(' by ')} cells)`)
+  check(tree && tree.low === 0 && tree.air === 0 && (tree.stuff[13] ?? 0) > tree.n / 2 && !tree.stuff[6], `none of it is the street (${tree?.low} cells under foot, ${tree?.air} of air, ${tree?.stuff[6] ?? 0} of asphalt)`)
   const part = await aim({ share: 'part' })
-  check(part?.share === 'part' && part.kinds === 1 && part.n < car.n && part.n > 20, `a part of it is cells of one kind that touch (${part?.n} of ${car?.n})`)
+  check(part?.share === 'part' && part.kinds === 1 && part.n < tree.n && part.n > 20, `a part of it is cells of one kind that touch (${part?.n} of ${tree?.n})`)
   const side = await aim({ share: 'side' })
-  check(side?.share === 'side' && side.hidden === 0 && side.n > 20 && side.n < car.n / 3, `a side of it is the cells that face one way (${side?.n} of ${car?.n}, facing ${side?.normal})`)
+  check(side?.share === 'side' && side.hidden === 0 && side.n > 20 && side.n < tree.n / 3, `a side of it is the cells that face one way (${side?.n} of ${tree?.n}, facing ${side?.normal})`)
 
-  // The same aim, picked a second time, is not gathered again; a hole blown in the car is not part of it afterwards.
+  // The same aim, picked a second time, is not gathered again; a hole blown in the tree is not part of it afterwards.
   await aim({ share: 'whole' })
   await page.evaluate(() => globalThis.engine.blast(5, false))
   await still(page)
   const holed = await aim({ share: 'whole' })
-  check(!holed || (holed.air === 0 && holed.n < car.n), `after a hammer blow what is aimed at is what is left (${holed?.n ?? 'nothing'} cells, ${holed?.air ?? 0} of air; it was ${car?.n})`)
+  check(!holed || (holed.air === 0 && holed.n < tree.n), `after a hammer blow what is aimed at is what is left (${holed?.n ?? 'nothing'} cells, ${holed?.air ?? 0} of air; it was ${tree?.n})`)
 
   // A house is not one thing: a terrace is joined from end to end.
   check(await find(9, 300) || await find(8, 300), 'a house front is near')

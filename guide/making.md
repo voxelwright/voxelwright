@@ -128,7 +128,7 @@ A model writes text, and nothing more. Each boundary below is enforced by code, 
 - A key is sent only to its own provider's address in `AT`. Nothing a world, a link or a reply says can change that address.
 - The request gives the model no tools. The reply is read as text.
 - Only words the visitor typed are sent (`Ask.typed`).
-- The key is kept only in this browser's storage, under `village.ai`, and in no address or server.
+- The key is kept only in this tab's `sessionStorage` by default, or in `localStorage` when **Remember key in this browser** is ticked, under `village.ai`, and in no address or server.
 
 **The reply**, in any form:
 
