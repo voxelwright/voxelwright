@@ -537,8 +537,21 @@ export class World {
   }
 
   /** Whether every box is whole but for a layer of sectors at each side: enough to follow the sun's lines through while the edges are still being made. */
-  nearlyWhole(): boolean {
-    return this.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] - 2))
+  nearlyWhole(): boolean { return this.wholeFrom() === 0 }
+
+  /**
+   * The finest box from which every box is whole but for a layer of sectors at each side, itself and all coarser
+   * (Infinity where the coarsest is not): the sun's lines through those can be followed while the finer boxes are
+   * still being made (sun.ts `plan`).
+   */
+  wholeFrom(): number {
+    let from = Infinity
+    for (let i = this.levels.length - 1; i >= 0; i--) {
+      const l = this.levels[i]
+      if (!l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] - 2)) break
+      from = i
+    }
+    return from
   }
 
   /** How high the contents of each column of a level's slots reach, and of each 4 x 4 columns, and of the whole box. */
