@@ -104,7 +104,45 @@ const flying = !LOCAL && (query.get('fly') ?? (location.pathname === '/' ? '1' :
  * GPU, the core and the first tiles are waited for first), it is kept for whoever does.
  */
 let explores: (() => void) | null = null, explored = false
+/** The GPU device is gone (`onLost`): no frame is drawn again. */
+let lost = false
 if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores(); else explored = true } })
+
+/**
+ * A card in the middle of the page that says why the realm is not shown and what to do (#81): over the loader's
+ * dimmed view (loading.html styles `.vw-fail`), or over the last picture where the GPU was lost after it opened.
+ * One at a time; the realm's own controls are hidden under it.
+ */
+function failCard(o: { title: string; lines: (string | HTMLElement)[]; keys: { label: string; main?: boolean; run: (key: HTMLButtonElement) => void }[]; links?: { label: string; href: string }[] }): void {
+  document.documentElement.dataset.failed = '1'
+  document.querySelector('.vw-fail')?.remove()
+  document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
+  const card = document.createElement('section'), h = document.createElement('h2'), keys = document.createElement('div')
+  card.className = 'vw-fail'; card.setAttribute('role', 'alertdialog'); card.setAttribute('aria-labelledby', 'vw-fail-h')
+  h.id = 'vw-fail-h'; h.textContent = o.title
+  card.append(h, ...o.lines.map((l) => { if (typeof l !== 'string') return l; const p = document.createElement('p'); p.textContent = l; return p }))
+  keys.className = 'keys'
+  for (const k of o.keys) { const b = document.createElement('button'); b.type = 'button'; b.textContent = k.label; if (k.main) b.className = 'main'; b.addEventListener('click', () => k.run(b)); keys.append(b) }
+  card.append(keys)
+  if (o.links?.length) {
+    const links = document.createElement('p')
+    links.className = 'links'
+    for (const l of o.links) { const a = document.createElement('a'); a.href = l.href; a.textContent = l.label; a.rel = 'noopener'; links.append(a) }
+    card.append(links)
+  }
+  document.body.append(card)
+  keys.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+}
+/** Whether the page is in an app's own browser (X, Instagram, Facebook and the like), which most often leave WebGPU out. */
+const inApp = () => /\b(FBAN|FBAV|Instagram|Twitter|TwitterAndroid|LinkedInApp|Line\/|Snapchat|TikTok|musical_ly|GSA\/)|; wv\)/i.test(navigator.userAgent)
+/** Copies this page's address, and says so on the key only if it was copied (an app's browser often has no clipboard). */
+const copyLink = async (key: HTMLButtonElement) => {
+  const was = key.textContent
+  let copied = false
+  try { await navigator.clipboard.writeText(location.href); copied = true } catch { /* no clipboard here */ }
+  key.textContent = copied ? 'Copied' : 'Copy it from the address bar'
+  setTimeout(() => { key.textContent = was }, 2200)
+}
 
 async function main() {
   report.env = environment()
@@ -147,6 +185,18 @@ async function main() {
     // until the visitor agrees nothing is sent to either, and the door's code is not fetched.)
     : query.has('lobby') && MASTER && RULES.lobbies === 'preview' && agreed('join') ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
   const gpu = await openGpu()
+  // The device lost (#81: a GPU reset, a phone short of memory, a long while in the background): the frames stop and
+  // the visitor is told, with a key that opens the realm again, rather than a picture that silently stands still.
+  gpu.onLost((info) => {
+    lost = true
+    report.notes.push(`device lost: ${info.reason}`)
+    if (info.reason === 'destroyed') return
+    const name = LOCAL?.name ?? 'The world'
+    if (!LOCAL) { over.status(`The GPU was lost (${info.reason}). Reload to go on.`); return }
+    loading.fail()
+    tell('error', { message: 'the GPU was lost', fatal: true })
+    failCard({ title: `${name} stopped drawing`, lines: ['The graphics processor was reset. This happens when a phone runs short of memory, or a tab was in the background for a long time.'], keys: [{ label: `Reload ${name}`, main: true, run: () => location.reload() }] })
+  })
   loading.step('gpu')
   const { device } = gpu
   report.env.gpu = await describe(gpu)
@@ -423,7 +473,8 @@ async function main() {
   }
   let target: Offscreen | null = null
   const fit = () => {
-    const dpr = devicePixelRatio || 1
+    // (At most two device pixels a CSS pixel, #81: a phone's three draws 2.25 times the pixels for little to see.)
+    const dpr = Math.min(devicePixelRatio || 1, 2)
     const w = Math.max(1, Math.round(laid.w * dpr)), h = Math.max(1, Math.round(laid.h * dpr))
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; target?.destroy(); target = null }
     const size: [number, number] = [Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))]
@@ -730,6 +781,7 @@ async function main() {
     return roomed
   }
   const frame = (now: number) => {
+    if (lost) return
     // At rest, a screen frame that comes too soon after the last one drawn is let go by, unseen by the watchers too: what
     // they are handed is the time since the last frame drawn. (Two milliseconds short still counts, so 60 Hz gives 30.)
     const wasResting = resting
@@ -2329,15 +2381,25 @@ main().catch(async (e: unknown) => {
   loading.fail()
   const text = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)
   over.status(`This did not work here: ${text.split('\n')[0]}`)
-  // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.
+  // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, with what to do next (#81).
   if (LOCAL) {
     tell('error', { message: text.split('\n')[0] })
-    document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
-    const told = document.createElement('p')
-    told.style.cssText = 'position:fixed;inset:0;margin:auto;height:fit-content;max-width:min(30em,calc(100vw - 32px));padding:0 16px;font:500 17px/1.45 system-ui,sans-serif;color:#e8ecf2;text-align:center;z-index:20'
-    told.textContent = /webgpu/i.test(text) ? `${LOCAL.name} is drawn with WebGPU, which this browser does not offer here. It opens in a recent Safari, Chrome or Edge.` : `${LOCAL.name} could not open here. Reloading the page may help.`
-    document.body.append(told)
-  }
+    const name = LOCAL.name
+    if (/webgpu/i.test(text)) {
+      const touch = navigator.maxTouchPoints > 0
+      failCard({
+        title: `${name} needs WebGPU`,
+        lines: [
+          `This browser doesn't offer WebGPU here, so ${name} can't be drawn.`,
+          inApp() || touch ? 'Open this link in Safari or Chrome. Browsers inside apps, like X\'s, often leave WebGPU out.' : 'It opens in a recent Chrome, Edge or Safari.',
+        ],
+        keys: [{ label: 'Copy link', main: true, run: (k) => void copyLink(k) }],
+        links: [{ label: 'zahynailo.dev', href: 'https://zahynailo.dev' }, { label: 'Voxelwright on GitHub', href: 'https://github.com/voxelwright/voxelwright' }],
+      })
+    } else {
+      failCard({ title: `${name} couldn't open`, lines: ['Something went wrong while it was loading. Reloading often helps.'], keys: [{ label: 'Reload', main: true, run: () => location.reload() }] })
+    }
+  } else document.documentElement.dataset.failed = '1'
   console.error(e)
   report.notes.push(`failed: ${text}`)
   await post('error')
