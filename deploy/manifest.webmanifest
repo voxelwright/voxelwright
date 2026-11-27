@@ -1,0 +1,66 @@
+{
+  "id": "/",
+  "name": "Voxelwright — San Francisco",
+  "short_name": "Voxelwright",
+  "description": "San Francisco at true size in 10 cm voxels, drawn live with WebGPU in the browser. Walk it, drive it, or make things in it by talking to your own AI.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#10141a",
+  "theme_color": "#10141a",
+  "categories": ["games", "entertainment"],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  },
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Explore San Francisco",
+      "short_name": "Explore",
+      "description": "Enter San Francisco immediately with controls ready",
+      "url": "/?first=0",
+      "icons": [
+        { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Night Drive",
+      "short_name": "Night Drive",
+      "description": "Drive San Francisco at night with city lights on",
+      "url": "/?first=0&hour=21.5&living=car",
+      "icons": [
+        { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Golden Hour",
+      "short_name": "Golden Hour",
+      "description": "San Francisco in warm late-afternoon sunlight",
+      "url": "/?first=0&hour=17.25",
+      "icons": [
+        { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    }
+  ]
+}

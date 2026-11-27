@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { CEILING, NOTE, SET, Synth } from '../page/sound/dsp.ts'
 import { compile, patch, sounds } from '../page/sound/patch.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from '../page/sound/kinds.ts'
+import { hearing } from '../page/sound/world.ts'
 import * as ears from './ears.mjs'
 import { arg } from './kit.mjs'
 
@@ -80,6 +81,53 @@ console.log('True to what it says')
   a.notes([0, 1, 0, 1, 0.8, 0, 0.7, 0.7, 0, 0, 0, 0, 24000, 1, 0, 1, 0.8, 0, 0.7, 0.7, 0, 0, 0, 0])
   const al = new Float32Array(48000), ar = new Float32Array(48000); a.render(al, ar)
   check(al.slice(0, 12000).some((v, i) => Math.abs(v - al[24000 + i]) > 1e-3), 'two blows on the same brick are not the same sound (the grit in each differs)')
+}
+
+console.log('Vehicle and body bumps do not ring like a bell')
+{
+  const bumpDecay = Object.fromEntries(['bodyBump', 'carBump', 'carCrunch'].map((name) => {
+    const o = play(WORLD[name], { force: 0.75, secs: 2 })
+    keep(`world-${name}`, o)
+    return [name, ears.decay(o.l, o.sr, 40)]
+  }))
+  check(bumpDecay.bodyBump < 0.2 && bumpDecay.carBump < 0.3 && bumpDecay.carCrunch < 0.5, `body and vehicle impacts are short and damped, never ringing like a bell (bodyBump ${bumpDecay.bodyBump.toFixed(2)} s, carBump ${bumpDecay.carBump.toFixed(2)} s, carCrunch ${bumpDecay.carCrunch.toFixed(2)} s to -40 dB)`)
+  const played = []
+  const fakeVoice = {
+    context: { currentTime: 0 },
+    play(p, how) { played.push({ p, how }); return true },
+    set() {},
+    hear: () => ({ gain: 1, pan: 0, lp: 20000, late: 0, far: 2 }),
+    listen() {},
+    flush() {},
+    hold: () => 0,
+    release() {},
+    glide() {},
+    place: () => 0,
+    forget() {},
+    hush() {},
+    running: true,
+    told: null,
+    spent: 0,
+    out: null,
+  }
+  const fakeScene = { ground: () => 0, paving: () => 8, rain: () => 0, under: () => false, flames: () => new Float32Array(0), bodies: () => 0, hour: () => 12, making: () => false, kind: () => 0, person: (id) => id === 10 }
+  const h = hearing(fakeVoice, fakeScene, { music: false })
+  const empty = { edits: [], born: [], gone: [], dust: [], moves: [], broke: [], bursts: [], fire: [], flow: [], live: [], figures: [], struck: [] }
+  // Player walking gently into a steel car (1.5 m/s): silent.
+  h.told({ ...empty, struck: [{ a: 10, b: 20, at: [0, 0, 0], speed: 15, push: 50, kindA: 10, kindB: 12, flags: 3 }] }, new Map())
+  check(played.length === 0, `a person brushing a car at walking speed makes no impact sound (${played.length} played)`)
+  // Player running into a steel car (3.5 m/s): only soft bodyBump, never HIT.steel.
+  played.length = 0
+  h.told({ ...empty, struck: [{ a: 10, b: 20, at: [0, 0, 0], speed: 35, push: 200, kindA: 10, kindB: 12, flags: 3 }] }, new Map())
+  check(played.length === 1 && played[0].p === WORLD.bodyBump && !played.some((x) => x.p === HIT.steel), 'a person running into a steel car plays a soft muted bodyBump, never ringing HIT.steel')
+  // Low-speed car-to-car bump (2.5 m/s): damped carBump, never HIT.steel.
+  played.length = 0
+  h.told({ ...empty, struck: [{ a: 30, b: 40, at: [0, 0, 0], speed: 25, push: 600, kindA: 12, kindB: 12, flags: 3 }] }, new Map())
+  check(played.some((x) => x.p === WORLD.carBump) && !played.some((x) => x.p === HIT.steel || x.p === BREAK.steel), 'a low-speed car bump plays damped carBump, never ringing HIT.steel')
+  // High-speed car-to-car crash (8.0 m/s): carBump + carCrunch + glass shatter, never HIT.steel or BREAK.steel.
+  played.length = 0
+  h.told({ ...empty, struck: [{ a: 50, b: 60, at: [0, 0, 0], speed: 80, push: 5000, kindA: 12, kindB: 12, flags: 7 }] }, new Map())
+  check(played.some((x) => x.p === WORLD.carBump) && played.some((x) => x.p === WORLD.carCrunch) && played.some((x) => x.p === BREAK.glass) && !played.some((x) => x.p === HIT.steel || x.p === BREAK.steel), 'a high-speed car crash layers carBump, carCrunch and glass shatter without ringing steel')
 }
 
 console.log('In tune, and on time')

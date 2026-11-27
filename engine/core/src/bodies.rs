@@ -502,6 +502,11 @@ impl Ground {
         support::Blocks { region, count, by }
     }
 
+    #[inline]
+    fn box_hits_col(&self, x: i32, z: i32, y0: i32, y1: i32) -> bool {
+        self.boxes.iter().any(|(a, b)| a[0] <= x && x < b[0] && a[2] <= z && z < b[2] && a[1] <= y1 && y0 < b[1])
+    }
+
     fn make(&mut self, key: [i32; 3]) -> Sector {
         let s = SIDE as i32;
         let (lo, hi) = (key.map(|k| k * s), key.map(|k| (k + 1) * s));
@@ -510,7 +515,24 @@ impl Ground {
         if (key[1] < first || key[1] > last) && !self.boxes.iter().any(|(a, b)| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])) {
             return if key[1] < first { Sector::Solid } else { Sector::Air };
         }
-        self.fill(key);
+        if let Some((kept, _)) = self.kept.get(&key) {
+            match kept {
+                Kept::Same(0) => return Sector::Air,
+                Kept::Same(k) if burns(material(*k)).0 == 0 && support::is_ground(*k) => return Sector::Solid,
+                Kept::Same(k) => {
+                    self.scratch.start(key[0], key[1], key[2], 0);
+                    self.scratch.cells.fill(*k);
+                }
+                Kept::Cells(cells) => {
+                    self.scratch.start(key[0], key[1], key[2], 0);
+                    self.scratch.cells.copy_from_slice(cells);
+                }
+            }
+        } else {
+            let reaching = self.edits.iter().zip(&self.boxes).filter(|(_, (a, b))| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i])).map(|(e, _)| e);
+            fill_of(&mut self.scratch, key[0], key[1], key[2], 0, reaching);
+            self.charged |= self.scratch.cells.iter().any(|&k| charged(k));
+        }
         let mut bits = Box::new([0u64; CELLS / 64]);
         let mut fuel = Box::new([0u64; CELLS / 64]);
         let mut coarse = Coarse::new(0);
@@ -526,10 +548,9 @@ impl Ground {
                     coarse.built[i >> 6] |= 1 << (i & 63);
                     coarse.count[b] += 1;
                 }
-                if burns(material(kind)).0 != 0 {
-                    coarse.sorted(i, material(kind));
-                }
-                if burns(material(kind)).0 != 0 {
+                let mat = material(kind);
+                if burns(mat).0 != 0 {
+                    coarse.sorted(i, mat);
                     fuel[i >> 6] |= 1 << (i & 63);
                 }
                 any = true;
@@ -571,7 +592,18 @@ impl Ground {
 
     #[inline]
     pub fn solid(&mut self, x: i32, y: i32, z: i32) -> bool {
-        let slot = self.slot([x >> 6, y >> 6, z >> 6]);
+        let key = [x >> 6, y >> 6, z >> 6];
+        let slot = if key == self.last.0 {
+            Some(self.last.1 as usize)
+        } else if let Some(&s) = self.sectors.get(&key) {
+            self.last = (key, s);
+            Some(s as usize)
+        } else if crate::bay::on() && !self.box_hits_col(x, z, y, y) {
+            return crate::bay::solid_single(x, y, z);
+        } else {
+            None
+        };
+        let slot = slot.unwrap_or_else(|| self.slot(key));
         match &self.slots[slot] {
             Sector::Air => false,
             Sector::Solid => true,
@@ -611,14 +643,42 @@ impl Ground {
     }
 
     /// What the cell is made of. Slower than `solid`: its sector is made whole, and the last few asked about are kept.
+    /// In unedited Bay columns, answers directly from the single column without building a 262,144-cell sector (#73).
     pub fn kind(&mut self, x: i32, y: i32, z: i32) -> Kind {
         let key = [x >> 6, y >> 6, z >> 6];
         let i = at((x & 63) as usize, (y & 63) as usize, (z & 63) as usize);
+        if let Some(kept) = self.kept.get_mut(&key) {
+            self.asked += 1;
+            kept.1 = self.asked;
+            return match &kept.0 {
+                Kept::Same(kind) => *kind,
+                Kept::Cells(cells) => cells[i],
+            };
+        }
+        if crate::bay::on() && !self.box_hits_col(x, z, y, y) {
+            return crate::bay::kind_single(x, y, z);
+        }
         self.keep(key);
         match &self.kept[&key].0 {
             Kept::Same(kind) => *kind,
             Kept::Cells(cells) => cells[i],
         }
+    }
+
+    /// Top solid cell + 1 at or below `y` within `depth` cells (edits and all), or `i32::MIN` if none (#73).
+    pub fn under(&mut self, x: i32, y: i32, z: i32, depth: i32) -> i32 {
+        if crate::bay::on() && !self.box_hits_col(x, z, y - depth, y) {
+            return crate::bay::under(x, y, z, depth);
+        }
+        let end = y - depth;
+        let mut at = y;
+        while at > end {
+            if self.solid(x, at, z) {
+                return at + 1;
+            }
+            at -= 1;
+        }
+        i32::MIN
     }
 }
 

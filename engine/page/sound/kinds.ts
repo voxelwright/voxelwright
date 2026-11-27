@@ -65,5 +65,9 @@ export const WORLD: Record<string, Patch> = {
   carShift: { how: 'struck', hard: 0.45, rough: 0.8, shape: 'skin', pitch: 76, ring: 0.14, damp: 0.85, bend: -0.35, air: { from: 700, to: 180, for: 0.12, gain: 0.55, q: 0.7 }, gain: 0.65 },
   carPop: { how: 'struck', hard: 0.85, rough: 1, shape: 'lump', pitch: 140, ring: 0.05, damp: 0.9, air: { from: 1900, to: 260, for: 0.09, gain: 0.75, q: 0.8 }, gain: 0.7 },
   carThump: { how: 'struck', hard: 0.2, rough: 0.5, shape: 'skin', pitch: 54, ring: 0.18, damp: 0.92, bend: -0.25, air: { from: 320, to: 85, for: 0.14, gain: 0.55, q: 0.6 }, gain: 0.85 },
+  // Damped body & vehicle impacts: short hollow thuds and crumple noise, never a ringing steel bell.
+  bodyBump: { how: 'struck', hard: 0.14, rough: 0.45, shape: 'lump', pitch: 82, ring: 0.055, damp: 0.92, bend: -0.15, air: { from: 320, to: 90, for: 0.06, gain: 0.35, q: 0.6 }, gain: 0.48 },
+  carBump: { how: 'struck', hard: 0.32, rough: 0.55, shape: 'skin', pitch: 66, ring: 0.11, damp: 0.9, bend: -0.25, air: { from: 520, to: 110, for: 0.1, gain: 0.55, q: 0.65 }, gain: 0.8 },
+  carCrunch: { how: 'struck', hard: 0.72, rough: 0.95, shape: 'plate', pitch: 155, ring: 0.16, damp: 0.82, bend: -0.2, pieces: { count: 6, over: 0.22, spread: 0.45 }, air: { from: 2400, to: 260, for: 0.22, gain: 0.85, q: 0.5 }, gain: 0.88 },
   carHorn: { how: 'blown', hard: 0.9, rough: 0.15, shape: 'tube', pitch: 415, ring: 0.08, damp: 0.28, gain: 0.55 },
 }

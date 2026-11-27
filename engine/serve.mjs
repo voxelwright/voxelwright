@@ -1305,8 +1305,8 @@ function gapsAll() {
 }
 
 let topsAsked = 0, topsSince = Date.now()
-/** The road's marks (/bay/marks.bin) and 3D map binary (/bay/map.bin), once made. */
-let roadMarks = null, navMap = null
+/** The road's marks (/bay/marks.bin), neighborhood places (/bay/places.json) and 3D map binary (/bay/map.bin), once made. */
+let roadMarks = null, navMap = null, bayPlaces = null
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
@@ -1403,6 +1403,11 @@ const server = createServer((req, res) => {
     if (bytes) return send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream')
     if (url.pathname !== '/bay/map.bin') return send(res, 404, 'no road marks')
   }
+  // Neighborhood storefronts & plazas (/bay/places.json), lazily compiled from sf/places-raw.json.br + brands.json + plazas.json.
+  if (url.pathname === '/bay/places.json') {
+    bayPlaces ??= import('./sf/places.mjs').then((m) => m.buildPlaces())
+    return void bayPlaces.then((made) => send(res, 200, made.bytes, TYPES['.json']), (e) => { bayPlaces = null; console.error(`no neighborhood places: ${e.message}`); send(res, 404, 'no neighborhood places') })
+  }
   // The 3D minimap & GPS navigation binary (/bay/map.bin), lazily compiled once from the staged SF release + street graphs.
   if (url.pathname === '/bay/map.bin') {
     const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
@@ -1410,7 +1415,7 @@ const server = createServer((req, res) => {
     const pin = JSON.parse(readFileSync(join(root, 'sf', 'pilot', 'current.json'), 'utf8'))
     const stagedRel = join(staged, dirname(pin.manifest)), builtRel = join(root, 'dist-sf', 'sf', dirname(pin.manifest))
     const relDir = existsSync(join(stagedRel, 'tiles')) ? stagedRel : builtRel
-    navMap ??= import('./sf/map.mjs').then((m) => m.buildMap({ releaseDir: relDir, graphDir: graphs }).bytes)
+    navMap ??= Promise.all([import('./sf/map.mjs'), import('./sf/places.mjs').then((p) => p.buildPlaces().mapPlaces).catch(() => [])]).then(([m, extraPlaces]) => m.buildMap({ releaseDir: relDir, graphDir: graphs, extraPlaces }).bytes)
     return void navMap.then((bytes) => send(res, 200, bytes, 'application/octet-stream'), (e) => { navMap = null; console.error(`no 3D map binary: ${e.message}`); send(res, 404, 'no 3D map') })
   }
   // The road's marks for the whole city (#450, sf/marks.mjs over the city run's street graphs), as sf/build.mjs writes

@@ -20,6 +20,7 @@ import { coarser, COUPE_KINDS, GT_COUPE, leaksOf, outsideAir, sculptCoupe } from
 import { car as makeCar, FINE_FILLED, fineCar } from '../page/living.ts'
 import { carveWheelWells } from '../page/wheels.ts'
 import { KEPT } from '../rules/kept.mjs'
+import { buildRobotaxiModel, ROBOTAXI_SERVICES } from '../page/robotaxi.ts'
 import { cleanShell } from '../sf/sculpt-cars.mjs'
 import { here } from './kit.mjs'
 
@@ -159,6 +160,13 @@ console.log('the SF library: repainted cleanly, shut at every coarseness')
     if (made.status !== 0) throw new Error(made.stderr)
     const unrun = (runs, palette, n) => { const b = Buffer.from(runs, 'base64'), c = new Uint16Array(n); let i = 0, at = 0; const leb = () => { let v = 0, s = 1, x; do { x = b[i++]; v += (x & 127) * s; s *= 128 } while (x & 128); return v }; while (i < b.length) { const n2 = leb(), which = leb(); c.fill(palette[which], at, at + n2); at += n2 } return c }
     const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8'))
+    // #100: every drivable vehicle in the SF library and every procedural robotaxi service wears a fine look (per >= 4).
+    const drivable = index.cars.map((entry) => ({ entry, car: JSON.parse(readFileSync(join(dir, entry.path), 'utf8')) })).filter(({ car }) => !!car.motor)
+    check(drivable.length >= 7 && drivable.every(({ car }) => car.looks?.some((l) => l.per >= 4)), `every drivable SF vehicle wears a fine look (per >= 4): ${drivable.map(({ entry, car }) => `${entry.id}@${Math.max(...(car.looks ?? []).map((l) => l.per))}`).join(', ')}`)
+    for (const svc of ROBOTAXI_SERVICES) {
+      const m = buildRobotaxiModel(svc)
+      check(!!m.motor && m.looks.some((l) => l.per >= 4), `procedural robotaxi ${svc.id} is drivable and wears a fine look (per >= 4)`)
+    }
     for (const entry of index.cars.filter((c) => ['coupe', 'saloon', 'suv', 'hatch', 'van', 'truck'].includes(c.id))) {
       const car = JSON.parse(readFileSync(join(dir, entry.path), 'utf8')), first = car.looks[0], n = (l) => l.size[0] * l.size[1] * l.size[2]
       const looks = car.looks.map((l) => ({ l, kinds: unrun(l.runs, l.palette, n(l)) })).filter(({ l }) => Math.abs(l.size[0] / l.per - first.size[0] / first.per) < 3)

@@ -57,6 +57,7 @@ if (parts.includes('cars')) {
       const byHue = new Map()
       look.palette.forEach((k, j) => { if (look.roles?.[j] === 'paint' && hueOf(colourOf(k)) >= 0) byHue.set(hueOf(colourOf(k)), (byHue.get(hueOf(colourOf(k))) ?? 0) + n[j]) })
       const own = [...byHue.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+      if (c.id === 'hatch') check(own === 15, `blue saloon (hatch) paint role selects blue hue 15, not dark grey trim (got hue ${own})`)
       if (own === undefined) continue
       const filled = n.reduce((a, b, j) => a + (look.palette[j] ? b : 0), 0)
       for (const v of car.variants) {

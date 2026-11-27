@@ -14,7 +14,7 @@ Install Node.js 25 or newer and stable Rust, then add the Wasm target once with 
 ./world
 ```
 
-It builds the core, downloads and verifies the pinned city data, builds the realm and serves it. Open the printed address in a WebGPU browser such as Chrome and choose the **EXPLORE** board twice: the first click arms it, and a second at least 300 ms later enters the city. The [quickstart](guide/quickstart.md) covers mirrors, the Dev Container and what to try first.
+It builds the core, downloads and verifies the pinned city data, builds the realm and serves it. Open the printed address in a WebGPU browser such as Chrome, click the **EXPLORE** board to open the 3D map, choose a spot (or keep the scenic default) and press **Start** to enter the city. The [quickstart](guide/quickstart.md) covers mirrors, the Dev Container and what to try first.
 
 ## What works today
 
