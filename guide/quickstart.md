@@ -36,7 +36,7 @@ Every key, the gamepad and the touch controls are on [gameplay](/gameplay).
 
 ## Make something
 
-Exploring needs no account or key. To make something new, open the realm settings, choose **Your AI…**, select your provider and paste your own API key. The browser sends requests directly to that provider. Use **Forget this key** in the same panel to remove the saved key.
+Exploring needs no account or key. To make something new, open the realm settings, choose **Your AI…**, select your provider and paste your own API key. The browser sends requests directly to that provider. The page keeps the key for this tab only, so it is gone when you close the tab. Tick **Remember key in this browser** before you connect to keep it for later visits. Use **Forget this key** in the same panel to remove the saved key.
 
 ## The city's data
 
