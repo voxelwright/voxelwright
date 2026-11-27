@@ -9,6 +9,7 @@
 //   node deploy/data.mjs pack-local PIN DIRECTORY   writes DIRECTORY/TAG/data.tar and DIRECTORY/data.json for a staged release
 //   node deploy/data.mjs fetch   in CI: downloads the bundle deploy/data.json names, checks it is for the pin and that
 //                                every file is the one packed, and writes it all under $HOME/.village
+//   node deploy/data.mjs fetch ARCHIVE   verifies and restores a previously downloaded data.tar from disk
 import { brotliCompressSync, brotliDecompressSync, constants } from 'node:zlib'
 import { createWriteStream } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
@@ -123,12 +124,14 @@ if (localPack || process.argv[2] === 'pack') {
     rmSync(work, { recursive: true, force: true })
   }
 } else if (process.argv[2] === 'fetch') {
+  if (process.argv.length > 4) fail('usage: node deploy/data.mjs fetch [ARCHIVE]')
   const record = JSON.parse(readFileSync(RECORD, 'utf8'))
   if (record.pin !== pin) fail(`deploy/data.json is for pin ${record.pin.slice(0, 12)} but engine/sf/pilot/current.json pins ${pin.slice(0, 12)}: run node deploy/data.mjs pack and commit deploy/data.json`)
   const work = mkdtempSync(join(tmpdir(), 'sf-data-'))
   try {
-    await download(record.tag, join(work, 'data.tar'))
     const archive = join(work, 'data.tar')
+    if (process.argv[3]) copyFileSync(process.argv[3], archive)
+    else await download(record.tag, archive)
     const listing = execFileSync('tar', ['-xOf', archive, 'index.json'], { maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
     if (sha(listing) !== record.digest) throw new Error(`${record.tag} is not the bundle deploy/data.json names`)
     const { files: index } = JSON.parse(listing)
@@ -156,4 +159,4 @@ if (localPack || process.argv[2] === 'pack') {
   } finally {
     rmSync(work, { recursive: true, force: true })
   }
-} else fail('usage: node deploy/data.mjs pack|pack-local PIN DIRECTORY|fetch')
+} else fail('usage: node deploy/data.mjs pack|pack-local PIN DIRECTORY|fetch [ARCHIVE]')

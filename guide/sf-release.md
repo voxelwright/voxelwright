@@ -214,7 +214,7 @@ Never edit a staged release. Stage a new one, which gets a new name. The code ho
 - `release.py --panel` moves a staging pointer only with a receipt naming this candidate, the current predecessor, the tested core's Wasm and the panel spec, with no score below the previous pin or `engine/bay/panel-floors.json`.
 - `build.mjs` by default builds only the release `engine/sf/pilot/current.json` pins, and fails when the staging folder does not hold it.
 - `deploy/data.mjs pack` refuses a staged manifest whose SHA-256 is not the pin.
-- `deploy/data.mjs fetch` refuses a bundle made for another pin or whose index does not hash to the recorded digest, and checks every file's length and SHA-256.
+- `deploy/data.mjs fetch` checks the pin, the index digest and each restored file's length and SHA-256. Passing a local `data.tar` as an argument applies the same checks to a bundle already on disk.
 </Warning>
 
 ### The data bundle

@@ -79,6 +79,7 @@ The release, the street graphs and the kept car live in `~/.village`, not in git
 | `node deploy/data.mjs pack` | The machine with `~/.village`, after the pin moves | Bundles the pinned release (its quality-11 copies from the realm build's cache), the street graphs and the kept car as Brotli in one `data.tar`. Uploads it as release `sf-data-<first 16 hex of the index digest>` unless that release exists, and writes `deploy/data.json` (`pin`, `digest`, `tag`). |
 | `node deploy/data.mjs pack-local PIN DIRECTORY` | Anywhere with the staged release | Writes the archive and `data.json` into `DIRECTORY` instead of uploading. |
 | `node deploy/data.mjs fetch` | CI | Checks that `data.json` is for the pin in `engine/sf/pilot/current.json`, downloads the bundle, checks the index digest and every file's size and SHA-256, and writes them under `~/.village/engine`. |
+| `node deploy/data.mjs fetch /path/to/data.tar` | Bake machine | Restores a local copy of the bundle with the same pin, index and file checks. |
 
 `fetch` downloads from GitHub, or from `VOXELWRIGHT_DATA_URL` when it is set (HTTPS, or HTTP on a loopback address: `127.0.0.1`, `localhost` or `[::1]`). A mirror serves `<tag>/data.tar` under that address, the layout `pack-local` writes. If the pin and `data.json` disagree, CI fails before it builds the realm, so nothing deploys. Commit `data.json` with the pin.
 
