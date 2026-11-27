@@ -22,7 +22,7 @@ import { car, fineCar, living, type Making } from './living.ts'
 import { stunts } from './stunts.ts'
 import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
-import { engineVent, puffs } from './puffs.ts'
+import { engineOut, engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
@@ -1141,7 +1141,7 @@ async function main() {
         debris.burst(at, 1.1, Math.round(1 + strength * 2), [0.06, 0.06, 0.07], 0.30, 15, 0.07 + strength * 0.05, true)
         if (glass) debris.burst([at[0], at[1] + 0.8, at[2]], 1.0, Math.round(2 + strength * 3), [0.48, 0.55, 0.60], 0.20, 14, 0.09 + strength * 0.06, true)
       },
-      engine: (at, level, dt, source) => smoke.engine(engineVent(source, at), level, dt),
+      engine: (at, level, dt, source) => smoke.engine(engineVent(source, at), level, dt, engineOut(source)),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,

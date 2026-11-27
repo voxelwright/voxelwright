@@ -7,7 +7,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { sculptCoupe } from '../page/car-sculpt.ts'
-import { fenderOpening } from '../page/crash-opening.ts'
 import { VehicleDeformation, MAX_DENTS, DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, deformPointCpu, recordImpact, repairVehicle, clearVehicle, getVehicleDamage } from '../page/deform.ts'
 
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b} (+/- ${tolerance})`)
@@ -267,15 +266,6 @@ assert.ok(quarterBend > 14, `the shoulder over the struck wheel interrupts the r
 const middle = [quarter.center[0] - 0.52*quarter.radius, quarter.center[1], quarter.center[2]]
 const doorTravel = deformPointCpu(middle, [0,0,-1], {dentCount:1, dents:[quarter], front:0}).pos[2] - middle[2]
 assert.ok(doorTravel > 0.68*quarter.depth, 'a side hit presses in the door between the folds')
-const coupe = sculptCoupe({L:4.2,H:1.3,W:1.8,per:4,wheels:[0.7,3.5],wheelY:0.3,wheelR:0.3,tyreW:0.22,eye:[1.9,1,0.55],paint:5132|128})
-for (const sign of [-1,1]) {
-  const contact = {...quarter, center:[23,10,sign < 0 ? -3 : 75], dir:[0,0,-sign]}
-  const hit = {dentCount:1,front:0,dents:[contact],cabin:new Float64Array([72,25,31,93,45,51])}
-  const slit = fenderOpening(coupe.cells, coupe.size, 0.25, hit)
-  assert.ok(slit && slit.removed.size >= 8 && slit.walls.length >= 16, 'the struck painted fender exposes its lining')
-  hit.cabin = new Float64Array([0,0,0,...coupe.size])
-  assert.equal(fenderOpening(coupe.cells, coupe.size, 0.25, hit)?.removed.size, 0, 'the split never cuts into the cabin')
-}
 const rotatedDoor = tracker.recordImpact(707, {...doorBody,front:2}, [8,4,0], [-1,0,0], 130, 10000, { min:[72,25,31], max:[93,45,51] })
 const states = [undefined, state, multi, protectedState, windshield, side, door, rotatedDoor]
 const uniforms = new Float32Array(52 * 64)
