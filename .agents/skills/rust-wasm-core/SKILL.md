@@ -44,6 +44,55 @@ WebAssembly JS API, and the probes below.
 - Loading: `WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})` in a page (the
   server sends `application/wasm`), `WebAssembly.instantiate(bytes, {})` in Node.
 
+## What belongs in Rust first (and what does not)
+
+Lessons paid for in `#139` (moving fine meshing, RLE codecs, coarsening, and vehicle sculptors
+from TypeScript to `engine/core/src/fine.rs` gave 3.6× to 7.5× speedups with bit-exact parity):
+
+**Always write in Rust (`engine/core`) from day one:**
+
+- **Dense 3D voxel/grid kernels (≥ ~50K cells)**: procedural sculptors (`sculptCoupe`,
+  `sculptKart`, `sculptOjai`), 3D flood fills and BFS (`outside_air`, `support.rs`),
+  morphological sealing/coarsening, greedy face meshing, and 3D prefix sums / smooth-normal
+  baking. Flat linear memory, zero GC pauses, and `wasm32` `simd128` beat V8 by 4×–7.5×.
+- **Packed binary codecs and multi-stage pipelines**: RLE/LEB128/base64 decode and encode plus
+  chained steps (`unrun` → `facesWithSmooth`, `sculptOjai` → `coarser` → `encodeRuns`). Keeping
+  intermediate grids inside Wasm linear memory eliminates repeated JS typed-array allocations
+  and JS↔Wasm marshaling copies.
+- **Deterministic world, tree, and simulation rules** shared across browser Web Workers and
+  Node (`city.rs`, `bay.rs`, `tree.rs`, `support.rs`, `bodies.rs`).
+
+**Keep in TypeScript (or WGSL) instead of reflexively porting:**
+
+- **AudioWorklet synthesis (`engine/page/sound/dsp.ts`)**: `AudioWorklet.addModule` (especially
+  iOS Safari) favors a single zero-import ES module; precomputing sample-rate coefficients and
+  avoiding per-sample allocations already achieves 3.1× speedup (~10% of the 2.67 ms quantum).
+- **Short off-thread JS search & WebGPU/DOM orchestration** (`engine/page/sound/music/rules.ts`,
+  `engine/page/world.ts`, `engine/page/main.ts`, `engine/page/map-gpu.ts`): zero-alloc typed-array
+  TS gets 2.6×–3.2× with no Wasm binary size or call-boundary overhead.
+- **Per-pixel GPU work (`engine/page/march.ts`)**: optimize in WGSL (pipeline-overridable
+  `override` constants), not Rust.
+
+## Wasm performance rules (paid for in #139)
+
+- **Never call `powf`/`exp`/`sin`/`hypot` per voxel in `wasm32`.** Rust on
+  `wasm32-unknown-unknown` links software `libm`, which is slower than V8's native C++ libm
+  inside 3D loops (naive Rust `sculptOjai` took 981 ms vs TS 616 ms). Precompute 1D/2D
+  analytical profile tables along X, XY, or XZ outside the inner loop: `sculptOjai` dropped
+  from 981 ms to 99.8 ms (**10×** faster than naive Rust, **6.2×** faster than TS).
+- **Reuse `thread_local!` scratch buffers (`RefCell<Scratch>`)** for every repeated per-sector
+  or per-blast call (`tree.rs`, `support.rs`, `fine.rs`), and reset large arrays sparsely
+  instead of zeroing megabytes on every call (`core-time` sped up 1.8×–3.1×; `big_charges`
+  `release asked` ~1.5×).
+- **Eliminate integer division/modulo in 3D loops**: use nested `(y, z, x)` loops or bit-packed
+  queues (`x | (z << 10) | (y << 20)`), and skip empty 4-cell/`u64` chunks in one check.
+- **Keep browser bridges free of static Node imports**: `engine/page/fine-core.ts` resolves
+  `engine/page/core.wasm` relative to `import.meta.url` (so `engine/sf/build.mjs` rewrites it
+  to the content-hashed asset) and uses `process.getBuiltinModule('node:fs')` in Node.
+- **Preserve summation order on symmetric float seams**: when porting JS `Map` code (such as
+  octahedral normal folding where `+0.0` vs `-1e-17` flips a sign), preserve insertion order
+  instead of sorting keys with `BTreeMap`.
+
 ## The same answer everywhere
 
 - Whole-number hashes (`hash.rs`) and smooth noise built from adds and multiplies only. No

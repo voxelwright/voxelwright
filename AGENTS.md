@@ -146,6 +146,28 @@ Before building or changing UI, read [DESIGN.md](DESIGN.md).
   silently become successful or be replayed without reconciliation.
 - Keep product language warm and clear. Technical controls belong in the
   Workshop and settings.
+- Write these in Rust (`engine/core`, compiled to `engine/page/core.wasm`) from
+  the start instead of prototyping in TypeScript and porting later (#139):
+  - Dense 3D voxel/grid kernels (≥ ~50K cells): procedural sculptors, 3D flood
+    fills/BFS, shell coarsening/sealing, greedy meshing, and 3D prefix sums /
+    smooth-normal baking.
+  - Packed binary codecs and multi-stage asset pipelines (RLE/varint decode,
+    coarsen, seal, mesh) so intermediate buffers stay zero-copy inside Wasm
+    linear memory rather than bouncing across JS↔Wasm.
+  - Deterministic world generation, octree encoding, structural support, and
+    physics shared across workers and Node.
+- Keep AudioWorklet DSP (`engine/page/sound/dsp.ts`, zero-import single-module
+  requirement), WebGPU/DOM orchestration, and short off-thread JS searches
+  (like music rule scoring) in allocation-free TypeScript unless profiling
+  proves Wasm wins. For GPU-bound fragment shaders (`engine/page/march.ts`),
+  gate rare or mode-specific branches behind WGSL `override` constants with an
+  explicit `GPUPipelineLayout` instead of runtime `if` checks inside inlined
+  loops.
+- In `engine/core` Wasm hot loops: hoist `powf`/`exp`/`sin`/`hypot` out of 3D
+  loops into 1D/2D lookup tables (`wasm32` software `libm` is slower than V8
+  per voxel), reuse `thread_local!` scratch buffers with sparse resets, and
+  avoid integer division/modulo by using nested `(y, z, x)` loops or packed
+  coordinates. See `.agents/skills/rust-wasm-core/SKILL.md`.
 
 ## Privacy and authority
 
