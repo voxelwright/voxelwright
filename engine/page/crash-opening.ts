@@ -5,6 +5,7 @@ import { COUPE_KINDS } from './car-sculpt.ts'
 
 export interface CrashOpening {
   face: readonly [number, number, number]
+  root?: [number, number, number]
   axis: 0 | 2
   sign: number
   large: boolean
@@ -18,6 +19,7 @@ export function crashOpening(
   face: readonly [number, number, number], axis: 0 | 2, sign: number, large: boolean, cabin: Float64Array, fender = false,
 ): CrashOpening {
   const across = 2 - axis, removed = new Set<number>(), walls: number[] = []
+  let root: [number, number, number] | undefined, rootDistance = Infinity
   const halfWidth = (fender ? 1.85 : large ? 2.55 : 1.70) / cell
   const halfHeight = (fender ? 0.28 : large ? 0.90 : 0.65) / cell
   const from = Math.max(0, Math.min(size[axis] - 1, Math.floor(face[axis] + sign * 2.0 / cell)))
@@ -31,7 +33,7 @@ export function crashOpening(
   for (let b = Math.max(0, Math.floor(face[across] - halfWidth)); b < Math.min(size[across], face[across] + halfWidth); b++) {
     const u = (b + 0.5 - face[across]) / halfWidth
     // The panel peels up at one tip. Stepped edges are the actual fine cells of the lamp surround.
-    const lift = fender ? 0.75 * (u + 0.40 * Math.abs(u)) / cell : halfHeight * 0.25 * u
+    const lift = fender ? (0.64 * u + 0.50 * Math.max(0, u - 0.1) - 0.23 * Math.exp(-16 * (u + 0.34) ** 2)) / cell : halfHeight * 0.25 * u
     const centre = face[1] + lift + halfHeight * 0.12 * Math.sin(5 * u)
     for (let y = Math.max(0, Math.floor(centre - halfHeight)); y < Math.min(size[1], centre + halfHeight); y++) {
       const v = (y + 0.5 - centre) / halfHeight
@@ -49,6 +51,50 @@ export function crashOpening(
           b + 1 >= cabin[across] && b <= cabin[across + 3] && y + 1 >= cabin[1] && y <= cabin[4]) continue
       for (let a = skin; a !== back; a -= sign) removed.add(address(a, y, b))
       wall(address(back, y, b), axis, sign > 0, COUPE_KINDS.liner)
+      // Choose the air inside the lower half of the socket. Its front lip occludes
+      // the root when the player looks across the bonnet at the far lamp.
+      const distance = u*u + (v + 0.45) ** 2
+      if (!fender && skin !== back && distance < rootDistance) {
+        rootDistance = distance
+        const inside = back + 0.5 + sign * Math.max(1, Math.round(Math.abs(skin - back) * 0.35))
+        root = axis === 0 ? [inside, y + 0.5, b + 0.5] : [b + 0.5, y + 0.5, inside]
+      }
+    }
+  }
+  // A broken lamp loses its connected lens, including the amber tip outside
+  // the mouth. Other lights and neighbouring painted panels stay in place.
+  if (!fender) {
+    const pending = [...removed], lens = new Set<number>()
+    for (const where of pending) {
+      const coords = [where & 1023, (where >>> 10) & 1023, (where >>> 20) & 1023]
+      for (let dim = 0; dim < 3; dim++) for (const step of [-1, 1]) {
+        const q = [...coords]
+        q[dim] += step
+        if (q[dim] < 0 || q[dim] >= size[dim] || Math.abs(q[across] + 0.5 - face[across]) > halfWidth + 2 / cell) continue
+        if (q.every((v,i) => v + 1 >= cabin[i] && v <= cabin[i+3])) continue
+        const key = pack(q[0], q[1], q[2])
+        if (!removed.has(key) && (kind(q[axis], q[1], q[across]) & 15) === 15) {
+          removed.add(key)
+          lens.add(key)
+          pending.push(key)
+        }
+      }
+    }
+    // A lens can be thicker than the initial pocket. Discard its old back
+    // plate before closing the housing at the first surviving cell.
+    let kept = 0
+    for (let i = 0; i < walls.length; i += 2) {
+      if (lens.has(walls[i])) continue
+      walls[kept++] = walls[i]
+      walls[kept++] = walls[i+1]
+    }
+    walls.length = kept
+    for (const where of lens) {
+      const q = [where & 1023, (where >>> 10) & 1023, (where >>> 20) & 1023]
+      q[axis] -= sign
+      if (q[axis] < 0 || q[axis] >= size[axis]) continue
+      const back = pack(q[0], q[1], q[2])
+      if (!removed.has(back) && kind(q[axis], q[1], q[across])) wall(back, axis, sign > 0, COUPE_KINDS.liner)
     }
   }
   // Cap the edges exposed beside the opening. These faces move and cast shading with the skin.
@@ -61,11 +107,11 @@ export function crashOpening(
       if (removed.has(neighbour)) continue
       const x = neighbour & 1023, y = (neighbour >>> 10) & 1023, z = (neighbour >>> 20) & 1023
       if (!cells[x + size[0] * (z + size[2] * y)]) continue
-      const lip = fender ? COUPE_KINDS.alloy : COUPE_KINDS.grille
+      const lip = fender && Math.abs(coord[across] + 0.5 - face[across]) < halfWidth * 0.32 ? COUPE_KINDS.alloy : COUPE_KINDS.grille
       wall(neighbour, edge, step < 0, edge === 1 && step < 0 ? lip : COUPE_KINDS.barrel)
     }
   }
-  return { face, axis, sign, large, cabin: cabin.slice(), removed, walls: new Uint32Array(walls) }
+  return { face, root, axis, sign, large, cabin: cabin.slice(), removed, walls: new Uint32Array(walls) }
 }
 
 /** The upper edge of a hard side strike can split where the outer sheet turns

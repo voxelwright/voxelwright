@@ -234,28 +234,39 @@ const ventInBody = () => page.evaluate(async () => {
     rest=rest.map((p,j)=>p+bent[j]-warped[j])
   }
   const [a,b,c]=rest.map(Math.floor), {size,cells}=t.fine[0]
-  const inside=a>=0 && a<size[0] && b>=0 && b<size[1] && c>=0 && c<size[2] && cells[a+size[0]*(c+size[2]*b)]!==0
-  return {rest,inside,front:rest[0]/size[0],side:rest[2]/size[2]}
+  const opening = globalThis.parts.find(p => p.deform === d)?.opening
+  const inSocket = opening?.removed.has(a | (b << 10) | (c << 20)) ?? false
+  const recess = opening ? (opening.face[opening.axis] - rest[opening.axis]) * opening.sign * part.cell : 0
+  const inside=!inSocket && a>=0 && a<size[0] && b>=0 && b<size[1] && c>=0 && c<size[2] && cells[a+size[0]*(c+size[2]*b)]!==0
+  return {rest,inside,inSocket,recess,front:rest[0]/size[0],side:rest[2]/size[2]}
 })
 await page.waitForFunction(() => globalThis.flameDraws.length >= 24, null, {timeout: 8000})
 const flames = await page.evaluate(() => globalThis.flameDraws)
 check(flames.every(frame => frame.length === 1 && frame[0] < 0.015), 'each burning frame draws one flame attached to the vent')
-const socket = await page.evaluate(() => {
+const socket = await page.evaluate(async () => {
+  const { COUPE_KINDS } = await import('/page/car-sculpt.ts')
   const damage = globalThis.engine.alive.damage(globalThis.car)
   const opening = globalThis.parts.find(p => p.deform === damage)?.opening, drawn = globalThis.brokenNose
   if (!opening || !drawn) return null
   const walls = new Set()
   for (let w = 0; w < opening.walls.length; w += 2) walls.add(opening.walls[w] + ':' + opening.walls[w+1])
-  let closed = 0, interior = 0
+  let closed = 0, interior = 0, looseAmber = 0, otherAmber = 0
   for (let i = 0; i < drawn.length; i += 6) {
     if (!drawn[i+1]) continue
     if (opening.removed.has(drawn[i])) closed++
     if (walls.has(drawn[i] + ':' + drawn[i+1])) interior++
+    if ((drawn[i+1] >>> 16) === COUPE_KINDS.amber) {
+      const z = drawn[i] >>> 20
+      if (z > globalThis.car.fine[0].size[2] / 2) looseAmber++
+      else otherAmber++
+    }
   }
-  return { removed: opening.removed.size, closed, interior }
+  return { removed: opening.removed.size, closed, interior, looseAmber, otherAmber }
 })
 check(socket && socket.removed >= 8 && socket.closed === 0 && socket.interior >= 4, `the rendered vent has missing outer skin and recessed inner faces (${JSON.stringify(socket)})`)
+check(socket?.looseAmber === 0 && socket.otherAmber > 0, 'breaking the lamp takes its amber lens tip with it and preserves the opposite indicator')
 const vent = await ventInBody()
+check(vent.inSocket && vent.recess > 0.35, `the flame root sits behind the torn lip in an actual open cell (${vent.recess.toFixed(2)} cells deep)`)
 check(!vent.inside && vent.front>0.88 && vent.side>0.58, `flame starts in air at the struck nose opening (length ${vent.front.toFixed(2)}, width ${vent.side.toFixed(2)}, inside skin ${vent.inside})`)
 await page.evaluate(() => {
   const e=globalThis.engine, t=globalThis.car, p=e.alive.where(t)

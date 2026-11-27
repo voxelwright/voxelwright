@@ -61,9 +61,9 @@ export function engineVent(piece: Piece, bonnet: readonly [number, number, numbe
     }
     const normal: Point = [0, 0, 0], offset: Point = [0, 0, 0]
     normal[front] = sign
-    const bent = deformPointCpu(face, normal, state)
-    // The light and smoke start just outside the deformed mouth.
-    for (let i = 0; i < 3; i++) offset[i] = (bent.pos[i] - com[i]) * piece.cell + bent.norm[i] * 0.16
+    const root = piece.opening?.root
+    const bent = deformPointCpu(root ?? face, normal, state)
+    for (let i = 0; i < 3; i++) offset[i] = (bent.pos[i] - com[i]) * piece.cell + (root ? 0 : bent.norm[i] * 0.16)
     vent = { state, revision: state.revision, faces, offset }
     vents.set(piece, vent)
   }
@@ -126,12 +126,13 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
     let height = in.uv.y * 0.5 + 0.5;
     let phase = -in.more.w;
     let sway = height * (0.17 * sin(phase + height * 6.0) + 0.09 * sin(2.1 * phase - height * 4.0));
-    let width = pow(1.0 - height, 0.68) * (0.67 + 0.11 * sin(phase * 1.4 + height * 9.0));
+    let foot = 0.20 + 0.80 * smoothstep(0.0, 0.22, height);
+    let width = foot * pow(1.0 - height, 0.68) * (0.67 + 0.11 * sin(phase * 1.4 + height * 9.0));
     let edge = abs(in.uv.x - sway) / max(width, 0.005);
     let main = (1.0 - smoothstep(0.42, 1.0, edge)) * (1.0 - smoothstep(0.85, 1.0, height));
     let forkHeight = 0.68 + 0.09 * sin(phase * 0.76);
-    let forkWidth = 0.35 * max(0.0, 1.0 - height / forkHeight);
-    let forkEdge = abs(in.uv.x + 0.34 + 0.13 * sin(phase - height*8.0)) / max(0.005, forkWidth);
+    let forkWidth = foot * 0.35 * max(0.0, 1.0 - height / forkHeight);
+    let forkEdge = abs(in.uv.x + foot * (0.34 + 0.13 * sin(phase - height*8.0))) / max(0.005, forkWidth);
     let tongue = max(main, (1.0 - smoothstep(0.3, 1.0, forkEdge)) * (1.0 - smoothstep(forkHeight-0.16, forkHeight, height)));
     let core = (1.0 - smoothstep(0.04, 0.64, edge)) * (1.0 - smoothstep(0.12, 0.68, height));
     let colour = mix(vec3f(0.93, 0.19, 0.02), vec3f(1.0, 0.73, 0.22), core);
@@ -373,7 +374,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
     },
     engine(at, level, dt) {
-      // The vent is already outside the deformed skin. Start here and let each puff fan out as it rises.
+      // Start in the open socket and let each puff fan out as it rises.
       if (level < 0.7) {
         const frac = (level - 0.35) / 0.35
         if (Math.random() < dt * (14 + 12 * frac)) {
@@ -384,8 +385,8 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
       // A few lighter wisps mix with the darker engine smoke.
       if (Math.random() < dt * 15) {
-        const wisp = rnd(0.56, 0.70)
-        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.65, 1.0), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.14, late: 0.12 })
+        const wisp = rnd(0.68, 0.79)
+        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.55, 0.85), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.18, late: 0.12 })
       }
       // Oil smoke rises from the same opening and expands as it cools.
       if (Math.random() < dt * 10) {
