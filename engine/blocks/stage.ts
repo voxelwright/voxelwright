@@ -6,7 +6,7 @@
 // Parts handed over in one turn of the page are drawn together: each is laid on a sheet (59 parts took 12 sheets),
 // a sheet is drawn in two passes, and each part's area is copied to its canvas on the GPU. No pixel comes back to the page's thread. Why a
 // canvas a part, and not one canvas copied with `drawImage` or one canvas under the window, is measured in
-// blocks/proof and told in the README ("Blocks").
+// blocks/proof and told in guide/blocks-and-fonts.md.
 import { blocks, fail, type Blocks, type Frame } from './pass.ts'
 
 export interface Stats { draws: number; drawMs: number; flushes: number; flushMs: number; first: number; opened: number; ready: number; lost: number; faults: string[] }

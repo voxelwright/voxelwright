@@ -3,7 +3,7 @@
 // NO MODEL IS RUN HERE. Replies kept in this file stand in for one, and a small script stands in for the binary
 // where the run itself is what is tried (slow, failing, started with a tool). This proves the plumbing: the form,
 // its refusals, the placing and the sending. That a real model answers in the form is proved by a real run
-// (engine/README.md, "Making"), not by this.
+// (guide/making.md), not by this.
 //
 //   node test/make.mjs
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'

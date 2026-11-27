@@ -15,6 +15,7 @@ Builds and ships the two Cloudflare Workers. `voxelwright` serves the San Franci
 | `data.mjs`, `data.json` | The realm's data bundle and the release that holds it. |
 | `ship.mjs` | One-command local deploy. |
 | `publish.sh` | CI's deploy, live check and rollback for each Worker. Actions only. |
+| `release.mjs` | Records a verified deploy as a GitHub Release (`vYYYY.MM.DD.N`) with grouped, meaningful release notes. |
 | `*-rule*.json` | Single Redirect rules on the two zones. |
 
 ## Test
@@ -112,6 +113,20 @@ cd deploy
 npx cf rulesets entrypoint get http_request_dynamic_redirect --zone zahynailo.dev     # note its id
 for part in a b; do npx cf rulesets rules create "$RULESET_ID" --zone zahynailo.dev --body "$(jq -c . zahynailo-realm-rule-$part.json)"; done
 ```
+
+## Releases
+
+After `publish.sh` confirms both Workers are live on `main`, `.github/workflows/deploy.yml` runs `node release.mjs` to publish a GitHub Release tagged `vYYYY.MM.DD.N` (UTC date + daily sequence) and marked **Latest**, keeping deploy releases distinct from `sf-data-*` data bundles.
+
+To preview or publish a release locally:
+
+```sh
+npm --prefix deploy run release -- --dry-run
+npm --prefix deploy run release -- --dry-run --since HEAD~3
+npm --prefix deploy run release
+```
+
+Flags: `--dry-run`, `--sha <ref>`, `--since <ref>`, `--tag <tag>`, `--date <YYYY-MM-DD>`, `--offline` (with `--dry-run`). Notes prefer an author-written `## Release notes` section in each merged PR's description and otherwise distill the PR's summary and change bullets while stripping test logs and footers. Re-running on an already-released commit is a no-op.
 
 ## Roll back
 

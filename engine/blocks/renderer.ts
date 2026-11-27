@@ -1,5 +1,5 @@
-// The Voxelmorphism kit's renderer on the engine's page stage (#430). The kit (plant-a-seed,
-// packages/voxelmorphism) is handed it with `use()`:
+// The Voxelmorphism kit's renderer on the engine's page stage (#430). The kit (engine/kit)
+// is handed it with `use()`:
 //
 //   import { use, adopt } from 'voxelmorphism'
 //   import { renderer } from './blocks/renderer.js'

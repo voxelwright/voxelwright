@@ -1572,7 +1572,7 @@ export function street(o: {
   const CRASH_SCAN = 120 // 12 m proximity radius (cells)
   const HORN_CAR_REACH = 260 // 26 m traffic reaction radius (cells)
   const NEAR_MISS_MIN_KMH = 65
-  const NEAR_MISS_MAX_GAP = 20 // 2.0 m lateral clearance (cells)
+  const NEAR_MISS_MAX_GAP = 20 // 2.0 m clearance on any axis (cells)
   const NEAR_MISS_COOL = 3.0 // seconds per car
   let nearMissCb = o.onNearMiss
   let prevRideId = 0, prevRideAt: [number, number, number] | null = null, rideDt = 0
@@ -1731,10 +1731,9 @@ export function street(o: {
       if (Math.abs(c.y - rFloorY) > 35) return
       const dist = Math.hypot(dx, dz)
       if (dist > CRASH_SCAN) return
-      // Pre-warm finest outside mesh faces before impact so waking is instant.
+      // Pre-warm finest look faces before impact so waking (with interior, drivable) is instant (#61).
       if (c.model.motor && dist < 110) {
-        const lod = lods(c.model)
-        if (lod.length) bornOf(c.model, c.paint, lod[lod.length - 1].i)
+        for (let i = 0; i < c.model.looks.length; i++) if (c.model.looks[i].per >= 4) bornOf(c.model, c.paint, i)
       }
       const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
       const cHalfL = c.model.long * 0.5, cHalfW = c.model.wide * 0.5
@@ -1769,7 +1768,10 @@ export function street(o: {
           if (ph > 420) { px = (px * 420) / ph; pz = (pz * 420) / ph }
           const py = Math.min(55, Math.max(6, (relSpeed - 28) * 0.24))
           const sepDist = Math.min(6, Math.max(0, 1.5 - gap))
-          const how = { inside: false, push: [px, py, pz] as const, sep: [nx * sepDist, nz * sepDist] as const }
+          const hitSpeed = Math.max(closing, relSpeed * 0.6)
+          // Both the driven vehicle and the woken street car dent immediately on impact, and the woken car is drivable (#61).
+          o.alive.hit(riding, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 80)
+          const how = { inside: true, push: [px, py, pz] as const, sep: [nx * sepDist, nz * sepDist] as const, then: (thing: Thing) => o.alive.hit(thing, hitAt, [-nx, 0, -nz], hitSpeed, hitSpeed * 80) }
           pending.set(c, how)
           void wake(c, how)
           // Immediate tactile recoil on the player's vehicle.
@@ -1782,8 +1784,10 @@ export function street(o: {
           for (const tCar of traffic) if (Math.hypot(tCar.x - hitAt[0], tCar.z - hitAt[2]) < 260) tCar.shaken = now - 2.5
           o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: c.model.name, woke: true })
         } else if (now - (c.hitAt ?? -99) > 0.45) {
-          // Non-motorized heavy street vehicles (cable cars, trams): solid bounce recoil + sparks/audio.
+          // Non-motorized heavy street vehicles (cable cars, trams): solid bounce recoil, dent on the driven car, sparks/audio.
           c.hitAt = now
+          const hitSpeed = Math.max(closing, relSpeed * 0.6)
+          o.alive.hit(riding, hitAt, [nx, 0, nz], hitSpeed, hitSpeed * 120)
           const bounce = Math.max(24, Math.max(closing, relSpeed * 0.5) * 1.25)
           o.alive.kick(riding, [-nx * bounce, Math.min(18, 4 + bounce * 0.1), -nz * bounce])
           crashShocks.push({ at: hitAt, radius: 14 + force * 20, t: o.clock() })

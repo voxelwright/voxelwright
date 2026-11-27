@@ -1,7 +1,7 @@
 // The kit's own showcase drawn by the engine (#430, step 3), every part against the kit's WebGL2 renderer, pixel
-// by pixel, by day and by night. Needs `node blocks/serve.mjs --port 5991 --as kit` and `npm run player`.
+// by pixel, by day and by night. Needs `node blocks/serve.mjs --port 5990`.
 //
-//   node blocks/proof/showcase.mjs [--port 5991] [--only chrome,webkit] [--page showcase/]
+//   node blocks/proof/showcase.mjs [--port 5990] [--only chrome,webkit] [--page kit/showcase/]
 //
 // Each part is drawn by the engine into its own canvas and read in the same turn; the same frame is then drawn by
 // the kit's renderer into a 2D canvas. A pixel is off when any channel differs by 3 of 255 or more. It also keeps
@@ -11,7 +11,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { arg, browsers, turn } from '../../test/kit.mjs'
 
-const port = arg('port', '5991'), only = arg('only', 'chrome').split(','), where = arg('page', 'showcase/')
+const port = arg('port', '5990'), only = arg('only', 'chrome').split(','), where = arg('page', 'kit/showcase/')
 const dir = join(homedir(), '.village', 'engine', 'blocks', 'showcase')
 mkdirSync(dir, { recursive: true })
 await turn()
@@ -25,7 +25,7 @@ for (const name of only) {
       page.on('pageerror', (e) => errors.push(e.message))
       await page.goto(`http://127.0.0.1:${port}/${where}${query}`)
       await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 60000 })
-      await page.evaluate(async () => { await (await import('/packages/voxelmorphism/src/index.js')).ready(); await document.fonts.ready })
+      await page.evaluate(async () => { await (await import('/kit/src/index.js')).ready(); await document.fonts.ready })
       await page.waitForTimeout(600)
       return { context, page, errors }
     }
@@ -38,7 +38,7 @@ for (const name of only) {
       if (await el.count()) { await el.scrollIntoViewIfNeeded(); await p.waitForTimeout(400); await p.screenshot({ path: join(dir, `${tag}-${sel.slice(1)}-${who}.png`) }) }
     }
     const said = await ours.page.evaluate(async () => {
-      const kit = await import('/packages/voxelmorphism/src/index.js'), { Renderer } = await import('/packages/voxelmorphism/src/core/gl.js')
+      const kit = await import('/kit/src/index.js'), { Renderer } = await import('/kit/src/core/gl.js')
       const stage = kit.getStage(), r = globalThis.blocks
       if (!stage || !r) return { none: !r ? 'the engine gave no renderer' : 'the kit stayed plain' }
       const frame = () => new Promise((f) => requestAnimationFrame(f))

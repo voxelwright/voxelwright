@@ -16,7 +16,7 @@ import { arg, here } from './kit.mjs'
 
 const ears = join(here, 'ears'), keep = arg('keep', ''), out = keep || mkdtempSync(join(tmpdir(), 'ears-'))
 if (keep) mkdirSync(keep, { recursive: true })
-const run = (cmd, args, cwd) => { const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 1 << 26 }); if (r.status !== 0) { console.error((r.stdout ?? '') + (r.stderr ?? '') + (r.error ? String(r.error) : '')); console.error(`FAILED: ${cmd} ${args.slice(0, 3).join(' ')} did not run (the judge needs uv: see ears/pyproject.toml)`); process.exit(1) } return r.stdout }
+const run = (cmd, args, cwd) => { const r = spawnSync(cmd, args, { cwd, encoding: 'utf8', maxBuffer: 1 << 26 }); if (r.status !== 0) { console.error((r.stdout ?? '') + (r.stderr ?? '') + (r.error ? String(r.error) : '')); const why = r.error?.code === 'ENOENT' ? 'was not found (the judge needs uv: see ears/pyproject.toml)' : `failed (${r.signal ? `signal ${r.signal}` : `exit ${r.status}`})`; console.error(`FAILED: ${cmd} ${args.slice(0, 3).join(' ')} ${why}`); process.exit(1) } return r.stdout }
 run('node', ['ears/bench.mjs', '--out', out], here)
 run('uv', ['run', '--quiet', 'python', 'judge.py', 'measure', out], ears)
 run('uv', ['run', '--quiet', 'python', 'score.py', 'clips', out, '--json', join(out, 'score.json'), '--faults', '0'], ears)

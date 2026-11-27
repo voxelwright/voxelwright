@@ -8,11 +8,20 @@
 // Cells are laid out x, then z, then y (as page/living.ts `Making`); +x is the front. A seat is where a rider's
 // feet are, in the thing's own cells from its low corner.
 
+import { sculptCoupe, sculptKart } from '../page/car-sculpt.ts'
+import { POLISHED } from '../page/spells.ts'
+
 const STEEL = 12, GLASS = 11, LAMP = 15, WOOD = 10
 const kind = (material, colour = 0) => material | (colour << 8)
 /** A colour of the world's palette by hue (0 to 23) and tone (0 to 9), as page/living.ts has it. */
 const hue = (h, tone) => 16 + (((h % 24) + 24) % 24) * 10 + (tone % 10)
 const DARK = kind(STEEL, 13)
+const fineCache = new Map()
+const fineOnce = (key, make) => {
+  let hit = fineCache.get(key)
+  if (!hit) { hit = make(); fineCache.set(key, hit) }
+  return hit
+}
 
 /** An empty grid and how to set a cell of it. */
 const grid = (size) => { const cells = new Int32Array(size[0] * size[1] * size[2]); return { cells, set: (x, y, z, k) => { if (x >= 0 && y >= 0 && z >= 0 && x < size[0] && y < size[1] && z < size[2]) cells[x + size[0] * (z + size[2] * y)] = k } } }
@@ -21,7 +30,7 @@ const wheels = (set, xs, zs, tall) => { for (const x0 of xs) for (const z of zs)
 const feet = (xs, zs, y, reach) => [[xs[0], zs[0], false], [xs[0], zs[1], false], [xs[1], zs[0], true], [xs[1], zs[1], true]].map(([x, z, front]) => ({ at: [x, y, z], reach, steers: front, drives: !front }))
 
 export const KEPT = {
-  /** A kart: 2.4 m long, low and open, one seat. Quick to turn, 14 m/s. It takes a bump: what stops it dead at its own top speed does not break it (a car's 120 did, on the first parked car). */
+  /** A kart: 2.4 m long, low and open, one seat, wearing a 2.5 cm sculpted kart look (#61). Quick to turn, 14 m/s. */
   kart(colour) {
     // Its floor is three cells over the bottom of its wheels: a kerb two cells high passes under it. (With its floor at two it sat astride a built kerb, belly on it, and was set back only to climb it again.)
     const size = [24, 8, 14], { cells, set } = grid(size), paint = kind(STEEL, hue(colour, 4))
@@ -29,9 +38,10 @@ export const KEPT = {
     for (let z = 3; z < 11; z++) { for (let y = 4; y < 8; y++) set(3, y, z, paint); set(19, 5, z, DARK) }
     for (const z of [4, 9]) set(23, 4, z, kind(LAMP))
     wheels(set, [2, 16], [0, 13], 6)
-    return { name: 'kart', size, cells, scheme: 'drive', seats: [[9, 4, 7]], motor: { front: 0, grip: 1.6, power: 70, top: 140, steer: 0.7, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 300, feet: feet([5, 19], [1, 13], 3, 6) } }
+    const look = fineOnce(`kart:${paint}`, () => sculptKart({ paint: paint | POLISHED, per: 4 }))
+    return { name: 'kart', size, cells, scheme: 'drive', seats: [[9, 4, 7]], eye: [9.5, 11, 7], fine: [{ size: look.size, per: 4, low: [0, 0, 0], cells: look.cells }], motor: { front: 0, grip: 1.6, power: 70, top: 140, steer: 0.7, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 300, feet: feet([5, 19], [1, 13], 3, 6) } }
   },
-  /** A car: 4.2 m, a cabin of glass, two seats. 20 m/s. */
+  /** A car: 4.2 m, wearing the 2.5 cm sculpted coupe look (#61), two seats. 20 m/s. */
   car(colour) {
     const size = [42, 10, 18], { cells, set } = grid(size), paint = kind(STEEL, hue(colour, 4))
     for (let y = 2; y < 10; y++) for (let z = 1; z < 17; z++) for (let x = 0; x < 42; x++) {
@@ -42,7 +52,8 @@ export const KEPT = {
     }
     for (const z of [3, 4, 13, 14]) for (const y of [3, 4]) set(41, y, z, kind(LAMP))
     wheels(set, [4, 32], [0, 17], 6)
-    return { name: 'car', size, cells, scheme: 'drive', seats: [[20, 3, 5], [20, 3, 12]], motor: { front: 0, grip: 1.3, power: 60, top: 200, steer: 0.55, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 120, feet: feet([7, 35], [1, 17], 3, 5) } }
+    const look = fineOnce(`car:${paint}`, () => sculptCoupe({ L: 4.2, H: 1.3, W: 1.8, per: 4, wheels: [0.7, 3.5], wheelY: 0.3, wheelR: 0.3, tyreW: 0.22, eye: [1.9, 1.0, 0.55], paint: paint | POLISHED }))
+    return { name: 'car', size, cells, scheme: 'drive', seats: [[20, 3, 5], [20, 3, 12]], eye: [19, 10, 5.5], fine: [{ size: look.size, per: 4, low: [0, 0, 0], cells: look.cells }], motor: { front: 0, grip: 1.3, power: 60, top: 200, steer: 0.55, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 120, feet: feet([7, 35], [1, 17], 3, 5) } }
   },
   /** A broom: 2 m of wood that hangs a metre over the ground and flies, one astride. */
   broom() {

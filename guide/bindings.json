@@ -203,7 +203,8 @@
     "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
     "deploy/worker.mjs": "lines:pathname\\.",
     "deploy/ship.mjs": "lines:const known =",
-    ".github/workflows/deploy.yml": "lines:paths:"
+    "deploy/release.mjs": "lines:^export const DEPLOY_TAG_RE|^const RELEASE_OPTIONS =",
+    ".github/workflows/deploy.yml": "lines:paths:|node release\\.mjs"
   },
   "engine/README.md": {
     "engine/package.json": [
@@ -301,7 +302,6 @@
     "engine/kit/src/core/audio/release.wav": "file"
   },
   "engine/landing/ina/README.md": {
-    "engine/landing/ina/shoot.mjs": "lines:arg\\('(place|out|cells|server|fine)'",
     "engine/landing/ina/camera.json": [
       "camera"
     ],
@@ -432,7 +432,8 @@
     "deploy/ship.mjs": "lines:const known =|steps.push|fetch\\('https",
     "deploy/data.mjs": "lines:^const INPUTS|const tag = |VOXELWRIGHT_DATA_URL requires",
     "deploy/publish.sh": "lines:pages=|rollback|grep -qi",
-    ".github/workflows/deploy.yml": "lines:paths:|environment:",
+    "deploy/release.mjs": "lines:^export const DEPLOY_TAG_RE|^const RELEASE_NOTES_HEADING_RE|^export function nextDeployTag|make_latest:",
+    ".github/workflows/deploy.yml": "lines:paths:|environment:|node release\\.mjs",
     "deploy/zahynailo-realm-rule-a.json": [
       "expression",
       "action_parameters.from_value.status_code"
@@ -464,7 +465,9 @@
     ],
     "engine/page/input.ts": "lines:^export function",
     "engine/page/plugins.ts": "types:Pass",
-    "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed"
+    "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed",
+    "engine/page/deform.ts": "lines:^export const (MAX_DENTS|DEFORM_BYTES)|^export class VehicleDeformation|^recordImpact\\(|^repairVehicle\\(",
+    "engine/page/living.ts": "lines:^const (DENTS_FROM|CRASH_FROM|HEAD_ROOM|ENGINE_SEEN) =|^repair\\(thing\\)"
   },
   "guide/engine-plugins.md": {
     "engine/rules/run.mjs": "lines:^export const (RULES_MOST|SOURCE_MOST)|^const (START_MOST|STRIKES|WAITING_MOST)",

@@ -3,7 +3,7 @@ title: Playing San Francisco
 description: Everything a player does in the San Francisco realm, from the first view to driving, the map, the gamepad, the sky and the eggs.
 ---
 
-The San Francisco realm is the engine's own page (`engine/page/main.ts`) run with the realm's record, `engine/sf/realm.json`. A visitor to San Francisco arrives at a still picture of the skyline, is set down on a roof by the EXPLORE board, then walks, flies and drives through the city. Every control, every address option and the code behind each are below.
+The San Francisco realm is the engine's own page (`engine/page/main.ts`) run with the realm's record, `engine/sf/realm.json`. A visitor to San Francisco arrives at a still picture of the skyline, dives straight into a sunlit Financial District street through the 3D map via the EXPLORE board, then walks, flies and drives through the city. Every control, every address option and the code behind each are below.
 
 ```mermaid
 stateDiagram-v2
@@ -48,11 +48,12 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Drift (handbrake) | Hold Space | Hold Drift | A / Cross (analog) |
 | Boost | Hold Shift | Hold Boost | B / Circle |
 | Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Drift and the left half forward, then let go of Drift | RT and A, then let go of A |
-| Next camera | C | - | RB or D-pad down |
+| Next camera | C | Cam | RB or D-pad down |
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
-| Horn | Hold H | - | L3 |
-| Next radio station | N | Tap the station's name while it shows | - |
+| Horn | Hold H | Hold Horn | L3 |
+| Next radio station | N | Radio, or tap the station's name while it shows | - |
+| Repair car | F | Repair | D-pad right |
 | View from the seat | V | Seat | R3 or D-pad up |
 | Get out | E | Get off | Y / Triangle |
 | **Map** | | | |
@@ -75,20 +76,19 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Mirrors, shadows, traced shadows, heat view | Shift+M, L, K, H (on foot) | - | - |
 | In a [shared world](/multiplayer): pick up, throw, portal, realm wheel | G, T, P, Tab | - | - |
 
-While you drive, the car's mode is solid. Keys the page hears before any mode still work (Enter, `/`, O, M and Shift+M among them), but the hour, rain, reset, F, K, G and Backquote wait until you are out.
+While you drive, the car's mode is solid. Keys the page hears before any mode still work (Enter, `/`, O, M and Shift+M among them), but the hour, rain, reset, K, G and Backquote wait until you are out; F repairs the car you are driving instead of lighting a fire.
 
-Riding something other than a car (a flying or hovering thing, or one that jumps) uses the schemes in `SCHEMES` in `engine/page/living.ts`: W and S, A and D, then Space and C to rise and sink, Q to roll over (hover) or Space to jump (ride). The wand registers Q as a key heard before any mode (`always` in `engine/page/wand.ts`), so on a hover vehicle Q takes up the wand and the roll never arrives; the touch key **Roll over** works. The ray marcher draws mirrors, shadows and glass; [the engine](/engine#glass) explains how.
+Riding something other than a car (a flying or hovering thing, or one that jumps) uses the schemes in `SCHEMES` in `engine/page/living.ts`: W and S, A and D, then Space and C to rise and sink, Q to roll over (hover) or Space to jump (ride). The wand ignores Q while `mounted` is live (`engine/page/wand.ts`), so on a hover vehicle Q rolls it over (and the touch key **Roll over** works too). The ray marcher draws mirrors, shadows and glass; [the engine](/engine#glass) explains how.
 
 ## The first view and EXPLORE
 
 The realm opens on a still picture from Ina Coolbrith Park (`engine/page/first.ts`). No key moves the eye and no click takes the pointer. Only the settings gear (time, weather, graphics), a Credits key and the signs answer. Enter, NumpadEnter and `/` open the eggs' line. `?first=0` skips the first view. The realm hides the line of numbers (frame time, memory, position) unless the address has `?debug=1`.
 
-The EXPLORE board on the roof of 555 California St is the way in (`engine/page/explore.ts`). `engine.explore.state` moves through `idle`, `armed`, `going`, `in` and `leaving`:
+The EXPLORE board on the roof of 555 California St is the way in (`engine/page/entry.ts`). `engine.explore.state` moves through `idle`, `armed`, `going`, `in` and `leaving`:
 
-1. **Asked once** (a click, a tap, or Enter on its button): its letters light, the eye leans toward it and a line says to ask again. Esc, a click elsewhere, moving the mouse well away or six seconds (`STANDS`) puts it back. The roof's finest tiles start loading.
-2. **Asked twice**, at least 300 ms later (`AGAIN`), so a double click counts once: the eye flies to the board in 3 s while the lens opens, the world is built around the roof, and your body is set down beside the sign. It waits up to 8 s for the roof. A roof whose tiles never come leaves you in as a flying eye. Any key or tap after 350 ms skips to the end. With `prefers-reduced-motion` the picture fades instead of flying.
-3. **On the roof**, a card teaches the two moves (Space in the air opens the canopy, B flies) and goes once both are done or after 120 s.
-4. **Back to the view** (Backquote, or the button at the foot of the settings panel) flies back to the park in 3.7 s (`BACK`). You get off any vehicle first. The world is not reloaded: what you broke stays broken.
+1. **Asked once** (a click, a tap, or Enter on its button): its letters light, the eye leans toward it and a line says to ask again. Esc, a click elsewhere, moving the mouse well away or six seconds (`STANDS`) puts it back. Financial District street tiles start warming without fetching `map.bin` yet.
+2. **Asked twice**, at least 300 ms later (`AGAIN`), so a double click counts once: the eye lifts off Ina Coolbrith Park into the 3D WebGPU map of San Francisco, locks the live voxel and far-model camera pixel-for-pixel behind it, optically dissolves the stylized map straight into 10 cm streets in the Financial District, and swings behind your body on foot. Any key or tap after 420 ms skips to the end once tiles arrive. With `prefers-reduced-motion` the picture cross-fades straight onto the street.
+3. **Back to the view** (Backquote, or the button at the foot of the settings panel) arcs smoothly back to the park. You get off any vehicle first. The world is not reloaded: what you broke stays broken.
 
 A realm with no EXPLORE board (`?boards=0`) enters on any key or click on the picture.
 
@@ -110,7 +110,7 @@ Stand within 4.5 m of a car and the cue says `E  drive the` and its name. Press 
 
 The physics runs in the core (`engine/core/src/bodies/living.rs`), as it does for every [living thing](/living). The page sends three numbers: go (throttle or brake), turn, and rise (the handbrake). For a car it also sends whether boost is held and how hard it rains (`living_drive_aux` in the [core](/engine-core)). It resends them when they change and every 0.25 s while held. A car told nothing for 1 s (`QUIET`) goes to sleep.
 
-Each car has a **motor**: `grip`, `power`, `top` speed, `steer` angle and `tough`ness, with its wheels as feet that steer or drive (`Motor` in `engine/page/living.ts`). The street cars carry their motors in the kept car library. `?living=car` puts the hand-written test car in front of you (4.2 m long, top speed 20 m/s), and `?living=finecar` the same car with a cabin in 2.5 cm cells.
+Each car has a **motor**: `grip`, `power`, `top` speed, `steer` angle and `tough`ness, with its wheels as feet that steer or drive (`Motor` in `engine/page/living.ts`). The street cars carry their motors in the kept car library. `?living=car` (and `?living=finecar`) puts the hand-written sculpted test car in front of you (4.2 m long, top speed 20 m/s, with a cabin in 2.5 cm cells).
 
 - **Throttle** is strongest from a standstill and fades toward `top`. Reverse tops out at about a third of it.
 - **Brake**: pressing against the direction of travel brakes every wheel. Off the throttle the car coasts, and stops dead below 0.6 m/s.
@@ -141,7 +141,7 @@ Hold Shift (Boost on touch, B on a pad) with the throttle on for nitrous: 40% mo
 
 A **burnout** builds a launch. Below 6.5 km/h with the throttle and the handbrake both over half, the front brakes hold the car while the rear wheels spin and smoke. The charge fills in 1.15 s and the boost bar turns orange to show it. Let go of the handbrake with the throttle still on and the car launches with up to 45% more thrust, fading over 0.8 s.
 
-In a shared world the world process gets boost but not the rain, so wet roads grip fully there. Letting go of boost is not passed on yet: once asked, boost stays on while the throttle is held.
+In a shared world, both boost (on and off) and rain wetness are forwarded to the world process (`POST /world/drive` → `living_drive_aux`), matching local driving.
 
 ### Cameras
 
@@ -172,7 +172,7 @@ N cycles the car radio through Radio Off, Bay Drive FM, Twin Peaks Chill and Fil
 
 ### Wheels
 
-Every living car with two or more wheels gets drawn wheels (`engine/page/wheels.ts`, the `wheels` pass of the [frame](/engine#how-a-frame-is-made), at most 64 wheels). The wheels baked into a car's fine look are carved out (`carveWheelWells`) so the drawn ones can move. Front wheels steer with your input and counter-steer into a slide. Each wheel rides its own suspension over kerbs. Driven wheels spin in a burnout, rear wheels lock under the handbrake, and brake discs glow orange-red after hard braking and cool as you drive on. Reduced motion softens the steering and the spin.
+Every living car with two or more wheels gets drawn wheels (`engine/page/wheels.ts`, the `wheels` pass of the [frame](/engine#how-a-frame-is-made), at most 64 wheels). The wheels baked into a car's fine look are carved out (`carveWheelWells`, preserving painted fenders and lining recessed wheel wells dark) so the drawn ones can move. Front wheels steer with your input and counter-steer into a slide. Each wheel rides its own suspension over kerbs and shifts and tilts inward with a crushed corner (`deformPointCpu` in `engine/page/deform.ts`). Driven wheels spin in a burnout, rear wheels lock under the handbrake, and brake discs glow orange-red after hard braking and cool as you drive on. Reduced motion softens the steering and the spin.
 
 ### Lamps, skidmarks and light on the road
 
@@ -192,7 +192,7 @@ Traffic cars are drawn and steered by the page, not simulated as bodies (`engine
 
 They react to you:
 
-- **Crashes.** Hit a car and it wakes as a real body and is knocked by the impact, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams only bounce you off. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
+- **Crashes.** Hit a car and it wakes as a real drivable body with its interior, is knocked by the impact, and both vehicles dent immediately, at most 6 at a time (`MAX_CRASH_LIVING`). Pedestrians nearby are startled and traffic close by stops briefly. Cable cars and trams bounce you off and dent your car. Each hit fires a `voxelwright:crash` event that plays debris and glass ([sound](/sound)).
 - **Horn.** Holding H makes pedestrians within 14 m flinch or step aside, nudges slow traffic ahead to move on, and makes one nearby car honk back.
 - **Near misses.** Passing within 2 m of a car above 65 km/h fires `voxelwright:nearmiss`, once per car every 3 s.
 
@@ -220,13 +220,13 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
-**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While riding, the foot keys step aside for the vehicle's own: Drift, Boost, Seat and Get off for a car.
+**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While riding, the foot keys step aside for the vehicle's own: Drift, Boost, Horn, Seat, Cam, Radio and Get off for a car.
 
 ## The minimap, the map and GPS
 
 The **minimap** (`engine/page/minimap.ts`) is a small 3D map drawn by the engine's own WebGPU device (`engine/page/map-gpu.ts`): extruded buildings, roads by class and a pink route ribbon. It sits bottom left on a desk and at the top on a phone and turns with your heading (your car's when driving). On foot it shows about 132 m. Flying widens it with speed. Driving, it zooms out to 1.85 times that by 180 km/h and centres up to 52 m ahead of the car, and your marker glows cyan above 45 km/h and pink in a drift (a still ring with reduced motion). `engine.map.stats` reports its `span`, `zoom` and `lookAhead`. It is hidden in the first view. Clicking it opens the full map.
 
-The **full-screen map** opens with M. Click a place, a landmark pin or a chip along the bottom to route there. A card shows the distance and rough drive and walk times. **Visit** fast-travels: it gets you off any vehicle and puts the eye above the destination. The world stops drawing while the map covers it.
+The **full-screen map** opens with M. Click a place, a landmark pin or a chip along the bottom to route there. A card shows the distance and rough drive and walk times. **Visit** fast-travels via the same 3D Map-to-Reality Optical Dive straight from the current map camera onto a verified clear street beside the destination (pressing M mid-dive cancels the dive and re-opens the map). The world stops drawing while the map covers it.
 
 **GPS** (`engine/page/gps.ts`) runs A* over the road graph. Both ends snap to a road within 700 m. Freeways and arterials cost less than side streets, and driving against a one-way costs more. When you stray more than 48 m from the route it routes again. Within 16 m of the destination it says you have arrived and clears the route. Distances are in feet and miles.
 
@@ -352,7 +352,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Part | Source | Check |
 | --- | --- | --- |
 | Keys and modes | `engine/page/input.ts`, `engine/page/keys.ts` | `engine/test/keys.mjs`, `engine/test/keys-stay.mjs` |
-| First view, EXPLORE | `engine/page/first.ts`, `engine/page/explore.ts` | `engine/test/sf-explore.mjs` |
+| First view, EXPLORE & Map Dive | `engine/page/first.ts`, `engine/page/entry.ts`, `engine/page/explore.ts` | `engine/test/sf-entry.mjs`, `engine/test/sf-explore.mjs` |
 | Body, canopy | `engine/page/person.ts` | `engine/test/person.mjs` |
 | Driving, boost, grip | `engine/page/living.ts`, `engine/core/src/bodies/living.rs` | `engine/test/living.mjs`, `engine/test/fine-living.mjs`, the core's `cargo test` |
 | Car classes | `engine/sf/fleet.mjs`, `engine/sf/cars.mjs` | - |

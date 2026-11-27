@@ -3,7 +3,7 @@
 //
 //   GET  /workshop/gaps            what models writing rules said they could not do, newest first:
 //                                  {gaps: [{id, line, count, by, wish, rule, askers: [{by, wish, name, rule, realm, at}], sent}]}
-//                                  `sent` says where a gap's session is: {state: "started" | "open" | "merged" | "in" | "asked", thread, pr, url, plugins, asked}
+//                                  `sent` says where a gap's session is: {state: "started" | "open" | "merged" | "closed" | "in" | "asked", thread, pr, url, plugins, asked}
 //   POST /workshop/brief {gap}     the brief a session would be given for that gap, to be read: {brief, title, branch, text}
 //   POST /workshop/send  {brief, again}   starts the session with exactly that brief: {thread, link}. `again: true` is the
 //                                  owner's yes, given once and here, to asking the rules that wanted it again when it is in the game
@@ -58,10 +58,10 @@ what it could not do: ${quoted(gap.line, 300)}
 
 YOUR TASK
 Give rules the one capability that the last line says is missing, as an engine plugin: the smallest thing that closes that gap for any realm, not for this wish alone. Nothing in engine/ names a game: health, score, laps are a rule's own numbers.
-1. Read AGENTS.md, then engine/README.md "Rules" and "Engine plugins", and engine/plugins/look/ as the example to follow (world.mjs, guide.txt, check.mjs).
+1. Read AGENTS.md, then guide/engine-plugins.md, and engine/plugins/look/ as the example to follow (world.mjs, guide.txt, check.mjs).
 2. Find out whether the engine already offers it: start a server (below) and read its guide (curl -s http://127.0.0.1:<port>/world/). If it does, change nothing: say so in your final message and stop.
 3. Write engine/plugins/<name>/: world.mjs (one file; what a rule may do goes under does, what it hears is said with hear or happen; check every field as a stranger's and refuse in words), page.ts only if a page must show or play something, guide.txt (the lines a model will write rules from: say every field and every limit), check.mjs (the real server, a rule that is no game, what is wrong refused in words).
-4. If the plugin needs a door into the world that plugins are not given (README lists them), add it to doors in engine/world.mjs in one line and to the README's list.
+4. If the plugin needs a door into the world that plugins are not given (guide/engine-plugins.md lists them), add it to doors in engine/world.mjs in one line and to guide/engine-plugins.md.
 5. Add what a rule can now do and hear to the lists at the top of engine/test/whole.mjs (DOES, HEARS): that check is how a later merge is caught taking it away. Change nothing else outside your plugin's folder.
 
 CHECKS, in the foreground, each under ten minutes
@@ -73,7 +73,7 @@ RULES OF THE ROAD
 Ports 5810 to 5819 and files under ~/.village/engine/workshop/. Never port 5740 or 5750, the engine-live checkout or ~/.village/engine/world/. Never run codex or gcloud. Synthetic data. Loopback only. No design documents.
 
 DELIVER
-Your branch is ${branch}, made from origin/main. One commit, subject "[#264] <what a rule can now do>", no co-author line. Before you push, read git diff --stat origin/main...HEAD: it must list only your plugin's folder and test/whole.mjs (and world.mjs and README.md if you added a door). Open a PR to main with gh. Do not merge it. Your final message: the PR's address, what a rule can now do and hear, what you ran and what it said.
+Your branch is ${branch}, made from origin/main. One commit, subject "[#264] <what a rule can now do>", no co-author line. Before you push, read git diff --stat origin/main...HEAD: it must list only your plugin's folder and test/whole.mjs (and world.mjs and guide/engine-plugins.md if you added a door). Open a PR to main with gh. Do not merge it. Your final message: the PR's address, what a rule can now do and hear, what you ran and what it said.
 `
 
 /**

@@ -43,7 +43,7 @@ export function serve(port = 5990, host = '127.0.0.1') {
     if (path.endsWith('/')) path += 'index.html'
     const rel = normalize(path).replace(/^[/\\]+/, ''), file = join(root, rel)
     // Of the engine only what the proof's pages and the kit's load.
-    if (!['blocks', 'probe', 'kit'].includes(rel.split(sep)[0]) || rel.split(sep).some((p) => p === '..' || p === 'node_modules' || p.startsWith('.')) || !(extname(rel) in TYPES) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('not found') }
+    if (!['blocks', 'probe', 'kit', 'landing', 'page', 'core'].includes(rel.split(sep)[0]) || rel.split(sep).some((p) => p === '..' || p === 'node_modules' || p.startsWith('.')) || !(extname(rel) in TYPES) || !existsSync(file) || !statSync(file).isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('not found') }
     let body = readFileSync(file)
     if (extname(rel) === '.ts') { try { body = stripTypeScriptTypes(body.toString('utf8')) } catch (e) { res.writeHead(500, { 'Content-Type': 'text/plain' }); return res.end(`${rel}: ${e.message}`) } }
     res.writeHead(200, { 'Content-Type': TYPES[extname(rel)], 'Cache-Control': 'no-store' })

@@ -8,6 +8,23 @@ import type { MapData, MapPlace } from './nav-data.ts'
 import type { Input } from './input.ts'
 import type { Hud } from './hud.ts'
 
+export interface MapDiveState {
+  cam: MapCamera
+  /** Overlay opacity (0..1): 1 = full stylized 3D map, 0 = fully dissolved into live voxel world. */
+  opacity: number
+  /** Optional target marker drawn cleanly over the diving 3D map. */
+  target?: { x: number; z: number; name?: string }
+}
+
+export interface MapCameraSnapshot {
+  cx: number
+  cz: number
+  yaw: number
+  tilt: number
+  span: number
+  extrude: number
+}
+
 export interface MapSystemOptions {
   device: GPUDevice
   format: GPUTextureFormat
@@ -23,8 +40,10 @@ export interface MapSystemOptions {
   paused(): boolean
   /** Called once when the visitor first engages (triggers lazy MAP1 load with zero cold-load bytes). */
   onEngage?(): void
-  /** Optional fast-travel handler: lets the visitor jump directly to the chosen destination on the map. */
-  onVisit?(x: number, z: number, name: string): Promise<void> | void
+  /** Called right before the fullscreen map opens (lets an active optical dive cancel cleanly). */
+  onOpen?(): void
+  /** Optional fast-travel handler: lets the visitor dive straight to the chosen destination from the map camera. */
+  onVisit?(x: number, z: number, name: string, cam: MapCameraSnapshot): Promise<boolean | void> | boolean | void
 }
 
 export interface MapSystem {
@@ -37,6 +56,12 @@ export interface MapSystem {
   readonly route: GpsRoute | null
   readonly progress: RouteProgress | null
   readonly stats: { nodes: number; edges: number; buildings: number; places: number; renderMs: number; span: number; zoom: number; lookAhead: number }
+  /** Current parsed map data (null until MAP1 has loaded). */
+  readonly data: MapData | null
+  /** Current fullscreen map camera state (for seamless Map-to-Reality dives). */
+  camera(): MapCameraSnapshot
+  /** Drives `#world-map` directly during an optical 3D Map-to-Reality dive (pass `null` to end). */
+  setDive(state: MapDiveState | null): void
   toggle(open?: boolean): void
   setMode(mode: '2d' | '3d'): void
   setDestination(x: number, z: number, name?: string): GpsRoute | null
@@ -70,17 +95,17 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
 #minimap .mm-clip {
   position: absolute;
   inset: 0;
-  border-radius: 14px;
+  border-radius: 4px;
   overflow: hidden;
   background: #173642;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 #minimap .mm-rim {
   position: absolute;
   inset: 0;
-  border-radius: 14px;
-  border: 1.5px solid rgba(255, 255, 255, 0.24);
-  box-shadow: inset 0 0 0 1px rgba(10, 18, 24, 0.42), inset 0 10px 18px rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+  border: 2px solid rgba(94, 114, 146, 0.45);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.18), inset -1px -1px 0 rgba(6, 10, 18, 0.65);
   pointer-events: none;
 }
 #minimap canvas, #world-map canvas {
@@ -112,12 +137,30 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
   opacity: 0.55;
   transition: opacity 0.18s ease-out;
 }
+#minimap .mm-mly {
+  position: absolute;
+  left: 7px;
+  bottom: 6px;
+  width: 16px;
+  height: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(12, 16, 22, 0.52);
+  opacity: 0.72;
+  z-index: 2;
+  transition: opacity 0.16s ease-out;
+}
+html.has-mapillary #minimap .mm-mly { display: inline-flex; }
+#minimap .mm-mly:hover { opacity: 1; }
+#minimap .mm-mly svg { width: 11px; height: 11px; display: block; }
 #minimap:hover { transform: translateY(-1px); }
 #minimap:hover .mm-rim { border-color: rgba(255, 255, 255, 0.42); }
 #minimap:hover .mm-key { opacity: 1; }
 #minimap:focus-visible .mm-rim { border-color: #ff4fa0; box-shadow: 0 0 0 2px rgba(255, 42, 133, 0.55); }
 
-/* Touch layouts: keep bottom-left completely free for the floating thumb stick and clear of all safe insets & buttons. */
+/* Touch layouts: keep bottom-left completely free for the floating thumb stick and place minimap cleanly in top-left. */
 @media (pointer: coarse) {
   #minimap .mm-key { display: none; }
   html.drawer #minimap,
@@ -129,13 +172,13 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
 }
 @media (pointer: coarse) and (orientation: portrait) {
   #minimap {
-    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
     bottom: auto;
-    left: 138px;
+    left: max(14px, calc(env(safe-area-inset-left) + 14px));
     width: 124px;
     height: 74px;
   }
-  #minimap .mm-clip, #minimap .mm-rim { border-radius: 11px; }
+  #minimap .mm-clip, #minimap .mm-rim { border-radius: 3px; }
   #minimap .mm-ov {
     inset: -6px !important;
     width: calc(100% + 12px) !important;
@@ -146,11 +189,11 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
   #minimap {
     top: calc(env(safe-area-inset-top, 0px) + 14px);
     bottom: auto;
-    left: calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 100px);
+    left: max(14px, calc(env(safe-area-inset-left) + 14px));
     width: 136px;
     height: 78px;
   }
-  #minimap .mm-clip, #minimap .mm-rim { border-radius: 12px; }
+  #minimap .mm-clip, #minimap .mm-rim { border-radius: 3px; }
 }
 
 /* ── Full-Screen Interactive Map & GPS Navigator ── */
@@ -168,11 +211,30 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
   font: 500 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "IBM Plex Sans", system-ui, sans-serif;
   color: #eef3f8;
 }
+@keyframes wm-open {
+  from { opacity: 0.04; transform: scale(0.988); }
+  to { opacity: 1; transform: scale(1); }
+}
 #world-map[hidden] { display: none !important; }
 #world-map.open {
   opacity: 1;
   transform: scale(1);
   pointer-events: auto;
+  transition: none;
+  animation: wm-open 0.16s cubic-bezier(0.2, 0.9, 0.25, 1) both;
+}
+#world-map.dive {
+  background: transparent;
+  transform: none;
+  transition: none;
+  pointer-events: none;
+}
+#world-map.dive .wm-head,
+#world-map.dive .wm-tools,
+#world-map.dive .wm-dock {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease-out;
 }
 #world-map .wm-stage {
   position: absolute;
@@ -415,7 +477,7 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
   #world-map .wm-title-card { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  #minimap, #world-map { transition: none !important; }
+  #minimap, #world-map { transition: none !important; animation: none !important; }
 }
 `
 
@@ -526,8 +588,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       <div class="mm-rim"></div>
     </div>
     <canvas class="mm-ov"></canvas>
+    <a class="mm-mly" href="https://www.mapillary.com/" target="_blank" rel="noopener noreferrer" aria-label="Mapillary street imagery" title="Mapillary street imagery"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 35 35" fill="none" aria-hidden="true"><path fill="#05cb63" fill-rule="evenodd" d="M16.468 25.735c.624.327 15.734 8.542 16.21 8.807.954.528 1.963-.494 1.444-1.45-.261-.48-8.446-15.977-8.722-16.451-.276-.475-.956-.714-1.467-.396-.5.312-1.077.663-1.4.832-.651.34-.731.851-.439 1.42.643 1.248 2.664 5.038 2.896 5.435.484.831-.596 1.78-1.329 1.366-.31-.176-5.107-2.768-5.446-2.971-.339-.203-.94-.201-1.351.484a53.63 53.63 0 00-.837 1.425c-.334.61-.182 1.172.441 1.499zM.517 17.069c-.805-.448-.658-1.613.357-1.91.86-.252 7.844-2.657 9.957-3.386.382-.131.679-.434.807-.82L15.032.724c.317-.957 1.466-.96 1.935-.034.166.33 6.49 12.106 6.71 12.606.22.5.078 1.053-.42 1.372-.5.319-1.312.796-1.596.977-.513.328-1.004.1-1.238-.408-.234-.507-2.038-3.78-2.774-5.169-.368-.694-1.476-.96-1.848.162l-1.224 3.689a1.343 1.343 0 01-.812.827l-3.683 1.254c-.727.247-1.08 1.392-.099 1.874.205.1 4.626 2.538 5.082 2.76.457.224.71.867.443 1.323-.364.622-.83 1.411-1 1.668-.293.444-.87.591-1.353.33C12.671 23.69.804 17.228.517 17.068z" clip-rule="evenodd"/></svg></a>
     <span class="mm-key" aria-hidden="true">M</span>
   `
+  mmRoot.querySelector('.mm-mly')?.addEventListener('click', (e) => e.stopPropagation())
   document.body.append(mmRoot)
   const mmGpu = mmRoot.querySelector<HTMLCanvasElement>('.mm-gpu')!
   const mmOv = mmRoot.querySelector<HTMLCanvasElement>('.mm-ov')!
@@ -614,6 +678,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   let streetLabels: StreetLabel[] = []
   let engagedOnce = false
   let isOpen = false
+  let diveState: MapDiveState | null = null
+  let diveDrawn = false
   let openedAt = 0
   let hideTimer: ReturnType<typeof setTimeout> | null = null
   let leaveInput: (() => void) | null = null
@@ -765,9 +831,14 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     const want = next ?? !isOpen
     if (want === isOpen) return
     if (want && !opts.engaged()) return
+    if (want) opts.onOpen?.()
     isOpen = want
     if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
     if (isOpen) {
+      diveState = null
+      wmRoot.classList.remove('dive')
+      html.classList.remove('map-dive')
+      wmRoot.style.removeProperty('opacity')
       openedAt = performance.now()
       document.exitPointerLock?.()
       html.classList.add('map-open')
@@ -827,7 +898,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       wmRoot.classList.remove('open')
       html.classList.remove('map-open')
       leaveInput?.(); leaveInput = null
-      hideTimer = setTimeout(() => { if (!isOpen) wmRoot.hidden = true }, 200)
+      if (!diveState) hideTimer = setTimeout(() => { if (!isOpen && !diveState) wmRoot.hidden = true }, 200)
     }
   }
 
@@ -854,9 +925,11 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   wmVisitBtn.addEventListener('click', () => {
     if (!destination || !opts.onVisit) return
     const { x, z, name } = destination
+    const snap: MapCameraSnapshot = { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
     clearDestination()
+    // Close interactive map controls cleanly (if onVisit initiates an optical dive, setDive keeps wmRoot live without a flash).
     toggle(false)
-    void opts.onVisit(x, z, name)
+    void opts.onVisit(x, z, name, snap)
   })
   wmClearBtn.addEventListener('click', () => clearDestination())
   wmCloseBtn.addEventListener('click', () => toggle(false))
@@ -1524,6 +1597,70 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
   }
 
+  const drawDiveOverlay = (vp: Float32Array, state: MapDiveState) => {
+    const cssW = wmStage.clientWidth, cssH = wmStage.clientHeight
+    if (cssW < 10 || cssH < 10) return
+    const dpr = Math.min(2, devicePixelRatio || 1)
+    const pw = Math.round(cssW * dpr), ph = Math.round(cssH * dpr)
+    if (wmOv.width !== pw || wmOv.height !== ph) { wmOv.width = pw; wmOv.height = ph }
+    const ctx = wmCtx
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, cssW, cssH)
+    const target = state.target
+    if (!target || state.opacity < 0.08) return
+    const proj = projectMapPoint(vp, target.x, 4, target.z, cssW, cssH)
+    if (!proj) return
+    const [dx, dy] = proj
+    const alpha = Math.min(1, state.opacity * 1.15)
+    ctx.save()
+    ctx.globalAlpha = alpha
+    const pulse = (time * 1.6) % 1
+    ctx.beginPath()
+    ctx.arc(dx, dy, 12 + pulse * 26, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(255, 45, 136, ${(1 - pulse) * 0.85})`
+    ctx.lineWidth = 2.2
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(dx, dy, 6.5, 0, Math.PI * 2)
+    ctx.fillStyle = '#ff2a85'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = '#ffffff'
+    ctx.stroke()
+    if (target.name) {
+      ctx.font = '700 12px -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif'
+      const label = target.name.toUpperCase()
+      const tw = ctx.measureText(label).width + 20
+      ctx.fillStyle = 'rgba(10, 15, 22, 0.82)'
+      ctx.beginPath()
+      ctx.roundRect(dx - tw * 0.5, dy - 38, tw, 23, 8)
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, dx, dy - 26.2)
+    }
+    ctx.restore()
+  }
+
+  const renderDive = (state: MapDiveState) => {
+    if (!mmRoot.hidden) mmRoot.hidden = true
+    if (!map || opts.paused()) return
+    const gpuDpr = Math.min(1.5, devicePixelRatio || 1)
+    const w = Math.round((wmStage.clientWidth || innerWidth) * gpuDpr)
+    const h = Math.round((wmStage.clientHeight || innerHeight) * gpuDpr)
+    const t0 = performance.now()
+    const vp = gpu.render(wmGpu, w, h, state.cam)
+    renderMs = renderMs * 0.85 + (performance.now() - t0) * 0.15
+    if (vp) {
+      lastWmVP = vp
+      drawDiveOverlay(vp, state)
+    }
+  }
+
   // ── Per-Frame Update & Render ──
   const frame = (dtRaw: number) => {
     const dt = clamp(dtRaw || 0.016, 0.001, 0.05)
@@ -1534,12 +1671,20 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       engagedOnce = true
       opts.onEngage?.()
     }
+
+    // 0. Optical Map-to-Reality Dive Mode (rendered synchronously in setDive for 0-frame parallax lag; fallback here if idle).
+    if (diveState) {
+      if (!diveDrawn) renderDive(diveState)
+      diveDrawn = false
+      return
+    }
+
     if (!engaged) {
       if (!mmRoot.hidden) mmRoot.hidden = true
       if (isOpen) toggle(false)
       return
     }
-    if (mmRoot.hidden && map) mmRoot.hidden = false
+    if (engaged && mmRoot.hidden && map) mmRoot.hidden = false
     if (!map || opts.paused()) return
 
     const p = opts.player()
@@ -1681,10 +1826,40 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     if (vp) drawMinimapOverlay(vp, mmCam, p.yaw, mmSpeedNorm, mmDriftNorm)
   }
 
+  const setDive = (state: MapDiveState | null) => {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null }
+    diveState = state
+    if (state) {
+      if (isOpen) {
+        isOpen = false
+        wmHeld.clear()
+        wmRoot.classList.remove('open')
+        html.classList.remove('map-open')
+        leaveInput?.(); leaveInput = null
+      }
+      wmRoot.hidden = false
+      wmRoot.classList.add('dive')
+      html.classList.add('map-dive')
+      wmRoot.style.opacity = String(clamp(state.opacity, 0, 1))
+      renderDive(state)
+      diveDrawn = true
+    } else {
+      diveDrawn = false
+      wmRoot.classList.remove('dive')
+      html.classList.remove('map-dive')
+      wmRoot.style.removeProperty('opacity')
+      if (!isOpen) wmRoot.hidden = true
+    }
+  }
+
   return {
     get open() { return isOpen },
-    get opaque() { return isOpen && performance.now() - openedAt > 220 },
+    get opaque() {
+      if (diveState) return false
+      return isOpen && performance.now() - openedAt > 220
+    },
     get ready() { return !!map },
+    get data() { return map },
     get mode() { return viewMode },
     get destination() { return destination ? { ...destination } : null },
     get route() { return route },
@@ -1701,6 +1876,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         lookAhead: Math.round(mmLookAhead * 10) / 10,
       }
     },
+    camera(): MapCameraSnapshot {
+      return { cx: wmCam.cx, cz: wmCam.cz, yaw: wmCam.yaw, tilt: wmCam.tilt, span: wmCam.span, extrude: wmCam.extrude }
+    },
+    setDive,
     toggle,
     setMode,
     setDestination,
