@@ -153,6 +153,10 @@ html.riding #realm :is(.act, .held, .tools, .cues), html.riding #realm :is(.act,
     #realm .sky:has(.part.res) { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)) - 68px), calc(var(--vx) * 228)); grid-template-columns: 1fr 1fr 1fr; }
     #realm .sky .part { display: grid; gap: calc(var(--vx) * 3); align-content: start; }
     #realm .sky .part.world { grid-column: 1; grid-row: 1 / span 2; }
+    /* (A column a third of the panel: the section's name and the clock kept on one line.) */
+    #realm .sky:has(.part.res) { grid-template-columns: 1.25fr 1fr 1fr; }
+    #realm .sky h2 { font-size: 11.5px; white-space: nowrap; }
+    #realm .sky header > output { font-size: 17px; }
     #realm .sky .part.acts { grid-column: 2 / -1; grid-row: 2; }
     #realm .sky .sep { display: none; }
     /* (The sky's keys are the first view's here, first.ts: in the realm's own panel a row more runs off the screen.) */

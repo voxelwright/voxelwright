@@ -120,6 +120,8 @@ html:not(.first)[data-hud].choosing #ask:not(.open) { visibility: hidden !import
 #realm[data-hud] .help, #realm[data-hud] .stick { display: none !important; }
 /* A thing's cue in the world ("E Take the van", hud.ts) is not drawn over the open Settings panel. */
 html[data-hud]:has(#realm.open) #over > #cues { visibility: hidden; }
+/* The street's name steps aside while the line to say something on is open (on a phone on its side they share the top). */
+html[data-hud]:has(#realm .egg-line:not([hidden])) #where { visibility: hidden; }
 
 /* ── Shared crisp typography & surface polish for slim voxel buttons ── */
 html[data-hud] #realm .fold,
@@ -502,10 +504,11 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   }
 
   /* Wand key (non-wheel modes) & wand bar. */
-  html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 96px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
-  html[data-hud] [data-panel="wand-take"] button.vx-button { min-block-size: 44px; }
+  /* (Under the street's name, which stands at the top left by touch; 44 px tall to hit, game-hud rule 16.) */
+  html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 124px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
+  html:not(.first)[data-hud] [data-panel="wand-take"] button.vx-button { block-size: 44px; min-block-size: 44px; }
   html[data-hud] [data-panel="wand-take"] .vx-kbd { display: none; }
-  html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 100px); }
+  html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 180px); }
 
   /* Sky drawer open: gameplay chrome steps aside cleanly. */
   html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .lobbies, #lobby-tag, #ask:not(.open), #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
