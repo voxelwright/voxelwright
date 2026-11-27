@@ -740,6 +740,7 @@ async function main() {
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
     controls.poll?.(dt)
     shot?.before?.()
+    drawAhead(now)
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     stuntHud.frame(dt)
     shot?.after(dt)
@@ -899,6 +900,39 @@ async function main() {
   // The Bay in tiles (#373): this page's core and the one that moves things hold what is round the eye, asked again as it moves.
   if (STREAM) { const tell = () => { const x = Math.round(ahead ? ahead[0] : pose.x * M), z = Math.round(ahead ? ahead[2] : pose.z * M); void near(inner, x, z); mover.postMessage({ bay: [x, z] } as never) }; tell(); setInterval(tell, 500) }
   const moving = new Map<number, Piece>()
+  // ── Where a moving thing is drawn (#73) ──
+  // The mover is asked once a frame to move things on by the time the last frame took, and what it answers is what the
+  // next frame draws: a thing is drawn where it was a frame ago. With every frame on time nobody can tell. But a frame
+  // that comes late shows it going half as fast and then twice as fast, and an answer that comes after the next frame
+  // has begun shows it standing still for a frame and then jumping (0.9 m at 200 km/h), with the eye that rides it:
+  // the faster it goes, the further. So a thing the last step moved is drawn on from where that step left it, the way
+  // it went in that step, to the time of the frame being drawn (a tenth of a second at most; not a thing that went
+  // faster than anything goes, which was set down somewhere else). A thing the last step did not move lies where it
+  // was said to. `?ahead=0`, or `engine.ahead = false`, draws things as they are said: for measuring.
+  type Placed = { pos: [number, number, number]; rot: [number, number, number, number] }
+  /** A moving thing's last two places as the mover said them, the frame the last was asked in and the seconds asked for, which step it was, and where it is drawn. */
+  const went = new WeakMap<Piece, { from: Placed | null; to: Placed; at: number; took: number; step: number; drawn: Placed }>()
+  let aheadOn = query.get('ahead') !== '0', frameAt = 0, tickAt = 0, tickTook = 0, stepped = 0
+  const AHEAD_MOST = 0.1, AHEAD_SPEED = 2000
+  /** Draws each thing the last step moved on to the time of this frame. */
+  const drawAhead = (now: number) => {
+    frameAt = now
+    if (!aheadOn) return
+    for (const piece of moving.values()) {
+      const w = went.get(piece)
+      if (!w || w.step !== stepped || !w.from || w.took < 1e-3) continue
+      const a = w.from, b = w.to, k = Math.min(AHEAD_MOST, Math.max(0, (now - w.at) / 1000)) / w.took
+      if (Math.hypot(b.pos[0] - a.pos[0], b.pos[1] - a.pos[1], b.pos[2] - a.pos[2]) > AHEAD_SPEED * w.took) continue
+      for (let i = 0; i < 3; i++) w.drawn.pos[i] = b.pos[i] + (b.pos[i] - a.pos[i]) * k
+      // Its turn goes on the same way: along the short way from the one turn to the other, and as far again.
+      const near = a.rot[0] * b.rot[0] + a.rot[1] * b.rot[1] + a.rot[2] * b.rot[2] + a.rot[3] * b.rot[3] < 0 ? -1 : 1
+      let length = 0
+      for (let i = 0; i < 4; i++) { w.drawn.rot[i] = b.rot[i] + (b.rot[i] - near * a.rot[i]) * k; length += w.drawn.rot[i] ** 2 }
+      length = Math.sqrt(length) || 1
+      for (let i = 0; i < 4; i++) w.drawn.rot[i] /= length
+      piece.pos = w.drawn.pos; piece.rot = w.drawn.rot
+    }
+  }
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
   let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0, burning = 0
@@ -939,6 +973,8 @@ async function main() {
     // An answer about the world as it was before it was put back: a blast's cells must not come down in the new one.
     if (!far && answer.age !== moverAge) { stale.answers++; return }
     queueMicrotask(() => { spent.heard += performance.now() - t0 })
+    // (A step's answer: what was asked once a frame, `fallOn`.)
+    const step = !far && ticking && !answer.released && answer.spawned === undefined
     if (far) { if (answer.released && asked.shift()) waiting-- }
     else if (answer.released) waiting--
     else if (answer.spawned === undefined) ticking = false
@@ -962,9 +998,21 @@ async function main() {
     for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
     // Something went up of itself: the cells it emptied came as edits, and this is its fire, smoke and shock.
     if (!far || far.live) for (const b of told.bursts) { smoke.blast(b.at, b.radius); shocks.push({ at: b.at, radius: b.radius, t: folkClock.now() }); fell.bursts++ }
+    // What the last step moved and this one did not lies where that step left it, not where it was drawn on to.
+    if (step) { stepped++; for (const piece of moving.values()) { const w = went.get(piece); if (w && w.step === stepped - 1) { piece.pos = w.to.pos; piece.rot = w.to.rot } } }
     for (const at of [...told.moves, ...told.gone]) {
       const piece = moving.get(at.id)
       if (piece) { piece.pos = at.pos; piece.rot = at.rot }
+    }
+    // Where each thing a step moved was before it and is now, for drawing it on (`drawAhead`). Moved by anything else
+    // (set down, a blast), it has no way it went, and is drawn as said until two steps have moved it again.
+    for (const at of told.moves) {
+      const piece = moving.get(at.id)
+      if (!piece) continue
+      const w = went.get(piece), to: Placed = { pos: [at.pos[0], at.pos[1], at.pos[2]], rot: [at.rot[0], at.rot[1], at.rot[2], at.rot[3]] }
+      if (!step) went.delete(piece)
+      else if (w) Object.assign(w, { from: w.step === stepped - 1 ? w.to : null, to, at: tickAt, took: tickTook, step: stepped })
+      else went.set(piece, { from: null, to, at: tickAt, took: tickTook, step: stepped, drawn: { pos: [0, 0, 0], rot: [0, 0, 0, 1] } })
     }
     for (const { id } of told.gone) {
       const piece = moving.get(id)
@@ -1125,7 +1173,7 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
+    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
     if (!far && silent(moverWorker) > moverPatience) loseMover(moverWorker)
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
@@ -2131,7 +2179,7 @@ async function main() {
     }
     watchers.add(hatch)
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   const carSummon = createCarSummon({

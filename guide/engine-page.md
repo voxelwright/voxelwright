@@ -101,6 +101,12 @@ A tile of a sun map is 4,096 rays that each go through everything up-sun of them
 - A tile's rays never enter a finer box, so a map is drawn as soon as its own box and every coarser one is whole but for a layer of sectors at each side (`wholeFrom` in `world.ts`). Going fast, the finest boxes are always being made; the coarser maps no longer wait for them.
 - `engine.sunRoom` reports the measured tile time and the last frame's count. `?suntiles=8` (or setting `engine.sunRoom.fixed`) draws a fixed number a frame, to measure what the share is worth.
 
+## Where a moving thing is drawn
+
+The mover (`engine/page/mover.ts`) is asked once a frame to move bodies on by the time the last frame took, and its answer is what the next frame draws. A body is therefore drawn where it was a frame ago. With every frame on time nobody can tell. A frame that comes late shows the body at half speed and then double speed, and an answer that arrives after the next frame has begun shows it standing still for a frame and then jumping: 0.9 m at 200 km/h, and the eye that rides a car jumps with it. In San Francisco the mover's steps are slower than in the town, so driving fast there showed the car standing or jumping in 2 to 5% of frames (#73).
+
+`drawAhead` in `main.ts` draws each body the last step moved on from where that step left it, the way it went in that step, to the time of the frame being drawn. It goes on a tenth of a second at most, and not for a body that was set down somewhere else. A body the last step did not move lies where the mover said. `?ahead=0` or `engine.ahead = false` draws bodies as the mover last said them, for measuring: the `--ahead` mode of the [drive-smooth check](#check-a-change) drives the same car both ways in one session.
+
 ## Vehicle damage
 
 Every drivable car and kart wears a 2.5 cm fine look (`car()`, `KEPT.car`, `KEPT.kart`, and street cars), so every car dents where it is struck (#37, #61). The core reports each crash as a `STRUCK` record with a place, a closing speed and a push, but no direction; street-car impacts also dent both vehicles immediately through `living.hit`, and blows on a car before its fine look arrives are queued and replayed as soon as the look loads. `living.ts` keeps the hardest blow each vehicle took in one answer. For a blow at 1.8 m/s or more, it gives each part of the look a dent at that place, pushed in from the side of the part's box nearest the hit. `deform.ts` holds up to six dents a part. Each dent has a centre, a radius, a direction and a depth, all in the part's own cells. Nearby blows deepen an existing dent, and blows near the driver's eye and seats are kept out of it: no dent, however it is moved, reaches that room. The same record holds how scuffed the paint is, how damaged the engine is, and how cracked each of the four window zones (front, rear, left, right) is.
@@ -130,6 +136,6 @@ node test/bench.mjs               # frame cost before and after
 node test/drive-smooth.mjs        # going fast against standing: late frames, the page's thread, the sun's tiles
 ```
 
-`test/drive-smooth.mjs` carries the eye along a straight street at 180 km/h with the picture's size pinned and compares it with the same page standing still. `--curve` runs 0, 60, 120 and 180 km/h in one session, `--car` drives the summoned coupe, `--profile` adds Chrome's samples of the page's thread, and `--sf <folder>` serves this checkout's page over a San Francisco folder that `engine/sf/build.mjs` wrote, without copying its tiles.
+`test/drive-smooth.mjs` carries the eye along a straight street at 180 km/h with the picture's size pinned and compares it with the same page standing still. `--curve` runs 0, 60, 120 and 180 km/h in one session, `--car` drives the summoned coupe, `--ahead` drives it with and without `drawAhead` in turn, `--busy` has a second page draw beside it, `--profile` adds Chrome's samples of the page's thread, and `--sf <folder>` serves this checkout's page over a San Francisco folder that `engine/sf/build.mjs` wrote, without copying its tiles.
 
 Add `?pool=`, `?grid=` or `?levels=` to `/city` to try other sizes for the pool, the boxes and the number of levels.
