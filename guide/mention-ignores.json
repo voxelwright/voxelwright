@@ -148,6 +148,7 @@
   "guide/city-pipeline.md": {
     "sf/current.json": "A staged release's pointer, written under ~/.village by engine/sf/release.py.",
     "engine/dist-sf": "Build output of engine/sf/build.mjs.",
+    "engine/page/core.wasm": "Build output of npm run core in engine/.",
     "OUT/current.json": "Placeholder for the release output directory.",
     "state.json": "The city job's checkpoint under ~/.village/engine/bay."
   },
