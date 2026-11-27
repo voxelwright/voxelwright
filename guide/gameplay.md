@@ -55,7 +55,7 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Next FM station | N | Choose a station in Radio | - |
 | Open the radio picker | R | Radio, or tap the station name while it shows | - |
 | Repair car | F | Repair | D-pad right |
-| Straight into the seat, and back | V | Seat | R3 or D-pad up |
+| Straight into the seat, and back | V | Seat (hover things); while driving, Cam goes round to the seat | R3 or D-pad up |
 | Get out | E | Get off | Y / Triangle |
 | **Map** | | | |
 | Open and close | M (once in the city), Esc closes | Tap the minimap | View / Share |
@@ -225,7 +225,11 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
-**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While riding, the foot keys step aside for the vehicle's own: Drift, Boost, Horn, Seat, Cam, Radio and Get off for a car.
+**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While riding, the foot keys step aside for the vehicle's own: Drift, Boost, Horn, Cam, Radio and Get off for a car (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+
+The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
+
+The **settings panel** is in sections: Time & weather (Light, Dark, SF now, the hour fader, the weather), Graphics (Low, Medium, High, Dynamic resolution and Target FPS or the resolution fader), and, in play, the keys that act: Back to the view, Say…, Your AI…, Credits and Reset world. On a desk in play the two sections stand side by side with the keys along the foot; on an upright phone they are one column. The first view's gear, its panel and its Credits and lockers keys use the same slim look as the HUD in play.
 
 ## The minimap, the map and GPS
 

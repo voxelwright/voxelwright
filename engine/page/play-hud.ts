@@ -68,8 +68,8 @@ const toolSvg = (toolName: string) => {
 }
 
 const STYLE = /* css */ `
-/* ── Voxelmorphism v1 "slim" look for live gameplay HUD (First View stays on classic "lit" look) ── */
-html:not(.first)[data-hud] :is(#realm, #over, #lobby-tag) {
+/* ── Voxelmorphism v1 "slim" look, the first view's keys and panel as well as the HUD in play (#75): one product ── */
+html[data-hud] :is(#realm, #over, #lobby-tag, #first) {
   --vx-look: slim;
   --vx-ink: #f0f4fa;
   --vx-ink-quiet: #9eb0ca;
@@ -91,29 +91,42 @@ html:not(.first)[data-hud] :is(#realm, #over, #lobby-tag) {
 }
 
 /* Fine 2px voxel pitch for sleek low-profile in-play keys; 3px for the Settings enclosure. */
-html:not(.first)[data-hud] #realm :is(.fold, .lobbies, .home-key, .held, .toolkey, .act .vx-button, .cue, .float, .float .cap),
+html[data-hud] #realm .fold,
+html:not(.first)[data-hud] #realm :is(.lobbies, .held, .toolkey, .act .vx-button, .cue, .float, .float .cap),
+html[data-hud] #first .corner .vx-button,
 html:not(.first)[data-hud] #lobby-tag,
 html:not(.first)[data-hud] #ask-row .ask-voxel,
 html:not(.first)[data-hud] [data-panel="living"] .vx-button,
 html:not(.first)[data-hud] [data-panel="wand-take"] .vx-button {
   --vx: 2px;
 }
-html:not(.first)[data-hud] #realm .sky {
+html[data-hud] #realm .sky {
   --vx: 3px;
   border-top: 0;
   --vx-key-size: 13px;
 }
 
-/* In play, Credits moves into the Settings panel header and Mapillary attribution sits cleanly inside #minimap. */
+/* The first view's corner (Credits, and the lockers' count beside it): slim keys of the HUD's size. */
+html[data-hud] #first .corner .vx-button { display: inline-flex; align-items: center; gap: 6px; block-size: 36px; min-block-size: 36px; padding: 0 13px; opacity: 1; }
+html[data-hud] #first .corner { gap: 10px; }
+@media (pointer: coarse) { html[data-hud] #first .corner .vx-button { block-size: 44px; min-block-size: 44px; } }
+
+/* In play, Credits moves into the Settings panel's keys and Mapillary attribution sits cleanly inside #minimap. */
 html:not(.first)[data-hud] #first .corner { display: none !important; }
 /* While the Settings panel or radial pie wheel is open, hide overlapping corner chrome cleanly. */
 html:not(.first)[data-hud]:has(#realm.open) :is(#ask:not(.open), #realm .held),
 html:not(.first)[data-hud].choosing #ask:not(.open) { visibility: hidden !important; }
 
 #realm[data-hud] .help, #realm[data-hud] .stick { display: none !important; }
+/* A thing's cue in the world ("E Take the van", hud.ts) is not drawn over the open Settings panel. */
+html[data-hud]:has(#realm.open) #over > #cues { visibility: hidden; }
+/* The street's name steps aside while the line to say something on is open (on a phone on its side they share the top). */
+html[data-hud]:has(#realm .egg-line:not([hidden])) #where { visibility: hidden; }
 
 /* ── Shared crisp typography & surface polish for slim voxel buttons ── */
-html:not(.first)[data-hud] #realm :is(.fold, .lobbies, .home-key, .held, .toolkey, .act .vx-button),
+html[data-hud] #realm .fold,
+html:not(.first)[data-hud] #realm :is(.lobbies, .held, .toolkey, .act .vx-button),
+html[data-hud] #first .corner .vx-button,
 html:not(.first)[data-hud] #lobby-tag,
 html:not(.first)[data-hud] [data-panel="living"] .vx-button,
 html:not(.first)[data-hud] [data-panel="wand-take"] .vx-button {
@@ -128,8 +141,8 @@ html:not(.first)[data-hud] #realm .act .up.chute {
   color: #ffffff;
 }
 
-/* Settings gear button in play: crisp low-profile slim voxel key with inlaid pearl-ivory gear relief. */
-html:not(.first)[data-hud] #realm .fold {
+/* Settings gear button (first view and play): crisp low-profile slim voxel key with inlaid pearl-ivory gear relief. */
+html[data-hud] #realm .fold {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -220,7 +233,7 @@ html:has(#choice:not([hidden]), #ask.open, #connect[open], #radio-picker[open], 
 #realm .tool-glyph { display: inline-grid; place-items: center; inline-size: 18px; block-size: 18px; border-radius: 3px; border: 1.5px solid currentColor; font-size: 10px; flex: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  #realm .cue, #realm .float, #realm[data-hud] :is(.tools, .act, .act *, .held, .fold, .home-key) { transition: none !important; }
+  #realm .cue, #realm .float, #realm[data-hud] :is(.tools, .act, .act *, .held, .fold) { transition: none !important; }
   #realm .cue { translate: none; }
 }
 
@@ -416,31 +429,17 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   /* Contextual auto-dimming when idle so the city shines through. */
   #realm[data-hud="quiet"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.22; }
   #realm[data-hud="wheel"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.7; }
-  html[data-hud="wheel"].away :is(#first .credits, #realm .fold, #realm .home-key) { opacity: 0.86 !important; pointer-events: auto !important; }
+  html[data-hud="wheel"].away :is(#first .credits, #realm .fold) { opacity: 0.86 !important; pointer-events: auto !important; }
   html[data-hud="wheel"].away #ask:not(.open) { opacity: 0.72 !important; pointer-events: auto !important; }
 
-  /* Clean top-right slim voxel utility keys: Back chevron + Settings gear side by side, matching minimap top-left. */
-  html:not(.first)[data-hud] #realm .fold {
+  /* The Settings gear alone in the top right, matching the minimap top-left. (Back to the view is in its panel, #75.) */
+  html[data-hud] #realm .fold {
     top: calc(env(safe-area-inset-top, 0px) + 14px);
     right: max(14px, calc(env(safe-area-inset-right) + 14px));
     inline-size: 44px;
     block-size: 44px;
     min-inline-size: 44px;
     min-block-size: 44px;
-  }
-  html:not(.first)[data-hud="wheel"] #realm .home-key {
-    position: absolute;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    top: calc(env(safe-area-inset-top, 0px) + 14px);
-    right: calc(max(14px, env(safe-area-inset-right) + 14px) + 52px);
-    left: auto;
-    inline-size: 44px;
-    block-size: 44px;
-    min-inline-size: 44px;
-    min-block-size: 44px;
-    padding: 0;
   }
 
   /* Servers / lobby tag on touch: tucked cleanly under the top-left minimap. */
@@ -505,13 +504,17 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   }
 
   /* Wand key (non-wheel modes) & wand bar. */
-  html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 96px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
-  html[data-hud] [data-panel="wand-take"] button.vx-button { min-block-size: 44px; }
+  /* (Under the street's name, which stands at the top left by touch; 44 px tall to hit, game-hud rule 16.) */
+  html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 124px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
+  html:not(.first)[data-hud] [data-panel="wand-take"] button.vx-button { block-size: 44px; min-block-size: 44px; }
   html[data-hud] [data-panel="wand-take"] .vx-kbd { display: none; }
+  /* (Upright with a wand key, context and quiet, under that key; with the wheel, and on its side, where it was: lower it
+     was over the pie's top wedge.) */
   html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 100px); }
+  @media (orientation: portrait) { html[data-hud]:not([data-hud="wheel"]) [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 180px); } }
 
   /* Sky drawer open: gameplay chrome steps aside cleanly. */
-  html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .home-key, #realm .lobbies, #lobby-tag, #ask:not(.open), #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
+  html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .lobbies, #lobby-tag, #ask:not(.open), #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
   html:not(.first)[data-hud] #where {
     bottom: auto !important;
     top: calc(env(safe-area-inset-top, 0px) + 94px) !important;
@@ -564,15 +567,16 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
     gap: 2px;
   }
   html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { font: 600 9px/1 var(--hud-font); letter-spacing: 0.02em; opacity: 0.92; }
-  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Seat, Cam, Radio, Repair. */
+  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Cam, Radio, Repair.
+     No Seat key while driving (#75): Cam goes round the views, the seat among them (#74). */
+  html[data-hud].driving [data-panel="living"] [data-act="seat"] { display: none !important; }
   html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 4; }
   html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 2; grid-row: 3; }
   html[data-hud].driving [data-panel="living"] [data-act="horn"] { grid-column: 2; grid-row: 2; }
   html[data-hud].driving [data-panel="living"] [data-act="leave"] { grid-column: 2; grid-row: 1; }
-  html[data-hud].driving [data-panel="living"] [data-act="seat"] { grid-column: 1; grid-row: 4; }
-  html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 3; }
-  html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 2; }
-  html[data-hud].driving [data-panel="living"] [data-act="repair"] { grid-column: 1; grid-row: 1; }
+  html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 4; }
+  html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 3; }
+  html[data-hud].driving [data-panel="living"] [data-act="repair"] { grid-column: 1; grid-row: 2; }
   @media (orientation: landscape) {
     html[data-hud]:not(.driving) [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 10px); inline-size: calc(2 * 96px + 10px); column-gap: 10px; }
     html[data-hud].driving [data-panel="living"] { grid-auto-rows: 44px; gap: 6px; }
@@ -597,8 +601,6 @@ export function playHud(o: {
   engaged(): boolean
   /** The wand (wand.ts), held or not: with the wheel it is chosen as the tools are, the last of them. */
   wand?: { held: boolean }
-  /** Back to the view (explore.ts `back`), and whether it can be gone back from here: by touch the wheel has a key for it. */
-  back?: { go(): void; can(): boolean }
   /** While riding (living.ts): the corners of the thing ridden (cells), which are kept clear as the body is; none with the eye in the seat. Null on foot. */
   vehicle?: () => readonly (readonly [number, number, number])[] | null
 }): PlayHud {
@@ -662,7 +664,7 @@ export function playHud(o: {
     return { lift: (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx, bleed: vx }
   }
 
-  // ── Kit adoption & live look transitions (First View stays on lit; gameplay switches to slim) ──
+  // ── Kit adoption (the slim look holds in the first view and in play: what the kit built before this sheet came is built again) ──
   const pendingKit: ((k: Kit) => void)[] = []
   const kitDo = (fn: (k: Kit) => void) => { if (o.ui.kit) fn(o.ui.kit); else pendingKit.push(fn) }
   const flushKit = () => {
@@ -675,7 +677,7 @@ export function playHud(o: {
     kitDo((k) => { if (!el.hasAttribute('data-vx-live')) k.adopt(el) })
   }
   const refreshAll = (k: Kit) => {
-    for (const el of root.querySelectorAll<HTMLElement>('[data-vx-live]')) if (el.offsetWidth && el.offsetHeight) k.refresh?.(el)
+    for (const el of document.querySelectorAll<HTMLElement>('#realm [data-vx-live], #first [data-vx-live]')) if (el.offsetWidth && el.offsetHeight) k.refresh?.(el)
     for (const sel of ['#lobby-tag', '#ask-row .ask-voxel', '[data-panel="wand-take"] button', '[data-panel="living"] .vx-button', '[data-panel="summon"] .vx-button']) {
       for (const el of document.querySelectorAll<HTMLElement>(sel)) {
         if (!el.hasAttribute('data-vx-live')) k.adopt(el)
@@ -738,15 +740,6 @@ export function playHud(o: {
   const current = () => (WAND >= 0 && o.wand!.held ? WAND : o.tool())
   const take = (i: number) => { if (i === WAND) { o.wand!.held = true; return } if (o.wand && WAND >= 0) o.wand.held = false; o.pickTool(i) }
   const name = (i: number) => choices[i] ?? ''
-
-  // ── Back to the view, with the wheel by touch: slim voxel key with inlaid pearl-ivory chevron relief ──
-  const home = Object.assign(document.createElement('button'), { className: 'vx-button home-key', type: 'button', hidden: true })
-  home.dataset.vxIcon = 'back'
-  home.setAttribute('data-vx-icon-only', '')
-  home.setAttribute('aria-label', 'Back to the view')
-  home.title = 'Back to the view'
-  home.addEventListener('click', () => o.back?.go())
-  if (mode === 'wheel' && o.back) { root.append(home); adoptOne(home) }
 
   // ── Sleek SVG icon decoration for touch action keys (.use, .up, .down, .walks) ──
   const styledKeys = new WeakSet<HTMLElement>()
@@ -942,22 +935,15 @@ export function playHud(o: {
 
   // ── Every frame ──
   let shownTool = -1, b: Box | null = null, inside = false, stickOver = false, panelWas = false
-  let appliedLook: 'lit' | 'slim' | null = null, floatShown = false, askWasOpen = false, lastTouch = coarse.matches
+  let looked = false, floatShown = false, askWasOpen = false, lastTouch = coarse.matches
   const did = { chute: 0, flew: false, landed: 0 }
   let wasOn = true, wasCanopy = false, flyingSince = 0, afootMs = 0, offSince = 0
   const place = (el: HTMLElement, x: number, y: number) => { el.style.translate = `${Math.round(x)}px ${Math.round(y)}px` }
   o.watch((gap) => {
     flushKit()
     const eng = o.engaged()
-    const wantLook = eng ? 'slim' : 'lit'
-    // (Back in the first view, the key goes with the rest: asked before the frame is left to it.)
-    const homeShown = coarse.matches && eng && !!o.back?.can()
-    if (home.hidden === homeShown) {
-      home.hidden = !homeShown
-      if (homeShown && o.ui.kit) o.ui.kit.refresh?.(home)
-    }
-    if (o.ui.kit && wantLook !== appliedLook) {
-      appliedLook = wantLook
+    if (o.ui.kit && !looked) {
+      looked = true
       refreshAll(o.ui.kit)
     }
     if (!eng) return
