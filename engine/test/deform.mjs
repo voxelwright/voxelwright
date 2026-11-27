@@ -172,12 +172,12 @@ function position(p, s) {
     if (d.radius <= 0.0001 || r >= d.radius || d.depth <= 0) continue
     const [dx, dy, dz] = d.dir
     const envelope = (r) => Math.max(0, 1 - (r / d.radius) ** 2) ** 2
-    const compression = d.depth * (0.76 + 0.24 * dy ** 2) * envelope(r)
+    const compression = d.depth * envelope(r)
     for (let a = 0; a < 3; a++) q[a] += d.dir[a] * compression
     const v = q.map((x, a) => x - d.center[a])
-    const along = ((3*dx + 0.8*dz)*v[0] + 0.4*v[1] + (3*dz - 0.8*dx)*v[2]) / d.radius - 0.9
-    const lift = 0.64 * d.depth * envelope(Math.hypot(...v)) * Math.max(0, 1 - along*along) ** 2
-    for (let a = 0; a < 3; a++) q[a] += ((a === 1 ? 1 : 0) - dy*d.dir[a]) * lift
+    const along = ((1.75*dx + 1.65*dz)*v[0] + 0.95*v[1] + (1.75*dz - 1.65*dx)*v[2]) / d.radius - 0.9
+    const lift = d.depth * envelope(Math.hypot(...v)) * Math.max(0, 1 - along*along) ** 2
+    for (let a = 0; a < 3; a++) q[a] += (0.60 * ((a === 1 ? 1 : 0) - dy*d.dir[a]) - 0.49 * (1-dy*dy) * d.dir[a]) * lift
   }
   return q
 }

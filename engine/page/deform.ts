@@ -201,20 +201,21 @@ export function deformPointCpu(
       nx -= k*gx; ny -= k*gy; nz -= k*gz
       px += ax*amount; py += ay*amount; pz += az*amount
     }
-    const depth = d.depth * (0.76 + 0.24 * dy*dy)
+    const depth = d.depth
     const slope = -4 * support * depth * inv
     push(dx, dy, dz, depth * support*support, slope*x, slope*y, slope*z)
 
     // The compressed metal gathers into a diagonal ridge just behind the contact.
     x = (px - d.center[0]) * inv; y = (py - d.center[1]) * inv; z = (pz - d.center[2]) * inv
     support = 1 - x*x - y*y - z*z
-    const ax = 3 * dx + 0.8 * dz, az = 3 * dz - 0.8 * dx
-    const along = ax*x + az*z + 0.4*y - 0.9, ridge = 1 - along*along
+    const ax = 1.75 * dx + 1.65 * dz, az = 1.75 * dz - 1.65 * dx
+    const along = ax*x + az*z + 0.95*y - 0.9, ridge = 1 - along*along
     if (support <= 0 || ridge <= 0 || Math.abs(dy) === 1) continue
-    const lift = 0.64 * d.depth, shape = support * ridge
-    const g = -4 * shape * lift * inv
-    push(-dx*dy, 1-dy*dy, -dz*dy, lift*shape*shape,
-      g*(ridge*x + support*along*ax), g*(ridge*y + support*along*0.4), g*(ridge*z + support*along*az))
+    const shape = support * ridge
+    const returned = 0.49 * (1 - dy*dy) + 0.60 * dy
+    const g = -4 * shape * depth * inv
+    push(-dx*returned, 0.60-dy*returned, -dz*returned, depth*shape*shape,
+      g*(ridge*x + support*along*ax), g*(ridge*y + support*along*0.95), g*(ridge*z + support*along*az))
 
   }
   const norm = Math.hypot(nx, ny, nz) || 1
@@ -269,28 +270,27 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
     if (support <= 0.0) { continue; }
     let core = support * support;
     let dir = crush.xyz;
-    let depth = crush.w * (0.76 + 0.24 * dir.y * dir.y);
+    let depth = crush.w;
     let grad = (-4.0 * support * depth / zone.w) * u;
     result.norm -= grad * (dot(dir, result.norm) / (1.0 + dot(dir, grad)));
     result.pos += dir * (depth * core);
 
     // A horizontal strike shortens the panel, then lifts a diagonal ridge behind its crushed lip.
     // Both displacements vanish at the support boundary. |grad(core)| <= 1.54/r and the
-    // ridge coordinate has slope <= 3.14/r. Each map's displacement slope stays below one
-    // at depth <= 0.2r. Their directions are orthogonal and their combined travel <= depth.
+    // ridge coordinate has slope < 2.59/r. Each map's displacement slope stays below one
+    // at depth <= 0.2r. The raised lip returns some compression, so total travel stays <= depth.
     var shape = 0.0;
     if (abs(dir.y) < 1.0 && crush.w > 0.0) {
       let v = (result.pos - zone.xyz) / zone.w;
       let edge = max(0.0, 1.0 - dot(v, v));
-      let axis = vec3f(3.0 * dir.x + 0.8 * dir.z, 0.4, 3.0 * dir.z - 0.8 * dir.x);
+      let axis = vec3f(1.75 * dir.x + 1.65 * dir.z, 0.95, 1.75 * dir.z - 1.65 * dir.x);
       let along = dot(v, axis) - 0.9;
       let ridge = max(0.0, 1.0 - along * along);
       shape = edge * ridge;
-      let up = vec3f(0, 1, 0) - dir * dir.y;
-      let lift = 0.64 * crush.w;
-      let gradLift = (-4.0 * shape * lift / zone.w) * (ridge * v + edge * along * axis);
-      result.norm -= gradLift * (dot(up, result.norm) / (1.0 + dot(up, gradLift)));
-      result.pos += up * (lift * shape * shape);
+      let lip = 0.60 * (vec3f(0, 1, 0) - dir * dir.y) - 0.49 * (1.0 - dir.y * dir.y) * dir;
+      let gradLift = (-4.0 * shape * depth / zone.w) * (ridge * v + edge * along * axis);
+      result.norm -= gradLift * (dot(lip, result.norm) / (1.0 + dot(lip, gradLift)));
+      result.pos += lip * (depth * shape * shape);
     }
 
     // A protected window can still be marked by a zero-depth impact.
@@ -303,19 +303,27 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
   return result;
 }
 fn deformPaint(albedo: vec3f, scuff: f32, crease: f32, p: vec3f) -> DeformPaint { return deformPaintSeen(albedo, scuff, crease, p, 1.0); }
-// Rub through the colour coat in short, interrupted tracks. p is in world cells
-// (10 cm), oriented along the sheet. Low spots keep their paint between the tracks.
+// Three unequal, tapered scores in a rub mark. The path is in 10 cm cells relative
+// to contact. Each score ends on the panel, even when repeated blows widen the dent.
+fn gouge(p: vec2f, length: f32, width: f32, bend: f32) -> f32 {
+  let x = p.x / length;
+  let taper = max(0.0, 1.0 - x*x);
+  let edge = abs(p.y - bend * x * (1.0 - 0.4*x)) - width * taper;
+  return taper * (1.0 - smoothstep(-0.025, 0.065, edge));
+}
 fn deformPaintSeen(albedo: vec3f, scuff: f32, crease: f32, p: vec3f, detail: f32) -> DeformPaint {
   if (scuff <= 0.0 && crease <= 0.0) { return DeformPaint(albedo, 0.0, 1.0); }
-  let grain = deformNoise(p * vec3f(0.48, 4.6, 0.52));
-  let chips = deformNoise(p * vec3f(1.35, 1.85, 1.1) + 7.2);
-  let contact = smoothstep(0.16, 0.63, scuff);
-  let rub = contact * smoothstep(0.37, 0.70, grain + 0.22 * (chips - 0.5));
-  let cut = rub * smoothstep(0.50, 0.76, chips) * detail;
-  let primer = mix(albedo, albedo * 0.23 + vec3f(0.076, 0.067, 0.061), rub);
-  let colour = mix(primer, vec3f(0.24, 0.23, 0.22), cut);
-  let rough = clamp(0.18 * crease + 0.35 * scuff + 0.28 * rub, 0.0, 1.0);
-  return DeformPaint(colour, rough, 1.0 - min(0.97, scuff * 0.58 + rub * 0.65));
+  let grain = deformNoise(p * vec3f(2.1, 4.5, 2.2));
+  let uv = vec2f(p.x, p.y + (grain - 0.5) * 0.11);
+  let cut = max(gouge(uv, 3.8, 0.12, -0.19),
+    max(gouge(uv - vec2f(0.65, 0.34), 2.15, 0.07, -0.07),
+        gouge(uv + vec2f(1.3, 0.28), 1.25, 0.08, -0.14)));
+  let rubbed = smoothstep(0.12, 0.50, scuff) * cut * detail;
+  let steel = smoothstep(0.25, 0.73, grain) * rubbed;
+  let primer = albedo * 0.28 + vec3f(0.080, 0.074, 0.065);
+  let colour = mix(albedo, mix(primer, vec3f(0.22, 0.22, 0.21), steel), rubbed);
+  let rough = min(0.82, scuff * 0.22 + crease * 0.09 + rubbed * 0.55);
+  return DeformPaint(colour, rough, 1.0 - min(0.94, scuff * 0.38 + rubbed * 0.80));
 }
 // p is window-local, relative to the impact center, in the same fine cells as scuff.
 fn deformGlass(crack: f32, scuff: f32, p: vec3f) -> f32 {

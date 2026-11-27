@@ -58,7 +58,7 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   if (r >= 1.0) { discard; }
   let drift = vec2f(f32(seed & 15u), age * 2.4 + f32((seed >> 4u) & 15u));
   let billow = billowAt(in.uv, drift, seed);
-  let body = smoothstep(0.96, 0.42, r + (billow - 0.5) * 0.82) * (1.0 - r * r * r);
+  let body = (1.0 - smoothstep(0.42, 0.96, r + (billow - 0.5) * 0.82)) * (1.0 - r * r * r);
   if (body <= 0.004) { discard; }
   // The smoke a blast leaves comes late (more.w): it shows as the ball of fire goes out, not in front of it.
   let fade = smoothstep(in.more.w, in.more.w + 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
@@ -67,9 +67,9 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   let cover = in.colour.a * body * fade * (1.0 - 0.92 * smoothstep(0.05, 0.6, heat));
   // Directional billow self-shadowing: sample slightly toward the sun in screen space so each lobe
   // has a bright sunlit crest and a cool shadowed underside matching the world's daylight.
-  let round = vec3f(in.uv.x, -in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
+  let round = vec3f(in.uv.x, in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
   let towards = vec3f(dot(u.sun, u.right), dot(u.sun, u.up), -dot(u.sun, u.forward));
-  let sunStep = normalize(vec2f(towards.x, -towards.y) + vec2f(0.001, 0.001)) * 0.14;
+  let sunStep = normalize(towards.xy + vec2f(0.001, 0.001)) * 0.14;
   let billowSun = billowAt(in.uv + sunStep, drift, seed);
   let foldRelief = clamp((billow - billowSun) * 2.2, -0.45, 0.65);
   let sunFace = clamp(dot(round, towards) * 0.65 + 0.35 + foldRelief * 0.55, 0.0, 1.25);
@@ -290,7 +290,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     engine(at, level, dt) {
       // Emit cleanly just above the buckled front hood ridge (never intersecting the hood mesh like a
       // dark painted stain): pale radiator steam at the base, thickening into sunlit charcoal smoke as it rises.
-      const seam: [number, number, number] = [at[0], at[1] + 0.3, at[2]]
+      const seam: [number, number, number] = [at[0], at[1] - 1.5, at[2]]
       if (level < 0.7) {
         const frac = (level - 0.35) / 0.35
         if (Math.random() < dt * (14 + 12 * frac)) {
@@ -306,9 +306,9 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
       // Warm-charcoal engine smoke (clearly damaged-engine smoke rather than a pitch-black oil fire)
       // fading in softly off the hood crest and keeping the right driving lane readable from the seat.
-      if (Math.random() < dt * 16) {
-        const grey = rnd(0.34, 0.48)
-        puff(seam, 0.85, rnd(0.8, 2.1), rnd(11, 17), { size: rnd(0.85, 1.25), grow: rnd(2.4, 3.6), life: rnd(1.6, 2.4), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.24, late: 0.03 })
+      if (Math.random() < dt * 10) {
+        const grey = rnd(0.30, 0.43)
+        puff(seam, 0.85, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.32, late: 0.0 })
       }
       // Burning: compact flickering orange tongues at the hood seam.
       if (level > 0.92 && Math.random() < dt * 12) puff(seam, 0.8, rnd(1, 2.2), rnd(10, 22), { size: rnd(0.95, 1.7), grow: rnd(0.8, 1.8), life: rnd(0.28, 0.55), heat: 0.72, cool: rnd(1.1, 1.6), rise: 42, drag: 1.5, colour: [0.06, 0.05, 0.04], cover: 0.22, late: 0.0 })

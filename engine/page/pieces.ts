@@ -270,16 +270,27 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var brokenLamp = 0.0;
   if (in.hasSmooth != 0u && in.wear.x > 0.001) {
     if (stuff == 15u) {
-      brokenLamp = smoothstep(0.32, 0.64, in.wear.x);
+      brokenLamp = smoothstep(0.58, 0.88, in.wear.x);
       albedo = mix(albedo, vec3f(0.026, 0.029, 0.034), brokenLamp);
       rough = mix(rough, 0.68, brokenLamp);
     } else if (polished) {
-      // Oblique 3D grain runs continuously around the hood and down the fender.
-      let p = in.at * u.cell;
-      let alongX = u.midX >= u.midZ;
-      let along = select(p.z, p.x, alongX);
-      let across = select(p.x, p.z, alongX);
-      let materialAt = vec3f(along + 0.3 * across, p.y + 0.34 * across + 0.12 * along, across);
+      // Only the closest contact leaves a transfer mark. The strike direction and
+      // its sideways tangent give a bent panel the same scar from every camera.
+      var nearest = 2.0;
+      var contact = 0u;
+      for (var i = 0u; i < min(u32(u.deform.status.x), 6u); i++) {
+        let zone = u.deform.posR[i];
+        let q = (in.at - zone.xyz) / max(zone.w, 0.001);
+        let gap = dot(q, q);
+        if (gap < nearest) { nearest = gap; contact = i; }
+      }
+      let rel = (in.at - u.deform.posR[contact].xyz) * u.cell;
+      let dir = u.deform.dirD[contact].xyz;
+      let side = normalize(select(vec3f(dir.z, 0.0, -dir.x), vec3f(1,0,0), abs(dir.y) > 0.95));
+      let across = dot(rel, side);
+      let inward = dot(rel, dir);
+      // The horizontal bumper crosses the vertical door and rolls over the shoulders.
+      let materialAt = vec3f(across, rel.y + inward * 0.50 + across * 0.16 - 1.55, inward);
       let detail = 1.0 - smoothstep(40.0, 95.0, length(in.seen));
       let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y, materialAt, detail);
       albedo = worn.albedo;
@@ -376,7 +387,7 @@ fn paneCrack(in: Out) -> vec2f {
     let dist = length(across);
     if (dist >= maxReach) { continue; }
     let angle = atan2(across.y, across.x);
-    let rayCount = 13.0;
+    let rayCount = 11.0;
     let sectorSpan = 6.2831853 / rayCount;
     let uAngle = angle + 3.14159265;
     let sector = floor(uAngle / sectorSpan);
@@ -396,7 +407,7 @@ fn paneCrack(in: Out) -> vec2f {
     let localA = fract(uAngle / sectorSpan + jag) - 0.5;
     let rayDist = abs(localA) * max(dist, 1.5) * sectorSpan;
     let fineScale = select(0.78, 1.0, in.hasSmooth != 0u);
-    let rayWidth = mix(0.20, 0.068, clamp(dist / rayReach, 0.0, 1.0)) * fineScale;
+    let rayWidth = mix(0.15, 0.025, clamp(dist / rayReach, 0.0, 1.0)) * fineScale;
     let rayVis = max(rayWidth / (rayWidth + px * 0.28), 0.36);
     let rays = (1.0 - smoothstep(rayWidth, rayWidth + px * 0.90, rayDist)) * rayVis * clamp(amount * 1.40, 0.0, 0.92);
     // 3. Straight-chord staggered cobweb cross-cracks between adjacent radial rays.
@@ -404,7 +415,7 @@ fn paneCrack(in: Out) -> vec2f {
     let ringOffset = deformHash(vec3f(sector, 6.0, 1.0 + f32(w))) * 2.8;
     let ringSpace = 3.5 + 0.14 * dist;
     let ringDist = abs(fract((chordDist + ringOffset) / ringSpace) - 0.5) * ringSpace;
-    let ringWidth = 0.088 * fineScale;
+    let ringWidth = 0.060 * fineScale;
     let ringEnv = smoothstep(bullRadius * 0.7, bullRadius * 1.5, dist) * (1.0 - smoothstep(rayReach * 0.35, rayReach * 0.84, dist));
     let ringVis = max(ringWidth / (ringWidth + px * 0.34), 0.34);
     let rings = (1.0 - smoothstep(ringWidth, ringWidth + px * 0.95, ringDist)) * ringVis * ringEnv * clamp(amount * 1.30, 0.0, 0.84);
@@ -466,7 +477,7 @@ fn paneCrack(in: Out) -> vec2f {
   let own = shade(m.colour, n, rd, u.sun, direct, in.open, m.rough, 0.0);
   // Crisp white-silver internal reflection along laminated fracture planes; interior faces are
   // strictly capped below glow.ts's bloom threshold so cracks never bloom into a lens-flare starburst.
-  let crackStrength = select(0.96, 0.98, in.hasSmooth != 0u);
+  let crackStrength = select(0.62, 0.85, in.hasSmooth != 0u);
   let litCrack = shade(vec3f(0.60, 0.64, 0.68), n, rd, u.sun, max(direct, 0.34), max(in.open, 0.74), 0.38, 0.0);
   let transmitted = vec3f(0.68, 0.72, 0.76) * max(g.lightSun.a, 0.32);
   let crackLight = select(min(max(litCrack, transmitted), vec3f(0.76)), min(litCrack, vec3f(1.25)), in.hasSmooth != 0u);

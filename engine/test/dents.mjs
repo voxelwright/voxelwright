@@ -50,19 +50,19 @@ check(!!struck && struck.faces > faces, `a dented look is drawn a cell at a time
 const fr = struck?.wheels?.[3], rl = struck?.wheels?.[0]
 check(!!fr && !!rl && (fr.mag > 0.15 || fr.tilt > 0.02) && rl.mag < 0.05, `front-right wheel bends with its crushed corner (offset ${fr?.offset.map((v) => v.toFixed(2)).join(', ')}, tilt ${fr?.tilt.toFixed(3)} rad; rear-left ${rl?.mag.toFixed(2)})`)
 // #61: per-window crack origins — striking the front windshield then the rear window keeps two distinct origins.
-const crackCheck = await page.evaluate(() => {
+const hit = (local, normal) => page.evaluate(([local, normal]) => {
   const e = globalThis.engine, t = globalThis.car, w = e.alive.where(t)
-  const turn = (q, v) => { const [x, y, z, s] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + s * tx + (y * tz - z * ty), v[1] + s * ty + (z * tx - x * tz), v[2] + s * tz + (x * ty - y * tx)] }
-  const atLocal = (v) => { const p = turn(w.rot, v); return [w.at[0] + p[0], w.at[1] + p[1], w.at[2] + p[2]] }
-  e.alive.hit(t, atLocal([12, 5, 0]), turn(w.rot, [1, 0.3, 0]), 115, 9000)
-  const first = e.alive.look(t).parts[0]?.cracks?.[0] ?? null
-  e.alive.hit(t, atLocal([-14, 5, 0]), turn(w.rot, [-1, 0.3, 0]), 115, 9000)
-  const both = e.alive.look(t).parts[0]?.cracks ?? null
-  const dist = first && both?.[1] ? Math.hypot(both[0][0] - both[1][0], both[0][1] - both[1][1], both[0][2] - both[1][2]) : 0
-  const stayed = first && both?.[0] ? Math.hypot(both[0][0] - first[0], both[0][1] - first[1], both[0][2] - first[2]) : Infinity
-  return { first, both, dist, stayed }
-})
-check(!!crackCheck.first && !!crackCheck.both?.[1] && crackCheck.stayed === 0 && crackCheck.dist > 20, `per-window crack origins stay distinct (front ${crackCheck.both?.[0]?.map((v) => v.toFixed(0))}, rear ${crackCheck.both?.[1]?.map((v) => v.toFixed(0))}, apart ${crackCheck.dist.toFixed(1)} fine cells)`)
+  const turn = (v) => {
+    const [x,y,z,s] = w.rot, tx = 2*(y*v[2]-z*v[1]), ty = 2*(z*v[0]-x*v[2]), tz = 2*(x*v[1]-y*v[0])
+    return [v[0]+s*tx+y*tz-z*ty, v[1]+s*ty+z*tx-x*tz, v[2]+s*tz+x*ty-y*tx]
+  }
+  e.alive.hit(t, turn(local).map((v,i) => v+w.at[i]), turn(normal), 115, 9000)
+  return e.alive.look(t).parts[0]?.cracks
+}, [local, normal])
+const first = (await hit([12,5,0], [1,0.3,0]))?.[0]
+const both = await hit([-14,5,0], [-1,0.3,0])
+const apart = first && both?.[1] ? Math.hypot(...both[1].map((v,i) => v-first[i])) : 0
+check(first && both?.[0]?.every((v,i) => v === first[i]) && apart > 20, `per-window crack origins stay distinct (${apart.toFixed(1)} fine cells apart)`)
 // The same view of the struck corner, dented and repaired via KeyF while riding, read from the screen.
 const camPose = await page.evaluate(() => {
   const e = globalThis.engine, t = globalThis.car, p = e.alive.look(t).parts[0], d = e.alive.damage(t), k = d.dents.slice(0, d.dentCount).reduce((a, x, i) => (x.depth > d.dents[a].depth ? i : a), 0), dent = d.dents[k]
@@ -74,13 +74,30 @@ const camPose = await page.evaluate(() => {
 const aim = () => page.evaluate((p) => { Object.assign(globalThis.engine.pose, p) }, camPose)
 const clip = { x: 440, y: 210, width: 400, height: 300 }
 const shoot = async (name) => { await page.waitForTimeout(700); const png = await page.screenshot({ clip }); if (out) await page.screenshot({ path: join(out, `${name}.png`) }); return png }
-const differ = (a, b) => page.evaluate(async ([a, b]) => {
-  const read = async (b64) => { const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob()), c = new OffscreenCanvas(bitmap.width, bitmap.height), g = c.getContext('2d'); g.drawImage(bitmap, 0, 0); return g.getImageData(0, 0, bitmap.width, bitmap.height).data }
+const compare = (a, b) => page.evaluate(async ([a,b]) => {
+  const read = async (b64) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob())
+    const g = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d')
+    g.drawImage(bitmap, 0, 0)
+    return g.getImageData(0, 0, bitmap.width, bitmap.height)
+  }
   const x = await read(a), y = await read(b)
   let sum = 0
-  for (let i = 0; i < x.length; i += 4) sum += (Math.abs(x[i] - y[i]) + Math.abs(x[i + 1] - y[i + 1]) + Math.abs(x[i + 2] - y[i + 2])) / 3
-  return sum / (x.length / 4)
+  const rows = []
+  for (let row = 0; row < x.height; row++) {
+    let bright = 0
+    for (let col = 0; col < x.width; col++) {
+      const i = (row*x.width+col)*4
+      const r = x.data[i]-y.data[i], g = x.data[i+1]-y.data[i+1], b = x.data[i+2]-y.data[i+2]
+      sum += (Math.abs(r)+Math.abs(g)+Math.abs(b))/3
+      if ((r+g+b)/3 > 24) bright++
+    }
+    rows.push(bright/x.width)
+  }
+  const rowBand = Math.max(...rows.slice(3,-3).map((v,i) => v - (rows[i]+rows[i+6])/2))
+  return {mean: sum/(x.width*x.height), rowBand}
 }, [a.toString('base64'), b.toString('base64')])
+const differ = async (a,b) => (await compare(a,b)).mean
 await aim()
 const dented = await shoot('dented')
 const kept = await page.evaluate(() => { const d = globalThis.engine.alive.damage(globalThis.car); return d.dentCount })
@@ -113,6 +130,26 @@ const mended = await page.evaluate(() => {
   return { dents: d.dentCount, hood: d.hoodDamage, scuff: d.scuff, cracks: e.alive.look(globalThis.car).parts[0]?.cracks ?? null, faces: e.falling.faces, wheels }
 })
 check(mended.dents === 0 && mended.hood === 0 && mended.scuff === 0 && mended.cracks === null && mended.faces === faces && mended.wheels.every((w) => w.off === 0 && w.tilt === 0), `KeyF repairs dents, cracks, faces and wheels (${JSON.stringify({ dents: mended.dents, hood: mended.hood, scuff: mended.scuff, cracks: mended.cracks, faces: mended.faces })})`)
+// A lateral strike near the windshield used to project its fractures edge-on across
+// the glass. Switch just the fractures off from the same seat and measure horizontal
+// bands on the passenger side, away from the central sightline checked above.
+await hit([16,4,8], [0,0,1])
+await page.evaluate(() => {
+  const e = globalThis.engine
+  e.alive.mount(globalThis.car); e.alive.view(true); e.off.add('puffs')
+})
+await page.waitForTimeout(750)
+const passengerGlass = {x: 730, y: 248, width: 440, height: 150}
+const cracked = await page.screenshot({clip: passengerGlass})
+const strength = await page.evaluate(() => {
+  const cracks = globalThis.engine.alive.damage(globalThis.car).glassCrack
+  const strength = Math.max(...cracks); cracks.fill(0); return strength
+})
+await page.waitForTimeout(200)
+const clear = await page.screenshot({clip: passengerGlass})
+const glass = await compare(cracked, clear)
+check(strength > 0 && glass.rowBand < 0.5, `side impact leaves no bright scanlines across the windshield (row contrast ${glass.rowBand.toFixed(2)})`)
+await page.evaluate(() => { const e = globalThis.engine; e.off.delete('puffs'); e.alive.view(false); e.alive.mount(null) })
 // Taken away, its dents go with it: a body's id may be another thing's later.
 const gone = await page.evaluate(() => { const e = globalThis.engine, t = globalThis.car; e.alive.vanish(t); return e.alive.damage(t) })
 check(gone === null, 'a car taken away leaves no dents behind')
