@@ -403,11 +403,11 @@ export function eggs(page: EggsPage) {
   player.dataset.hudClear = ''
   // Where it stands: in a strip along the top or the bottom of the picture, one end fixed, and the video is fitted
   // into the rest (strip(), eggs-pictures.ts videoRect), so the two never meet. On a desk, in the first view at the
-  // bottom right (eggs-first.ts), gone in at the top left under the servers' key (the settings panel is open at the
+  // bottom right, gone in at the top left under the servers' key (the settings panel is open at the
   // top right). By touch, held upright: under the top corners' keys, as wide as the screen (in the first
   // view under the credits and settings keys, first.ts; in the realm under the minimap, the tool key and the street's
   // name, play-hud.ts); held wide and gone in, in the top row left of the settings key; held wide in the first view,
-  // at the bottom right (eggs-first.ts: the towers' lamps and the banner are at the top). Hidden, it is its one key
+  // at the bottom right in two rows, right of the BLOG board (the banner and the boards are at the top). Hidden, it is its one key
   // where that key was. (By the page's state, not by what holds it: started in the first view it stays in #first.)
   const placed = document.createElement('style')
   placed.textContent = /* css */ `
@@ -429,8 +429,6 @@ export function eggs(page: EggsPage) {
     @container (max-width: 200px) { .egg-player .time .whole { display: none; } }
     .egg-player .vx-slider { flex: 1 1 auto; display: flex; align-items: center; align-self: stretch; min-inline-size: 0; }
     .egg-player .vx-slider input { inline-size: 100%; block-size: 100%; margin: 0; accent-color: var(--vx-link, auto); }
-    .egg-player .mute.says { grid-column: 3 / span 2; inline-size: auto; padding-inline: 8px; }
-    .egg-player .mute.says + .next { display: none; }
     .egg-player .title { flex: 0 1 auto; display: inline-flex; min-inline-size: 0; max-inline-size: 100%; color: var(--vx-link, inherit); text-decoration: none; }
     .egg-player .title > span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
     /* (The arrow stays when the title is cut short: it says the title is a link out.) */
@@ -460,13 +458,24 @@ export function eggs(page: EggsPage) {
       html.first .vx-card.egg-player { top: calc(max(20px, calc(env(safe-area-inset-top) + 8px)) + 64px); }
       html:not(.first) .vx-card.egg-player { top: calc(max(14px, env(safe-area-inset-top)) + 110px); }
     }
+    /* The first view, wide: at the bottom right, the video fitted above it (its top is the banner's round and the boards). */
+    @media (min-aspect-ratio: 1/1) { html.first .vx-card.egg-player { top: auto; left: auto; bottom: max(16px, env(safe-area-inset-bottom)); right: max(16px, env(safe-area-inset-right)); } }
+    /* By touch, held wide, in the first view: right of the BLOG board (which ends a little past the middle of the
+       picture), in two rows: the title, Sound and Stop over Pause, the fader, Next and Hide (Hide in the corner the row
+       stands by, so that hidden its key is where it was). */
+    @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
+      html.first .vx-card.egg-player { inline-size: calc(43vw - max(16px, env(safe-area-inset-right))); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 6px 6px 9px; }
+      html.first .egg-player .line { order: 1; flex: 1 1 calc(100% - 2 * var(--key) - 16px); }
+      html.first .egg-player .mute { order: 2; } html.first .egg-player .stop { order: 3; }
+      html.first .egg-player .pause { order: 4; } html.first .egg-player .seek { order: 5; flex: 1 1 0; block-size: var(--key); }
+      html.first .egg-player .next { order: 6; } html.first .egg-player .tuck { order: 7; }
+    }
     /* Held wide and gone in: in the top row, between the minimap and the column of the settings and tool keys. */
     @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
       html:not(.first) .vx-card.egg-player { top: max(7px, env(safe-area-inset-top)); right: calc(max(14px, env(safe-area-inset-right)) + 134px); inline-size: min(420px, 100vw - 2 * max(14px, env(safe-area-inset-left)) - 330px); }
     }`
   document.head.append(placed)
-  // (Each key is its picture alone, its name said to whoever cannot see it, with no tip over the picture; the sound's key says
-  // Unmute in words while the browser holds the sound back, as that is the tap it wants.)
+  // (Each key is its picture alone, its name said to whoever cannot see it, with no tip over the picture.)
   const key = (cls: string, icon: string, name: string, extra = '') => `<button class="vx-button ${cls}" type="button" data-vx-icon="${icon}" data-vx-icon-only aria-label="${name}"${extra}></button>`
   player.innerHTML = `${key('pause', 'pause', 'Pause', ' data-vx-kind="main"')}
     <div class="line"><a class="title" target="_blank" rel="noopener noreferrer"><span></span></a></div>
@@ -480,14 +489,11 @@ export function eggs(page: EggsPage) {
   const muteKey = $p<HTMLButtonElement>('.mute'), stopKey = $p<HTMLButtonElement>('.stop'), pauseKey = $p<HTMLButtonElement>('.pause'), nextKey = $p<HTMLButtonElement>('.next'), tuckKey = $p<HTMLButtonElement>('.tuck')
   const link = $p<HTMLAnchorElement>('.title'), fader = $p<HTMLInputElement>('.vx-slider input'), at = $p<HTMLOutputElement>('.at'), of = $p<HTMLOutputElement>('.of')
   const mmss = (t: number) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00')
-  /** A key's name, picture and words (none: its picture alone), set only where they change: the kit builds a key again when its picture does. */
-  const keyed = (b: HTMLButtonElement, name: string, icon: string, words = '', kind = '') => {
+  /** A key's name, picture and kind, set only where they change: the kit builds a key again when its picture does. */
+  const keyed = (b: HTMLButtonElement, name: string, icon: string, kind = '') => {
     if (b.getAttribute('aria-label') !== name) b.setAttribute('aria-label', name)
     if (b.dataset.vxIcon !== icon) b.dataset.vxIcon = icon
     if ((b.dataset.vxKind ?? '') !== kind) { if (kind) b.dataset.vxKind = kind; else delete b.dataset.vxKind }
-    if (b.textContent !== words) b.textContent = words
-    b.toggleAttribute('data-vx-icon-only', !words)
-    b.classList.toggle('says', !!words)
   }
   /** Whether the hand is on the fader: what it says is the hand's then, not the video's. */
   let scrubbing = false
@@ -512,8 +518,9 @@ export function eggs(page: EggsPage) {
     if (source) { link.href = `https://www.youtube.com/watch?v=${source}`; link.setAttribute('aria-label', `${title}: the original on YouTube (opens a new tab)`) }
     else { link.removeAttribute('href'); link.removeAttribute('aria-label') }
     const muted = running.media.muted
-    keyed(muteKey, muted ? 'Unmute' : 'Mute', muted ? 'muted' : 'sound', running.blocked ? 'Unmute' : '', running.blocked ? 'main' : '')
-    keyed(pauseKey, running.paused ? 'Play' : 'Pause', running.paused ? 'play' : 'pause', '', 'main')
+    // (The sound held back by the browser: the key is cobalt, the tap it wants.)
+    keyed(muteKey, muted ? 'Unmute' : 'Mute', muted ? 'muted' : 'sound', running.blocked ? 'main' : '')
+    keyed(pauseKey, running.paused ? 'Play' : 'Pause', running.paused ? 'play' : 'pause', 'main')
     folded()
     where()
   }
@@ -526,9 +533,19 @@ export function eggs(page: EggsPage) {
     if (player.hidden || !player.isConnected) return undefined
     const v = page.canvas.getBoundingClientRect(), p = player.getBoundingClientRect()
     if (!v.height || !p.height) return undefined
-    const GAP = 8
-    return p.top + p.height / 2 < v.top + v.height / 2 ? { top: (p.bottom + GAP - v.top) / v.height, bottom: 1 } : { top: 0, bottom: (p.top - GAP - v.top) / v.height }
+    // (Hidden, the row as it was open: its key stays at the end the row stands by, the top or the bottom.)
+    if (!tucked) openTall = p.height
+    const tall = tucked && openTall ? openTall : p.height, GAP = 8
+    if (p.top < v.top + v.height / 2) {
+      // In the first view the banner's plane flies just over the top of a video with a sky (boards.ts `above`): a lane
+      // for it under the row, its 3% margin, its cloth and the room round its target.
+      const lane = document.documentElement.classList.contains('first') && running?.picture?.sky ? 0.03 * v.height + 56 : 0
+      return { top: (p.top + tall + GAP + lane - v.top) / v.height, bottom: 1 }
+    }
+    return { top: 0, bottom: (p.bottom - tall - GAP - v.top) / v.height }
   }
+  /** How tall the row is open (it is measured so while it is, and kept while it is hidden). */
+  let openTall = 0
   muteKey.addEventListener('click', () => {
     if (!running?.media) return
     const m = running.media
@@ -560,7 +577,7 @@ export function eggs(page: EggsPage) {
     folded()
   }
   /** The hide key, and hidden the key that is all of it: cobalt while the video plays (something is on), plain while it is paused. */
-  const folded = () => keyed(tuckKey, tucked ? 'Show the player' : 'Hide the player', tucked ? 'playing' : 'minimize', '', tucked && !running?.paused ? 'main' : '')
+  const folded = () => keyed(tuckKey, tucked ? 'Show the player' : 'Hide the player', tucked ? 'playing' : 'minimize', tucked && !running?.paused ? 'main' : '')
   /** Which end of the row the hide key is at: the end the row stands by (CSS), so that hidden, the key stays where it was. */
   const anchor = () => {
     if (tucked || player.hidden) return

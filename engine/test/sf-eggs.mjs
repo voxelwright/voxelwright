@@ -322,8 +322,10 @@ const things = async (page, kind) => {
 
 // ── From the first view (`--first`, page/eggs-first.ts) ──
 /** A page of the realm at its first view, nobody gone in: the world round the park whole, the eggs and the way in come. */
-const openFirst = async (context) => {
+const openFirst = async (context, insets = null) => {
   const page = await context.newPage()
+  // (A phone's safe areas, as a notched phone has them: headless Chrome gives env() as 0 without them.)
+  if (insets) await (await context.newCDPSession(page)).send('Emulation.setSafeAreaInsetsOverride', { insets })
   // Which event each play() of a video is called inside: a phone's browser gives sound only to one started in the tap's own handler.
   await page.addInitScript(() => {
     const play = HTMLMediaElement.prototype.play
@@ -354,6 +356,51 @@ const boardBoxes = (page, touch) => page.evaluate((touch) => globalThis.engine.b
 const apart = (a, b) => Math.round(Math.hypot(Math.max(0, a.x0 - b.x1, b.x0 - a.x1), Math.max(0, a.y0 - b.y1, b.y0 - a.y1)))
 const boxOf = (s) => ({ x0: s.x - s.w / 2, y0: s.y - s.h / 2, x1: s.x + s.w / 2, y1: s.y + s.h / 2 })
 const firstSizes = [['desk', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true], ['landscape', { width: 844, height: 390 }, true]]
+/** A notched phone's safe areas, upright and on its side (game-hud skill, sf-hud.mjs). */
+const SAFE = { phone: { top: 59, bottom: 34, left: 0, right: 0 }, landscape: { top: 0, bottom: 21, left: 59, right: 59 } }
+/**
+ * The banner's plane over its round against the player (#134): held at ten places on it, a frame apart, its cloth's
+ * box on the page against the player's. In the first view it flies just over the top of a video with a sky, under a
+ * player at the top.
+ */
+/**
+ * Hidden and back (#134): the row folds into its hide key where that key was, the only thing of it left, the video
+ * where it was; the key brings the row back as it was.
+ */
+const foldsInPlace = async (page, press) => {
+  const laid = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), k = p.querySelector('.tuck'), q = k.getBoundingClientRect(), v = globalThis.engine.eggs.screen
+    return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), key: [q.left, q.top, q.right, q.bottom].map(Math.round), x: q.left + q.width / 2, y: q.top + q.height / 2, name: k.getAttribute('aria-label'),
+      onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2)?.closest('.tuck') === k, seen: [...p.querySelectorAll('button, a, input')].filter((e) => e.checkVisibility({ visibilityProperty: true, opacityProperty: true })).length, screen: v && [v.left, v.top, v.right, v.bottom].map(Math.round).join(' ') } })
+  const open = await laid()
+  await press(open.x, open.y)
+  await page.waitForTimeout(600)
+  const folded = await laid()
+  await press(folded.x, folded.y)
+  await page.waitForTimeout(600)
+  const back = await laid()
+  const kept = folded.key.every((v, i) => Math.abs(v - open.key[i]) <= 2)
+  return { ok: folded.seen === 1 && folded.onTop && folded.name === 'Show the player' && kept && folded.screen === open.screen && back.seen === open.seen && String(back.box) === String(open.box),
+    says: `hidden, its one key (${folded.seen} shown) at ${folded.key.join(' ')} (was ${open.key.join(' ')}), the video at ${folded.screen} (was ${open.screen}); back, ${back.seen} controls at ${back.box.join(' ')} (were ${open.seen} at ${open.box.join(' ')})` }
+}
+const planeClear = (page) => page.evaluate(async () => {
+  const plane = globalThis.engine.boards?.plane, p = document.querySelector('.egg-player').getBoundingClientRect(), hit = []
+  if (!plane) return { hit, seen: 0 }
+  const was = plane.hold
+  let seen = 0
+  for (let i = 0; i < 10; i++) {
+    plane.hold = i / 10
+    for (let f = 0; f < 4; f++) await new Promise((r) => requestAnimationFrame(r))
+    const b = plane.box
+    if (!b) continue
+    seen++
+    // (Its target: the cloth grown to a thumb's 44 px each way.)
+    const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, hw = Math.max(22, (b.x1 - b.x0) / 2), hh = Math.max(22, (b.y1 - b.y0) / 2)
+    if (p.left < cx + hw && p.right > cx - hw && p.top < cy + hh && p.bottom > cy - hh) hit.push(`${i / 10} at ${Math.round(cx)}, ${Math.round(cy)}`)
+  }
+  plane.hold = was
+  return { hit, seen }
+})
+
 
 const fromFirst = async () => {
   const dir = join(shots, 'first')
@@ -361,7 +408,7 @@ const fromFirst = async () => {
   results.first = {}
   for (const [kind, viewport, touch] of firstSizes) {
     console.log(`\nfrom the first view, ${kind} ${viewport.width} x ${viewport.height} (${touch ? 'taps' : 'clicks'})`)
-    const page = await openFirst(await browser.newContext({ viewport, deviceScaleFactor: 1, hasTouch: touch, isMobile: touch }))
+    const page = await openFirst(await browser.newContext({ viewport, deviceScaleFactor: 1, hasTouch: touch, isMobile: touch }), SAFE[kind])
     const press = (x, y) => (touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y))
     const r = (results.first[kind] = { spots: {}, eggs: {} })
     /** Until the banner's cloth is whole in the picture and can be read (on a wide picture its own round crosses the left edge). */
@@ -389,6 +436,10 @@ const fromFirst = async () => {
       check(p.running === 'apple' && !p.under.length, `${kind}: Bad Apple!! plays, and its player at ${p.box.join(' ')} is over ${p.under.join(', ') || 'no spot and no board'}`)
       const clear = await clearOfVideo(page)
       check(clear.ok, `${kind}: Bad Apple!!: ${saysClear(clear)}`)
+      const flown = await planeClear(page)
+      check(!flown.hit.length, `${kind}: Bad Apple!!: the banner's plane, held at ${flown.seen} places on its round in the picture, is clear of the player${flown.hit.length ? `, but under it at ${flown.hit.join('; ')}` : ''}`)
+      const fold = await foldsInPlace(page, press)
+      check(fold.ok, `${kind}: the player ${fold.says}`)
       await page.screenshot({ path: join(dir, `${kind}-apple.png`) })
       await page.evaluate(() => globalThis.engine.eggs.say('stop'))
       await page.waitForTimeout(500)
@@ -466,15 +517,19 @@ const fromFirst = async () => {
         await page.waitForTimeout(1500)
         const player = await page.evaluate(() => {
           const keys = [...document.querySelectorAll('.egg-player button')].filter((b) => b.checkVisibility({ visibilityProperty: true })).map((b) => { const q = b.getBoundingClientRect(), top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { text: b.getAttribute('aria-label') ?? b.textContent, x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), w: Math.round(q.width), h: Math.round(q.height), onTop: top === b } })
-          const c = document.querySelector('#first .credits').getBoundingClientRect(), p = document.querySelector('.egg-player').getBoundingClientRect()
+          // (Credits moved into the settings panel: a corner key, where there is one.)
+          const c = document.querySelector('#first .credits')?.getBoundingClientRect() ?? null, p = document.querySelector('.egg-player').getBoundingClientRect()
           // (Nor over a spot that ends it, or a board.)
           const s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
           const under = [...['banner'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)]
-          return { keys, under, shown: !document.querySelector('.egg-player').hidden, box: [p.left, p.top, p.right, p.bottom].map(Math.round), credits: [c.left, c.top, c.right, c.bottom].map(Math.round), meets: [c, ...[document.querySelector('#realm > .fold')].filter((g) => g?.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((g) => g.getBoundingClientRect())].some((c) => p.left < c.right && p.right > c.left && p.top < c.bottom && p.bottom > c.top), ...globalThis.engine.eggs.state }
+          return { keys, under, shown: !document.querySelector('.egg-player').hidden, box: [p.left, p.top, p.right, p.bottom].map(Math.round), credits: c && [c.left, c.top, c.right, c.bottom].map(Math.round), meets: [...(c ? [c] : []), ...[document.querySelector('#realm > .fold')].filter((g) => g?.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((g) => g.getBoundingClientRect())].some((c) => p.left < c.right && p.right > c.left && p.top < c.bottom && p.bottom > c.top), ...globalThis.engine.eggs.state }
         })
         r.eggs[egg].player = player
         const clear = await clearOfVideo(page)
         check(clear.ok, `${kind}: ${egg}: ${saysClear(clear)}`)
+        const flown = await planeClear(page)
+        check(!flown.hit.length, `${kind}: ${egg}: the banner's plane, held at ${flown.seen} places on its round in the picture, is clear of the player${flown.hit.length ? `, but under it at ${flown.hit.join('; ')}` : ''}`)
+        if (egg === 'rickroll') { const fold = await foldsInPlace(page, press); check(fold.ok, `${kind}: the player ${fold.says}`) }
         check(player.shown && player.keys.every((k) => k.onTop && (!touch || k.h >= 44)) && !player.meets && !player.under.length, `${kind}: its player is shown in the first view at ${player.box.join(' ')}, clear of the credits and settings keys${player.under.length ? ` but over ${player.under.join(', ')}` : ', the spots and the boards'}, its keys on top${touch ? ' and a thumb tall' : ''}: ${player.keys.map((k) => `${k.text} ${k.w} x ${k.h} at ${k.x}, ${k.y}`).join('; ')}`)
         const played = await page.evaluate(() => globalThis.playedIn)
         check(player.playing && !player.muted && player.sound > 0 && played[0] === 'click', `${kind}: ${egg} plays with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${played.join(', ')}; muted ${player.muted}, ${player.sound} bytes of sound decoded; Chrome, not Safari)`)
@@ -526,7 +581,7 @@ const fromFirst = async () => {
     // Sound held back by the browser: Bad Apple!! plays muted, and Unmute on the player, in the first view, is the tap that brings it.
     await page.evaluate(() => { globalThis.refuseSound = true; globalThis.engine.eggs.say('bad apple') })
     const muted = await until(() => globalThis.engine.eggs.state.blocked && globalThis.engine.eggs.state.playing, null)
-    const unmute = await page.evaluate(() => { const b = [...document.querySelectorAll('.egg-player button')].find((k) => k.textContent === 'Unmute'), q = b?.getBoundingClientRect(); return q && { x: q.left + q.width / 2, y: q.top + q.height / 2, w: Math.round(q.width), h: Math.round(q.height), onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2) === b } })
+    const unmute = await page.evaluate(() => { const b = [...document.querySelectorAll('.egg-player button')].find((k) => k.getAttribute('aria-label') === 'Unmute'), q = b?.getBoundingClientRect(); return q && { x: q.left + q.width / 2, y: q.top + q.height / 2, w: Math.round(q.width), h: Math.round(q.height), onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2) === b } })
     await page.evaluate(() => { globalThis.refuseSound = false })
     if (unmute) await press(unmute.x, unmute.y)
     const sounded = await until(() => { const s = globalThis.engine.eggs.state; return !s.muted && s.playing && s.sound > 0 }, null, 10_000)
@@ -632,7 +687,7 @@ try {
   const player = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), m = globalThis.engine.eggs.media; return { hidden: p.hidden, display: getComputedStyle(p).display, box: [r.x, r.y, r.width, r.height].map(Math.round), media: m && { paused: m.paused, ended: m.ended, error: m.error?.code ?? null, src: !!m.src } } })
   check(s.running === 'apple' && s.time > 0 && s.muted && s.blocked, `refused its sound, Bad Apple!! plays muted (${JSON.stringify({ running: s.running, time: round(s.time), muted: s.muted, blocked: s.blocked, status: s.status })})`)
   if (!(s.muted && s.blocked)) console.log('   ', JSON.stringify(await player()), page.said.slice(-6).join(' | '))
-  check(await page.locator('.egg-player .mute').textContent() === 'Unmute', 'the player offers Unmute')
+  check(await page.locator('.egg-player .mute').getAttribute('aria-label') === 'Unmute', 'the player offers Unmute')
   try {
     await page.evaluate(() => { globalThis.refuseSound = false })
     await page.click('.egg-player .mute', { timeout: 5000 })
