@@ -3,6 +3,7 @@
 // and rotating brake rotors that glow orange-red under sustained hard braking.
 // Zero GPU work when no drivable wheeled vehicle is visible.
 import { shader, type Target } from '../probe/gpu.ts'
+import { deformPointCpu, type DeformState } from './deform.ts'
 import type { Foot, Motor } from './living.ts'
 import type { View } from './march.ts'
 
@@ -146,6 +147,10 @@ export interface WheelVehicle {
   feet: readonly Foot[]
   hasFine: boolean
   profile?: WheelProfile
+  /** Live body deformation on part 0 (#61), so wheels move and bend with a crushed corner. */
+  deform?: DeformState
+  fineLow?: readonly [number, number, number]
+  finePer?: number
   /** Live driver controls when this vehicle is actively ridden. */
   steerInput?: number
   throttle?: number
@@ -164,6 +169,10 @@ export interface WheelDebug {
   susp: number
   heat: number
   steer: number
+  /** Local hub displacement in coarse body cells from vehicle deformation (#61). */
+  offset: readonly [number, number, number]
+  /** Combined camber/toe tilt magnitude in radians from vehicle deformation (#61). */
+  tilt: number
 }
 
 export interface Wheels {
@@ -500,8 +509,8 @@ export function carveWheelWells(
     const restHubY = baseMinY + radius
 
     // 3. Carve the static tire & hub cylinder cleanly out of the outside look.
-    const carveR = radius + 0.26
-    const carveDepth = width + 0.6
+    const carveR = radius + 0.20
+    const carveDepth = width + 0.25
     const latLo = sideLow ? outerLat - 0.25 : outerLat - carveDepth
     const latHi = sideLow ? outerLat + carveDepth : outerLat + 0.25
     const cx = fAlong
@@ -529,9 +538,37 @@ export function carveWheelWells(
           const idx = (y * d + z) * w + x
           const k = out[idx]
           if (!k) continue
-          // Preserve painted upper fender lips if a car's arch is very tight.
-          if (dy > radius * 0.30 && isPaint(k)) continue
+          // Preserve painted fender skin all around the arch so carving never bites a stair-step into the body (#61).
+          if (r > radius - 0.15 && isPaint(k)) continue
           out[idx] = 0
+        }
+      }
+    }
+
+    // Line exposed recessed wheel-well walls with dark matte liner (#61) so no bright painted inner bulkhead peeks out behind the bent fender.
+    const LINER = 14 | ((1 + 13) << 8)
+    const linerDepth = width + 1.0
+    const ll0 = Math.max(0, Math.floor(((sideLow ? outerLat + width * 0.65 : outerLat - linerDepth) - (alongX ? low[2] : low[0])) * per))
+    const ll1 = Math.min((alongX ? d : w) - 1, Math.ceil(((sideLow ? outerLat + linerDepth : outerLat - width * 0.65) - (alongX ? low[2] : low[0])) * per))
+    const outStep = sideLow ? -1 : 1
+    for (let y = cy0; y <= cy1; y++) {
+      const by = (y + 0.5) / per + low[1]
+      const dy = by - cy
+      for (let l = ll0; l <= ll1; l++) {
+        const bLat = (l + 0.5) / per + (alongX ? low[2] : low[0])
+        const distIn = sideLow ? bLat - outerLat : outerLat - bLat
+        if (distIn < width * 0.65) continue
+        const lOut = l + outStep
+        if (lOut < 0 || lOut >= (alongX ? d : w)) continue
+        for (let a = ca0; a <= ca1; a++) {
+          const ba = (a + 0.5) / per + (alongX ? low[0] : low[2])
+          if (Math.hypot(ba - cx, dy) > carveR + 0.2) continue
+          const x = alongX ? a : l, z = alongX ? l : a
+          const idx = (y * d + z) * w + x
+          const k = out[idx]
+          if (!k || !isPaint(k)) continue
+          const ox = alongX ? a : lOut, oz = alongX ? lOut : a
+          if (!out[(y * d + oz) * w + ox]) out[idx] = LINER
         }
       }
     }
@@ -561,6 +598,8 @@ interface VehicleState {
     susp: number
     heat: number
     steer: number
+    offset: [number, number, number]
+    tilt: number
     init: boolean
   }[]
   lastSeen: number
@@ -666,7 +705,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
           st = {
             steerSm: 0,
             prevPos: [v.pos[0], v.pos[1], v.pos[2]],
-            wheels: v.feet.map(() => ({ roll: 0, susp: 0, heat: 0, steer: 0, init: false })),
+            wheels: v.feet.map(() => ({ roll: 0, susp: 0, heat: 0, steer: 0, offset: [0, 0, 0] as [number, number, number], tilt: 0, init: false })),
             lastSeen: tick,
           }
           states.set(v.id, st)
@@ -764,10 +803,65 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
             maxBump = 0.85
           }
 
-          // Wheel hub world position at rest height.
+          // Wheel hub displacement and axle camber/toe tilt from vehicle body dents (#61), so a crushed corner does not leave a wheel standing outside its fender.
           const hx = alongX ? foot.at[0] : wheelLat
           const hz = alongX ? wheelLat : foot.at[2]
-          const restOff = turned(v.rot, [hx - offX, restHubY - offY, hz - offZ])
+          let bendX = 0, bendY = 0, bendZ = 0, camber = 0, toe = 0
+          if (v.deform && v.deform.dentCount > 0 && v.fineLow && v.finePer) {
+            const per = v.finePer
+            const flx = (hx - v.fineLow[0]) * per
+            const fly = (restHubY - v.fineLow[1]) * per
+            const flz = (hz - v.fineLow[2]) * per
+            const longSign = (v.front & 1) === 0 ? 1 : -1
+            const latAxis = alongX ? 2 : 0
+            const longAxis = alongX ? 0 : 2
+            const latOff = outLocalLat * width * 0.45 * per
+            const longOff = longSign * radius * 0.70 * per
+            const sample = (dLong: number, dUp: number, dLat: number): [number, number, number] => {
+              const px = flx + (alongX ? dLong : dLat)
+              const py = fly + dUp
+              const pz = flz + (alongX ? dLat : dLong)
+              const res = deformPointCpu([px, py, pz], [0, 1, 0], v.deform)
+              return [(res.pos[0] - px) / per, (res.pos[1] - py) / per, (res.pos[2] - pz) / per]
+            }
+            const dHub = sample(0, 0, 0)
+            const dOut = sample(0, 0, latOff)
+            const dTop = sample(0, radius * 0.85 * per, latOff)
+            const dBot = sample(0, -radius * 0.55 * per, latOff)
+            const dFwd = sample(longOff, 0, latOff * 0.9)
+            const dAft = sample(-longOff, 0, latOff * 0.9)
+            const dFwdTop = sample(longOff, radius * 0.85 * per, latOff)
+            const dAftTop = sample(-longOff, radius * 0.85 * per, latOff)
+            // Signed displacement along outward lateral axis (negative = pushed inward toward car centerline).
+            const latHub = dHub[latAxis] * outLocalLat
+            const latOut = dOut[latAxis] * outLocalLat
+            const latTop = dTop[latAxis] * outLocalLat
+            const latBot = dBot[latAxis] * outLocalLat
+            const latFwd = dFwd[latAxis] * outLocalLat
+            const latAft = dAft[latAxis] * outLocalLat
+            const latFwdTop = dFwdTop[latAxis] * outLocalLat
+            const latAftTop = dAftTop[latAxis] * outLocalLat
+            // Track the crushed fender/arch inward (including leading & trailing arch edges) so a crushed corner never leaves a wheel standing outside its fender.
+            const rawLat = Math.min(latHub, latOut, latTop, latFwd, latAft, latFwdTop, latAftTop)
+            const latShift = Math.max(-width * 1.25, Math.min(width * 0.25, rawLat))
+            let longShiftRaw = dHub[longAxis]
+            for (const d of [dOut, dTop, dFwd, dAft, dFwdTop, dAftTop]) {
+              if (Math.abs(d[longAxis]) > Math.abs(longShiftRaw)) longShiftRaw = d[longAxis]
+            }
+            const longShift = Math.max(-radius * 0.75, Math.min(radius * 0.75, longShiftRaw * 0.85))
+            const vertShift = Math.max(-0.3, Math.min(0.45, dHub[1]))
+            bendX = alongX ? longShift : latShift * outLocalLat
+            bendY = vertShift
+            bendZ = alongX ? latShift * outLocalLat : longShift
+            // Bent control arm camber (top tilts inward when pushed in) + vertical dent gradient, and impact toe-in/out.
+            const rawCamber = ((latBot - Math.min(latTop, latFwdTop, latAftTop)) / Math.max(1, radius * 1.4)) * 0.85 + Math.max(0, -latShift) * 0.14
+            camber = Math.max(-0.38, Math.min(0.38, rawCamber))
+            toe = Math.max(-0.38, Math.min(0.38, (((latFwd - latAft) * sideSign) / Math.max(1, radius * 1.4)) * 1.1))
+          }
+          ws.offset[0] = bendX; ws.offset[1] = bendY; ws.offset[2] = bendZ
+          ws.tilt = Math.hypot(camber, toe)
+
+          const restOff = turned(v.rot, [hx + bendX - offX, restHubY + bendY - offY, hz + bendZ - offZ])
           const restW: [number, number, number] = [v.pos[0] + restOff[0], v.pos[1] + restOff[1], v.pos[2] + restOff[2]]
 
           // Independent per-wheel suspension compression sampled from groundUnder relative to hub height.
@@ -815,8 +909,8 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
             ws.heat = Math.max(0, ws.heat - coolRate * clampedDt)
           }
 
-          // Wheel steering yaw (front steerable wheels only).
-          const wheelSteer = foot.steers ? targetSteer : 0
+          // Wheel steering yaw (front steerable wheels only) + impact toe/camber tilt (#61).
+          const wheelSteer = (foot.steers ? targetSteer : 0) + toe
           ws.steer = wheelSteer
           const cs = Math.cos(wheelSteer), sn = Math.sin(wheelSteer)
           const ax: [number, number, number] = [
@@ -827,14 +921,25 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat): Promi
           const srX = bodyRight[0] * cs - bodyFwd[0] * sn
           const srY = bodyRight[1] * cs - bodyFwd[1] * sn
           const srZ = bodyRight[2] * cs - bodyFwd[2] * sn
-          const az: [number, number, number] = [srX * sideSign, srY * sideSign, srZ * sideSign]
+          const az0: [number, number, number] = [srX * sideSign, srY * sideSign, srZ * sideSign]
+          const cc = Math.cos(camber), sc = Math.sin(camber)
+          const ay: [number, number, number] = [
+            bodyUp[0] * cc - az0[0] * sc,
+            bodyUp[1] * cc - az0[1] * sc,
+            bodyUp[2] * cc - az0[2] * sc,
+          ]
+          const az: [number, number, number] = [
+            az0[0] * cc + bodyUp[0] * sc,
+            az0[1] * cc + bodyUp[1] * sc,
+            az0[2] * cc + bodyUp[2] * sc,
+          ]
 
           active.push({
             world: [restW[0] + bodyUp[0] * ws.susp, restW[1] + bodyUp[1] * ws.susp, restW[2] + bodyUp[2] * ws.susp],
             radius,
             width,
             ax,
-            ay: bodyUp,
+            ay,
             az,
             roll: ws.roll,
             heat: ws.heat,

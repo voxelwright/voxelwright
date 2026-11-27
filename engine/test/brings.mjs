@@ -42,6 +42,13 @@ try {
   await post('say', { by: 'steward', text: 'set out' })
   const out = await says((t) => t.k1 && t.c1 && t.b1 && t.h1 && Object.values(t).every((x) => x.speed === 0))
   check(!!out && out.k1.name === 'kart' && out.c1.name === 'car' && out.k1.up && out.c1.up && out.k1.seats === 1 && out.c1.seats === 2 && out.h1.seats === 6, `said "set out", a kart, a car, a broom and a craft are in the world at once, by the rule's own ids, upright, with their seats (${out ? Object.entries(out).map(([k, v]) => `${k} ${v.name} ${v.seats}`).join(', ') : '?'})`)
+  // #61: kept cars and karts brought by rules wear their 2.5 cm fine looks, served from /world/fine/<kept>.
+  const brought = await (await fetch(`${server.url}/world/things`)).json()
+  const kRec = brought.find((t) => t.id === 'marshal-k1'), cRec = brought.find((t) => t.id === 'marshal-c1')
+  const kKept = kRec?.controls?.fine?.[0]?.kept, cKept = cRec?.controls?.fine?.[0]?.kept
+  const kRes = kKept ? await fetch(`${server.url}/world/fine/${kKept}`) : null
+  const cRes = cKept ? await fetch(`${server.url}/world/fine/${cKept}`) : null
+  check(!!kKept && !!cKept && kRes?.status === 200 && cRes?.status === 200, `kept kart and car carry 2.5 cm fine looks served by the world (kart ${kRes?.status ?? 'none'}, car ${cRes?.status ?? 'none'})`)
   const ground = Math.round((await (await fetch(`${server.url}/world/at?x=760&y=0&z=4078`)).json()).ground)
   check(!!out && Math.abs(out.k1.yaw - 1.57) < 0.1 && Math.abs(out.b1.yaw + 1.57) < 0.1 && Math.abs(out.k1.at[0] - 790) < 6 && Math.abs(out.k1.at[2] - 4072) < 6, `each stands where it was asked and faces as asked (the kart at ${out?.k1.at} facing ${out?.k1.yaw}, the broom facing ${out?.b1.yaw})`)
   // The craft rides over the street as it would over water (the sea and a beach are in the core's own test), level,

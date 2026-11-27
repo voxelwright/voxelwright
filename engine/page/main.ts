@@ -1052,11 +1052,14 @@ async function main() {
       const active = drive && drive.id === t.id ? drive : null
       const st = !active && t.state ? t.state : null
       const stBrake = st && ((st.go < -0.1 && st.speed > 8) || (st.go > 0.1 && st.speed < -8)) ? Math.min(1, Math.abs(st.go)) : 0
+      const deform = alive.damage(t)
+      const look0 = deform && deform.dentCount > 0 ? alive.look(t).parts[0] : undefined
       out.push({
         id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
         bornLow: piece.born.low, bornCom: piece.born.com,
         front: t.motor.front, steerLimit: t.motor.steer, topSpeed: t.motor.top,
         feet: t.motor.feet, hasFine: !!(t.fine?.length || t.kept?.length), profile: t.wheelProfile,
+        ...(look0 && deform ? { deform, fineLow: look0.low, finePer: look0.per } : {}),
         ...(active ? { steerInput: active.steer, throttle: active.throttle, brake: active.brake, handbrake: active.handbrake, fwdSpeed: active.fwdSpeed, latSpeed: active.latSpeed, slip: active.slip, drifting: active.drifting, burnout: active.burnout, decel: active.decel } : st ? { steerInput: st.turn, throttle: st.go, brake: stBrake, handbrake: st.rise > 0.1, fwdSpeed: st.speed } : {}),
       })
     }
@@ -1802,14 +1805,13 @@ async function main() {
   // How thick the marine layer is, 0 to 1 (fog.ts): a property, as the hour and the rain are.
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'fog', { get: () => marine.strength, set: (v: number) => { marine.strength = Math.max(0, Math.min(1, v)) } })
 
-  // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
-  // `?living=finecar`: the same car wearing a look in cells of 2.5 cm, with seats, a dash and a wheel inside (V from the seat).
+  // `?living=car` (or `?living=finecar`): a fine-look car to drive stands in the street ahead of where the page starts, with no console needed (#61).
   if (query.get('living') === 'car' || query.get('living') === 'finecar') void (async () => {
     if (far) while (!far.live) await new Promise((done) => setTimeout(done, 100))
     // In a shared world one is enough: whoever comes later finds the one that is there.
     if (far && [...made.all.values()].some((t) => t.name === 'car')) return
     const x = Math.round(pose.x * M) + 60, z = Math.round(pose.z * M) + 4
-    await alive.spawn((query.get('living') === 'finecar' ? fineCar : car)([x, core.ground_at(x, z) + 5, z]))
+    await alive.spawn(car([x, core.ground_at(x, z) + 5, z]))
   })()
   // ── A realm run alone (#450, local.ts) ─────────────────────────────────
   // Its living things come from a kept library: each a plain file beside the page (sf/kept.mjs), set down where the

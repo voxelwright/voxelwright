@@ -13,8 +13,12 @@
 //   { log, state, counts }        what came of it or of a tick: `log` is what must never be
 //                                 missed (cells out and back, bodies born and gone, dust),
 //                                 `state` is where things are now (bodies, fire, water)
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { parentPort, workerData } from 'node:worker_threads'
+import { gzipSync } from 'node:zlib'
 import { controlsOf, numbers } from './page/living.ts'
 import { things as livingThings } from './rules/things.mjs'
 import { sight } from './rules/sight.mjs'
@@ -564,12 +568,33 @@ function people(id) {
 }
 /** Whether someone's helper answers for this world's people now: the server says when it changes (mind/door.mjs). */
 let voiced = false
+/** Fine looks written by `bring` so kept cars and karts wear their 2.5 cm looks on every page (#61). */
+const FINE_DIR = workerData.fineDir || ''
+const fineKeptCache = new WeakMap()
+function keepFine(f) {
+  if (!FINE_DIR || !f?.cells) return null
+  const hit = fineKeptCache.get(f.cells)
+  if (hit) return hit
+  const bytes = Buffer.from(f.cells.buffer, f.cells.byteOffset, f.cells.byteLength)
+  const kept = createHash('sha256').update(bytes).digest('hex')
+  const path = join(FINE_DIR, `${kept}.gz`)
+  if (!existsSync(path)) {
+    mkdirSync(FINE_DIR, { recursive: true })
+    writeFileSync(`${path}.part`, gzipSync(bytes))
+    if (!existsSync(path)) renameSync(`${path}.part`, path)
+  }
+  const entry = { size: f.size, per: f.per, low: f.low, kept }
+  fineKeptCache.set(f.cells, entry)
+  return entry
+}
 /** Living things as rules have them (rules/things.mjs): told of, and driven. */
 const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => { if (go || turn || rise || jump) rode(a); return core.living_drive(a.body, go, turn, rise, 0, jump ? 1 : 0) }, tell: (p) => tell(p), happen: (event, e) => ruled.happen(event, e), stand: (x, z) => stand(x, z), changed: () => body.say(),
   // A kept thing is brought in as any made thing is: its record and its cells together in one ask of the world's own, so it is in the world's file and every page has it. Then it is turned to face as asked.
   bring: ({ id, rule, thing, low, yaw }) => {
     const rows = keptRows(thing, low), mid = [low[0] + thing.size[0] / 2, low[1] + thing.size[1] / 2 + 2, low[2] + thing.size[2] / 2]
-    parentPort.emit('message', { ask: { by: 'the world', edit: [1, rows.length / 5, ...rows], box: [low[0], low[1], low[2], low[0] + thing.size[0], low[1] + thing.size[1], low[2] + thing.size[2]], release: [low[0] - 2, low[1] + 1, low[2]], thing: { id, name: thing.name, wish: '', by: 'the world', at: [Math.round(mid[0]), low[1], Math.round(mid[2])], size: thing.size, facing: 'east', rule, controls: { scheme: thing.scheme, motor: thing.motor, seats: thing.seats, size: thing.size } } } })
+    const fine = (thing.fine ?? []).map(keepFine).filter(Boolean)
+    const controls = { scheme: thing.scheme, motor: thing.motor, seats: thing.seats, size: thing.size, ...(thing.eye ? { eye: thing.eye } : {}), ...(fine.length ? { fine } : {}) }
+    parentPort.emit('message', { ask: { by: 'the world', edit: [1, rows.length / 5, ...rows], box: [low[0], low[1], low[2], low[0] + thing.size[0], low[1] + thing.size[1], low[2] + thing.size[2]], release: [low[0] - 2, low[1] + 1, low[2]], thing: { id, name: thing.name, wish: '', by: 'the world', at: [Math.round(mid[0]), low[1], Math.round(mid[2])], size: thing.size, facing: 'east', rule, controls } } })
     const a = alive.get(id)
     if (a && Number.isFinite(yaw)) { const half = (Math.PI / 2 - yaw) / 2; core.living_place(a.body, mid[0], mid[1], mid[2], 0, Math.sin(half), 0, Math.cos(half)); nudged = true }
     return !!a

@@ -25,8 +25,9 @@ export const OWN: Readonly<Record<string, string>> = {
  */
 export const YIELDED: Readonly<Record<string, string>> = {
   KeyE: 'get on a ride, take up an instrument, beside one',
-  KeyR: 'rain', KeyF: 'fire ahead', KeyH: 'heat', KeyK: 'maps', KeyL: 'shadows',
+  KeyR: 'rain', KeyF: 'fire ahead; repair while driving', KeyH: 'heat', KeyK: 'maps', KeyL: 'shadows',
+  KeyN: 'next radio station while driving',
 }
 
 /** Handed, in order, to offers that asked for no key: letters the page never listens for. */
-export const FREE: readonly string[] = ['KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyJ', 'KeyN']
+export const FREE: readonly string[] = ['KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyJ']
