@@ -291,7 +291,14 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       let across = dot(rel, side);
       let inward = dot(rel, dir);
       // The horizontal bumper crosses the vertical door and rolls over the shoulders.
-      let materialAt = vec3f(across, rel.y + inward * 0.50 + across * 0.16 - 1.55, inward);
+      let frontZ = select(u.midZ > u.midX, u.lampAxis >= 3.0, u.lampAxis > 0.0);
+      let lateral = abs(select(dir.z, dir.x, frontZ));
+      // Across a quarter panel the bumper rubs the upper flank of the crease.
+      // At a low hit the contact centre can be in the empty wheel opening.
+      let sideHit = smoothstep(0.55, 0.85, lateral);
+      let radius = u.deform.posR[contact].w * u.cell;
+      let markHeight = mix(1.55, 0.44 * radius, sideHit);
+      let materialAt = vec3f(across, rel.y + inward * 0.50 + across * mix(0.16,-0.28,sideHit) - markHeight, inward);
       let detail = 1.0 - smoothstep(40.0, 95.0, length(in.seen));
       let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y, materialAt, detail);
       albedo = worn.albedo;

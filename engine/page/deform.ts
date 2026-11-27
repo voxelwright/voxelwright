@@ -213,26 +213,41 @@ export function deformPointCpu(
     const ax = 3.7 * dz + 1.85 * upX, ay = 1.85 * upY, az = -3.7 * dx + 1.85 * upZ
     const along = ax * x + ay * y + az * z - 0.89
     const t = clamp(Math.abs(along) / 0.89), rib = 1 - t * t * (3 - 2 * t)
-    const inward = depth * (1 - 0.10 * horizontal), compression = 1 - 0.66 * horizontal * rib
+    // A bumper catches the sheet above the point of contact. Its raised shoulder
+    // cuts across the oblique fold, including on the metal over a wheel opening.
+    const acrossX = 6.8 * upX - 1.9 * dz, acrossY = 6.8 * upY, acrossZ = 6.8 * upZ + 1.9 * dx
+    const line = acrossX * x + acrossY * y + acrossZ * z - 3.0, edgeT = clamp(Math.abs(line))
+    const shoulder = 1 - 0.63 * horizontal * (1 - edgeT * edgeT * (3 - 2 * edgeT))
+    const shoulderSlope = 0.63 * horizontal * 6 * edgeT * (1 - edgeT) * Math.sign(line)
+    const inward = depth * (1 - 0.10 * horizontal), oblique = 1 - 0.66 * horizontal * rib
+    const compression = oblique * shoulder
     const slope = -4 * inward * inv * support * compression
-    const flank = inward * inv * support * support * 0.66 * horizontal * 6 * t * (1 - t) * Math.sign(along) / 0.89
+    const baseSlope = inward * inv * support * support
+    const flank = baseSlope * shoulder * 0.66 * horizontal * 6 * t * (1 - t) * Math.sign(along) / 0.89
+    const transverse = baseSlope * oblique * shoulderSlope
     push(dx, dy, dz, inward * support * support * compression,
-      slope * x + flank * ax, slope * y + flank * ay, slope * z + flank * az)
+      slope * x + flank * ax + transverse * acrossX,
+      slope * y + flank * ay + transverse * acrossY,
+      slope * z + flank * az + transverse * acrossZ)
 
     // The end of the folded sheet tucks down under the adjoining panel.
-    // Its bottom edge stays level. The top and bottom of the grille pinch together.
+    // The bottom edge stays level while the grille pinches closed.
     x = (px - d.center[0]) * inv; y = (py - d.center[1]) * inv; z = (pz - d.center[2]) * inv
     support = 1 - x * x - y * y - z * z
     if (support <= 0 || horizontal <= 0) continue
     const bx = 3.4 * dz + 2.25 * dx, by = 2.25 * dy, bz = -3.4 * dx + 2.25 * dz
     const cut = bx * x + by * y + bz * z - 0.65
-    const f = clamp(Math.abs(cut)), seam = 1 - f * f * (3 - 2 * f)
+    const f = clamp(Math.abs(cut))
+    // The sheet turns back up just behind the tuck. The narrow lip is visible from the seat.
+    const back = 3.4 * (x * dx + y * dy + z * dz) - 1.60, k = clamp(Math.abs(back))
+    const seam = 1 - f * f * (3 - 2 * f) - 0.80 * (1 - k * k * (3 - 2 * k))
     const h = clamp((upX * x + upY * y + upZ * z + 0.45) / 0.72), top = h * h * (3 - 2 * h)
     const drop = 0.42 * depth, base = drop * inv * support * support
     const radial = -4 * drop * inv * support * seam * top
     const edge = -base * top * 6 * f * (1 - f) * Math.sign(cut), height = base * seam * 6 * h * (1 - h) / 0.72
+    const curl = base * top * 0.80 * 6 * k * (1 - k) * Math.sign(back) * 3.4
     push(-upX, -upY, -upZ, drop * support * support * seam * top,
-      radial * x + edge * bx + height * upX, radial * y + edge * by + height * upY, radial * z + edge * bz + height * upZ)
+      radial * x + edge * bx + curl * dx + height * upX, radial * y + edge * by + curl * dy + height * upY, radial * z + edge * bz + curl * dz + height * upZ)
 
   }
   const norm = Math.hypot(nx, ny, nz) || 1
@@ -298,9 +313,15 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
     let t = clamp(abs(along) / 0.89, 0.0, 1.0);
     let ridge = 1.0 - t * t * (3.0 - 2.0 * t);
     let inward = depth * (1.0 - 0.10 * horizontal);
-    let compression = 1.0 - 0.66 * horizontal * ridge;
+    let across = 6.8 * up - 1.9 * side;
+    let line = dot(across, u) - 3.0;
+    let k = min(abs(line), 1.0);
+    let shoulder = 1.0 - 0.63 * horizontal * (1.0 - k*k*(3.0-2.0*k));
+    let shoulderSlope = 0.63 * horizontal * 6.0*k*(1.0-k) * sign(line);
+    let oblique = 1.0 - 0.66 * horizontal * ridge;
+    let compression = oblique * shoulder;
     let flank = 0.66 * horizontal * 6.0 * t * (1.0 - t) * sign(along) / 0.89;
-    let grad = (inward / zone.w) * (-4.0 * support * compression * u + core * flank * axis);
+    let grad = (inward / zone.w) * (-4.0 * support * compression * u + core * (flank * shoulder * axis + oblique * shoulderSlope * across));
     result.norm -= grad * (dot(dir, result.norm) / (1.0 + dot(dir, grad)));
     result.pos += dir * (inward * core * compression);
 
@@ -312,12 +333,14 @@ fn deformPoint(p: vec3f, n: vec3f, def: Deform) -> DeformResult {
       let joint = 3.4 * side + 2.25 * dir;
       let cut = dot(v, joint) - 0.65;
       let f = min(abs(cut), 1.0);
-      let seam = 1.0 - f * f * (3.0 - 2.0 * f);
+      let back = 3.4 * dot(v, dir) - 1.60;
+      let curlT = min(abs(back), 1.0);
+      let seam = 1.0 - f*f*(3.0-2.0*f) - 0.80 * (1.0 - curlT*curlT*(3.0-2.0*curlT));
       let h = clamp((dot(v, up) + 0.45) / 0.72, 0.0, 1.0);
       let top = h * h * (3.0 - 2.0 * h);
       let drop = 0.42 * depth;
       let gradDrop = (drop / zone.w) * (-4.0 * support2 * seam * top * v + support2 * support2 *
-        (-top * 6.0 * f * (1.0 - f) * sign(cut) * joint + seam * 6.0 * h * (1.0 - h) * up / 0.72));
+        (-top * 6.0 * f * (1.0 - f) * sign(cut) * joint + top * 0.80 * 6.0*curlT*(1.0-curlT) * sign(back) * 3.4 * dir + seam * 6.0 * h * (1.0 - h) * up / 0.72));
       result.norm += gradDrop * (dot(up, result.norm) / (1.0 - dot(up, gradDrop)));
       result.pos -= up * (drop * support2 * support2 * seam * top);
     }
@@ -350,7 +373,7 @@ fn deformPaintSeen(albedo: vec3f, scuff: f32, crease: f32, p: vec3f, detail: f32
   let colour = mix(albedo, mix(primer,vec3f(0.32,0.30,0.27),steel), rubbed);
   // A crushed coat crazes on both flanks. Primer and bare chips lose the coat entirely.
   let crazed = smoothstep(0.12, 0.70, scuff) * (0.55 + 0.45 * crease);
-  let rough = min(0.91, crazed * 0.52 + rubbed * 0.66);
+  let rough = min(0.91, scuff * 0.02 + crazed * 0.50 + rubbed * 0.66);
   return DeformPaint(colour, rough, (1.0 - crazed * 0.86) * (1.0 - rubbed * 0.98));
 }
 // p is window-local, relative to the impact center, in the same fine cells as scuff.

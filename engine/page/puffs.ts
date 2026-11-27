@@ -126,9 +126,13 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
     let height = in.uv.y * 0.5 + 0.5;
     let phase = -in.more.w;
     let sway = height * (0.17 * sin(phase + height * 6.0) + 0.09 * sin(2.1 * phase - height * 4.0));
-    let width = pow(1.0 - height, 0.72) * (0.58 + 0.12 * sin(phase * 1.4 + height * 9.0));
+    let width = pow(1.0 - height, 0.68) * (0.67 + 0.11 * sin(phase * 1.4 + height * 9.0));
     let edge = abs(in.uv.x - sway) / max(width, 0.005);
-    let tongue = (1.0 - smoothstep(0.42, 1.0, edge)) * (1.0 - smoothstep(0.85, 1.0, height));
+    let main = (1.0 - smoothstep(0.42, 1.0, edge)) * (1.0 - smoothstep(0.85, 1.0, height));
+    let forkHeight = 0.68 + 0.09 * sin(phase * 0.76);
+    let forkWidth = 0.35 * max(0.0, 1.0 - height / forkHeight);
+    let forkEdge = abs(in.uv.x + 0.34 + 0.13 * sin(phase - height*8.0)) / max(0.005, forkWidth);
+    let tongue = max(main, (1.0 - smoothstep(0.3, 1.0, forkEdge)) * (1.0 - smoothstep(forkHeight-0.16, forkHeight, height)));
     let core = (1.0 - smoothstep(0.04, 0.64, edge)) * (1.0 - smoothstep(0.12, 0.68, height));
     let colour = mix(vec3f(0.93, 0.19, 0.02), vec3f(1.0, 0.73, 0.22), core);
     return vec4f(colour * tongue, tongue * 0.44);
@@ -374,22 +378,22 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         const frac = (level - 0.35) / 0.35
         if (Math.random() < dt * (14 + 12 * frac)) {
           const w = rnd(0.84, 0.95)
-          puff(at, 0, rnd(0.6, 1.7), rnd(12, 18), { size: rnd(0.37, 0.59), grow: rnd(2.6, 3.5), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.27 + 0.07 * frac, late: 0.07 })
+          puff(at, 0, rnd(0.6, 1.7), rnd(12, 18), { size: rnd(0.37, 0.59), grow: rnd(2.6, 3.5), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.19 + 0.06 * frac, late: 0.22 })
         }
         return
       }
       // A few lighter wisps mix with the darker engine smoke.
       if (Math.random() < dt * 15) {
         const wisp = rnd(0.56, 0.70)
-        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.65, 1.0), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.20, late: 0.0 })
+        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.65, 1.0), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.14, late: 0.12 })
       }
       // Oil smoke rises from the same opening and expands as it cools.
       if (Math.random() < dt * 10) {
         const grey = rnd(0.30, 0.43)
-        puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.32, late: 0.0 })
+        puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.22, late: 0.10 })
       }
       // Redraw one attached flame while the engine burns. Smoke alone drifts away.
-      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.42 + 0.18 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
+      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
     },
     step(dt) {
       flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)

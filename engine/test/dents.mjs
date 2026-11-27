@@ -166,6 +166,11 @@ await page.evaluate(() => {
   // Read the hot instances actually submitted to the renderer. Detached burning puffs
   // used to drift up even when their spawn position was correct.
   globalThis.flameDraws = []
+  // Isolate a small steam emission in empty air beside the car. Read the first
+  // visible billows at their drawn size and age to catch a puff painted on the metal.
+  const steamAt = e.alive.where(globalThis.car).at.map((v,i) => v + (i === 1 ? 100 : 0))
+  globalThis.steamClearance = []
+  for (let i=0; i<16; i++) emit(steamAt, 0.50, 1)
   const draw = e.smoke.draw.bind(e.smoke)
   const write = GPUQueue.prototype.writeBuffer
   e.smoke.draw = (encoder, target, view) => {
@@ -173,6 +178,15 @@ await page.evaluate(() => {
     draw(encoder, target, view)
   }
   GPUQueue.prototype.writeBuffer = function(buffer, offset, data, start, count) {
+    if (buffer.label === 'puff instances') {
+      for (let i = 0; i < count; i += 12) {
+        const age = data[i+10], visibleFrom = data[i+11]
+        const height = data[i+1] + globalThis.puffAnchor[1] - steamAt[1]
+        if (height >= 0 && height < 35 && age >= visibleFrom + 0.02 && age < 0.45 && data[i+4] > 0.80) {
+          globalThis.steamClearance.push(height - data[i+3])
+        }
+      }
+    }
     if (buffer.label === 'broken nose mesh') globalThis.brokenNose = data.slice()
     if (buffer.label === 'puff instances' && globalThis.burningVent && globalThis.flameDraws.length < 24) {
       const errors = []
@@ -235,6 +249,8 @@ await page.evaluate(() => {
 })
 await page.waitForFunction(() => Math.abs(globalThis.engine.alive.where(globalThis.car).rot[1]) > 0.64)
 await page.waitForTimeout(180)
+const steam = await page.evaluate(() => ({ samples: globalThis.steamClearance.length, low: Math.min(...globalThis.steamClearance) }))
+check(steam.samples > 0 && steam.low > 0.6, `visible steam clears the emitting surface (${steam.low?.toFixed(2)} cells)`)
 const turnedVent = await ventInBody()
 check(!turnedVent.inside && Math.hypot(...turnedVent.rest.map((v,i)=>v-vent.rest[i]))<0.25, 'the vent follows the same open cells when the damaged car turns')
 // Taken away, its dents go with it: a body's id may be another thing's later.

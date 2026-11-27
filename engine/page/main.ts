@@ -1014,7 +1014,7 @@ async function main() {
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
-      sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
+      sparks: (at, strength) => { debris.burst(at, 1.5, Math.round(3 + strength * 6), [1.0, 0.57, 0.12], 0.13, 0.34, 0.5 + strength * 0.4, true); smoke.glint(at, 4 + strength * 5) },
       // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)

@@ -178,10 +178,12 @@ function position(p, s) {
     const smooth = x => { const t = Math.max(0, Math.min(1, x)); return t*t*(3-2*t) }
     let v = relative()
     const ridge = 1 - smooth(Math.abs(3.7*project(v, side) + 1.85*project(v, up) - 0.89) / 0.89)
-    const inward = d.depth * (1-0.1*up[1]) * envelope(r) * (1-0.66*up[1]*ridge)
+    const shoulder = 1 - smooth(Math.abs(6.8*project(v, up) - 1.9*project(v, side) - 3.0))
+    const inward = d.depth * (1-0.1*up[1]) * envelope(r) * (1-0.66*up[1]*ridge) * (1-0.63*up[1]*shoulder)
     for (let i = 0; i < 3; i++) q[i] += d.dir[i]*inward
     v = relative()
-    const seam = 1 - smooth(Math.abs(3.4*project(v, side) + 2.25*project(v, d.dir) - 0.65))
+    const curl = 1 - smooth(Math.abs(3.4*project(v, d.dir) - 1.60))
+    const seam = 1 - smooth(Math.abs(3.4*project(v, side) + 2.25*project(v, d.dir) - 0.65)) - 0.80*curl
     const top = smooth((project(v, up) + 0.45)/0.72)
     const drop = 0.42 * d.depth * Math.max(0, 1-project(v,v))**2 * seam * top
     for (let i = 0; i < 3; i++) q[i] -= up[i]*drop
@@ -218,7 +220,7 @@ for (let x = -6; x <= 6; x++) for (let y = -6; y <= 6; y++) for (let z = -6; z <
   })
   minVolume = Math.min(minVolume, a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
 }
-assert.ok(lowest < -0.32 * dent.depth && highest <= 1e-6 && minVolume > 0, 'the hood folds down below the sightline and the skin stays in order')
+assert.ok(lowest < -0.32 * dent.depth && highest > 0.07 * dent.depth && highest < 0.25 * dent.depth && minVolume > 0, 'a folded hood has a low return lip behind the tuck and the skin stays in order')
 // The grille used to stretch downward and open wider under a horizontal blow.
 const gapAt = (y) => {
   const p = [dent.center[0], dent.center[1] + y*dent.radius, dent.center[2]]
@@ -242,6 +244,20 @@ for (let k = -20; k <= 20; k++) {
   lastNormal = norm
 }
 assert.ok(sharpest > 16, `a struck door bends its reflection across a crease (${sharpest.toFixed(1)} degrees)`)
+// In the street capture the bumper struck at hub height. Sample the surviving
+// painted metal above the wheel rather than the empty centre of its arch.
+const quarter = { center: [23,10,-3], radius: 38.3, depth: 7.65, dir: [0,0,1] }
+let previous, quarterBend = 0
+for (let k = 8; k <= 18; k++) {
+  const point = [quarter.center[0] + 0.16*quarter.radius, quarter.center[1] + k*quarter.radius/25, 1]
+  const { norm } = deformPointCpu(point, [0,0,-1], { dentCount: 1, dents: [quarter] })
+  if (previous) {
+    const cos = norm.reduce((sum, v, i) => sum + v*previous[i], 0)
+    quarterBend = Math.max(quarterBend, Math.acos(Math.max(-1,Math.min(1,cos))) * 180 / Math.PI)
+  }
+  previous = norm
+}
+assert.ok(quarterBend > 14, `the shoulder over the struck wheel interrupts the reflection (${quarterBend.toFixed(1)} degrees)`)
 const states = [undefined, state, multi, protectedState, windshield, side]
 const uniforms = new Float32Array(52 * 64)
 for (let i = 0; i < 64; i++) packDeformUniforms(states[i % states.length], uniforms, i * 52)
