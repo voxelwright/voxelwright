@@ -1902,13 +1902,14 @@ impl Pack {
             let length = dx*dx+dz*dz;
             let t = if length > 0.0 { ((ux*dx+uz*dz)/length).clamp(0.0,1.0) } else { 0.0 };
             let cable = r[6] <= 3;
-            // Thin aerial cables (<= 3 cm radius) are rendered as 2.5 cm fine subcells at L0 (size == 1); at size >= 2
-            // (20 cm+) they bloat into solid beams and cast coarse sawtooth shadows across streets.
-            if cable && size > 1 { continue; }
+            // Thin aerial cables (<= 3 cm radius) are rasterized into fine subcell blocks at L0..L2 (size <= 4):
+            // 2.5 cm subcells at L0 (shift 2) and L1 (shift 3), and 5 cm subcells at L2 (shift 3), so overhead
+            // trolley/utility wires continue down the street instead of vanishing at the L0 boundary (#154).
+            let cable_step = if size == 1 { 0.25 } else { size as f32 / 8.0 };
+            let cable_rad = (r[6] as f32 / 10.0).min(0.18).max(cable_step * 0.72);
             // A cell is in a rod when its middle is within the rod's radius, and never less than the 0.71 of a cell
             // that keeps a thin one whole at any slant. Added to the radius, it made a stop sign's plate a red box
             // 1 m across and 24 cm deep and every lamp's mast 38 cm thick (#450).
-            let cable_rad = (r[6] as f32 / 10.0).min(0.18);
             let rad = if cable { cable_rad + size as f32 * 0.71 } else { (r[6] as f32 / 10.0).max(size as f32 * 0.71) };
             let far = (ux-dx*t).powi(2)+(uz-dz*t).powi(2);
             if far > rad*rad { continue; }
@@ -2349,33 +2350,62 @@ struct FixtureSpan {
 }
 
 impl FixtureSpan {
-    // Rasterize a cable at 2.5 cm only inside the candidate 10 cm column.
-    // Relative coordinates retain sub-centimetre precision far from the engine origin.
+    // Rasterize a cable at 2.5 cm inside one L0 column (thin wrapper over `cable_rows_lod`).
+    #[cfg(test)]
     fn cable_rows(&self, x: i32, z: i32, floor: i32, rows: &mut Vec<Run>) {
+        self.cable_rows_lod(x, z, floor, 0, rows);
+    }
+
+    // Rasterize a cable into fine subcell runs in sector-cell coordinates for LOD `k` (0..=2):
+    // L0 uses 4^3 subcells (2.5 cm), L1 uses 8^3 subcells (2.5 cm), and L2 uses 8^3 subcells (5.0 cm).
+    // Relative coordinates retain sub-centimetre precision far from the engine origin (#129, #154).
+    fn cable_rows_lod(&self, cell_x: i32, cell_z: i32, sector_low_y: i32, k: u32, rows: &mut Vec<Run>) {
         let r = self.rod;
-        let dx = (r[3]-r[0]) as f32;
-        let dy = (r[4]-r[1]) as f32;
-        let dz = (r[5]-r[2]) as f32;
-        let length2 = (dx*dx+dy*dy+dz*dz).max(1.0);
-        // Cap aerial cables to 1.8 cm radius (1-2 fine 2.5 cm subcells, guaranteed gap-free along any diagonal)
-        // so overhead trolley/utility wires stay slim rather than rendering as thick 7.5 cm black pipes (#129).
-        let radius2 = (r[6] as f32 / 10.0).min(0.18).powi(2);
-        for y in self.low.max(floor)..=self.high.min(floor+SIDE as i32-1) {
-            for sy in 0..4 {
-                for sz in 0..4 {
-                    let uy = (y-r[1]) as f32 + (sy as f32+0.5)/4.0;
-                    let uz = (z-r[2]) as f32 + (sz as f32+0.5)/4.0;
-                    let (mut first,mut end) = (4,0);
-                    for sx in 0..4 {
-                        let ux = (x-r[0]) as f32 + (sx as f32+0.5)/4.0;
-                        let t = ((ux*dx+uy*dy+uz*dz)/length2).clamp(0.0,1.0);
-                        if (ux-t*dx).powi(2)+(uy-t*dy).powi(2)+(uz-t*dz).powi(2) <= radius2 {
-                            first=first.min(sx);
-                            end=sx+1;
+        let dx = (r[3] - r[0]) as f32;
+        let dy = (r[4] - r[1]) as f32;
+        let dz = (r[5] - r[2]) as f32;
+        let length2 = (dx * dx + dy * dy + dz * dz).max(1.0);
+        let shift = if k == 0 { 2u32 } else { 3u32 };
+        let per = 1i32 << shift;
+        let step = (1 << k) as f32 / per as f32;
+        // Cap aerial cables to 1.8 cm radius at 2.5 cm pitch (L0/L1) and 0.72 * subcell pitch at L2 (3.6 cm)
+        // so overhead trolley/utility wires stay slim (1-2 subcells) and gap-free along any 3D diagonal.
+        let radius = (r[6] as f32 / 10.0).min(0.18).max(step * 0.72);
+        let radius2 = radius * radius;
+        let seg_y_min = r[1].min(r[4]) as f32 - radius;
+        let seg_y_max = r[1].max(r[4]) as f32 + radius;
+        let cy_start = ((self.low >> k) - sector_low_y).max(0);
+        let cy_end = ((self.high >> k) - sector_low_y).min(SIDE as i32 - 1);
+        let wx = cell_x << k;
+        let wz = cell_z << k;
+        for cy in cy_start..=cy_end {
+            let cell_y = sector_low_y + cy;
+            let wy = cell_y << k;
+            for sy in 0..per {
+                let wy_s = wy as f32 + (sy as f32 + 0.5) * step;
+                if wy_s < seg_y_min || wy_s > seg_y_max {
+                    continue;
+                }
+                let uy = wy_s - r[1] as f32;
+                for sz in 0..per {
+                    let uz = (wz - r[2]) as f32 + (sz as f32 + 0.5) * step;
+                    let (mut first, mut end) = (per, 0);
+                    for sx in 0..per {
+                        let ux = (wx - r[0]) as f32 + (sx as f32 + 0.5) * step;
+                        let t = ((ux * dx + uy * dy + uz * dz) / length2).clamp(0.0, 1.0);
+                        if (ux - t * dx).powi(2) + (uy - t * dy).powi(2) + (uz - t * dz).powi(2) <= radius2 {
+                            first = first.min(sx);
+                            end = sx + 1;
                         }
                     }
-                    if first<end {
-                        rows.push(Run { x0:x*4+first, x1:x*4+end, y:y*4+sy, z:z*4+sz, kind:r[7] as Kind });
+                    if first < end {
+                        rows.push(Run {
+                            x0: cell_x * per + first,
+                            x1: cell_x * per + end,
+                            y: cell_y * per + sy,
+                            z: cell_z * per + sz,
+                            kind: r[7] as Kind,
+                        });
                     }
                 }
             }
@@ -3420,7 +3450,10 @@ pub fn make(s: &mut Scratch) {
     let z_max = ((s.low[2] + side - 1) << k) + size / 2;
     let least = least_step(size);
     let low_y = s.low[1] << k;
-    let skip_cables = s.finer && k == 0;
+    let fine_l0 = s.finer && k == 0;
+    let fine_cables = s.finer && k <= 2;
+    // Never rasterize thin cables into coarse solid voxels (at L1/L2 they use fine blocks when `s.finer`, or are omitted).
+    let skip_cables = fine_cables || k > 0;
 
     PACKS.with_borrow(|packs| {
         SECTOR_COLS.with_borrow_mut(|cache| {
@@ -3468,7 +3501,7 @@ pub fn make(s: &mut Scratch) {
                     let x = ((s.low[0] + cx) << k) + half;
                     let oc = &cache.cols[row_base + cx as usize];
                     let has_fixtures = !oc.fixtures.is_empty();
-                    if skip_cables {
+                    if fine_l0 {
                         let mut carved = false;
                         if let Some(curb) = oc.curb {
                             let mut c = oc.as_column(packs);
@@ -3480,11 +3513,11 @@ pub fn make(s: &mut Scratch) {
                             if has_fixtures { c.fixtures = oc.fixtures.clone(); }
                             grade_rows(&c, x, z, s.low[1], &mut road);
                         }
-                        if has_fixtures {
-                            for fixture in &oc.fixtures {
-                                if fixture.rod[6] <= 3 {
-                                    fixture.cable_rows(x, z, s.low[1], &mut cables);
-                                }
+                    }
+                    if fine_cables && has_fixtures {
+                        for fixture in &oc.fixtures {
+                            if fixture.rod[6] <= 3 {
+                                fixture.cable_rows_lod(s.low[0] + cx, s.low[2] + cz, s.low[1], k, &mut cables);
                             }
                         }
                     }
@@ -3547,7 +3580,7 @@ pub fn make(s: &mut Scratch) {
     });
     if !road.is_empty() { s.fine_runs(&road, 2); }
     if !curbs.is_empty() { s.fine_runs(&curbs, 3); }
-    if !cables.is_empty() { s.fine_runs(&cables, 2); }
+    if !cables.is_empty() { s.sector_fine_runs(&cables, if k == 0 { 2 } else { 3 }); }
 }
 
 #[cfg(test)]
@@ -4435,6 +4468,55 @@ mod tests {
         assert_eq!(kind_single(100, g + 10, 50), 0);
         assert_eq!(under(100, g + 20, 50, 40), g + 1);
         assert_eq!(material(kind_single(100, 160, 50)), STEEL, "wire remains visible at wire height");
+        clear();
+    }
+
+    #[test]
+    fn aerial_cables_continue_seamlessly_across_l0_l1_l2() {
+        use crate::kinds::FINE;
+        let mut b = pack();
+        // Diagonal trolley wire over open road at y=160 spanning (60, 160, 40) -> (180, 160, 100).
+        let wire: [i32; 8] = [60, 160, 40, 180, 160, 100, 3, kind(STEEL, grey(14)) as i32];
+        b.extend_from_slice(b"SFST");
+        b.extend_from_slice(&1u32.to_le_bytes());
+        for w in wire { b.extend_from_slice(&w.to_le_bytes()); }
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+
+        let mut s = Scratch::new();
+        s.finer = true;
+        // L0 (k=0, 10 cm cells), L1 (k=1, 20 cm cells), L2 (k=2, 40 cm cells) must all carry FINE | STEEL wire blocks.
+        for (lod, (sx, sy, sz)) in [(0u32, (1, 2, 0)), (1u32, (0, 1, 0)), (2u32, (0, 0, 0))] {
+            s.start(sx, sy, sz, lod);
+            make(&mut s);
+            let wire_cells: Vec<usize> = s.cells.iter().enumerate()
+                .filter(|&(_, &k)| k & FINE != 0 && material(k) == STEEL)
+                .map(|(i, _)| i)
+                .collect();
+            assert!(!wire_cells.is_empty(), "L{lod} must emit fine aerial cable cells (#154)");
+            for &i in &wire_cells {
+                assert!(s.fine_of.contains_key(&(i as u32)), "L{lod} fine wire cell must have a fine block");
+            }
+            // Verify tree::encode_fine succeeds cleanly for every LOD carrying fine wire blocks.
+            let mut tree = Vec::new();
+            let whole = crate::tree::encode_fine(&s.cells, &s.fine_of, &s.fine, &mut tree);
+            assert!(matches!(whole, crate::tree::Whole::Tree(_)), "L{lod} sector with fine wires must encode to a tree");
+        }
+
+        // L3 (k=3, 80 cm cells) omits aerial cables (fixture_spans stops at size <= 4).
+        s.start(0, 0, 0, 3);
+        make(&mut s);
+        assert!(s.fine_of.is_empty(), "L3 must not emit fine cable blocks");
+        assert!(s.cells.iter().all(|&k| material(k) != STEEL), "L3 must not emit coarse solid cable beams");
+
+        // With finer disabled, L1 and L2 must not bloat cables into coarse solid steel beams.
+        s.finer = false;
+        for (lod, (sx, sy, sz)) in [(1u32, (0, 1, 0)), (2u32, (0, 0, 0))] {
+            s.start(sx, sy, sz, lod);
+            make(&mut s);
+            assert!(s.cells.iter().all(|&k| material(k) != STEEL), "L{lod} without finer must not emit coarse solid cable beams");
+        }
         clear();
     }
 

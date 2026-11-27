@@ -152,7 +152,7 @@ On loading a fine tile, the core samples the roof inside each ordinary building'
 
 Two trailers may follow the trunks, in this order. Any other trailing bytes make the pack invalid.
 
-**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach. Overhead aerial cables (`radius <= 3 cm`) rasterize at a slim capped radius (`<= 0.18` cells) at fine detail so wires stay slender on pinned tiles too.
+**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach. Overhead aerial cables (`radius <= 3 cm`) rasterize into fine subcell blocks across L0–L2 (`2.5 cm` at L0/L1 with `<= 0.18` cell radius, `5 cm` at L2) so wires stay slender and continue down the street past the L0 boundary on pinned tiles too.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |

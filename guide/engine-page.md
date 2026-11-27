@@ -104,7 +104,7 @@ A tile of a sun map is 4,096 rays that each go through everything up-sun of them
 
 - While the eye moves faster than a metre a second, tiles get a twelfth of the frame's time on the GPU (`sunMost` in `main.ts`). The page measures what a tile takes with timestamp queries round the tile passes (`tend` in `march.ts`) and counts the share in tiles. A tile that costs more than the share is drawn every few frames.
 - An eye that stands still gets eight tiles a frame, as before. Nothing passes there for a late frame to show in, and the first picture's shadows are traced ray by ray until its tiles are drawn.
-- A tile's rays never enter a finer box, so a map is drawn as soon as its own box and every coarser one is whole but for a layer of sectors at each side (`wholeFrom` in `world.ts`). Going fast, the finest boxes are always being made; the coarser maps no longer wait for them.
+- A tile's rays never enter a finer box, so a map is drawn as soon as its own box and every coarser one is whole but for a layer of sectors at each side (`wholeFrom` in `world.ts`). Going fast, the finest boxes are always being made; the coarser maps no longer wait for them. Sun rays pass through glass at L0–L1 and fine overhead wires (`FINE | STEEL`) across L0–L2 so aerial cables continue cleanly past L0 without casting coarse shadows.
 - `engine.sunRoom` reports the measured tile time and the last frame's count. `?suntiles=8` (or setting `engine.sunRoom.fixed`) draws a fixed number a frame, to measure what the share is worth.
 
 ## Where a moving thing is drawn
