@@ -110,6 +110,20 @@ export interface Screens {
   readonly count: number
 }
 
+/**
+ * Where a sign's picture may come from (#81): this site's own (a path, or its own origin), any `https:` address, or a
+ * raster picture drawn in the page (`data:image/png|jpeg|gif|webp;base64`). Nothing else: no `javascript:`, `blob:`,
+ * `http:` from elsewhere, or SVG. The address to load, or null where it is refused.
+ */
+export function picture(url: unknown, base: string = globalThis.location?.href ?? 'https://invalid/'): string | null {
+  if (typeof url !== 'string' || !url || url.length > 4_000_000) return null
+  if (/^data:/i.test(url)) return /^data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=\s]*$/i.test(url) ? url : null
+  let at: URL
+  try { at = new URL(url, base) } catch { return null }
+  const here = new URL(base)
+  return at.origin === here.origin && /^https?:$/.test(at.protocol) ? at.href : at.protocol === 'https:' ? at.href : null
+}
+
 export async function screens(device: GPUDevice, format: GPUTextureFormat): Promise<Screens> {
   const module = await shader(device, 'screens', CODE)
   const pipeline = await device.createRenderPipelineAsync({
@@ -171,11 +185,13 @@ export async function screens(device: GPUDevice, format: GPUTextureFormat): Prom
           // An image: its ground until it has come; one that does not come is said on the console, and the ground stays.
           showing = { kind: 'image', ready: false }
           ground(); sent()
+          const src = picture(content.image)
+          if (!src) { console.warn('a sign\'s image was refused: only this site\'s own pictures, https: ones, and pictures drawn in the page are shown'); return }
           const image = new Image()
           image.crossOrigin = 'anonymous'
           image.onload = () => { if (mine !== asked) return; cover(image, image.naturalWidth, image.naturalHeight); sent(); showing = { kind: 'image', ready: true } }
           image.onerror = () => { if (mine === asked) console.warn(`a sign's image did not come: ${content.image}`) }
-          image.src = content.image
+          image.src = src
         },
         paint(draw) { asked++; video = null; draw(pen, pixels[0], pixels[1]); sent(); showing = { kind: 'image', ready: true } },
         tick() {

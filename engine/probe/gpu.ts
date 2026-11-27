@@ -12,6 +12,11 @@ export interface Gpu {
   canTime: boolean
   /** Whatever went wrong on the device after it was opened, as text. */
   faults: string[]
+  /**
+   * Hears the device lost (#81): a GPU reset, a phone that ran short of memory, a tab long in the background. Told
+   * once, at once if it is gone already. Nothing drawn with it is drawn again: the page must stop and say so.
+   */
+  onLost(each: (info: { reason: string; message: string }) => void): void
 }
 
 /** The limits the probe's work depends on. Asked for by name: a device opened with none has the specification's lowest. */
@@ -27,8 +32,16 @@ export async function openGpu(): Promise<Gpu> {
   const device = await adapter.requestDevice({ requiredLimits, requiredFeatures: canTime ? ['timestamp-query'] : [] })
   const faults: string[] = []
   device.addEventListener('uncapturederror', (e) => faults.push(`error: ${(e as GPUUncapturedErrorEvent).error.message}`))
-  void device.lost.then((info) => faults.push(`lost: ${info.reason} ${info.message}`))
-  return { adapter, device, format: navigator.gpu.getPreferredCanvasFormat(), canTime, faults }
+  let gone: { reason: string; message: string } | null = null
+  const hearing = new Set<(info: { reason: string; message: string }) => void>()
+  void device.lost.then((info) => {
+    faults.push(`lost: ${info.reason} ${info.message}`)
+    gone = { reason: String(info.reason ?? 'unknown'), message: String(info.message ?? '') }
+    for (const each of hearing) try { each(gone) } catch (e) { console.error(e) }
+    hearing.clear()
+  })
+  const onLost = (each: (info: { reason: string; message: string }) => void) => { if (gone) each(gone); else hearing.add(each) }
+  return { adapter, device, format: navigator.gpu.getPreferredCanvasFormat(), canTime, faults, onLost }
 }
 
 /** A shader module, or an error that says what the compiler said. */

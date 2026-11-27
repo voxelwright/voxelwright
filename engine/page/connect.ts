@@ -4,7 +4,8 @@
 //
 // What holds:
 //   - The key is in this file's closure, in models.ts's request headers to its own provider, in the password field while
-//     it is typed, and under `village.ai` in this browser's storage. Nowhere else: not in the DOM as text once connected
+//     it is typed, and under `village.ai` in this tab's storage (sessionStorage: gone when the tab closes), or, only
+//     when the visitor ticks "Remember key in this browser", in this browser's (localStorage, #81). Nowhere else: not in the DOM as text once connected
 //     (its last four characters at most), not in an address, a log, an error, a message to a host page or anything
 //     `engine` holds. What this file hands back is the reply's text alone. A provider's own words are shown only with the
 //     key taken out of them (`scrub`).
@@ -12,11 +13,12 @@
 //     this file asks nothing of its own. Nothing a host page, a board or a link says opens the panel or fills it.
 //   - A wish asked with nothing connected is not lost: it waits, in its turn, while the visitor connects, and is then
 //     made as it was asked. Let go (Not now, or the panel shut without a key), it goes quietly ('let go', making.ts).
-//   - Another tab that connects or forgets is followed here (the storage event).
+//   - Another tab that connects with its key remembered, or forgets a remembered one, is followed here (the storage
+//     event). A key kept for one tab alone is that tab's.
 //
 // The panel is the Voxelmorphism kit's dialog (engine/kit): plain HTML first, voxels when the kit draws them. It sits
 // outside the realm's controls (realm-ui.ts gives the keys back to the world when a pointer is let go there).
-import { ABOUT, keep, kept, models, preferred, reply, Unanswered, type Connected, type Listed, type Route } from './models.ts'
+import { ABOUT, keep, kept, models, preferred, remembered, reply, Unanswered, type Connected, type Listed, type Route } from './models.ts'
 import type { Ask, Stage } from './ask.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
@@ -37,7 +39,7 @@ export interface Connect {
 const ROUTES = Object.keys(ABOUT) as Route[]
 /** Thousands with a comma, as a bill shows them. */
 const count = (n: number) => n.toLocaleString('en-US')
-/** Whether this browser keeps anything for this site (a private window may not). */
+/** Whether this browser keeps anything for this site past the tab (a private window may not): whether a key can be remembered. */
 const storable = () => { try { localStorage.setItem('village.ai.can', '1'); localStorage.removeItem('village.ai.can'); return true } catch { return false } }
 
 const STYLE = /* css */ `
@@ -79,6 +81,7 @@ const STYLE = /* css */ `
 #connect .said:empty { display: none; }
 #connect .said[data-tone="bad"] { color: var(--vx-danger-text, #b3261e); }
 #connect .truth { margin: 0; color: var(--vx-ink-quiet); font-size: 14px; }
+#connect .remember { font-size: 14px; }
 #connect .truth b { color: var(--vx-ink); font-weight: 600; }
 #connect details { font-size: 14px; color: var(--vx-ink-quiet); }
 #connect summary { cursor: pointer; font-weight: 600; color: var(--vx-ink); min-block-size: 32px; display: flex; align-items: center; gap: 8px; list-style: none; }
@@ -253,9 +256,11 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
             <button class="vx-button reveal" type="button" aria-pressed="false" aria-controls="connect-key"><span>Show</span></button>
           </div>
         </div>
+        <label class="vx-check giving remember"><input type="checkbox" id="connect-remember"><span class="vx-box"></span>Remember key in this browser</label>
         <dl class="on" hidden>
           <dt>Connected</dt><dd><span class="lamp" aria-hidden="true"></span><span class="who"></span></dd>
           <dt>Key</dt><dd class="ends"></dd>
+          <dt>Kept</dt><dd class="where"></dd>
         </dl>
         <label class="vx-field models" hidden>
           <span class="vx-field-label">Which model makes things</span>
@@ -286,7 +291,7 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     $<HTMLSelectElement>('select').addEventListener('change', (e) => {
       const id = (e.target as HTMLSelectElement).value
       // Connected already: the choice is kept at once.
-      if (held && !field!.value) { held = { ...held, model: id }; if (!keep(held)) { /* this page only */ } draw() }
+      if (held && !field!.value) { held = { ...held, model: id }; if (!keep(held, remembered())) { /* this page only */ } draw() }
     })
     $<HTMLButtonElement>('.go').addEventListener('click', () => void go())
     $<HTMLButtonElement>('.later').addEventListener('click', () => d.close())
@@ -299,6 +304,7 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     d.addEventListener('close', () => {
       trying?.abort()
       field!.value = ''; field!.type = 'password'; reveal.setAttribute('aria-pressed', 'false'); legend(reveal, 'Show')
+      $<HTMLInputElement>('#connect-remember').checked = false
       leave?.(); leave = null
       const w = waiting; waiting = null
       w?.done(!!held)
@@ -328,6 +334,7 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     if (connected) {
       $<HTMLElement>('.who').textContent = `${about.name} · ${named(held!.model)}`
       $<HTMLElement>('.ends').textContent = `Ending in ${held!.key.slice(-4)}`
+      $<HTMLElement>('.where').textContent = remembered() ? 'In this browser, until you forget it' : 'In this tab, until it closes'
     }
     // The models: what the key being given can use, or what the connected one can.
     const list = listed && (connected ? listed.route === held!.route && listed.key === held!.key : listed.route === route && listed.key === field!.value.trim()) ? listed.list : null
@@ -340,12 +347,14 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
       else if (!choose.value || (connected && choose.value !== held!.model)) choose.value = pick.id
     }
     const keeps = storable()
+    // (A window that keeps nothing past the tab cannot remember: the box is not offered.)
+    $<HTMLElement>('.remember').hidden = connected || !keeps
     $<HTMLElement>('.truth').replaceChildren(
-      ...(connected ? [] : [document.createTextNode('Your key stays in this browser and goes only to '), Object.assign(document.createElement('b'), { textContent: about.name }), document.createTextNode('. ')]),
+      ...(connected ? [] : [document.createTextNode('Your key stays in this tab and goes only to '), Object.assign(document.createElement('b'), { textContent: about.name }), document.createTextNode('. ')]),
       document.createTextNode(`Each new thing is paid from your own ${about.name} account; kept things cost nothing.`),
       ...(keeps ? [] : [document.createTextNode(' This window keeps nothing: the key lasts until the page closes.')]),
     )
-    $<HTMLElement>('.how').textContent = `When you ask for something nothing kept is called, this page sends your words and a brief on how to build to ${hostOf(connected ? held!.route : route)} with your key, straight from this browser: no server of this site sees either. ${keeps ? 'The key is kept in this browser’s storage for this site until you forget it here.' : 'This window keeps nothing, so the key is held only while the page is open.'} Checking a key only asks which models it can use, which costs nothing.`
+    $<HTMLElement>('.how').textContent = `When you ask for something nothing kept is called, this page sends your words and a brief on how to build to ${hostOf(connected ? held!.route : route)} with your key, straight from this browser: no server of this site sees either. ${keeps ? 'The key is held for this tab and forgotten when it closes, unless you tick “Remember key in this browser”: then it is kept in this browser’s storage for this site until you forget it here.' : 'This window keeps nothing, so the key is held only while the page is open.'} Checking a key only asks which models it can use, which costs nothing.`
     $<HTMLElement>('.forget').hidden = !connected
     // Connected, from the settings: Done alone closes it; a second key that does the same would be one too many.
     legend($<HTMLElement>('.later'), 'Not now')
@@ -355,8 +364,8 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     go.setAttribute('aria-busy', String(!!trying))
     if (connected && !list && !trying) void list_(held!.route, held!.key)
     // Parts that were hidden when the kit drew them (the model's well, the keys of the other view) are drawn as they are now.
-    const shown = [...dialog!.querySelectorAll<HTMLElement>('.vx-well, .vx-button, .vx-toggle-group')].filter((el) => !el.closest('[hidden]')).map((el) => `${el.className}:${el.offsetWidth}x${el.offsetHeight}`).join()
-    if (kit && shown !== drawn) { drawn = shown; requestAnimationFrame(() => { kit?.adopt(dialog!); for (const el of dialog!.querySelectorAll('.vx-well, .vx-button, .vx-toggle-group')) kit?.refresh?.(el) }) }
+    const shown = [...dialog!.querySelectorAll<HTMLElement>('.vx-well, .vx-button, .vx-toggle-group, .vx-check')].filter((el) => !el.closest('[hidden]')).map((el) => `${el.className}:${el.offsetWidth}x${el.offsetHeight}`).join()
+    if (kit && shown !== drawn) { drawn = shown; requestAnimationFrame(() => { kit?.adopt(dialog!); for (const el of dialog!.querySelectorAll('.vx-well, .vx-button, .vx-toggle-group, .vx-check')) kit?.refresh?.(el) }) }
   }
   let drawn = ''
   const hostOf = (r: Route) => ({ anthropic: 'api.anthropic.com', openai: 'api.openai.com', gemini: 'generativelanguage.googleapis.com', openrouter: 'openrouter.ai' })[r]
@@ -395,9 +404,10 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     if (!(await tryKey())) { field!.focus(); return }
     const model = $<HTMLSelectElement>('select').value || preferred(route, listed!.list)!.id
     held = { route, key, model }
-    const kept = keep(held)
+    const remember = $<HTMLInputElement>('#connect-remember').checked && storable()
+    const kept = keep(held, remember)
     field!.value = ''
-    said(`Connected: ${ABOUT[route].name}, ${named(model)}.${kept ? '' : ' Until this page closes.'}`)
+    said(`Connected: ${ABOUT[route].name}, ${named(model)}.${!kept ? ' Until this page closes.' : remember ? ' Remembered in this browser.' : ' For this tab: it is forgotten when the tab closes.'}`)
     if (waiting) { dialog!.close(); return }
     draw()
     $<HTMLButtonElement>('.go').focus()

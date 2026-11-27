@@ -480,18 +480,31 @@ export function street(o: {
     }
   }
   const squareOf = (name: string) => { const [e, n] = name.split('_').map((v) => Number(v) * 1000); return [(e - 500000) * 10, (4250000 - n - 1000) * 10, (e + 1000 - 500000) * 10, (4250000 - n) * 10] }
+  /** Life files on their way: at most `LIFE_AT_ONCE` (#81), the nearest the eye first, so a jump across the city does not ask for a dozen at once. */
+  let lifeComing = 0
+  const LIFE_AT_ONCE = 3
   const wanted = (eye: readonly number[]) => {
-    if (!index) return
+    if (!index || lifeComing >= LIFE_AT_ONCE) return
+    const near: { name: string; d: number }[] = []
     for (const name of Object.keys(index.life)) {
       if (squares.has(name)) continue
-      const [x0, z0, x1, z1] = squareOf(name), dx = Math.max(x0 - eye[0], 0, eye[0] - x1), dz = Math.max(z0 - eye[2], 0, eye[2] - z1)
-      if (Math.hypot(dx, dz) > 15000) continue
+      const [x0, z0, x1, z1] = squareOf(name), dx = Math.max(x0 - eye[0], 0, eye[0] - x1), dz = Math.max(z0 - eye[2], 0, eye[2] - z1), d = Math.hypot(dx, dz)
+      if (d <= 15000) near.push({ name, d })
+    }
+    near.sort((a, b) => a.d - b.d)
+    for (const { name } of near.slice(0, LIFE_AT_ONCE - lifeComing)) {
       squares.set(name, 'asked')
-      void fetch(new URL(index.life[name].path, o.life)).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) { take(s); squares.set(name, 'held') } }, () => squares.delete(name))
+      lifeComing++
+      void fetch(new URL(index.life[name].path, o.life)).then((r) => (r.ok ? r.json() : null)).then((s) => { if (s) { take(s); squares.set(name, 'held') } }, () => squares.delete(name)).finally(() => { lifeComing-- })
     }
   }
+  /**
+   * The life files' listing and the transit routes: asked for the first time street life is on or prewarmed (#81),
+   * not as the page opens. In the first view it sleeps (main.ts `leaveLanding`), and a visitor who bounces off the landing costs none of these.
+   */
   let pendingWarm: readonly [number, number, number] | null = null
-  void fetch(new URL('index.json', o.life)).then((r) => r.json()).then((i) => {
+  let lifeAsked = false
+  const askLife = () => { if (lifeAsked) return; lifeAsked = true; void fetch(new URL('index.json', o.life)).then((r) => r.json()).then((i) => {
     index = i
     if (pendingWarm) wanted(pendingWarm)
     if (!i.transit) return
@@ -514,7 +527,7 @@ export function street(o: {
       for (const r of roads.values()) r.railShift = undefined
       routed = true
     }, () => {})
-  }, () => {})
+  }, () => {}) }
 
   // ── People ──
   const routes = new Map<string, Route>()
@@ -755,6 +768,7 @@ export function street(o: {
   let peopleMs = 0
   const folk = (view: View, seconds: number): readonly Person[] => {
     if (!on) { shown.length = 0; return shown }
+    begin()
     const t0 = performance.now(), t = o.clock(), hour = o.hour(), wet = o.rain() > 0.3, eye = view.eye, bodies = o.bodies()
     const dt = Math.max(0, Math.min(0.1, seconds - lastSeconds))
     lastSeconds = seconds
@@ -1059,13 +1073,15 @@ export function street(o: {
   }
   const serviceOf = (c: Car): RobotaxiService => serviceById.get(c.model.serviceId ?? '') ?? ROBOTAXI_SERVICES[0]
   const lidarBorn = (svc: RobotaxiService, stuck: boolean) => buildLidarDomeBorns(svc)[stuck ? 'stuck' : 'normal']
-  void fetch(new URL('index.json', o.cars)).then((r) => r.json()).then((l) => {
+  /** The kept vehicles' listing, and each of them: as the life files are, the first time street life is on (#81). */
+  let carsAsked = false
+  const askCars = () => { if (carsAsked) return; carsAsked = true; void fetch(new URL('index.json', o.cars)).then((r) => r.json()).then((l) => {
     library = l.cars
     for (const c of library) if (!serviceById.has(c.id)) model(c.id)
     for (const svc of ROBOTAXI_SERVICES) {
       if (!library.some((c) => c.id === svc.id)) library = [...library, { id: svc.id, kind: 'robotaxi' }]
     }
-  }, () => {})
+  }, () => {}) }
   const model = (id: string) => {
     let m = models.get(id)
     if (!m) models.set(id, m = fetch(new URL(`${id}.json`, o.cars)).then((r) => (r.ok ? r.json() : null)).then((m: Omit<Model, 'id' | 'front' | 'long' | 'wide'> | null) => {
@@ -3037,11 +3053,14 @@ export function street(o: {
   }
 
   let ms = 0, on = true
+  /** What street life needs from the network, asked for once it is first on. */
+  const begin = () => { askLife(); askCars() }
   const laps: Record<string, number> = {}
   const self: Street = {
     folk,
     frame(dt, view) {
       if (!on) { for (const c of [...parked.values(), ...traffic, ...depotCars, ...cables, ...trams]) hide(c); hideStations(); for (const h of headsShown) { h.piece?.destroy(); h.piece = null; h.shown = '' } headsShown.clear(); return }
+      begin()
       const t0 = performance.now(), eye = view.eye
       wanted(eye)
       probes = filled ? 8 : 400
@@ -3351,10 +3370,11 @@ export function street(o: {
     get onNearMiss() { return nearMissCb },
     set onNearMiss(fn: ((info: NearMiss) => void) | undefined) { nearMissCb = fn },
     get enabled() { return on },
-    set enabled(v: boolean) { on = v; if (!v) dropCue() },
-    prewarm,
+    set enabled(v: boolean) { on = v; if (v) begin(); else dropCue() },
+    prewarm() { begin(); prewarm() },
     warmAt(x: number, z: number) {
       pendingWarm = [x, 0, z]
+      begin()
       wanted(pendingWarm)
     },
     get ms() { return ms + peopleMs },

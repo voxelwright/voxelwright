@@ -9,7 +9,7 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
-import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, marcher, materials, palette, type Moon, type View } from './march.ts'
+import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
 import type { Heavens } from './almanac.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
@@ -26,6 +26,7 @@ import { engineOut, engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
+import { createNeighborhood, type Neighborhood } from './neighborhood.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
@@ -43,9 +44,9 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
-import { far as farOf } from './far.ts'
+import { far as farOf, samePath } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, BUDGET, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -84,6 +85,8 @@ const laid = { w: canvas.clientWidth, h: canvas.clientHeight }
 new ResizeObserver(() => { laid.w = canvas.clientWidth; laid.h = canvas.clientHeight }).observe(canvas)
 // One device class for the whole page (bay.ts `DEVICE`): what it draws and what it holds.
 const phone = DEVICE === 'phone'
+/** The world's pool of cells on the GPU (MiB) and its makers of sectors, by device class (bay.ts `BUDGETS`): a tablet has less than a laptop (#81). */
+const POOL_MB = BUDGET.pool, WORKERS = phone ? BUDGET.workers : Math.max(2, Math.min(BUDGET.workers, (navigator.hardwareConcurrency || 4) - 2))
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
 const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
 const over = hud(controls)
@@ -92,7 +95,7 @@ const pwa = initPwa({ notice: (text, ms) => over.notice(text, ms) })
 /** Cells in a metre. */
 const M = 10
 /** `?fine=1` or `2` (#259, an experiment): the world's finest cells are 5 or 2.5 cm, in one or two more boxes round the eye that hold the core's cells written out finer. Only the march knows: nothing else drawn or done is scaled. */
-const FINE = 1 << Number(query.get('fine') ?? 0)
+const FINE = 1 << FINE_ASKED
 const { report, post: send } = reporter('city-4')
 /** A realm this page runs alone (local.ts) has no page server to send what was measured to. */
 const post: typeof send = LOCAL ? async () => false : send
@@ -104,7 +107,45 @@ const flying = !LOCAL && (query.get('fly') ?? (location.pathname === '/' ? '1' :
  * GPU, the core and the first tiles are waited for first), it is kept for whoever does.
  */
 let explores: (() => void) | null = null, explored = false
+/** The GPU device is gone (`onLost`): no frame is drawn again. */
+let lost = false
 if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores(); else explored = true } })
+
+/**
+ * A card in the middle of the page that says why the realm is not shown and what to do (#81): over the loader's
+ * dimmed view (loading.html styles `.vw-fail`), or over the last picture where the GPU was lost after it opened.
+ * One at a time; the realm's own controls are hidden under it.
+ */
+function failCard(o: { title: string; lines: (string | HTMLElement)[]; keys: { label: string; main?: boolean; run: (key: HTMLButtonElement) => void }[]; links?: { label: string; href: string }[] }): void {
+  document.documentElement.dataset.failed = '1'
+  document.querySelector('.vw-fail')?.remove()
+  document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
+  const card = document.createElement('section'), h = document.createElement('h2'), keys = document.createElement('div')
+  card.className = 'vw-fail'; card.setAttribute('role', 'alertdialog'); card.setAttribute('aria-labelledby', 'vw-fail-h')
+  h.id = 'vw-fail-h'; h.textContent = o.title
+  card.append(h, ...o.lines.map((l) => { if (typeof l !== 'string') return l; const p = document.createElement('p'); p.textContent = l; return p }))
+  keys.className = 'keys'
+  for (const k of o.keys) { const b = document.createElement('button'); b.type = 'button'; b.textContent = k.label; if (k.main) b.className = 'main'; b.addEventListener('click', () => k.run(b)); keys.append(b) }
+  card.append(keys)
+  if (o.links?.length) {
+    const links = document.createElement('p')
+    links.className = 'links'
+    for (const l of o.links) { const a = document.createElement('a'); a.href = l.href; a.textContent = l.label; a.rel = 'noopener'; links.append(a) }
+    card.append(links)
+  }
+  document.body.append(card)
+  keys.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+}
+/** Whether the page is in an app's own browser (X, Instagram, Facebook and the like), which most often leave WebGPU out. */
+const inApp = () => /\b(FBAN|FBAV|Instagram|Twitter|TwitterAndroid|LinkedInApp|Line\/|Snapchat|TikTok|musical_ly|GSA\/)|; wv\)/i.test(navigator.userAgent)
+/** Copies this page's address, and says so on the key only if it was copied (an app's browser often has no clipboard). */
+const copyLink = async (key: HTMLButtonElement) => {
+  const was = key.textContent
+  let copied = false
+  try { await navigator.clipboard.writeText(location.href); copied = true } catch { /* no clipboard here */ }
+  key.textContent = copied ? 'Copied' : 'Copy it from the address bar'
+  setTimeout(() => { key.textContent = was }, 2200)
+}
 
 async function main() {
   report.env = environment()
@@ -147,6 +188,18 @@ async function main() {
     // until the visitor agrees nothing is sent to either, and the door's code is not fetched.)
     : query.has('lobby') && MASTER && RULES.lobbies === 'preview' && agreed('join') ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
   const gpu = await openGpu()
+  // The device lost (#81: a GPU reset, a phone short of memory, a long while in the background): the frames stop and
+  // the visitor is told, with a key that opens the realm again, rather than a picture that silently stands still.
+  gpu.onLost((info) => {
+    lost = true
+    report.notes.push(`device lost: ${info.reason}`)
+    if (info.reason === 'destroyed') return
+    const name = LOCAL?.name ?? 'The world'
+    if (!LOCAL) { over.status(`The GPU was lost (${info.reason}). Reload to go on.`); return }
+    loading.fail()
+    tell('error', { message: 'the GPU was lost', fatal: true })
+    failCard({ title: `${name} stopped drawing`, lines: ['The graphics processor was reset. This happens when a phone runs short of memory, or a tab was in the background for a long time.'], keys: [{ label: `Reload ${name}`, main: true, run: () => location.reload() }] })
+  })
   loading.step('gpu')
   const { device } = gpu
   report.env.gpu = await describe(gpu)
@@ -160,8 +213,9 @@ async function main() {
   let inner = await open<Core>(new URL('./core.wasm', import.meta.url).href)
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
-  const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
-  const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
+  const poolMb = Math.min(bounded(query.get('pool'), POOL_MB, 16, 2048, true), Math.floor(room / (1 << 20)))
+  // (Three whole sizes from 2 to 32 sectors, #81, or the device's own: a link cannot ask for a box past the GPU.)
+  const gridAsked = numbers('grid', []), grid = (gridAsked.length === 3 && gridAsked.every((n) => Number.isFinite(n)) ? gridAsked.map((n) => bounded(String(n), 8, 2, 32, true)) : phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
   /** Edits, one after another, as one edit of rows a column of sectors reads the same after their balls and blasts (the core's `merge_rows`). */
   const merge = (edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit => {
     const words = stream(edits), room = core.edits_room(words.length)
@@ -175,9 +229,9 @@ async function main() {
     merge,
     surveyedWalls: BAY_ON,
     grid,
-    levels: Number(query.get('levels') ?? (phone ? 8 : 9) + Number(query.get('fine') ?? 0)),
+    levels: bounded(query.get('levels'), (phone ? 8 : 9) + FINE_ASKED, 1, MAX_LEVELS, true),
     poolWords: (poolMb << 20) / 4,
-    fine: Number(query.get('fine') ?? 0),
+    fine: FINE_ASKED,
     // Cells may hold finer cells (#259): a made thing may be of cells of 2.5 or 1.25 cm (#372). `?bricks=1` from the
     // start, `?bricks=0` never; otherwise from the moment this world first holds such a thing, so that a world
     // without one pays nothing (world.ts `bricksLater`).
@@ -186,7 +240,7 @@ async function main() {
     // Shadows at the thing's own grain are dear where a fine thing fills the view (#372: 47% of the frame against 30% without, a car 5 m off and a house front), so they are for `?finesun=1`; without, a fine thing shades as its cells of 10 cm.
     bricksLater: !BAY_ON && query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
     // Each maker holds its own core and the tiles round what it makes (bay.ts `HOLD`): a phone has two (#450).
-    workers: Number(query.get('workers') ?? (phone ? 2 : Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4) - 2)))),
+    workers: bounded(query.get('workers'), WORKERS, 1, 8, true),
   })
   const march = await marcher(device, gpu.format, world)
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
@@ -208,7 +262,10 @@ async function main() {
   // `far`, a folder beside the page) or the address names one (`?far=/path/`).
   // The far model: a realm's pinned release holds it where it has one (bay.ts `where`), else beside the page.
   const released = LOCAL?.release ? await where().catch(() => null) : null
-  const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
+  // (A path the address names is this site's own or nothing, #81: `samePath`. The realm's own and its release's are as they say.)
+  const farAsked = query.get('far') === '' ? '' : query.has('far') ? samePath(query.get('far')) : null
+  if (query.has('far') && farAsked === null) console.warn('?far= names no path of this site: the realm\'s own far model is drawn')
+  const farModel = await farOf(device, gpu.format, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
   // Boxes covering the cells up to the far model's handover: on a full city with a far model, coarser boxes beyond
   // reach stream after the place is shown so cold load never waits on citywide coarse tiles hidden behind far faces.
   const nearLevels = farModel.listing && farModel.reach > 0
@@ -380,7 +437,7 @@ async function main() {
   // How many pixels are marched for each pixel shown, each way. Unless the address fixes it, it follows the
   // GPU: fewer pixels when a view is dear, so the frame rate holds, and all of them when it is cheap.
   const fixed = query.has('scale')
-  let scale = Number(query.get('scale') ?? (phone ? 0.5 : 0.75))
+  let scale = bounded(query.get('scale'), phone ? 0.5 : 0.75, 0.25, 1.5)
   let held = 0
   // A phone's GPU clock is not to be believed: the iPhone's read 0.01 to 10 ms for the same work from one second to the next.
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
@@ -420,7 +477,8 @@ async function main() {
   }
   let target: Offscreen | null = null
   const fit = () => {
-    const dpr = devicePixelRatio || 1
+    // (At most two device pixels a CSS pixel, #81: a phone's three draws 2.25 times the pixels for little to see.)
+    const dpr = Math.min(devicePixelRatio || 1, 2)
     const w = Math.max(1, Math.round(laid.w * dpr)), h = Math.max(1, Math.round(laid.h * dpr))
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; target?.destroy(); target = null }
     const size: [number, number] = [Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))]
@@ -442,6 +500,7 @@ async function main() {
   const takenOff = new Set<number>()
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
   let streetLife: Street | null = null
+  let neighborhood: Neighborhood | null = null
   const lively = !!LOCAL?.street && query.get('street') !== '0'
   if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
@@ -629,7 +688,7 @@ async function main() {
   // The picture is right meanwhile: a place whose tile is not drawn is answered from the next coarser box's map.
   // An eye that stands has eight a frame as before: nothing passes for a late frame to be seen in, and the first
   // picture's shadows are traced ray by ray until its tiles are drawn.
-  const sunRoom = { tileMs: 1, share: 0, owed: 0, most: 0, drew: 0, moving: false, /** `?suntiles=n`: so many tiles a frame whatever they cost (8: as it was before #73), for measuring what the share is worth. */ fixed: query.has('suntiles') ? Number(query.get('suntiles')) : null as number | null }
+  const sunRoom = { tileMs: 1, share: 0, owed: 0, most: 0, drew: 0, moving: false, /** `?suntiles=n`: so many tiles a frame whatever they cost (8: as it was before #73), for measuring what the share is worth. */ fixed: query.has('suntiles') ? bounded(query.get('suntiles'), 8, 0, 64, true) : null as number | null }
   const SUN_SHARE = 1 / 12
   /** How many tiles this frame has room for: `budget` is the frame's time (ms), `moving` whether the eye moved. */
   const sunMost = (budget: number, moving: boolean): number => {
@@ -665,6 +724,7 @@ async function main() {
     landing = false
     farModel.left()
     if (streetLife) streetLife.enabled = true
+    if (neighborhood) neighborhood.enabled = true
   }
   // An eye that turned, or a window screen that is up (an egg playing, eggs.ts), stirs it as a hand does.
   let looked = ''
@@ -728,6 +788,7 @@ async function main() {
     return roomed
   }
   const frame = (now: number) => {
+    if (lost) return
     // At rest, a screen frame that comes too soon after the last one drawn is let go by, unseen by the watchers too: what
     // they are handed is the time since the last frame drawn. (Two milliseconds short still counts, so 60 Hz gives 30.)
     const wasResting = resting
@@ -777,6 +838,7 @@ async function main() {
     fallOn(dt)
     lap('fallOn')
     streetLife?.frame(dt, v)
+    neighborhood?.frame(v)
     lap('street')
     world.update(ahead ?? v.eye)
     lap('update')
@@ -814,6 +876,7 @@ async function main() {
       if (!off.has('under')) roadTracks.draw(encoder, to, v, groundUnder)
       if (!off.has('wheels')) carWheels.draw(encoder, to, v)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
+      if (!off.has('signs')) neighborhood?.drawSigns(encoder, to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
@@ -2046,6 +2109,17 @@ async function main() {
     if (landing && first && !first.engaged) life.enabled = false
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
+  if (BAY_ON && !far && query.get('neighborhood') !== '0') {
+    neighborhood = await createNeighborhood({
+      device, format: gpu.format, pieces: falling, land: core,
+      hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks,
+      load: placesData,
+    }).catch((e: unknown) => { console.warn(`no neighborhood places: ${e instanceof Error ? e.message : String(e)}`); return null })
+    if (neighborhood) {
+      if (landing && first && !first.engaged) neighborhood.enabled = false
+      if (query.get('people') !== '0') folk.from.push(neighborhood.folk)
+    }
+  }
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
   // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
   // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
@@ -2115,6 +2189,7 @@ async function main() {
     farModel.forget()
     core.world_forget()
     streetLife?.reset()
+    neighborhood?.reset()
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
@@ -2254,7 +2329,7 @@ async function main() {
     }
     watchers.add(hatch)
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, get neighborhood() { return neighborhood }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   const carSummon = createCarSummon({
@@ -2328,7 +2403,7 @@ async function main() {
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({
     gpu, far, realms: realm, world, march, pose, began,
-    make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }),
+    make: () => new World(device, { ...world.options, workers: bounded(query.get('portalworkers'), world.options.workers, 1, 8, true) }),
     // The other world's own marcher: made again, as this one's is, when that world comes to hold finer cells (#372).
     marcher: async (w) => { const m = await marcher(device, gpu.format, w, true); w.onFine = () => void m.reshade((wgsl) => wgsl); return m },
     people: (m) => people(device, gpu.format, m),
@@ -2399,15 +2474,25 @@ main().catch(async (e: unknown) => {
   loading.fail()
   const text = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)
   over.status(`This did not work here: ${text.split('\n')[0]}`)
-  // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.
+  // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, with what to do next (#81).
   if (LOCAL) {
     tell('error', { message: text.split('\n')[0] })
-    document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
-    const told = document.createElement('p')
-    told.style.cssText = 'position:fixed;inset:0;margin:auto;height:fit-content;max-width:min(30em,calc(100vw - 32px));padding:0 16px;font:500 17px/1.45 system-ui,sans-serif;color:#e8ecf2;text-align:center;z-index:20'
-    told.textContent = /webgpu/i.test(text) ? `${LOCAL.name} is drawn with WebGPU, which this browser does not offer here. It opens in a recent Safari, Chrome or Edge.` : `${LOCAL.name} could not open here. Reloading the page may help.`
-    document.body.append(told)
-  }
+    const name = LOCAL.name
+    if (/webgpu/i.test(text)) {
+      const touch = navigator.maxTouchPoints > 0
+      failCard({
+        title: `${name} needs WebGPU`,
+        lines: [
+          `This browser doesn't offer WebGPU here, so ${name} can't be drawn.`,
+          inApp() || touch ? 'Open this link in Safari or Chrome. Browsers inside apps, like X\'s, often leave WebGPU out.' : 'It opens in a recent Chrome, Edge or Safari.',
+        ],
+        keys: [{ label: 'Copy link', main: true, run: (k) => void copyLink(k) }],
+        links: [{ label: 'zahynailo.dev', href: 'https://zahynailo.dev' }, { label: 'Voxelwright on GitHub', href: 'https://github.com/voxelwright/voxelwright' }],
+      })
+    } else {
+      failCard({ title: `${name} couldn't open`, lines: ['Something went wrong while it was loading. Reloading often helps.'], keys: [{ label: 'Reload', main: true, run: () => location.reload() }] })
+    }
+  } else document.documentElement.dataset.failed = '1'
   console.error(e)
   report.notes.push(`failed: ${text}`)
   await post('error')
