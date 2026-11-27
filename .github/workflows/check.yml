@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  RUST: '1.96'
+  CARGO_TERM_COLOR: always
+
 concurrency:
   group: check-${{ github.ref }}
   cancel-in-progress: true
@@ -38,3 +42,66 @@ jobs:
           path: .check/
           include-hidden-files: true
           retention-days: 7
+
+  # The active stack's own tests that need no GPU and no city data.
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: deploy
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: npm
+          cache-dependency-path: deploy/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  engine-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: engine/core
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install "$RUST" --profile minimal && rustup default "$RUST"
+      - run: cargo test --locked
+
+  # TypeScript only: no install scripts and no Playwright browser download.
+  engine-types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: engine
+    env:
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit
