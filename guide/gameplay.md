@@ -291,7 +291,7 @@ The site's navigation stands in the city as things you would see from the park (
 
 Click or tap a board and the eye flies to it, then opens its link. A link to another site shows a card asking to open it in a new tab (`engine/page/leaving.ts`). O opens the board ahead. Every board is also a link in the page for keyboards and screen readers.
 
-What a sign shows is set through `realm.signs` (`engine/page/signs.ts`): `realm.signs.set(id, content)` takes `{ text }`, `{ image }`, `{ video }`, or `null` for its own. Lettering takes text only. When the realm runs in a frame, `engine/page/host.ts` lists the messages it sends the host page (`ready`, `error`, `navigate`, `engaged`, `back`) and the ones it takes (`fly`, `open`, `signs.set`, `explore`).
+What a sign shows is set through `realm.signs` (`engine/page/signs.ts`): `realm.signs.set(id, content)` takes `{ text }`, `{ image }`, `{ video }`, or `null` for its own. Lettering takes text only. When the realm runs in a frame, `engine/page/host.ts` lists the messages it sends the host page (`ready`, `error`, `navigate`, `engaged`, `back`) and the ones it takes (`fly`, `open`, `signs.set`, `explore`). It hears and tells only a host on a trusted origin, and a sign's `{ image }` must be this site's, `https:` or a raster picture drawn in the page ([what the page refuses](/engine-page#what-the-page-refuses)).
 
 The words are set in the kit's faces (`engine/page/typeface.ts`): `?face=zakon` (the default) or `?face=block`, each with a display and a compact set.
 

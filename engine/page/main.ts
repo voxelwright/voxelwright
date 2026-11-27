@@ -211,7 +211,8 @@ async function main() {
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(bounded(query.get('pool'), POOL_MB, 16, 2048, true), Math.floor(room / (1 << 20)))
-  const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
+  // (Three whole sizes from 2 to 32 sectors, #81, or the device's own: a link cannot ask for a box past the GPU.)
+  const gridAsked = numbers('grid', []), grid = (gridAsked.length === 3 && gridAsked.every((n) => Number.isFinite(n)) ? gridAsked.map((n) => bounded(String(n), 8, 2, 32, true)) : phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
   /** Edits, one after another, as one edit of rows a column of sectors reads the same after their balls and blasts (the core's `merge_rows`). */
   const merge = (edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit => {
     const words = stream(edits), room = core.edits_room(words.length)
@@ -682,7 +683,7 @@ async function main() {
   // The picture is right meanwhile: a place whose tile is not drawn is answered from the next coarser box's map.
   // An eye that stands has eight a frame as before: nothing passes for a late frame to be seen in, and the first
   // picture's shadows are traced ray by ray until its tiles are drawn.
-  const sunRoom = { tileMs: 1, share: 0, owed: 0, most: 0, drew: 0, moving: false, /** `?suntiles=n`: so many tiles a frame whatever they cost (8: as it was before #73), for measuring what the share is worth. */ fixed: query.has('suntiles') ? Number(query.get('suntiles')) : null as number | null }
+  const sunRoom = { tileMs: 1, share: 0, owed: 0, most: 0, drew: 0, moving: false, /** `?suntiles=n`: so many tiles a frame whatever they cost (8: as it was before #73), for measuring what the share is worth. */ fixed: query.has('suntiles') ? bounded(query.get('suntiles'), 8, 0, 64, true) : null as number | null }
   const SUN_SHARE = 1 / 12
   /** How many tiles this frame has room for: `budget` is the frame's time (ms), `moving` whether the eye moved. */
   const sunMost = (budget: number, moving: boolean): number => {

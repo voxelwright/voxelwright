@@ -32,6 +32,8 @@ export function allowed(origin: string, here: { origin: string; hostname: string
 /** The page that holds this one's origin, where it is one this realm trusts: from the browser's own list of them, or the address it came from. */
 const parentOrigin = (): string | null => {
   if (!embedded) return null
+  // A host on this origin can be asked directly (and Firefox has no list of ancestors); another throws here.
+  try { if (window.parent.location.origin === location.origin) return location.origin } catch { /* another origin */ }
   const here = { origin: location.origin, hostname: location.hostname }
   const listed = (location as Location & { ancestorOrigins?: DOMStringList }).ancestorOrigins?.[0]
   if (listed) return allowed(listed, here) ? listed : null
