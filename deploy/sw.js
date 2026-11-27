@@ -48,7 +48,7 @@ const tileTouched = new Map()
 
 const OFFLINE_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#10141a"><title>Offline · Voxelwright</title><style>html,body{margin:0;min-height:100%;background:#10141a;color:#e8ebf2;font:400 1rem/1.5 system-ui,-apple-system,sans-serif;display:grid;place-items:center;padding:16px;box-sizing:border-box}main{max-width:28rem;padding:24px;background:#1a2029;border-inline-start:8px solid #fff600;box-shadow:4px 5px 0 rgb(0 0 0/.45)}h1{margin:0 0 10px;font-size:1.35rem}p{margin:0;color:#b4bccb}button{margin-top:18px;padding:10px 16px;border:0;background:#fff600;color:#0a0f3d;font:650 0.95rem system-ui,sans-serif;cursor:pointer}</style></head><body><main><h1>You’re offline</h1><p>Voxelwright needs one online visit to cache San Francisco on this device. Reconnect and try again.</p><button type="button" onclick="location.reload()">Try again</button></main></body></html>`
 
-const isPinnedReleaseMeta = (pathname) => /\/(?:manifest|far)\.json$|\/names\//.test(pathname)
+const isPinnedReleaseMeta = (pathname) => /\/(?:manifest|far)\.json$|\/names\/|\/packs\/landing\.pack$/.test(pathname)
 
 function releasePinFromPath(pathname) {
   const m = /^\/releases\/([0-9a-zA-Z_-]+)\//.exec(pathname)
@@ -291,8 +291,8 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(handleWeather(request, event))
     return
   }
-  // Content-hashed loader images: cache-first.
-  if (/^\/loading-[^/]+\.webp$/.test(pathname)) {
+  // Content-hashed loader images, bundled JS/WASM chunks and hashed kit stylesheet: cache-first.
+  if (/^\/loading-[^/]+\.webp$/.test(pathname) || pathname.startsWith('/assets/') || /^\/kit\/voxelmorphism-[0-9a-f]+\.css$/.test(pathname)) {
     event.respondWith((async () => {
       const cache = await caches.open(SHELL_CACHE)
       const hit = await cache.match(request)
