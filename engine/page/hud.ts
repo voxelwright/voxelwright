@@ -67,8 +67,8 @@ export interface Hud {
   cue(text: string, at: () => readonly [number, number, number] | null, tap?: () => void): { text: string; remove(): void }
   /** An empty element of a lane's own in the layer, by name (the same name gives the same element). Style it by `[data-panel="name"]`. */
   panel(name: string): HTMLElement
-  /** Once a frame: puts the cues where their places are now. Costs nothing with no cue. */
-  frame(project: Project): void
+  /** Once a frame: puts the cues where their places are now. Costs nothing with no cue. Optional `avoid` boxes (such as the player's body) keep world cues from overlapping them. */
+  frame(project: Project, avoid?: readonly { left: number; top: number; right: number; bottom: number }[]): void
 }
 
 export function hud(input: Input): Hud {
@@ -359,19 +359,43 @@ export function hud(input: Input): Hud {
       if (!p) { p = document.createElement('div'); p.dataset.panel = name; panels.set(name, p); layer.append(p) }
       return p
     },
-    frame(project) {
+    frame(project, avoid) {
       if (!shown.size) return
-      // What the page lays over the picture and asks cues to keep clear of (`data-hud-clear`, as an egg's player): a cue
-      // that would be under one stands just below it instead, nearer its thing.
+      // What the page lays over the picture and asks cues to keep clear of (`data-hud-clear`, as an egg's player, plus
+      // any caller-supplied avoidance boxes such as the player's body): a cue that would overlap moves clear or hides.
       const clear = [...document.querySelectorAll<HTMLElement>('[data-hud-clear]')].filter((e) => !e.hidden && e.offsetParent).map((e) => e.getBoundingClientRect())
+      const bodies = avoid ?? []
+      const hits = (l: number, t: number, r: number, b: number, box: { left: number; top: number; right: number; bottom: number }, pad = 0) => l < box.right + pad && r > box.left - pad && t < box.bottom + pad && b > box.top - pad
       for (const cue of shown) {
         const place = cue.at(), on = !!cue.text && place && project(place)
         cue.el.hidden = !on
         if (!on) continue
         // (Kept inside the screen: a thing near its edge has its cue whole, never cut off by it.)
-        const w = cue.el.offsetWidth, h = cue.el.offsetHeight, half = w / 2 + 8, x = Math.max(half, Math.min(innerWidth - half, on[0]))
+        const w = cue.el.offsetWidth, h = cue.el.offsetHeight, half = w / 2 + 8
+        let x = Math.max(half, Math.min(innerWidth - half, on[0]))
         let y = on[1]
-        for (const r of clear) if (x - w / 2 < r.right && x + w / 2 > r.left && y - 1.4 * h < r.bottom && y - 0.4 * h > r.top) y = r.bottom + 8 + 1.4 * h
+        for (const r of clear) if (hits(x - w / 2, y - 1.4 * h, x + w / 2, y - 0.4 * h, r)) y = r.bottom + 8 + 1.4 * h
+        if (bodies.length && w > 0 && h > 0) {
+          const overlapsBody = (cx: number, cy: number) => bodies.some((b) => hits(cx - w / 2, cy - 1.4 * h, cx + w / 2, cy - 0.4 * h, b, 6))
+          if (overlapsBody(x, y)) {
+            const topBody = Math.min(...bodies.map((b) => b.top))
+            const botBody = Math.max(...bodies.map((b) => b.bottom))
+            const leftBody = Math.min(...bodies.map((b) => b.left))
+            const rightBody = Math.max(...bodies.map((b) => b.right))
+            const candidates: [number, number][] = [
+              [x, topBody - 10 + 0.4 * h],
+              [rightBody + 10 + w / 2, y],
+              [leftBody - 10 - w / 2, y],
+              [x, botBody + 10 + 1.4 * h],
+            ]
+            let placed = false
+            for (const [cx, cy] of candidates) {
+              if (cx - w / 2 < 8 || cx + w / 2 > innerWidth - 8 || cy - 1.4 * h < 8 || cy - 0.4 * h > innerHeight - 8) continue
+              if (!overlapsBody(cx, cy)) { x = cx; y = cy; placed = true; break }
+            }
+            if (!placed) { cue.el.hidden = true; continue }
+          }
+        }
         cue.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -140%)`
       }
     },

@@ -15,7 +15,7 @@ The concepts, the patch form, the signal chain and how sound is judged are in [g
 | `sound.ts` | `sound()`: the audio context, the unlock on the first gesture, `play()`, `hold()`, and `hear()`, which turns a place into loudness, side, dullness and delay |
 | `world.ts` | `hearing()`: turns what the page knows (tools, blasts, the solver's report, weather, steps, the driven vehicle, rules' sounds) into plays and bed levels each frame, and picks the place's music |
 | `radio.ts` | the car radio's stations, ducking and station memory, and the pass-by whooshes heard driving fast |
-| `kinds.ts` | the world's own patches: `HIT` and `BREAK` for each of the core's materials, `WORLD` for steps, blasts, tools and vehicle foley |
+| `kinds.ts` | the world's own patches: `HIT` and `BREAK` for each of the core's materials, `WORLD` for steps, blasts, tools, vehicle foley, and damped body/car impacts (`bodyBump`, `carBump`, `carCrunch`) |
 | `likes.ts` | `LIKES`: the small kept set of sounds a rule can ask for by a word (`bell`, `drum`, `horn` and others) |
 | `things.ts` | `played()`: a made thing's own `hit` and `break`, and taking up a thing with a surface to play it |
 | `surface.ts` | an instrument's surface form and `surface()`, its only reader |

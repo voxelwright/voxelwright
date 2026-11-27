@@ -4,6 +4,7 @@
 // before it is asked anything, so each opens its core through `open`.
 import { releaseCredits } from './release-credits.ts'
 import { LOCAL } from './local.ts'
+import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
 
 /** The squares baked first, whole: what `?bay=551.7_4183.5,550.7_4183.5` names, as the first slice was measured. */
 const query = new URLSearchParams(globalThis.location?.search ?? '')
@@ -61,8 +62,10 @@ let get: (url: string | URL, init?: RequestInit) => Promise<Response> = (url, in
 let passed: (url: string, body: ArrayBuffer) => void = () => {}
 /** Whether this context fetches its own tiles (a page, the world's process) or asks the page for them (a worker). */
 let owns = typeof document !== 'undefined'
-/** How often a tile that does not come is asked for again, and how long is waited before the first time again (doubled each time). */
-let tries = 3, wait = 1000
+/** How often a tile that does not come is asked for again, how long is waited before the first time again (doubled each time), and how long one attempt may hang before aborting (ms). */
+let tries = 3, wait = 1000, fetchTimeout = 12_000
+/** Sets the per-attempt tile fetch timeout (ms), for checks. */
+export const setFetchTimeout = (ms: number) => { fetchTimeout = ms }
 /** Told that a core has taken a tile, by where it starts and how wide it is (the world's process has its solver make again what it kept of the cells there). */
 let taken: (core: object, x0: number, z0: number, size: number) => void = () => {}
 /** Where tiles that did not come are not asked for again until a while has passed (the world's process, `hold`): by `level/key`, until when (Infinity: still on its way after it was given up on). */
@@ -101,8 +104,14 @@ export const SQUARES: readonly string[] = !asked || asked === '0' || STREAM ? []
 export let ON = STREAM || SQUARES.length > 0
 /** Where on Earth the address says the page starts (`&ll=`): never in a world the server keeps, whose frame is its release's. */
 const ll = WORLD ? null : query.get('ll')
+/** `&ll=latitude,longitude` as two finite numbers on Earth, or null (#81: nothing else of the address reaches a worker's). */
+export const llAsked = (said: string | null): [number, number] | null => {
+  const v = said?.split(',').map((p) => (p.trim() === '' ? NaN : Number(p)))
+  return v?.length === 2 && v.every(Number.isFinite) && Math.abs(v[0]) <= 90 && Math.abs(v[1]) <= 180 ? [v[0], v[1]] : null
+}
+const asked_ll = llAsked(ll)
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = (STREAM ? `?bay=${asked}${ll ? `&ll=${ll}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
+export const BAY = (STREAM ? `?bay=${encodeURIComponent(asked!)}${asked_ll ? `&ll=${encodeURIComponent(asked_ll.join(','))}` : ''}` : SQUARES.length ? `?bay=${SQUARES.map(encodeURIComponent).join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
@@ -146,8 +155,7 @@ export function tileOf(x: number, z: number, tileSize = 2500): { tile: string; s
   return { tile: `0/${tx}_${tz}`, square: `${eKm.toFixed(1)}_${nKm.toFixed(1)}` }
 }
 /** `&ll=latitude,longitude`: where on Earth the page starts; the Bay where it does not say. */
-const asked_ll = ll?.split(',').map(Number)
-const there = STREAM && asked_ll?.length === 2 && asked_ll.every(Number.isFinite) ? place(asked_ll[0], asked_ll[1]) : null
+const there = STREAM && asked_ll ? place(asked_ll[0], asked_ll[1]) : null
 /** The frame this page's cells are counted in, and where it starts in it (the Bay's own start where null). */
 export const FRAME = LOCAL?.release ? '10n4250' : (there?.frame ?? '10n4250')
 export const START: [number, number] | null = there ? [there.x, there.z] : WORLD?.release && WORLD.arrive ? [WORLD.arrive.at[0], WORLD.arrive.at[2]] : null
@@ -261,16 +269,36 @@ export const water = () => ({ sea: seaKeys, unlisted })
 /** Where the tiles come from, read once: in the page only (a worker is told what it needs by the page). */
 export const where = (): Promise<Source> => (source ??= WORLD?.pointer ? released(new URL(WORLD.pointer, location.href)) : LOCAL?.release ? released(new URL(LOCAL.release, location.href)) : served())
 
-/** How much a device may hold (#450): a phone's tab is killed long before a laptop's. */
-export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4) < 600 ? 'phone' : 'desktop'
-/** What one device class may hold: tiles kept by each core, at each level, and tile bytes the page keeps for its workers. */
-export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } : { keep: [28, 12, 8], bytes: 96 << 20 }
+/**
+ * How much a device may hold (#450, #81): a phone's tab is killed long before a laptop's, and a tablet's (a touch
+ * screen under 900 points on its short side, or a touch device that says it has 4 GB or less) in between. Read from
+ * what the browser says: a worker, which has no screen, says desktop, and is told what to hold by its page.
+ */
+export function tierOf(d: { touch: number; short: number; memory?: number }): 'phone' | 'tablet' | 'desktop' {
+  if (!(d.touch > 0)) return 'desktop'
+  if (d.short < 600) return 'phone'
+  return d.short < 900 || (d.memory !== undefined && d.memory <= 4) ? 'tablet' : 'desktop'
+}
+export const TIER = typeof navigator === 'undefined' ? 'desktop' : tierOf({ touch: navigator.maxTouchPoints ?? 0, short: Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4), memory: (navigator as Navigator & { deviceMemory?: number }).deviceMemory })
+/** The device class most of the page asks about: a tablet draws as a desktop does, and holds less (`HOLD`, `BUDGET`). */
+export const DEVICE: 'phone' | 'desktop' = TIER === 'phone' ? 'phone' : 'desktop'
+/**
+ * What one device class may hold: tiles kept by each core, at each level, and tile bytes the page keeps for its
+ * workers; the pool of the world's cells on the GPU (MiB), how many makers of sectors, and the far model's faces.
+ */
+export const BUDGETS = {
+  phone: { keep: [12, 4, 4], bytes: 24 << 20, pool: 80, workers: 2, faces: 3_000_000 },
+  tablet: { keep: [20, 8, 6], bytes: 48 << 20, pool: 192, workers: 3, faces: 6_000_000 },
+  desktop: { keep: [28, 12, 8], bytes: 96 << 20, pool: 256, workers: 6, faces: 12_000_000 },
+} as const
+export const BUDGET = BUDGETS[TIER]
+export const HOLD: { keep: number[]; bytes: number } = { keep: [...BUDGET.keep], bytes: BUDGET.bytes }
 
 /** The tiles the page holds for its cores: each fetched once, the last wanted kept up to `HOLD.bytes`. */
-const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number }>()
+const bytesHeld = new Map<string, { body: Promise<ArrayBuffer | null>; size: number; used: number; hits: number }>()
 let heldTotal = 0, heldClock = 0
-/** What the page has done for its tiles, for the checks: requests, failures, retries, and how many asks were answered from what it held. */
-export const tally = { fetched: 0, failed: 0, retried: 0, shared: 0, water: 0, held: 0, bytes: 0 }
+/** What the page has done for its tiles, for the checks: requests, failures, retries, timeouts, and how many asks were answered from what it held. */
+export const tally = { fetched: 0, failed: 0, retried: 0, timedOut: 0, shared: 0, water: 0, held: 0, bytes: 0 }
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
@@ -284,20 +312,25 @@ export async function listed(path: string): Promise<ArrayBuffer | null> {
 
 /** A tile's bytes, fetched once however many cores want it. Null for water. Throws where a tile that should come does not. */
 export async function tile(level: number, key: string): Promise<ArrayBuffer | null> {
+  const source = await where()
+  // Publish the in-flight request in the same turn as the lookup, even when several workers arrive together.
   const name = `${level}/${key}`, had = bytesHeld.get(name)
-  if (had) { had.used = ++heldClock; tally.shared++; return had.body }
-  const found = (await where()).find(level, key)
+  if (had) { had.used = ++heldClock; had.hits++; tally.shared++; return had.body }
+  const found = source.find(level, key)
   if (!found) { tally.water++; return null }
-  const entry = { body: fetchTile(found), size: 0, used: ++heldClock }
+  const entry = { body: fetchTile(found), size: 0, used: ++heldClock, hits: 1 }
   bytesHeld.set(name, entry)
   try {
     const body = await entry.body
     entry.size = body?.byteLength ?? 0; heldTotal += entry.size; tally.held = heldTotal
-    // Let go of the longest unwanted, never the one just come.
-    if (heldTotal > HOLD.bytes) for (const [k, e] of [...bytesHeld].sort((a, b) => a[1].used - b[1].used)) {
-      if (heldTotal <= HOLD.bytes) break
-      if (e === entry || !e.size) continue
-      bytesHeld.delete(k); heldTotal -= e.size
+    // Let go of cold outer coarse tiles before hot neighborhood tiles while keeping actively shared inner coarse tiles.
+    if (heldTotal > HOLD.bytes) {
+      const score = (k: string, e: { used: number; hits: number }) => e.used + (k.startsWith('2/') ? Math.min(e.hits, 12) * 32 - 600 : Math.min(e.hits, 8) * 20)
+      for (const [k, e] of [...bytesHeld].sort((a, b) => score(a[0], a[1]) - score(b[0], b[1]))) {
+        if (heldTotal <= HOLD.bytes) break
+        if (e === entry || !e.size) continue
+        bytesHeld.delete(k); heldTotal -= e.size
+      }
     }
     tally.held = heldTotal
     return body
@@ -310,18 +343,38 @@ export async function tile(level: number, key: string): Promise<ArrayBuffer | nu
 async function fetchTile(found: NonNullable<ReturnType<Source['find']>>): Promise<ArrayBuffer | null> {
   for (let again = 0; ; again++) {
     tally.fetched++
-    const answer = await get(found.url).catch(() => null)
-    // Under the page server a 404 or 204 is a place nobody made: sea. In a release a listed tile is never water.
-    if (answer && !found.listed && (answer.status === 404 || answer.status === 204)) return null
-    if (answer?.ok) {
-      const body = await answer.arrayBuffer()
-      if (!found.listed && !body.byteLength) return null
-      // What the manifest says it is: a host that sends Brotli without saying so, or a file cut short, is caught here.
-      if (found.bytes === undefined) { tally.bytes += body.byteLength; return body }
-      const sum = found.sha256 ? await digest(body) : null
-      if (body.byteLength === found.bytes && (!found.sha256 || (sum ?? found.sha256) === found.sha256)) { tally.bytes += body.byteLength; if (sum) passed(found.url, body); return body }
+    const ac = typeof AbortController === 'function' ? new AbortController() : null
+    let timedOut = false
+    let onAbort: (() => void) | null = null
+    const timer = ac && fetchTimeout > 0 && Number.isFinite(fetchTimeout)
+      ? setTimeout(() => { timedOut = true; ac.abort(new Error('tile fetch timeout')) }, fetchTimeout)
+      : null
+    let answer: Response | null = null
+    try {
+      const req = get(found.url, ac ? { signal: ac.signal } : undefined)
+      answer = await (ac
+        ? Promise.race([req, new Promise<never>((_, rej) => { onAbort = () => rej(new Error('tile fetch timeout')); ac.signal.addEventListener('abort', onAbort, { once: true }) })])
+        : req)
+      // Under the page server a 404 or 204 is a place nobody made: sea. In a release a listed tile is never water.
+      if (answer && !found.listed && (answer.status === 404 || answer.status === 204)) return null
+      if (answer?.ok) {
+        const read = answer.arrayBuffer()
+        const body = await (ac
+          ? Promise.race([read, new Promise<never>((_, rej) => { if (ac.signal.aborted) rej(new Error('tile fetch timeout')); else ac.signal.addEventListener('abort', () => rej(new Error('tile fetch timeout')), { once: true }) })])
+          : read)
+        if (!found.listed && !body.byteLength) return null
+        // What the manifest says it is: a host that sends Brotli without saying so, or a file cut short, is caught here.
+        if (found.bytes === undefined) { tally.bytes += body.byteLength; return body }
+        const sum = found.sha256 ? await digest(body) : null
+        if (body.byteLength === found.bytes && (!found.sha256 || (sum ?? found.sha256) === found.sha256)) { tally.bytes += body.byteLength; if (sum) passed(found.url, body); return body }
+      }
+    } catch {
+      if (timedOut) tally.timedOut++
+    } finally {
+      if (timer !== null) clearTimeout(timer)
+      if (ac && onAbort) ac.signal.removeEventListener('abort', onAbort)
     }
-    if (again >= tries) { tally.failed++; throw new Error(`${new URL(found.url).pathname}: ${answer ? answer.status : 'no answer'}`) }
+    if (again >= tries) { tally.failed++; throw new Error(`${new URL(found.url).pathname}: ${timedOut ? 'timeout' : answer ? answer.status : 'no answer'}`) }
     tally.retried++
     await pause(wait * 2 ** again)
   }
@@ -332,6 +385,7 @@ type Said = { id: number; body?: ArrayBuffer | null; error?: string }
 let port: MessagePort | null = null, portCame: (p: MessagePort) => void = () => {}
 const portReady = new Promise<MessagePort>((r) => (portCame = r))
 let toldLevels: Level[] = LEVELS, toldKeep = HOLD.keep
+let toldHeroes: Landmark[] | undefined, toldSquares: ArrayBuffer | null | undefined
 const waiting = new Map<number, (s: Said) => void>()
 let asks = 0
 /** The cores this context opened: what they hold is reported to the page (`memory`). */
@@ -340,10 +394,11 @@ if (typeof document === 'undefined' && typeof self !== 'undefined') {
   // The page's first message to a worker that streams the Bay. It is this module's alone: the worker's own handler
   // (worker.ts, mover.ts) never sees it, since this listener was added first, when this module was evaluated.
   self.addEventListener('message', (e: MessageEvent) => {
-    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[] } | null
+    const told = e.data as { tiles?: MessagePort; levels?: Level[]; keep?: number[]; heroes?: Landmark[]; squares?: ArrayBuffer | null } | null
     if (!told?.tiles) return
     e.stopImmediatePropagation()
     port = told.tiles; toldLevels = told.levels ?? LEVELS; toldKeep = told.keep ?? HOLD.keep
+    toldHeroes = told.heroes; toldSquares = told.squares
     port.onmessage = (m: MessageEvent<Said | { memory: true } | { ping: number }>) => {
       // Answered at once, whatever this worker is waiting on: the page knows it is there (`silent`).
       if ('ping' in m.data) return port!.postMessage({ pong: m.data.ping })
@@ -375,9 +430,14 @@ export function share(worker: Worker): Worker {
     const { id, level, key } = m.data
     try { const body = await tile(level, key); port1.postMessage({ id, body } satisfies Said) } catch (e) { port1.postMessage({ id, error: String((e as Error).message ?? e) } satisfies Said) }
   }
-  const give = (levels: Level[]) => worker.postMessage({ tiles: port2, levels, keep: HOLD.keep }, [port2])
-  if (STREAM) void where().then((s) => give(s.levels), () => give(LEVELS))
-  else give(LEVELS)
+  const give = (levels: Level[], h: Landmark[], sq: ArrayBuffer | null) =>
+    worker.postMessage({ tiles: port2, levels, keep: HOLD.keep, heroes: h, squares: sq }, [port2])
+  // Hand levels, landmarks and marked squares once from the page so workers never duplicate /bay/ fetches (#82).
+  void Promise.all([
+    STREAM ? where().then((s) => s.levels, () => LEVELS) : Promise.resolve(LEVELS),
+    ON ? heroes() : Promise.resolve([]),
+    ON && FRAME === '10n4250' ? markedSquares() : Promise.resolve(null),
+  ]).then(([levels, h, sq]) => give(levels, h, sq))
   // Silence is counted in pings gone unanswered, a second apart, not in time: a page whose timers slept (a tab in the
   // background) or whose own thread stalled sends none meanwhile, so it does not take its workers for gone.
   const ping = setInterval(() => { if (entry.owed) entry.missed++; entry.owed = true; port1.postMessage({ ping: 1 }) }, 1000)
@@ -423,10 +483,20 @@ export async function prepare<T>(instance: object): Promise<T> {
   return core as unknown as T
 }
 
-/** The landmarks a Bay world has (sf/heroes.json, copied beside the tiles as heroes.json): where each stands. */
+const fromBase64 = (b64: string): ArrayBuffer => {
+  const bin = atob(b64), out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out.buffer
+}
+/** The landmarks a Bay world has (sf/heroes.json, embedded in LOCAL.bay or copied beside the tiles as heroes.json): where each stands. */
 export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number; /** `night`: only its light by night is by rule (heroes.rs `night`); its shape is the map's building. */ only?: 'night' }
 let landmarks: Promise<Landmark[]> | null = null
-export const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
+export const heroes = () => (landmarks ??= (
+  !ON ? Promise.resolve([])
+    : Array.isArray(LOCAL?.bay?.heroes) ? Promise.resolve(LOCAL.bay.heroes as Landmark[])
+      : !owns ? portReady.then(() => toldHeroes ?? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []))
+        : fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => [])
+))
 
 /**
  * A file of the road's marks a Bay world has beside its tiles (sf/marks.mjs), or null: San Francisco's alone (its cells
@@ -442,13 +512,18 @@ const markFile = (name: string, without: string) => (ON && FRAME === '10n4250' ?
 let squaring: Promise<ArrayBuffer | null> | null = null
 // Asked three times, a second apart, before a core goes on without them: a core that missed them keeps the bake's paint
 // under the page's lines in its own sectors.
-const markedSquares = () => (squaring ??= (async () => {
-  for (let tries = 3; ; tries--) {
-    const bytes = await markFile('marks-squares.bin', tries > 1 ? 'asking again' : "this core keeps the bake's 50 cm paint")
-    if (bytes || tries <= 1 || !(ON && FRAME === '10n4250')) return bytes
-    await new Promise((r) => setTimeout(r, 1000))
-  }
-})())
+const markedSquares = () => (squaring ??= (
+  !(ON && FRAME === '10n4250') ? Promise.resolve(null)
+    : typeof LOCAL?.bay?.marksSquares === 'string' ? Promise.resolve(fromBase64(LOCAL.bay.marksSquares))
+      : !owns ? portReady.then(() => (toldSquares !== undefined ? toldSquares : markFile('marks-squares.bin', "this core keeps the bake's 50 cm paint")))
+        : (async () => {
+          for (let tries = 3; ; tries--) {
+            const bytes = await markFile('marks-squares.bin', tries > 1 ? 'asking again' : "this core keeps the bake's 50 cm paint")
+            if (bytes || tries <= 1 || !(ON && FRAME === '10n4250')) return bytes
+            await new Promise((r) => setTimeout(r, 1000))
+          }
+        })()
+))
 /**
  * The marks themselves (marks.bin, 1.5 MB, 0.4 MB as Brotli), for the march (marks.ts): asked for once the place is
  * shown round the eye (main.ts), not before, so they cost the first picture nothing. The cores have stopped drawing
@@ -457,6 +532,12 @@ const markedSquares = () => (squaring ??= (async () => {
 export const marks = () => markFile('marks.bin', 'the roads are bare asphalt until they come')
 /** The 3D minimap and road navigation graph (map.bin, sf/map.mjs): fetched lazily once the visitor engages so cold load stays lean. */
 export const mapData = () => markFile('map.bin', 'the 3D minimap and GPS map are unavailable until loaded')
+/** Neighborhood storefronts, GTA-style parody brands, and civic plazas (places.json, sf/places.mjs): fetched lazily once after first view. */
+let placesCache: Promise<ArrayBuffer | null> | null = null
+export const placesData = () => (placesCache ??= markFile('places.json', 'neighborhood storefronts and plazas are unavailable until loaded').then((buf) => {
+  if (!buf) placesCache = null
+  return buf
+}))
 
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {
@@ -489,8 +570,8 @@ let clock = 0
  * Until it resolves the core answers water there. A place no tile knows stays water. Resolves false where a tile
  * that should be there did not come: what was made from it is water there, and is to be made again later.
  */
-export async function need(core: object, x0: number, z0: number, x1: number, z1: number, cell: number): Promise<boolean> {
-  return (await ground(core, x0, z0, x1, z1, cell)) === null
+export async function need(core: object, x0: number, z0: number, x1: number, z1: number, cell: number, within?: number): Promise<boolean> {
+  return (await ground(core, x0, z0, x1, z1, cell, within)) === null
 }
 /** The tiles a box of cells `cell` wide needs, by key, and where each starts. */
 const keysOf = (x0: number, z0: number, x1: number, z1: number, level: number, size: number) => {
@@ -647,7 +728,7 @@ export async function lists(): Promise<(x: number, z: number) => boolean> {
 }
 
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */
-export const near = (core: object, x: number, z: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1), need(core, x - 4000, z - 4000, x + 4000, z + 4000, 16), need(core, x - 8000, z - 8000, x + 8000, z + 8000, 32)]).then((w) => w.every(Boolean))
+export const near = (core: object, x: number, z: number, within?: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1, within), need(core, x - 4000, z - 4000, x + 4000, z + 4000, 16, within), need(core, x - 8000, z - 8000, x + 8000, z + 8000, 32, within)]).then((w) => w.every(Boolean))
 
 /** What the page says of a square: its streets by name and its addresses, in cells. */
 export interface Names { square: string; at: [number, number, number]; names: string[]; ways: { name: number; line: [number, number][] }[]; addresses: [number, number, number, string][]; credit: string }
@@ -660,15 +741,40 @@ const squareBox = (square: string): [number, number, number, number] | null => {
 const nearBox = (box: readonly [number, number, number, number] | null, x: number, z: number, margin: number): boolean =>
   !box || (x >= box[0] - margin && x <= box[2] + margin && z >= box[1] - margin && z <= box[3] + margin)
 const namedCache = new Map<string, Promise<Names | null>>()
-const loadNames = (url: string): Promise<Names | null> => {
+const loadNames = (url: string, square?: string, manifestUrl?: string | null): Promise<Names | null> => {
   let p = namedCache.get(url)
-  if (!p) namedCache.set(url, (p = fetch(url).then((r) => (r.ok ? (r.json() as Promise<Names>) : null), () => null)))
+  if (!p) {
+    const packKm = PACKS_ENABLED && manifestUrl ? LOCAL?.packs?.names : undefined
+    const packName = packKm && square ? squarePackName('names', square, packKm) : null
+    const packUrl = packName && manifestUrl ? new URL(`${LOCAL!.packs!.dir ?? 'packs/'}${packName}`, manifestUrl).href : null
+    p = (packUrl ? readPackedJson<Names>(packUrl, `names/${square}.json`) : Promise.resolve(null))
+      .then((packed) => packed ?? fetch(url).then((r) => (r.ok ? (r.json() as Promise<Names>) : null), () => null))
+    namedCache.set(url, p)
+  }
   return p
 }
 export const names = async (nearAt?: readonly [number, number], margin = 1200): Promise<Names[]> => {
-  const entries = STREAM ? (await where()).names : SQUARES.map((square) => ({ square, url: `${BASE}${square}.json` }))
+  const src = STREAM ? await where() : null
+  const entries = src ? src.names : SQUARES.map((square) => ({ square, url: `${BASE}${square}.json` }))
   const wanted = nearAt ? entries.filter((e) => nearBox(squareBox(e.square), nearAt[0], nearAt[1], margin)) : entries
-  return (await Promise.all(wanted.map((e) => loadNames(e.url)))).filter((n): n is Names => !!n)
+  return (await Promise.all(wanted.map((e) => loadNames(e.url, e.square, src?.manifest)))).filter((n): n is Names => !!n)
+}
+
+/** How many squares' names `whereabouts` keeps (#81): the nearest; a drive across the city does not hold all 155. */
+export const NAMES_KEPT = 32
+/**
+ * Lets the squares furthest from (x, z) go once more than `NAMES_KEPT` are held, never one the eye is near (the
+ * margin `whereabouts` fetches by): `gone` is told each one's square and address, to forget it was asked.
+ */
+export function forgetFar<T extends { box: readonly [number, number, number, number] | null }>(held: Map<string, T>, x: number, z: number, gone: (square: string, url: string) => void, entries: readonly { square: string; url: string }[], most = NAMES_KEPT): void {
+  if (held.size <= most) return
+  const far = (b: T['box']) => (b ? Math.hypot(Math.max(b[0] - x, 0, x - b[2]), Math.max(b[1] - z, 0, z - b[3])) : 0)
+  const order = [...held].filter(([, v]) => !nearBox(v.box, x, z, 600)).sort((a, b) => far(b[1].box) - far(a[1].box))
+  for (const [square] of order) {
+    if (held.size <= most) break
+    held.delete(square)
+    gone(square, entries.find((e) => e.square === square)?.url ?? '')
+  }
 }
 
 /**
@@ -694,7 +800,7 @@ export async function whereabouts(at: () => [number, number], /** Whose else the
     for (const e of entries) {
       if (asked.has(e.square) || !nearBox(e.box, x, z, 600)) continue
       asked.add(e.square)
-      coming.push(loadNames(e.url).then((data) => {
+      coming.push(loadNames(e.url, e.square, src?.manifest).then((data) => {
         if (!data) { asked.delete(e.square); return }
         const near = new Map<string, Names['addresses']>()
         for (const a of data.addresses) { const key = `${a[0] >> 8},${a[1] >> 8}`; const list = near.get(key); if (list) list.push(a); else near.set(key, [a]) }
@@ -715,6 +821,7 @@ export async function whereabouts(at: () => [number, number], /** Whose else the
   const update = () => {
     const [x, z] = at()
     ensure(x, z)
+    forgetFar(loaded, x, z, (square, url) => { asked.delete(square); namedCache.delete(url) }, entries)
     let street = '', least = 400 ** 2
     let address: Names['addresses'][number] | null = null, best = 300 ** 2
     for (const s of loaded.values()) {

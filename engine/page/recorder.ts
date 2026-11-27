@@ -209,6 +209,12 @@ export interface SessionTrace {
   events: TraceEvent[]
   edits: ReplayEdit[]
   anomalies: Anomaly[]
+  diagnostics?: {
+    tiles?: { fetched: number; failed: number; retried: number; timedOut: number; shared: number; water: number; held: number; bytes: number }
+    mover?: { ticking: boolean; waitMs: number; bodies: number; waiting: number }
+    workers?: { busy: number[]; maxAskMs: number; crashed: number; lacking: number }
+    notes?: string[]
+  }
 }
 
 export interface FeedbackPayload extends SessionTrace {
@@ -297,6 +303,7 @@ export interface RecorderDeps {
   topAt: (x: number, z: number) => number
   worldKind: (x: number, y: number, z: number) => number
   whereLabel: () => string
+  diagnostics?: () => NonNullable<SessionTrace['diagnostics']>
   endpointBase: string | null
 }
 
@@ -763,7 +770,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
       for (let i = 0; i < checkable.length; i++) {
         const a = checkable[i]
         // Traffic car stuck / gridlocked on unblocked road
-        if (a.kind === 'traffic' && a.stuck > 12 && !a.blocked && !['lights', 'stop sign', 'bus stop', 'blast', 'person'].includes(a.wait)) {
+        if (a.kind === 'traffic' && a.stuck > 12 && !a.blocked && !['lights', 'stop sign', 'bus stop', 'blast', 'person', 'queue'].includes(a.wait)) {
           pushAnomaly(
             'vehicle_stuck',
             'medium',
@@ -975,7 +982,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
               kmh: r1(tel?.kmh ?? Math.abs(riding.state?.speed ?? 0) * 0.36),
               gear: tel?.gear ?? 0, rpm: r2(tel?.rpm ?? 0), slip: r2(tel?.slip ?? 0),
               drifting: !!tel?.drifting, surface: tel?.surface ?? 'paved',
-              dents: dmg?.dents.length ?? 0,
+              dents: dmg?.dentCount ?? 0,
             } : null,
             perf: {
               frameMs: r1(p.frameMs), gpuMs: r1(p.gpuMs), cpuMs: r1(p.cpuMs), scale: r2(p.scale),
@@ -1161,6 +1168,7 @@ export function createRecorder(deps: RecorderDeps): Recorder {
         events: [...events],
         edits: [...edits],
         anomalies: [...anomalies],
+        ...(deps.diagnostics ? { diagnostics: deps.diagnostics() } : {}),
       }
     },
 

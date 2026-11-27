@@ -8,7 +8,7 @@ import test from 'node:test'
 import cloudflareConfig from './cloudflare.config.ts'
 import { securityHeaders } from './worker.mjs'
 
-const DEPLOY_FILES = ['assemble.mjs', 'alpha.js', 'notice.mjs', 'worker.mjs', 'encoding.mjs', 'og-world.png']
+const DEPLOY_FILES = ['assemble.mjs', 'alpha.js', 'notice.mjs', 'worker.mjs', 'encoding.mjs', 'og-world.png', 'manifest.webmanifest', 'sw.js', 'icons']
 
 test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwright.world (realm only)', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'world-assembly-'))
@@ -28,6 +28,11 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
   put('realm/sf/releases/p/tiles/0/1_2.bay.br', 'compressed tile')
   put('realm/sf/releases/p/far/0/1_2.far', 'uncompressed far')
   put('realm/sf/releases/p/far/0/1_2.far.br', 'compressed far')
+  put('realm/sf/releases/p/packs/landing.pack', 'uncompressed pack')
+  put('realm/sf/releases/p/packs/landing.pack.br', 'compressed pack')
+  put('realm/assets/main-deadbeef.js', 'console.log("hi")')
+  put('realm/assets/core-cafebabe.wasm', 'wasm')
+  put('realm/kit/voxelmorphism-12345678.css', 'body{}')
   put('realm/sf/releases/p/graph/1_2.json', '{"graph":1}')
   put('realm/sf/releases/p/graph/1_2.json.br', 'compressed graph')
   put('realm/sf/loading-wide-0123456789ab.webp', 'picture')
@@ -41,7 +46,7 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
   put('site/404.html', '<html><body>Not found</body></html>')
   put('site/robots.txt', 'personal robots')
   put('site/_headers', '/blog/*\n  Example: personal\n')
-  for (const file of DEPLOY_FILES) cpSync(new URL(file, import.meta.url), join(root, file))
+  for (const file of DEPLOY_FILES) cpSync(new URL(file, import.meta.url), join(root, file), { recursive: true })
   execFileSync(process.execPath, [join(root, 'assemble.mjs'), '--realm', join(root, 'realm'), '--site', join(root, 'site')])
 
   // deploy/dist: site alone, no realm files, no alpha notice
@@ -74,6 +79,8 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
   assert.equal(read('dist-world/releases/p/tiles/0/1_2.bay.br'), 'compressed tile')
   assert.equal(existsSync(join(root, 'dist-world/releases/p/far/0/1_2.far')), false, 'plain .far skipped when .br exists')
   assert.equal(read('dist-world/releases/p/far/0/1_2.far.br'), 'compressed far')
+  assert.equal(existsSync(join(root, 'dist-world/releases/p/packs/landing.pack')), false, 'plain .pack skipped when .br exists')
+  assert.equal(read('dist-world/releases/p/packs/landing.pack.br'), 'compressed pack')
   assert.equal(existsSync(join(root, 'dist-world/bay/map.bin')), false, 'plain .bin skipped when .br exists')
   assert.equal(read('dist-world/bay/map.bin.br'), 'compressed map')
   assert.equal(read('dist-world/bay/plain-only.bin'), 'plain only')
@@ -118,9 +125,40 @@ test('assemble separates zahynailo.dev (site only, no alpha notice) from voxelwr
   for (const [name, value] of Object.entries(securityHeaders())) {
     if (name !== 'Content-Security-Policy') assert.ok(all.includes(`  ${name}: ${value}\n`), `${name} on /*`)
   }
+  assert.match(headers, /\/sw\.js\n {2}Cache-Control: no-cache/)
+  assert.match(headers, /\/manifest\.webmanifest\n {2}Content-Type: application\/manifest\+json; charset=utf-8\n {2}Cache-Control: public, max-age=3600/)
+  assert.match(headers, /\/icons\/\*\n {2}Cache-Control: public, max-age=604800, stale-while-revalidate=2592000/)
   assert.match(headers, /\/loading-\*\.webp\n {2}Cache-Control: public, max-age=31536000, immutable/)
+  assert.match(headers, /\/assets\/\*\n {2}Cache-Control: public, max-age=31536000, immutable/)
+  assert.match(headers, /\/kit\/voxelmorphism-\*\.css\n {2}Cache-Control: public, max-age=31536000, immutable/)
   assert.match(headers, /\/kit\/fonts\/\*\n {2}Cache-Control: public, max-age=604800, stale-while-revalidate=2592000/)
+  assert.match(csp, /manifest-src 'self'/)
   assert.doesNotMatch(read('dist/_headers'), /Content-Security-Policy: script-src/, 'zahynailo.dev keeps its own headers')
+
+  // PWA assets, manifest, service worker and iOS/mobile meta tags live on voxelwright.world only
+  assert.equal(existsSync(join(root, 'dist/manifest.webmanifest')), false)
+  assert.equal(existsSync(join(root, 'dist/sw.js')), false)
+  const manifest = JSON.parse(read('dist-world/manifest.webmanifest'))
+  assert.equal(manifest.display, 'fullscreen')
+  assert.deepEqual(manifest.display_override, ['fullscreen', 'standalone'])
+  assert.deepEqual(manifest.launch_handler, { client_mode: ['focus-existing', 'auto'] })
+  assert.ok(manifest.shortcuts.length >= 3)
+  for (const icon of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) {
+    assert.equal(existsSync(join(root, `dist-world/icons/${icon}`)), true, `icons/${icon} present`)
+  }
+  assert.match(index, /<meta name="theme-color" content="#10141a">/)
+  assert.match(index, /<link rel="manifest" href="\/manifest\.webmanifest">/)
+  assert.match(index, /<link rel="apple-touch-icon" sizes="180x180" href="\/icons\/apple-touch-icon\.png">/)
+  assert.match(index, /<meta name="apple-mobile-web-app-capable" content="yes">/)
+  assert.match(index, /<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">/)
+  const sw = read('dist-world/sw.js')
+  assert.match(sw, /const SHELL_VERSION = "[0-9a-f]{12}"/)
+  assert.ok(sw.includes('"/loading-wide-0123456789ab.webp"'), 'sw precaches assembled loader images')
+  assert.ok(sw.includes('"/assets/main-deadbeef.js"'), 'sw precaches content-hashed main bundle')
+  assert.ok(sw.includes('"/assets/core-cafebabe.wasm"'), 'sw precaches content-hashed core wasm')
+  assert.ok(sw.includes('"/kit/voxelmorphism-12345678.css"'), 'sw precaches content-hashed kit stylesheet')
+  assert.ok(sw.includes('"/manifest.webmanifest"'), 'sw precaches manifest')
+  assert.doesNotMatch(sw, /clip\.mp4/, 'sw never precaches egg video clips')
 })
 
 test('assemble refuses a site build missing its personal page at /', (t) => {
@@ -132,7 +170,7 @@ test('assemble refuses a site build missing its personal page at /', (t) => {
   }
   put('realm/sf/index.html', '<html><body>Realm</body></html>')
   put('site/blog/index.html', '<html><body>Blog</body></html>')
-  for (const file of DEPLOY_FILES) cpSync(new URL(file, import.meta.url), join(root, file))
+  for (const file of DEPLOY_FILES) cpSync(new URL(file, import.meta.url), join(root, file), { recursive: true })
   assert.throws(
     () => execFileSync(process.execPath, [join(root, 'assemble.mjs'), '--realm', join(root, 'realm'), '--site', join(root, 'site')], { stdio: 'pipe' }),
     /holds no personal page at \//,

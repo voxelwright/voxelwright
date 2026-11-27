@@ -18,10 +18,44 @@ use std::cell::{Cell, RefCell};
 thread_local! {
     static ON: Cell<bool> = const { Cell::new(false) };
     static PACKS: RefCell<Vec<Pack>> = const { RefCell::new(Vec::new()) };
+    static PACK_GEN: Cell<u32> = const { Cell::new(1) };
     static ROOM: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static HEROES: RefCell<Vec<Hero>> = const { RefCell::new(Vec::new()) };
     static LANDMARKS: Cell<bool> = const { Cell::new(true) };
     static MARKS: RefCell<Marks> = RefCell::new(Marks::default());
+    static SECTOR_COLS: RefCell<SectorColCache> = RefCell::new(SectorColCache::default());
+    static SOLID_CACHE: RefCell<Box<[SolidEntry; 512]>> = RefCell::new(Box::new([SolidEntry::EMPTY; 512]));
+}
+
+#[inline]
+fn bump_gen() {
+    let next = PACK_GEN.get().wrapping_add(1);
+    PACK_GEN.set(if next == 0 { 1 } else { next });
+}
+
+#[derive(Clone, Copy)]
+struct SolidEntry {
+    x: i32,
+    z: i32,
+    epoch: u32,
+    top: i32,
+    g: i32,
+    ground: Kind,
+    /** Lowest fixture cell in this column (`i32::MAX` when none): queries below `ceil` hit the O(1) cache even under overhead wires (#129). */
+    ceil: i32,
+}
+
+impl SolidEntry {
+    const EMPTY: Self = Self { x: 0, z: 0, epoch: 0, top: 0, g: 0, ground: 0, ceil: 0 };
+}
+
+#[derive(Default)]
+struct SectorColCache {
+    low_x: i32,
+    low_z: i32,
+    lod: u32,
+    epoch: u32,
+    cols: Vec<OwnedColumn>,
 }
 
 /// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
@@ -45,6 +79,7 @@ pub fn marks() -> i32 {
     if ns.checked_mul(5).and_then(|n| end.checked_add(n)) != Some(w.len()) { return -1; }
     let covers = w[3..end].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
     MARKS.with_borrow_mut(|held| *held = Marks { covers });
+    bump_gen();
     ns as i32
 }
 
@@ -65,6 +100,13 @@ struct Hero {
     high: [i32; 2],
 }
 
+impl Hero {
+    fn local(&self, x: i32, z: i32, half: f32) -> (f32, f32) {
+        let (dx, dz) = ((x - self.at[0]) as f32 + half, (z - self.at[2]) as f32 + half);
+        ((dx * self.along[0] + dz * self.along[1]) * 0.1, (dz * self.along[0] - dx * self.along[1]) * 0.1)
+    }
+}
+
 /// A landmark stands at (x, z) in cells, its foot at height `foot`, its `u` turned `turn` millionths of a radian from
 /// the world's x towards z. 0 where no rule has that sort.
 pub fn hero(sort: u32, x: i32, z: i32, foot: i32, turn: i32) -> i32 {
@@ -80,12 +122,14 @@ pub fn hero(sort: u32, x: i32, z: i32, foot: i32, turn: i32) -> i32 {
         }
     }
     HEROES.with_borrow_mut(|h| h.push(Hero { sort, at: [x, foot, z], along, low, high }));
+    bump_gen();
     1
 }
 
 /// Whether landmarks are made as the world's cells: off, the place is as the tiles have it (for what they cost).
 pub fn landmarks(on: bool) {
     LANDMARKS.set(on);
+    bump_gen();
 }
 
 /// Whether the world is the Bay's: a pack has been loaded.
@@ -134,6 +178,10 @@ struct Building {
     seed: u32,
     /// The street's level at its lowest: where its storeys are counted from.
     base: i32,
+    /// True when the surveyed footprint already traces bay windows or faceted street projections.
+    has_surveyed_bays: bool,
+    /// Clean median eave/wall-top height (in cells) derived from valid roof samples, for uniform roof slopes.
+    eave_med: i32,
     low: [i32; 2],
     high: [i32; 2],
 }
@@ -160,6 +208,8 @@ struct Pack {
     buildings: Vec<Building>,
     /// Corners: x, z, and what the side from this corner on looks at (1 open air, 2 the street; 4 ends a ring).
     verts: Vec<[i32; 3]>,
+    /// Precomputed edge lengths for each vertex in `verts` (avoids per-edge sqrt in `Pack::probe`).
+    edge_len: Vec<f32>,
     /// Trunks: x, z, the crown's top, how thick.
     trunks: Vec<[i32; 4]>,
     near: Vec<Vec<u32>>,
@@ -193,6 +243,7 @@ pub fn load() -> i32 {
         p.len() as i32
     });
     ON.set(true);
+    bump_gen();
     held
 }
 
@@ -200,15 +251,18 @@ pub fn load() -> i32 {
 /// and where none is held yet there is water.
 pub fn begin() {
     ON.set(true);
+    bump_gen();
 }
 
 /// Lets go of the pack whose ground starts at (`x0`, `z0`) with a sample every `gstep` cells. Returns how many
 /// packs are held after. The world stays the Bay's.
 pub fn drop(x0: i32, z0: i32, gstep: i32) -> i32 {
-    PACKS.with_borrow_mut(|p| {
+    let held = PACKS.with_borrow_mut(|p| {
         p.retain(|p| (p.gx0, p.gz0, p.gstep) != (x0, z0, gstep));
         p.len() as i32
-    })
+    });
+    bump_gen();
+    held
 }
 
 /// The pack that answers for a column made of cells `size` wide: the finest that holds it among those no finer
@@ -230,6 +284,7 @@ pub fn least_step(size: i32) -> i32 {
 pub fn clear() {
     PACKS.with_borrow_mut(|p| p.clear());
     ON.set(false);
+    bump_gen();
 }
 
 fn read(b: &[u8]) -> Option<Pack> {
@@ -310,6 +365,8 @@ fn read(b: &[u8]) -> Option<Pack> {
             return None;
         }
         join_cornices(own);
+        propagate_fronts(own);
+        let has_surveyed_bays = ring_has_surveyed_bays(own);
         let style = r[4] as u32;
         let evidence = Evidence::of(r[3]);
         buildings.push(Building {
@@ -331,12 +388,32 @@ fn read(b: &[u8]) -> Option<Pack> {
             ground_floor: style >> 20 & 7,
             seed: style >> 24,
             base: r[5],
+            has_surveyed_bays,
+            eave_med: r[5] + 2 * ((style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 }),
             low: [own.iter().map(|v| v[0]).min()?, own.iter().map(|v| v[1]).min()?],
             high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
         });
     }
     let under_leaf_road = road_greys(&class, &tint, tw);
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut edge_len = vec![0.0f32; verts.len()];
+    for b in &buildings {
+        let own = &verts[b.first..b.first + b.count];
+        let mut start = 0;
+        for i in 0..own.len() {
+            let a = own[i];
+            let last = a[2] & 4 != 0 || i == own.len() - 1;
+            let c = if last { own[start] } else { own[i + 1] };
+            let (dx, dz) = ((c[0] - a[0]) as f32, (c[1] - a[1]) as f32);
+            edge_len[b.first + i] = (dx * dx + dz * dz).sqrt();
+            if last {
+                start = i + 1;
+            }
+        }
+    }
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    despike_roofs(&mut p.top, &p.class, tw, p.tstep);
+    clean_canopy(&mut p);
+    repair_building_roofs(&mut p);
     // Which buildings and trunks reach into each patch.
     p.pw = (wide >> PATCH) + 1;
     p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
@@ -387,57 +464,10 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     if !p.fixtures.is_empty() {
-        // Snap stop-sign fixtures (r == 5 cm vertical posts + octagon bars) that landed on asphalt onto the nearest
-        // surveyed pavement within 7.2 m, or drop stray mid-road ones with no adjacent pavement.
+        // Relocate or drop standing street fixtures (street lamps, stop signs, hydrants, utility poles, sensed poles)
+        // whose surveyed or OSM base landed on asphalt (ROAD).
         if p.tstep > 0 {
-            let mut moved: Vec<(i32, i32, Option<(i32, i32, i32)>)> = Vec::new();
-            for r in &p.fixtures {
-                if r[6] != 5 || r[0] != r[3] || r[2] != r[5] || (r[4] - r[1]).abs() < 20 {
-                    continue;
-                }
-                if p.surface(r[0], r[2]).0 & 7 != ROAD {
-                    continue;
-                }
-                let mut dest = None;
-                'search: for rad in (4..=72).step_by(4) {
-                    for a in 0..16 {
-                        let ang = a as f32 * (std::f32::consts::TAU / 16.0);
-                        let nx = r[0] + (ang.cos() * rad as f32).round() as i32;
-                        let nz = r[2] + (ang.sin() * rad as f32).round() as i32;
-                        if p.surface(nx, nz).0 & 7 == PAVEMENT {
-                            let sx = nx + (ang.cos() * 4.0).round() as i32;
-                            let sz = nz + (ang.sin() * 4.0).round() as i32;
-                            let (fx, fz) = if p.surface(sx, sz).0 & 7 == PAVEMENT { (sx, sz) } else { (nx, nz) };
-                            let dy = p.ground(fx, fz) - r[1];
-                            dest = Some((fx - r[0], dy, fz - r[2]));
-                            break 'search;
-                        }
-                    }
-                }
-                moved.push((r[0], r[2], dest));
-            }
-            if !moved.is_empty() {
-                p.fixtures.retain_mut(|r| {
-                    if r[6] != 5 {
-                        return true;
-                    }
-                    let mx = (r[0] + r[3]) / 2;
-                    let mz = (r[2] + r[5]) / 2;
-                    if let Some((_, _, shift)) = moved.iter().find(|&&(px, pz, _)| (mx - px).abs() <= 4 && (mz - pz).abs() <= 4) {
-                        match shift {
-                            Some((dx, dy, dz)) => {
-                                r[0] += *dx; r[3] += *dx;
-                                r[1] += *dy; r[4] += *dy;
-                                r[2] += *dz; r[5] += *dz;
-                                true
-                            }
-                            None => false,
-                        }
-                    } else {
-                        true
-                    }
-                });
-            }
+            p.clean_road_fixtures();
         }
         p.fixtures_near = vec![Vec::new(); (p.pw * p.pw) as usize];
         for (i, r) in p.fixtures.iter().enumerate() {
@@ -459,6 +489,347 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     Some(p)
+}
+
+/// Remove narrow vertical lidar spikes (rooftop light poles, masts, vents, antennas) from building roofs.
+/// At L0 (`tstep == 5`, 0.5 m samples), a separable 5x5 (2.5 m) morphological opening over non-canopy roof
+/// samples removes isolated pillars narrower than 2.5 m that rise more than 2.5 m above the surrounding roof,
+/// while preserving flat/pitched roofs, parapets <= 2.5 m, step edges between wide buildings, standalone
+/// narrow buildings, and tree canopies. At L1 (`tstep == 20`, 2 m samples), a bounded 3-cell connected
+/// component filter removes 1- to 3-cell spikes (poles straddling a 2 m grid line) without flattening
+/// narrow rowhouses.
+fn despike_roofs(top: &mut [i16], class: &[u8], tw: usize, tstep: i32) {
+    const THRESH: i32 = 25; // 2.5 m in 10 cm cells
+    if tstep == 5 && tw >= 5 {
+        let n = tw * tw;
+        let is_roof = |t: &[i16], i: usize| t[i] != NONE && class[i] & CANOPY == 0;
+        let mut hmin = vec![i16::MAX; n];
+        let mut eroded = vec![i16::MAX; n];
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MAX;
+                for x in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let k = row + x;
+                    if is_roof(top, k) { m = m.min(top[k]); }
+                }
+                hmin[row + i] = m;
+            }
+        }
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MAX;
+                for y in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                    m = m.min(hmin[y * tw + i]);
+                }
+                eroded[row + i] = m;
+            }
+        }
+        let mut hmax = vec![i16::MIN; n];
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MIN;
+                for x in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let k = row + x;
+                    if is_roof(top, k) && eroded[k] != i16::MAX { m = m.max(eroded[k]); }
+                }
+                hmax[row + i] = m;
+            }
+        }
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let k = row + i;
+                if !is_roof(top, k) { continue; }
+                let mut opened = i16::MIN;
+                for y in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                    opened = opened.max(hmax[y * tw + i]);
+                }
+                if opened != i16::MIN && top[k] as i32 - opened as i32 > THRESH {
+                    top[k] = opened;
+                }
+            }
+        }
+    } else if tstep == 20 && tw >= 3 {
+        let is_built = |t: &[i16], i: usize| t[i] != NONE && class[i] & BUILT != 0;
+        let tw_i = tw as isize;
+        let mut comp = [(0isize, 0isize); 4];
+        for j in 0..tw_i {
+            for i in 0..tw_i {
+                let idx = (j * tw_i + i) as usize;
+                if !is_built(top, idx) { continue; }
+                let t0 = top[idx] as i32;
+                let mut lo = t0;
+                for (dy, dx) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let (ny, nx) = (j + dy, i + dx);
+                    if ny >= 0 && ny < tw_i && nx >= 0 && nx < tw_i {
+                        let nk = (ny * tw_i + nx) as usize;
+                        if is_built(top, nk) { lo = lo.min(top[nk] as i32); }
+                    }
+                }
+                if t0 - lo <= THRESH { continue; }
+                comp[0] = (j, i);
+                let (mut len, mut head, mut too_big) = (1usize, 0usize, false);
+                while head < len && !too_big {
+                    let (y, x) = comp[head];
+                    head += 1;
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            if dy == 0 && dx == 0 { continue; }
+                            let (ny, nx) = (y + dy, x + dx);
+                            if ny < 0 || ny >= tw_i || nx < 0 || nx >= tw_i { continue; }
+                            let nk = (ny * tw_i + nx) as usize;
+                            if !is_built(top, nk) || top[nk] as i32 <= t0 - THRESH { continue; }
+                            if comp[..len].contains(&(ny, nx)) { continue; }
+                            if len == 3 { too_big = true; break; }
+                            comp[len] = (ny, nx);
+                            len += 1;
+                        }
+                        if too_big { break; }
+                    }
+                }
+                if too_big { continue; }
+                let mut comp_min = i32::MAX;
+                let mut ring_max = i32::MIN;
+                let mut ring = [(0isize, 0isize); 24];
+                let mut ring_cnt = 0usize;
+                for &(y, x) in &comp[..len] {
+                    comp_min = comp_min.min(top[(y * tw_i + x) as usize] as i32);
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let (ny, nx) = (y + dy, x + dx);
+                            if ny < 0 || ny >= tw_i || nx < 0 || nx >= tw_i { continue; }
+                            if comp[..len].contains(&(ny, nx)) || ring[..ring_cnt].contains(&(ny, nx)) { continue; }
+                            let nk = (ny * tw_i + nx) as usize;
+                            if is_built(top, nk) {
+                                ring_max = ring_max.max(top[nk] as i32);
+                                if ring_cnt < ring.len() {
+                                    ring[ring_cnt] = (ny, nx);
+                                    ring_cnt += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if ring_cnt >= 3 && comp_min > ring_max + THRESH {
+                    for &(y, x) in &comp[..len] {
+                        top[(y * tw_i + x) as usize] = ring_max as i16;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Clean L0 (`tstep == 5`, 0.5 m) sidewalk canopy stubs, building-wall lidar spillover spikes,
+/// and phantom trunks that stole a street tree's real trunk.
+/// - Drops tiny isolated canopy stubs (`<= 6` 4-connected cells, `<= 1.5 m^2`) that rise `>= 1.8 m`
+///   above ground or sit on street/pavement/road, while keeping low yard bushes (`< 1.8 m`).
+/// - Despikes narrow canopy cells jumping `> 4.5 m` above their 5x5 canopy neighborhood.
+/// - Drops phantom trunks whose recorded height no longer matches the cleaned canopy, and restores
+///   a grounded trunk at the crown peak of any large tree (`>= 9` cells, `>= 2.8 m` tall) left trunkless.
+fn clean_canopy(p: &mut Pack) {
+    if p.tstep != 5 || p.tw < 5 {
+        return;
+    }
+    let tw = p.tw as usize;
+    let n = tw * tw;
+    let is_real_canopy = |cls: u8, t: i16| {
+        t != NONE && cls & CANOPY != 0 && matches!(cls & 7, ROAD | PAVEMENT | GRASS_HERE)
+    };
+    let cell_ground = |p: &Pack, i: usize, j: usize| -> i32 {
+        let x = p.tx0 + i as i32 * p.tstep + 2;
+        let z = p.tz0 + j as i32 * p.tstep + 2;
+        p.ground(x, z)
+    };
+
+    // Pass 1: connected components of canopy cells; drop tiny tall/street stubs and record real crowns.
+    let mut visited = vec![0u8; n];
+    let mut queue: Vec<usize> = Vec::new();
+    let mut large_comps: Vec<Vec<usize>> = Vec::new();
+    for j in 0..tw {
+        for i in 0..tw {
+            let start = j * tw + i;
+            if visited[start] != 0 || !is_real_canopy(p.class[start], p.top[start]) {
+                continue;
+            }
+            visited[start] = 1;
+            queue.clear();
+            queue.push(start);
+            let mut head = 0usize;
+            while head < queue.len() {
+                let k = queue[head];
+                head += 1;
+                let (cy, cx) = (k / tw, k % tw);
+                if cx > 0 {
+                    let nk = k - 1;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+                if cx + 1 < tw {
+                    let nk = k + 1;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+                if cy > 0 {
+                    let nk = k - tw;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+                if cy + 1 < tw {
+                    let nk = k + tw;
+                    if visited[nk] == 0 && is_real_canopy(p.class[nk], p.top[nk]) {
+                        visited[nk] = 1;
+                        queue.push(nk);
+                    }
+                }
+            }
+            if queue.len() <= 6 {
+                let mut max_tall = i32::MIN;
+                let mut on_street = false;
+                for &k in &queue {
+                    let (cy, cx) = (k / tw, k % tw);
+                    let tall = p.top[k] as i32 - cell_ground(p, cx, cy);
+                    max_tall = max_tall.max(tall);
+                    if matches!(p.class[k] & 7, ROAD | PAVEMENT) {
+                        on_street = true;
+                    }
+                }
+                if max_tall >= 18 || on_street {
+                    for &k in &queue {
+                        p.class[k] &= !CANOPY;
+                        p.top[k] = NONE;
+                    }
+                }
+            } else if queue.len() >= 9 {
+                large_comps.push(queue.clone());
+            }
+        }
+    }
+
+    // Pass 2: despike narrow canopy height spikes (> 4.5 m above 5x5 canopy neighbors with < 6 peers).
+    let orig_top = p.top.clone();
+    let orig_cls = p.class.clone();
+    for j in 0..tw {
+        for i in 0..tw {
+            let k = j * tw + i;
+            if !is_real_canopy(orig_cls[k], orig_top[k]) {
+                continue;
+            }
+            let t0 = orig_top[k] as i32;
+            let mut peers = 0usize;
+            let mut lower = [0i16; 25];
+            let mut lower_n = 0usize;
+            for ny in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                let row = ny * tw;
+                for nx in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let nk = row + nx;
+                    if !is_real_canopy(orig_cls[nk], orig_top[nk]) {
+                        continue;
+                    }
+                    let nt = orig_top[nk] as i32;
+                    if nt >= t0 - 45 {
+                        peers += 1;
+                    } else if lower_n < lower.len() {
+                        lower[lower_n] = orig_top[nk];
+                        lower_n += 1;
+                    }
+                }
+            }
+            if peers < 6 {
+                if lower_n >= 3 {
+                    lower[..lower_n].sort_unstable();
+                    p.top[k] = lower[lower_n / 2];
+                } else if t0 - cell_ground(p, i, j) > 60 {
+                    p.class[k] &= !CANOPY;
+                    p.top[k] = NONE;
+                }
+            }
+        }
+    }
+
+    // Pass 3: drop phantom trunks disconnected from cleaned canopy, and restore trunks for large crowns.
+    let mut kept_trunks: Vec<[i32; 4]> = Vec::with_capacity(p.trunks.len());
+    for &tr in &p.trunks {
+        let ci = (tr[0] - p.tx0).div_euclid(p.tstep);
+        let cj = (tr[1] - p.tz0).div_euclid(p.tstep);
+        if ci < 0 || ci >= p.tw || cj < 0 || cj >= p.tw {
+            kept_trunks.push(tr);
+            continue;
+        }
+        let (ci, cj) = (ci as usize, cj as usize);
+        let mut near_canopy = 0usize;
+        for ny in cj.saturating_sub(3)..=(cj + 3).min(tw - 1) {
+            let row = ny * tw;
+            for nx in ci.saturating_sub(3)..=(ci + 3).min(tw - 1) {
+                let nk = row + nx;
+                if is_real_canopy(p.class[nk], p.top[nk]) {
+                    near_canopy += 1;
+                }
+            }
+        }
+        if near_canopy < 4 {
+            continue;
+        }
+        let mut max_top = i32::MIN;
+        for ny in cj.saturating_sub(5)..=(cj + 5).min(tw - 1) {
+            let row = ny * tw;
+            for nx in ci.saturating_sub(5)..=(ci + 5).min(tw - 1) {
+                let nk = row + nx;
+                if is_real_canopy(p.class[nk], p.top[nk]) {
+                    max_top = max_top.max(p.top[nk] as i32);
+                }
+            }
+        }
+        if tr[2] > max_top + 30 {
+            continue;
+        }
+        kept_trunks.push(tr);
+    }
+
+    for comp in &large_comps {
+        let mut live = 0usize;
+        let mut best_k = usize::MAX;
+        let mut best_tall = i32::MIN;
+        for &k in comp {
+            if !is_real_canopy(p.class[k], p.top[k]) {
+                continue;
+            }
+            live += 1;
+            if p.class[k] & 7 == ROAD {
+                continue;
+            }
+            let (cy, cx) = (k / tw, k % tw);
+            let tall = p.top[k] as i32 - cell_ground(p, cx, cy);
+            if tall > best_tall {
+                best_tall = tall;
+                best_k = k;
+            }
+        }
+        if live < 9 || best_k == usize::MAX || best_tall < 28 {
+            continue;
+        }
+        let (by, bx) = (best_k / tw, best_k % tw);
+        let px = p.tx0 + bx as i32 * p.tstep + 2;
+        let pz = p.tz0 + by as i32 * p.tstep + 2;
+        let has_trunk = kept_trunks.iter().any(|tr| {
+            let dx = tr[0] - px;
+            let dz = tr[1] - pz;
+            dx * dx + dz * dz <= 45 * 45
+        });
+        if !has_trunk {
+            kept_trunks.push([px, pz, p.top[best_k] as i32, 1 + i32::from(best_tall > 90)]);
+        }
+    }
+    p.trunks = kept_trunks;
 }
 
 /// What a building's photographs say of it as evidence (bay/facade_evidence.py, written by bay/evidence_tile.py), in
@@ -536,7 +907,409 @@ fn join_cornices(ring_verts: &mut [[i32; 3]]) {
     }
 }
 
+/// Propagates street-facing and open-air flags across recessed porches and faceted bay-window segments that erosion or
+/// setback distance left unmarked, and ensures no standalone building outer ring is completely windowless (#60).
+fn propagate_fronts(ring_verts: &mut [[i32; 3]]) {
+    const FACET_MAX: f32 = 22.0; // 2.2 m (bay facets & recessed porch jogs, never 3+ m side party walls)
+    let mut start = 0;
+    let mut outer = true;
+    while start < ring_verts.len() {
+        let end = (start..ring_verts.len()).find(|&i| ring_verts[i][2] & 4 != 0).unwrap_or(ring_verts.len() - 1) + 1;
+        let ring = &mut ring_verts[start..end];
+        let n = ring.len();
+        if n >= 3 {
+            let lens: Vec<f32> = (0..n).map(|i| {
+                let (a, c) = (ring[i], ring[(i + 1) % n]);
+                (((c[0] - a[0]) as f32).powi(2) + ((c[1] - a[1]) as f32).powi(2)).sqrt()
+            }).collect();
+            let orig: Vec<i32> = ring.iter().map(|v| v[2]).collect();
+            // Fill short unmarked chains (<= 6 edges, <= 12 m) bounded on both sides by street-facing edges (bit 1).
+            for i in 0..n {
+                if orig[i] & 3 == 3 || lens[i] >= FACET_MAX {
+                    continue;
+                }
+                let mut steps_b = 0usize;
+                let mut len_sum = lens[i];
+                let mut before_street = false;
+                for k in 1..=6.min(n - 1) {
+                    let j = (i + n - k) % n;
+                    if orig[j] & 2 != 0 {
+                        before_street = true;
+                        break;
+                    }
+                    if lens[j] >= FACET_MAX {
+                        break;
+                    }
+                    steps_b += 1;
+                    len_sum += lens[j];
+                }
+                if !before_street {
+                    continue;
+                }
+                let mut after_street = false;
+                for k in 1..=6.min(n - 1) {
+                    let j = (i + k) % n;
+                    if orig[j] & 2 != 0 {
+                        after_street = true;
+                        break;
+                    }
+                    if lens[j] >= FACET_MAX || steps_b + k > 6 {
+                        break;
+                    }
+                    len_sum += lens[j];
+                }
+                if after_street && len_sum <= 120.0 {
+                    ring[i][2] |= 3;
+                }
+            }
+            // Fallback: if an outer ring has zero open-air edges (erosion swallowed every face), open its longest
+            // fronts (>= 2.0 m, or at least its longest edge) so the building is never a blind blank box.
+            if outer && !ring.iter().any(|v| v[2] & 1 != 0) {
+                let longest = lens.iter().copied().fold(0.0f32, f32::max);
+                let thresh = (longest * 0.6).max(20.0).min(longest);
+                for (i, &l) in lens.iter().enumerate() {
+                    if l >= thresh - 0.1 {
+                        ring[i][2] |= 1;
+                    }
+                }
+            }
+        }
+        outer = false;
+        start = end;
+    }
+}
+
+/// True when a building's outer ring already traces bay windows or stepped/angled street projections, so `What::By`
+/// does not glue a second synthetic bay box on top of surveyed bay geometry (#60).
+fn ring_has_surveyed_bays(ring_verts: &[[i32; 3]]) -> bool {
+    let end = (0..ring_verts.len()).find(|&i| ring_verts[i][2] & 4 != 0).unwrap_or(ring_verts.len().saturating_sub(1)) + 1;
+    let ring = &ring_verts[..end.min(ring_verts.len())];
+    let n = ring.len();
+    if n < 7 {
+        return false;
+    }
+    let mut faceted_street = 0usize;
+    let mut angled_bends = 0usize;
+    for i in 0..n {
+        let (a, b, c) = (ring[i], ring[(i + 1) % n], ring[(i + 2) % n]);
+        let (dx1, dz1) = ((b[0] - a[0]) as f32, (b[1] - a[1]) as f32);
+        let len1 = (dx1 * dx1 + dz1 * dz1).sqrt();
+        if a[2] & 2 != 0 && (5.0..=45.0).contains(&len1) {
+            faceted_street += 1;
+            let (dx2, dz2) = ((c[0] - b[0]) as f32, (c[1] - b[1]) as f32);
+            let len2 = (dx2 * dx2 + dz2 * dz2).sqrt();
+            if len1 > 0.5 && len2 > 0.5 {
+                let cos_a = (dx1 * dx2 + dz1 * dz2) / (len1 * len2);
+                if cos_a.abs() < 0.92 {
+                    angled_bends += 1;
+                }
+            }
+        }
+    }
+    faceted_street >= 3 || (faceted_street >= 2 && angled_bends >= 1)
+}
+
+/// Repairs collapsed perimeter ground-level lidar dropouts (where a surveyed footprint extends 0.5–1.5 m past the
+/// lidar roof return edge), denoises single-cell rooftop spikes/potholes with a 3x3 building-interior median, and
+/// fills missing horizontal eaves on street-facing edges so houses never render as broken/demolished stubs (#60).
+fn repair_building_roofs(p: &mut Pack) {
+    if p.tstep <= 0 || p.tstep > 10 || p.buildings.is_empty() {
+        return;
+    }
+    let (tw, tstep, tx0, tz0) = (p.tw, p.tstep, p.tx0, p.tz0);
+    let nb = p.buildings.len();
+    for bi in 0..nb {
+        if p.buildings[bi].special != 0 {
+            continue;
+        }
+        let b_low = p.buildings[bi].low;
+        let b_high = p.buildings[bi].high;
+        let b_base = p.buildings[bi].base;
+        let b_first = p.buildings[bi].first;
+        let b_count = p.buildings[bi].count;
+        let i0 = ((b_low[0] - tx0).div_euclid(tstep)).clamp(0, tw - 1);
+        let i1 = ((b_high[0] - tx0).div_euclid(tstep)).clamp(0, tw - 1);
+        let j0 = ((b_low[1] - tz0).div_euclid(tstep)).clamp(0, tw - 1);
+        let j1 = ((b_high[1] - tz0).div_euclid(tstep)).clamp(0, tw - 1);
+        let (w, h) = ((i1 - i0 + 1) as usize, (j1 - j0 + 1) as usize);
+        if w == 0 || h == 0 || w * h > 12000 {
+            continue;
+        }
+        let mut inside = vec![false; w * h];
+        let mut repaired = vec![NONE; w * h];
+        let mut valid_heights = Vec::new();
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            let cz = tz0 + j * tstep + tstep / 2;
+            for li in 0..w {
+                let i = i0 + li as i32;
+                let cx = tx0 + i * tstep + tstep / 2;
+                if p.probe(&p.buildings[bi], cx, cz).inside {
+                    let k = lj * w + li;
+                    inside[k] = true;
+                    let v = p.top[(j * tw + i) as usize];
+                    repaired[k] = v;
+                    if v != NONE && (v as i32) >= b_base + 24 {
+                        valid_heights.push(v);
+                    }
+                }
+            }
+        }
+        if valid_heights.is_empty() {
+            continue;
+        }
+        valid_heights.sort_unstable();
+        let roof_lo = valid_heights[valid_heights.len() / 4];
+        // Pass A: Fill collapsed perimeter dropouts (< base + 24, i.e. ground/car/missing lidar inside the footprint)
+        // by sampling straight inward from the outer edge into the same building's valid roof.
+        let mut filled = repaired.clone();
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            let cz = tz0 + j * tstep + tstep / 2;
+            for li in 0..w {
+                let k = lj * w + li;
+                if !inside[k] {
+                    continue;
+                }
+                let v = repaired[k];
+                if v != NONE && (v as i32) >= b_base + 24 {
+                    continue;
+                }
+                let i = i0 + li as i32;
+                let cx = tx0 + i * tstep + tstep / 2;
+                let pr = p.probe(&p.buildings[bi], cx, cz);
+                if pr.far >= 24.0 {
+                    continue;
+                }
+                let far = pr.far.max(0.01);
+                let (ix, iz) = ((cx as f32 + 0.5 - pr.on[0]) / far, (cz as f32 + 0.5 - pr.on[1]) / far);
+                let mut found = None;
+                // Prefer the nearest valid inside roof sample (radius 1..=3) so a corner dropout next to a lower
+                // front eave inherits that front roof instead of jumping up to a taller rear roof (`roof_lo`).
+                let mut near_vals = [0i16; 49];
+                for rad in 1i32..=3 {
+                    let mut m = 0usize;
+                    for dj in -rad..=rad {
+                        let nj = lj as i32 + dj;
+                        if nj < 0 || nj >= h as i32 { continue; }
+                        for di in -rad..=rad {
+                            if di.abs().max(dj.abs()) != rad { continue; }
+                            let ni = li as i32 + di;
+                            if ni < 0 || ni >= w as i32 { continue; }
+                            let nk = nj as usize * w + ni as usize;
+                            if inside[nk] && repaired[nk] != NONE && (repaired[nk] as i32) >= b_base + 26 {
+                                near_vals[m] = repaired[nk];
+                                m += 1;
+                            }
+                        }
+                    }
+                    if m > 0 {
+                        near_vals[..m].sort_unstable();
+                        found = Some(near_vals[m / 4]);
+                        break;
+                    }
+                }
+                if found.is_none() {
+                    for &d in &[8.0f32, 14.0, 20.0, 26.0] {
+                        let sx = ((cx as f32 + 0.5 + ix * d).floor() as i32 - tx0).div_euclid(tstep) - i0;
+                        let sz = ((cz as f32 + 0.5 + iz * d).floor() as i32 - tz0).div_euclid(tstep) - j0;
+                        if sx >= 0 && sz >= 0 && (sx as usize) < w && (sz as usize) < h {
+                            let sk = sz as usize * w + sx as usize;
+                            if inside[sk] && repaired[sk] != NONE && (repaired[sk] as i32) >= b_base + 26 {
+                                found = Some(repaired[sk]);
+                                break;
+                            }
+                        }
+                    }
+                }
+                if found.is_none() && pr.looks & 128 != 0 {
+                    let eave = (pr.looks >> 8) as i16;
+                    if (eave as i32) >= b_base + 26 {
+                        found = Some(eave);
+                    }
+                }
+                if found.is_none() && (roof_lo as i32) >= b_base + 28 {
+                    found = Some(roof_lo);
+                }
+                if let Some(fv) = found {
+                    filled[k] = fv;
+                }
+            }
+        }
+        // Pass B: 3x3 edge-preserving building-interior median to strip lidar vents, poles, potholes and jagged teeth,
+        // plus a perimeter-sliver clamp on residential roofs so 0.5-1.0 m corner fins never protrude above the eave (#60).
+        let is_home = p.buildings[bi].home;
+        let mut nbrs = [0i16; 9];
+        let mut wide_nbrs = [0i16; 25];
+        for lj in 0..h {
+            let j = j0 + lj as i32;
+            for li in 0..w {
+                let k = lj * w + li;
+                if !inside[k] {
+                    continue;
+                }
+                let cur = filled[k];
+                if cur == NONE || (cur as i32) < b_base + 24 {
+                    continue;
+                }
+                let mut n = 0usize;
+                for dj in -1i32..=1 {
+                    let nj = lj as i32 + dj;
+                    if nj < 0 || nj >= h as i32 { continue; }
+                    for di in -1i32..=1 {
+                        let ni = li as i32 + di;
+                        if ni < 0 || ni >= w as i32 { continue; }
+                        let nk = nj as usize * w + ni as usize;
+                        if inside[nk] && filled[nk] != NONE && (filled[nk] as i32) >= b_base + 24 {
+                            nbrs[n] = filled[nk];
+                            n += 1;
+                        }
+                    }
+                }
+                let mut out = cur;
+                if n >= 4 {
+                    nbrs[..n].sort_unstable();
+                    let med = nbrs[n / 2];
+                    let flat = nbrs[..n].iter().filter(|&&nv| (nv - med).abs() <= 8).count();
+                    if (cur - med).abs() <= 18 || flat >= 5 {
+                        out = med;
+                    }
+                }
+                if is_home && n <= 4 {
+                    let mut wn = 0usize;
+                    for dj in -2i32..=2 {
+                        let nj = lj as i32 + dj;
+                        if nj < 0 || nj >= h as i32 { continue; }
+                        for di in -2i32..=2 {
+                            let ni = li as i32 + di;
+                            if ni < 0 || ni >= w as i32 { continue; }
+                            let nk = nj as usize * w + ni as usize;
+                            if inside[nk] && filled[nk] != NONE && (filled[nk] as i32) >= b_base + 24 {
+                                wide_nbrs[wn] = filled[nk];
+                                wn += 1;
+                            }
+                        }
+                    }
+                    if wn >= 6 {
+                        wide_nbrs[..wn].sort_unstable();
+                        let wmed = wide_nbrs[wn / 2];
+                        if out > wmed + 6 {
+                            out = wmed;
+                        }
+                    }
+                }
+                let i = i0 + li as i32;
+                p.top[(j * tw + i) as usize] = out;
+            }
+        }
+        // Pass C: Fill missing or collapsed surveyed eaves on street-facing edges using the repaired roof grid.
+        let mut best_street: Option<(f32, i32)> = None;
+        let mut ring_start = 0usize;
+        for ei in 0..b_count {
+            let a = p.verts[b_first + ei];
+            let last = a[2] & 4 != 0 || ei == b_count - 1;
+            let c = p.verts[b_first + if last { ring_start } else { ei + 1 }];
+            if last {
+                ring_start = ei + 1;
+            }
+            if a[2] & 2 == 0 {
+                continue;
+            }
+            let (dx, dz) = ((c[0] - a[0]) as f32, (c[1] - a[1]) as f32);
+            let long = (dx * dx + dz * dz).sqrt();
+            if long < 7.0 {
+                continue;
+            }
+            let has_valid = a[2] & 128 != 0 && ((a[2] >> 8) as i16 as i32) >= b_base + 28;
+            if has_valid && !is_home {
+                let ev = (a[2] >> 8) as i16 as i32;
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, ev));
+                }
+                continue;
+            }
+            let (tx, tz) = (dx / long, dz / long);
+            let (mx, mz) = ((a[0] + c[0]) as f32 * 0.5, (a[1] + c[1]) as f32 * 0.5);
+            let n1 = (-tz, tx);
+            let inward = if p.probe(&p.buildings[bi], (mx + n1.0 * 5.0) as i32, (mz + n1.1 * 5.0) as i32).inside {
+                n1
+            } else {
+                (tz, -tx)
+            };
+            let mut samples = Vec::new();
+            for &t in &[0.15f32, 0.32, 0.50, 0.68, 0.85] {
+                let sx = (a[0] as f32 + dx * t + inward.0 * 6.0) as i32;
+                let sz = (a[1] as f32 + dz * t + inward.1 * 6.0) as i32;
+                if let Some(top_v) = p.top(sx, sz) {
+                    if top_v >= b_base + 28 {
+                        samples.push(top_v);
+                    }
+                }
+            }
+            if has_valid {
+                let mut ev = (a[2] >> 8) as i16 as i32;
+                // Check both 0.6 m and 1.2 m inward before lowering a valid baked eave so a shallow front bay/porch
+                // ledge (0.6 m deep) never collapses a genuine two-storey street wall.
+                let mut deep_samples = Vec::new();
+                for &t in &[0.15f32, 0.32, 0.50, 0.68, 0.85] {
+                    let s1 = p.top((a[0] as f32 + dx * t + inward.0 * 6.0) as i32, (a[1] as f32 + dz * t + inward.1 * 6.0) as i32)
+                        .filter(|&v| v >= b_base + 28);
+                    let s2 = p.top((a[0] as f32 + dx * t + inward.0 * 12.0) as i32, (a[1] as f32 + dz * t + inward.1 * 12.0) as i32)
+                        .filter(|&v| v >= b_base + 28);
+                    if let Some(best) = s1.into_iter().chain(s2).max() {
+                        deep_samples.push(best);
+                    }
+                }
+                if deep_samples.len() >= 3 {
+                    deep_samples.sort_unstable();
+                    let med_eave = deep_samples[deep_samples.len() / 2];
+                    // Clamp stale baked eaves that sit > 0.6 m taller than the actual repaired roof behind the edge.
+                    if ev > med_eave + 6 {
+                        ev = med_eave;
+                        p.verts[b_first + ei][2] = (a[2] & !0xff_ff00) | 128 | ((ev & 0xffff) << 8);
+                    }
+                }
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, ev));
+                }
+            } else if samples.len() >= 3 {
+                samples.sort_unstable();
+                let med_eave = samples[samples.len() / 2];
+                p.verts[b_first + ei][2] = (a[2] & !0xff_ff00) | 128 | ((med_eave & 0xffff) << 8);
+                if best_street.is_none_or(|(bl, _)| long > bl) {
+                    best_street = Some((long, med_eave));
+                }
+            }
+        }
+        p.buildings[bi].eave_med = best_street.map_or(roof_lo as i32, |(_, ev)| ev);
+    }
+}
+
 impl Pack {
+    /// Roof height at an interior building cell, falling back to the nearest valid adjacent interior sample when a
+    /// narrow perimeter cell's `tstep` grid center sits just outside the polygon (`NONE`), before synthetic `2 * storey`.
+    #[inline]
+    fn roof_raster(&self, b: &Building, x: i32, z: i32) -> i32 {
+        if let Some(v) = self.top(x, z) {
+            return v;
+        }
+        if self.tstep > 0 {
+            let s = self.tstep;
+            let mut best = i32::MAX;
+            for (nx, nz) in [(x - s, z), (x + s, z), (x, z - s), (x, z + s)] {
+                if let Some(v) = self.top(nx, nz) {
+                    if v >= b.base + 24 && v < best && self.probe(b, nx, nz).inside {
+                        best = v;
+                    }
+                }
+            }
+            if best != i32::MAX {
+                return best;
+            }
+        }
+        b.base + 2 * b.storey
+    }
+
     /// Whether the pack knows a column: its samples reach round it.
     fn holds(&self, x: i32, z: i32) -> bool {
         let wide = (self.gw - 1) * self.gstep;
@@ -612,19 +1385,24 @@ impl Pack {
 
     /// The building a column is in, or the nearest one it is just outside of, with where on its outline.
     fn building(&self, x: i32, z: i32) -> Option<(&Building, Probe)> {
+        self.building_idx(x, z).map(|(i, p)| (&self.buildings[i], p))
+    }
+
+    fn building_idx(&self, x: i32, z: i32) -> Option<(usize, Probe)> {
         let patch = (((z - self.gz0) >> PATCH).clamp(0, self.pw - 1) * self.pw + ((x - self.gx0) >> PATCH).clamp(0, self.pw - 1)) as usize;
-        let mut best: Option<(&Building, Probe)> = None;
+        let mut best: Option<(usize, Probe)> = None;
         for &i in &self.near[patch] {
-            let b = &self.buildings[i as usize];
+            let bi = i as usize;
+            let b = &self.buildings[bi];
             if x < b.low[0] - OUT || z < b.low[1] - OUT || x > b.high[0] + OUT || z > b.high[1] + OUT {
                 continue;
             }
             let p = self.probe(b, x, z);
             if p.inside {
-                return Some((b, p));
+                return Some((bi, p));
             }
             if p.far < (if p.looks >> 24 != 0 { OUT } else { 8 }) as f32 && best.as_ref().is_none_or(|(_, q)| p.far < q.far) {
-                best = Some((b, p));
+                best = Some((bi, p));
             }
         }
         best
@@ -635,7 +1413,9 @@ impl Pack {
     fn probe(&self, b: &Building, x: i32, z: i32) -> Probe {
         let (px, pz) = (x as f32 + 0.5, z as f32 + 0.5);
         let own = &self.verts[b.first..b.first + b.count];
+        let lens = &self.edge_len[b.first..b.first + b.count];
         let mut p = Probe { inside: false, far: f32::MAX, along: 0.0, round: 0.0, long: 0.0, looks: 0, side: 0, on: [0.0; 2] };
+        let mut best_far2 = f32::MAX;
         let (mut start, mut run) = (0, 0.0f32);
         for i in 0..own.len() {
             let a = own[i];
@@ -646,8 +1426,7 @@ impl Pack {
             if (az > pz) != (cz > pz) && px < ax + (pz - az) / (cz - az) * (cx - ax) {
                 p.inside = !p.inside;
             }
-            let (dx, dz) = (cx - ax, cz - az);
-            let long = (dx * dx + dz * dz).sqrt();
+            let long = lens[i];
             run = if last { 0.0 } else { run + long };
             if last {
                 start = i + 1;
@@ -655,12 +1434,17 @@ impl Pack {
             if long < 0.5 {
                 continue;
             }
+            let (dx, dz) = (cx - ax, cz - az);
             let t = (((px - ax) * dx + (pz - az) * dz) / (long * long)).clamp(0.0, 1.0);
             let (qx, qz) = (ax + dx * t, az + dz * t);
-            let far = ((px - qx) * (px - qx) + (pz - qz) * (pz - qz)).sqrt();
-            if far < p.far {
-                p = Probe { inside: p.inside, far, along: t * long, round: before + t * long, long, looks: a[2], side: (b.first + i) as u32, on: [qx, qz] };
+            let far2 = (px - qx) * (px - qx) + (pz - qz) * (pz - qz);
+            if far2 < best_far2 {
+                best_far2 = far2;
+                p = Probe { inside: p.inside, far: far2, along: t * long, round: before + t * long, long, looks: a[2], side: (b.first + i) as u32, on: [qx, qz] };
             }
+        }
+        if best_far2 < f32::MAX {
+            p.far = best_far2.sqrt();
         }
         p
     }
@@ -686,7 +1470,8 @@ impl Pack {
             // A cell is in a rod when its middle is within the rod's radius, and never less than the 0.71 of a cell
             // that keeps a thin one whole at any slant. Added to the radius, it made a stop sign's plate a red box
             // 1 m across and 24 cm deep and every lamp's mast 38 cm thick (#450).
-            let rad = if cable { r[6] as f32/10.0 + if size == 2 { 0.3 } else { size as f32*0.71 } } else { (r[6] as f32/10.0).max(size as f32*0.71) };
+            let cable_rad = (r[6] as f32 / 10.0).min(0.18);
+            let rad = if cable { cable_rad + size as f32 * 0.71 } else { (r[6] as f32 / 10.0).max(size as f32 * 0.71) };
             let far = (ux-dx*t).powi(2)+(uz-dz*t).powi(2);
             if far > rad*rad { continue; }
             let height = |v:f32| r[1] as f32 + v*(r[4]-r[1]) as f32;
@@ -719,8 +1504,232 @@ impl Pack {
         let far = |t: &[i32; 4]| (x - t[0]) * (x - t[0]) + (z - t[1]) * (z - t[1]);
         self.stems[patch].iter().map(|&i| self.trunks[i as usize]).min_by_key(far).filter(|t| far(t) <= REACH * REACH).map(|t| ((far(&t) as f32).sqrt(), t))
     }
+
+    /// Whether `(x, z)` lies inside a surveyed building footprint or within `clear` cells of its exterior wall.
+    fn in_building(&self, x: i32, z: i32, clear: f32) -> bool {
+        self.building(x, z).is_some_and(|(_, q)| q.inside || q.far < clear)
+    }
+
+    /// Nearest off-road spot at street grade, clear of buildings, for relocating a road-standing fixture.
+    /// Prefers PAVEMENT (up to 7.2 m); falls back to roadside GRASS/YARD (up to 4.8 m) for park roads without
+    /// sidewalks. Insets 40 cm behind the edge so the mast clears the carriageway.
+    fn off_road_spot(&self, ox: i32, oz: i32, base_y: i32) -> Option<(i32, i32, i32)> {
+        // Exact 16-compass unit directions (no trig calls so wasm and native stay bit-identical).
+        const DIRS: [(f32, f32); 16] = [
+            (1.0, 0.0), (0.9238795, 0.38268343), (0.70710677, 0.70710677), (0.38268343, 0.9238795),
+            (0.0, 1.0), (-0.38268343, 0.9238795), (-0.70710677, 0.70710677), (-0.9238795, 0.38268343),
+            (-1.0, 0.0), (-0.9238795, -0.38268343), (-0.70710677, -0.70710677), (-0.38268343, -0.9238795),
+            (0.0, -1.0), (0.38268343, -0.9238795), (0.70710677, -0.70710677), (0.9238795, -0.38268343),
+        ];
+        let valid = |x: i32, z: i32, want_pav: bool| -> bool {
+            if self.cell(x, z).is_none() {
+                return false;
+            }
+            let s = self.surface(x, z).0 & 7;
+            let ok_surf = if want_pav { s == PAVEMENT } else { s == GRASS_HERE || s == YARD };
+            ok_surf && (self.ground(x, z) - base_y).abs() <= 15 && !self.in_building(x, z, 4.0)
+        };
+        let mut best_pav: Option<(i32, i32, i32, f32, f32)> = None;
+        let mut best_verge: Option<(i32, i32, i32, f32, f32)> = None;
+        for rad in (4..=72).step_by(4) {
+            for &(ux, uz) in &DIRS {
+                let nx = ox + (ux * rad as f32).round() as i32;
+                let nz = oz + (uz * rad as f32).round() as i32;
+                if best_pav.is_none() && valid(nx, nz, true) {
+                    best_pav = Some((rad, nx, nz, ux, uz));
+                } else if best_verge.is_none() && rad <= 48 && valid(nx, nz, false) {
+                    best_verge = Some((rad, nx, nz, ux, uz));
+                }
+            }
+            if best_pav.is_some() {
+                break;
+            }
+        }
+        let (nx, nz, ux, uz, want_pav) = match (best_pav, best_verge) {
+            (Some(p), Some(v)) if p.0 <= v.0 + 12 => (p.1, p.2, p.3, p.4, true),
+            (_, Some(v)) => (v.1, v.2, v.3, v.4, false),
+            (Some(p), None) => (p.1, p.2, p.3, p.4, true),
+            (None, None) => return None,
+        };
+        let sx = nx + (ux * 4.0).round() as i32;
+        let sz = nz + (uz * 4.0).round() as i32;
+        let (fx, fz) = if valid(sx, sz, want_pav) { (sx, sz) } else { (nx, nz) };
+        Some((fx, self.ground(fx, fz), fz))
+    }
+
+    /// Relocate or remove standing street fixtures whose surveyed/OSM base landed on asphalt (ROAD).
+    /// Handles street lamps (mast + bracket arm + luminaire head), stop signs (post + octagon bars),
+    /// fire hydrants (body + nozzles + cap), utility poles (mast + crossarm), and sensed poles (mast + span wires).
+    fn clean_road_fixtures(&mut self) {
+        let orig = self.fixtures.clone();
+        let n = orig.len();
+        let mut keep = vec![true; n];
+
+        let is_lamp_mast = |r: &[i32; 8]| {
+            r[0] == r[3] && r[2] == r[5] && r[6] == 12 && material(r[7] as Kind) == STEEL && r[4] - r[1] >= 60
+        };
+        // Track already-off-road lamps so a snapped road lamp never stacks on top of an existing corner lamp.
+        let mut kept_lamps: Vec<(i32, i32)> = orig
+            .iter()
+            .filter(|r| is_lamp_mast(r) && self.surface(r[0], r[2]).0 & 7 != ROAD)
+            .map(|r| (r[0], r[2]))
+            .collect();
+
+        let shift_seg = |seg: &mut [i32; 8], dx: i32, dy: i32, dz: i32| {
+            seg[0] += dx; seg[3] += dx;
+            seg[1] += dy; seg[4] += dy;
+            seg[2] += dz; seg[5] += dz;
+        };
+
+        for (i, r) in orig.iter().enumerate() {
+            if r[0] != r[3] || r[2] != r[5] {
+                continue;
+            }
+            let (ox, oy, oz) = (r[0], r[1], r[2]);
+            let dh = r[4] - r[1];
+            if dh < 6 || self.surface(ox, oz).0 & 7 != ROAD {
+                continue;
+            }
+
+            if is_lamp_mast(r) {
+                // Street lamp: mast (r=12, STEEL) + arm (r=5 from oy+79) + luminaire head (r=12, LAMP from arm tip).
+                let arms: Vec<usize> = (0..n)
+                    .filter(|&j| j != i && orig[j][6] == 5 && orig[j][0] == ox && orig[j][1] == oy + 79 && orig[j][2] == oz)
+                    .collect();
+                let mut heads: Vec<(usize, usize)> = Vec::new();
+                for &j in &arms {
+                    let a = orig[j];
+                    for k in 0..n {
+                        if orig[k][6] == 12 && material(orig[k][7] as Kind) == LAMP
+                            && orig[k][0] == a[3] && orig[k][1] == a[4] && orig[k][2] == a[5]
+                        {
+                            heads.push((j, k));
+                        }
+                    }
+                }
+                let spot = self.off_road_spot(ox, oz, oy).filter(|&(fx, _, fz)| {
+                    !kept_lamps.iter().any(|&(lx, lz)| (lx - fx) * (lx - fx) + (lz - fz) * (lz - fz) <= 25 * 25)
+                });
+                if let Some((fx, fy, fz)) = spot {
+                    kept_lamps.push((fx, fz));
+                    self.fixtures[i] = [fx, fy, fz, fx, fy + dh, fz, r[6], r[7]];
+                    // Re-aim arm and luminaire back over the carriageway instead of into a building behind the sidewalk.
+                    let (vx, vz) = ((ox - fx) as f32, (oz - fz) as f32);
+                    let len = (vx * vx + vz * vz).sqrt().max(1.0);
+                    let (ux, uz) = (vx / len, vz / len);
+                    let (ax2, ay2, az2) = (fx + (13.0 * ux).round() as i32, fy + 85, fz + (13.0 * uz).round() as i32);
+                    let (hx2, hz2) = (fx + (18.0 * ux).round() as i32, fz + (18.0 * uz).round() as i32);
+                    for &j in &arms {
+                        self.fixtures[j] = [fx, fy + 79, fz, ax2, ay2, az2, orig[j][6], orig[j][7]];
+                    }
+                    for &(_, k) in &heads {
+                        self.fixtures[k] = [ax2, ay2, az2, hx2, ay2, hz2, orig[k][6], orig[k][7]];
+                    }
+                } else {
+                    keep[i] = false;
+                    for &j in &arms { keep[j] = false; }
+                    for &(_, k) in &heads { keep[k] = false; }
+                }
+            } else if r[6] == 5 && dh >= 20 {
+                // Stop sign: post (r=5) + horizontal octagon bars (r=5) around its top.
+                let bars: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && orig[j][6] == 5
+                            && (orig[j][0] != orig[j][3] || orig[j][2] != orig[j][5])
+                            && ((orig[j][0] + orig[j][3]) / 2 - ox).abs() <= 4
+                            && ((orig[j][2] + orig[j][5]) / 2 - oz).abs() <= 4
+                            && orig[j][1] >= oy && orig[j][1] <= r[4] + 4
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in bars { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in bars { keep[j] = false; }
+                }
+            } else if r[6] == 15 && dh == 7 {
+                // Fire hydrant: body (r=15, dh=7) + cross nozzles (r=10 at oy+4) + cap (r=12 at oy+7..oy+8).
+                let parts: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && (
+                            (orig[j][6] == 10 && orig[j][1] == oy + 4 && orig[j][4] == oy + 4
+                                && (orig[j][0] + orig[j][3]) / 2 == ox && orig[j][2] == oz && orig[j][5] == oz)
+                            || (orig[j][6] == 12 && orig[j][0] == ox && orig[j][3] == ox
+                                && orig[j][2] == oz && orig[j][5] == oz && orig[j][1] == oy + 7 && orig[j][4] == oy + 8)
+                        )
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in parts { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in parts { keep[j] = false; }
+                }
+            } else if r[6] == 16 && dh >= 60 {
+                // Utility pole (OSM pole / metalPole): mast (r=16, dh=96) + crossarm (r=8 at oy+88).
+                let cross: Vec<usize> = (0..n)
+                    .filter(|&j| {
+                        j != i && orig[j][6] == 8 && orig[j][1] == oy + 88 && orig[j][4] == oy + 88
+                            && ((orig[j][0] + orig[j][3]) / 2 - ox).abs() <= 1
+                            && ((orig[j][2] + orig[j][5]) / 2 - oz).abs() <= 1
+                    })
+                    .collect();
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in cross { shift_seg(&mut self.fixtures[j], dx, dy, dz); }
+                } else {
+                    keep[i] = false;
+                    for j in cross { keep[j] = false; }
+                }
+            } else if r[6] == 14 && material(r[7] as Kind) == WOOD && dh >= 40 {
+                // Sensed pole (r=14, WOOD) + attached overhead span wire endpoints (r=3 at top-4).
+                let attach = (ox, r[4] - 4, oz);
+                if let Some((fx, fy, fz)) = self.off_road_spot(ox, oz, oy) {
+                    let (dx, dy, dz) = (fx - ox, fy - oy, fz - oz);
+                    shift_seg(&mut self.fixtures[i], dx, dy, dz);
+                    for j in 0..n {
+                        if orig[j][6] == 3 {
+                            if (orig[j][0], orig[j][1], orig[j][2]) == attach {
+                                self.fixtures[j][0] += dx;
+                                self.fixtures[j][1] += dy;
+                                self.fixtures[j][2] += dz;
+                            }
+                            if (orig[j][3], orig[j][4], orig[j][5]) == attach {
+                                self.fixtures[j][3] += dx;
+                                self.fixtures[j][4] += dy;
+                                self.fixtures[j][5] += dz;
+                            }
+                        }
+                    }
+                } else {
+                    keep[i] = false;
+                    for j in 0..n {
+                        if orig[j][6] == 3
+                            && ((orig[j][0], orig[j][1], orig[j][2]) == attach
+                                || (orig[j][3], orig[j][4], orig[j][5]) == attach)
+                        {
+                            keep[j] = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut idx = 0usize;
+        self.fixtures.retain(|_| {
+            let k = keep[idx];
+            idx += 1;
+            k
+        });
+    }
 }
 
+#[derive(Clone, Copy)]
 struct Probe {
     inside: bool,
     far: f32,
@@ -735,7 +1744,7 @@ struct Probe {
 
 /// What a front is at one place on it: how its storeys, windows and doors go. `up` is cells above the building's
 /// base, `top` where its wall ends, `deep` how many cells in from the outline, `size` the cell's size.
-fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32, size: i32) -> Kind {
+fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32, size: i32, pitched: bool) -> Kind {
     let glass = kind(GLASS, OWN);
     let dark = kind(PLASTER, grey(13));
     let (storey, module) = (b.storey, b.module as f32);
@@ -751,18 +1760,49 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         };
     }
     let detail = p.looks >> 24;
-    // Place the entry beside the garage, with both meeting the local street grade.
-    if detail != 0 && over_ground < 30 {
+    // Place the entry beside the garage, recessed cleanly inside trim jambs & lintels; never fall through to cut a
+    // Floor-0 window straight across the top of a garage door or front entry door (#60).
+    if detail != 0 && over_ground < storey {
         let entry = (p.long * 0.22).clamp(7.0, 18.0);
-        if detail & 8 != 0 && (p.along - entry).abs() <= 5.0 && (4..=26).contains(&over_ground) {
-            return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+        if detail & 8 != 0 && (p.along - entry).abs() <= 5.5 {
+            if (4..=27).contains(&over_ground) {
+                let jamb = (p.along - entry).abs() > 4.2;
+                if over_ground == 27 || jamb {
+                    return b.trim;
+                }
+                if deep < 1.1 && size == 1 {
+                    return 0;
+                }
+                return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+            }
+            return b.wall;
         }
-        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() < (p.long * 0.23).min(19.0) && over_ground < 23 {
-            return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+        let half_g = (p.long * 0.23).min(19.0);
+        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() <= half_g {
+            if over_ground <= 23 {
+                let jamb = (p.along - p.long * 0.66).abs() > half_g - 1.2;
+                if over_ground == 23 || jamb {
+                    return b.trim;
+                }
+                if deep < 1.0 && size == 1 {
+                    return 0;
+                }
+                return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+            }
+            return b.wall;
+        }
+        // On a residential garage+entry ground floor, never squeeze a broken narrow window sliver into the small
+        // pier between the entry door and garage door (or beside them when < 1.2 m of wall remains) (#60).
+        if detail & 12 == 12 {
+            let lo = (entry - 5.5).min(p.long * 0.66 - half_g) - 4.0;
+            let hi = (entry + 5.5).max(p.long * 0.66 + half_g) + 4.0;
+            if p.along >= lo && p.along <= hi {
+                return b.wall;
+            }
         }
     }
-    // The cornice: the wall's last cells are trim.
-    if up >= top - 3 && size <= 2 {
+    // The cornice: the wall's last cells are trim (slim 1-cell verge on pitched gables so gable slopes stay clean).
+    if size <= 2 && up >= top - if pitched { 1 } else { 3 } {
         return b.trim;
     }
     // A side that looks on nothing (a neighbour's wall, a light well) or is too short for a window is plain.
@@ -770,17 +1810,23 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         return b.wall;
     }
     let (floor, fy) = (up.div_euclid(storey), up.rem_euclid(storey));
+    // A surveyed faceted bay edge (0.8 m to 1 module wide on a street front) centers one sash window cleanly on that
+    // facet rather than risking falling entirely inside a solid pier between continuous ring bays (#60).
+    let facet = p.looks & 2 != 0 && p.long >= 8.0 && p.long < module;
     let count = (p.long / module).floor().max(1.0);
-    // A surveyed bay or curved street wall can comprise many edges shorter
-    // than a window module. Continue its spacing around the ring.
-    let within = if p.long < module { p.round.rem_euclid(module) } else { p.along - (p.long - count * module) / 2.0 };
-    if within < 0.0 || within >= count * module {
-        return b.wall;
-    }
-    let (bay, mu) = ((within / module) as i32, within % module - module / 2.0);
+    let (bay, mu, bay_half_cap) = if facet {
+        (0, p.along - p.long * 0.5, (p.long * 0.5 - 2.0).max(2.0))
+    } else {
+        // A curved wall made of tiny < 0.8 m chords continues its spacing around the ring.
+        let within = if p.long < module { p.round.rem_euclid(module) } else { p.along - (p.long - count * module) / 2.0 };
+        if within < 0.0 || within >= count * module {
+            return b.wall;
+        }
+        ((within / module) as i32, within % module - module / 2.0, module / 2.0 - 2.0)
+    };
     let chance = hash(bay, p.side as i32, b.seed);
     // What the opening is: its half width, its foot and its head, and whether it is a door.
-    let (half, foot, head, door) = if floor == 0 && p.looks & 2 != 0 && over_ground < storey && storey <= 60 {
+    let (mut half, foot, head, door) = if floor == 0 && p.looks & 2 != 0 && over_ground < storey && storey <= 60 {
         if b.ground_floor == 2 || b.ground_floor == 3 {
             (module / 2.0 - 2.0, 0, if b.ground_floor == 3 { storey - 3 } else { 24 }, 2)
         } else if b.ground_floor == 4 {
@@ -789,6 +1835,8 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             (module / 2.0 - 2.0, 0, storey - 3, 4)
         } else if b.ground_floor == 1 || !b.home {
             (module / 2.0 - 3.0, 5, storey - 7, 0) // a shop's window
+        } else if facet {
+            (bay_half_cap, 9, storey - 6, 0) // ground-level bay facet gets a clean window, not a cut-off garage
         } else if chance % 3 == 0 {
             (module / 2.0 - 4.0, 0, 23, 2) // a garage
         } else if chance % 3 == 1 {
@@ -804,23 +1852,36 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
     } else {
         (measured_half(b, 8, storey - 6).unwrap_or((module / 2.0 - 5.0).min(8.0)), 8, storey - 6, 0)
     };
+    if facet {
+        half = half.min(bay_half_cap);
+    }
+    // Clamp the top floor's window head cleanly below the cornice instead of deleting the entire floor of windows
+    // whenever a 2-story house sits slightly under `2 * storey` tall (#60: fixed blank 2nd floors across Outer Sunset).
+    let max_fy = top - 4 - floor * storey;
+    let eff_head = head.min(max_fy);
+    let eff_foot = if door == 0 && floor > 0 && eff_head < foot + 10 {
+        (eff_head - 14).max(3)
+    } else {
+        foot
+    };
+    let has_opening = eff_head - eff_foot >= if door == 0 { 8 } else { 14 };
     // A belt at each floor and a sill under each window, where cells are fine enough to show them.
     if size == 1 && deep < 1.0 {
         if fy == 0 && floor > 0 && !b.home {
             return b.trim;
         }
-        if door == 0 && fy == foot - 1 && mu.abs() < half + 1.0 {
+        if has_opening && door == 0 && fy == eff_foot - 1 && mu.abs() < half + 1.0 && over_ground + (fy - eff_foot) >= 2 {
             return b.trim;
         }
     }
-    if mu.abs() >= half || fy < foot || fy >= head || up + (head - fy) > top - 4 || over_ground + (fy - foot) < 3 && door == 0 {
+    if !has_opening || mu.abs() >= half || fy < eff_foot || fy >= eff_head || (over_ground + (fy - eff_foot) < 3 && door == 0) {
         return b.wall;
     }
     match door {
         4 => if deep < 2.0 * size as f32 { 0 } else { dark },
         3 => if deep < 1.0 { 0 } else { glass },
         2 => if deep < 1.0 && size == 1 { 0 } else { kind(WOOD, grey(4 + (chance >> 4) as u8 % 6)) },
-        1 => if deep < 1.0 && size == 1 { 0 } else if fy >= head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
+        1 => if deep < 1.0 && size == 1 { 0 } else if fy >= eff_head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
         // A window sits a cell back in its wall, with the room dark behind it.
         _ if size > 1 => if deep < size as f32 { glass } else { dark },
         _ => if deep < 1.0 { 0 } else if deep < 2.0 {
@@ -828,7 +1889,7 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             let sashes = (2.0 * half / 9.0).round().max(2.0);
             let across = (mu + half) / (2.0 * half) * sashes;
             let mullion = (across - across.round()).abs() * 2.0 * half / sashes < 0.6 && across.round() > 0.0 && across.round() < sashes;
-            if mullion || (fy - foot) == (head - foot) / 2 { b.trim } else { glass }
+            if mullion || (fy - eff_foot) == (eff_head - eff_foot) / 2 { b.trim } else { glass }
         } else { dark },
     }
 }
@@ -842,6 +1903,7 @@ fn measured_half(b: &Building, foot: i32, head: i32) -> Option<f32> {
 }
 
 /// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
+#[derive(Clone, Copy)]
 struct FixtureSpan {
     low: i32,
     high: i32,
@@ -857,7 +1919,9 @@ impl FixtureSpan {
         let dy = (r[4]-r[1]) as f32;
         let dz = (r[5]-r[2]) as f32;
         let length2 = (dx*dx+dy*dy+dz*dz).max(1.0);
-        let radius2 = (r[6] as f32 / 10.0).powi(2);
+        // Cap aerial cables to 1.8 cm radius (1-2 fine 2.5 cm subcells, guaranteed gap-free along any diagonal)
+        // so overhead trolley/utility wires stay slim rather than rendering as thick 7.5 cm black pipes (#129).
+        let radius2 = (r[6] as f32 / 10.0).min(0.18).powi(2);
         for y in self.low.max(floor)..=self.high.min(floor+SIDE as i32-1) {
             for sy in 0..4 {
                 for sz in 0..4 {
@@ -881,6 +1945,323 @@ impl FixtureSpan {
     }
 }
 
+struct OwnedColumn {
+    g: i32,
+    road_top4: Option<i32>,
+    ground: Kind,
+    kerb: i32,
+    what: OwnedWhat,
+    fixtures: Vec<FixtureSpan>,
+    heroes: [Option<(Hero, f32, f32)>; 2],
+    hero_n: u8,
+}
+
+enum OwnedWhat {
+    Open,
+    In(usize, usize, Probe, i32, u8, bool, i32, i32, f32),
+    By(usize, usize, Probe, i32, bool),
+    Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
+    Mass(i32, u8, Kind),
+}
+
+impl OwnedColumn {
+    #[inline]
+    fn as_column<'a>(&'a self, packs: &'a [Pack]) -> Column<'a> {
+        let what = match self.what {
+            OwnedWhat::Open => What::Open,
+            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far) =>
+                What::In(&packs[pi].buildings[bi], probe, roof, tint, pitched, wall_top, step_below, step_far),
+            OwnedWhat::By(pi, bi, probe, roof, stepped) => What::By(&packs[pi].buildings[bi], probe, roof, stepped),
+            OwnedWhat::Crown { foot, top, trunk, tint, edge } => What::Crown { foot, top, trunk, tint, edge },
+            OwnedWhat::Mass(roof, tint, wall) => What::Mass(roof, tint, wall),
+        };
+        Column {
+            g: self.g,
+            road_top4: self.road_top4,
+            ground: self.ground,
+            kerb: self.kerb,
+            what,
+            fixtures: Vec::new(),
+            heroes: self.heroes,
+            hero_n: self.hero_n,
+        }
+    }
+}
+
+#[inline]
+fn heroes_from_slice(heroes: &[Hero], x: i32, z: i32, size: i32) -> ([Option<(Hero, f32, f32)>; 2], u8) {
+    if heroes.is_empty() {
+        return ([None, None], 0);
+    }
+    let mut out = [None, None];
+    let mut n = 0u8;
+    let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+    for h in heroes {
+        if x < h.low[0] || z < h.low[1] || x > h.high[0] || z > h.high[1] {
+            continue;
+        }
+        let (u, w) = h.local(x, z, half);
+        let Some(r) = heroes::reach(h.sort) else { continue };
+        if u >= r[0] && u < r[3] && w >= r[2] && w < r[5] {
+            out[n as usize] = Some((*h, u, w));
+            n += 1;
+            if n == 2 {
+                break;
+            }
+        }
+    }
+    (out, n)
+}
+
+fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], marks: &[[i32; 4]], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
+    let (heroes, hero_n) = heroes_from_slice(heroes_slice, x, z, size);
+    let picked = pack_indices.iter().copied().find(|&pi| packs[pi].gstep >= least && packs[pi].holds(x, z))
+        .or_else(|| pack_indices.iter().copied().find(|&pi| packs[pi].holds(x, z)));
+    let Some(pi) = picked else {
+        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: OwnedWhat::Open, heroes, hero_n };
+    };
+    let p = &packs[pi];
+    let tread = tread_ground(&heroes[..hero_n as usize]);
+    let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
+    let g = (ground_height + 0.5).floor() as i32;
+    let (mut class, tint) = p.surface(x, z);
+    if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
+        h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
+    }) {
+        class = GRASS_HERE;
+    }
+    let graphed = class & 7 == ROAD && marks.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]);
+    if graphed { class &= !96; }
+    let road_grey = |t: u8| 8 + ((t.clamp(4, 11) - 4) * 4 + 3) / 7;
+    let asphalt = if class & 159 == 128 && (1..=15).contains(&tint) {
+        Some(road_grey(tint))
+    } else if class & 31 == CANOPY && measured_foliage(tint) && !p.under_leaf_road.is_empty() {
+        p.cell(x, z).map(|i| {
+            let w = p.tw as usize;
+            road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
+        })
+    } else { None };
+    let (ground, kerb) = match class & 7 {
+        _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
+        ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
+        ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
+        ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
+        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        GRASS_HERE => (kind(GRASS, OWN), 0),
+        WATER_HERE if g > 4 => (kind(WATER, colour(13, 5)), 0),
+        WATER_HERE => (kind(SAND, OWN), 0),
+        YARD => (kind(CONCRETE, tint), 0),
+        _ => (kind(EARTH, OWN), 0),
+    };
+    let what = match p.building_idx(x, z) {
+        Some((bi, probe)) if probe.inside => {
+            let b = &p.buildings[bi];
+            let raster = p.roof_raster(b, x, z);
+            let mut pitched = false;
+            let (roof, wall_top) = if probe.looks & 128 != 0 && probe.far < 15.0 {
+                let eave = (probe.looks >> 8) as i16 as i32;
+                let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
+                pitched = raster > eave + 6;
+                let r = if probe.looks >> 24 & 2 != 0 && !pitched { blended.min(eave + 3) } else { blended };
+                (r, eave)
+            } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
+                let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
+                match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
+                    Some(eave) => {
+                        // Blend from the smoothed eave at the wall face (`far <= 5`) into the roof raster over
+                        // `far = 5..15`, matching surveyed eaves so perimeter lidar dropouts never carve mid-wall
+                        // notches with floating white cornice/roofing strips (#129).
+                        let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                        let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
+                        pitched = raster > eave + 6;
+                        (if pitched { blended } else { blended.min(eave + 3) }, eave)
+                    }
+                    None => (raster, b.eave_med),
+                }
+            } else {
+                let eave = if probe.looks & 128 != 0 { (probe.looks >> 8) as i16 as i32 } else { b.eave_med };
+                (raster, eave)
+            };
+            let roof = roof.max(g + 22);
+            let (mut step_below, mut step_far) = (i32::MAX, 1e9f32);
+            if probe.far >= 3.0 * size as f32 && size <= 4 && probe.looks & 2 != 0 {
+                let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+                let far = probe.far.max(0.01);
+                let (ox, oz) = ((probe.on[0] - cx) / far, (probe.on[1] - cz) / far);
+                let d1 = 1.4 * size as f32;
+                let d2 = 2.6 * size as f32;
+                let d3 = 3.8 * size as f32;
+                let f1 = p.top((cx + ox * d1).floor() as i32, (cz + oz * d1).floor() as i32);
+                let f2 = p.top((cx + ox * d2).floor() as i32, (cz + oz * d2).floor() as i32);
+                let f3 = p.top((cx + ox * d3).floor() as i32, (cz + oz * d3).floor() as i32);
+                if let Some(low) = f1.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = if size == 1 { 0.5 } else { 1.5 };
+                } else if let Some(low) = f2.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 1.6;
+                } else if let Some(low) = f3.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 2.5;
+                }
+            }
+            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far)
+        }
+        Some((bi, probe)) if size <= 2 && probe.looks & 2 != 0 => {
+            let b = &p.buildings[bi];
+            let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
+            let far = probe.far.max(0.01);
+            let (ux, uz) = (dx / far, dz / far);
+            let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
+            let eave = if probe.looks & 128 != 0 {
+                Some((probe.looks >> 8) as i16 as i32)
+            } else if probe.looks >> 24 & 2 != 0 {
+                p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
+            } else {
+                p.top(ix, iz)
+            };
+            match eave {
+                Some(roof) => {
+                    let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
+                    let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
+                    let behind = b1.into_iter().chain(b2).max();
+                    let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
+                    OwnedWhat::By(pi, bi, probe, roof, stepped)
+                }
+                None => OwnedWhat::Open,
+            }
+        }
+        _ if class & BUILT != 0 => match (p.top(x, z), p.cell(x, z)) {
+            (Some(roof), Some(here)) if roof > g => OwnedWhat::Mass(roof, tint, match p.walls.get(here) { Some(&w) if w != 0 => w as Kind, _ => kind(PLASTER, OWN) }),
+            _ => OwnedWhat::Open,
+        },
+        _ if class & CANOPY != 0 => match p.top(x, z) {
+            Some(t) if t > g + 4 => {
+                let tall = t - g;
+                let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
+                let on_road = class & 7 == ROAD;
+                match p.trunk(x, z) {
+                    Some((_, stem)) if tall >= 28 && heroes.iter().flatten().any(|(h, _, _)|
+                        h.sort == heroes::CONSERVATORY && {
+                            let (u, w) = h.local(stem[0], stem[1], 0.0);
+                            heroes::valley_palm_stem(u, w)
+                        }) => OwnedWhat::Open,
+                    Some((far, trunk)) if tall >= 28 => {
+                        let high = (trunk[2] - g).max(tall).min(tall + 40);
+                        let measured = trunk[3] >> 8;
+                        let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
+                        if far > rim + 4.0 {
+                            OwnedWhat::Open
+                        } else {
+                            let deep = (high as f32 * 0.55).clamp(16.0, 90.0).min((rim * 2.2).max(20.0));
+                            let middle = g as f32 + high as f32 - deep / 2.0;
+                            let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
+                            let min_foot = if on_road { g + 32 } else { g + 18 };
+                            let foot = (under as i32 + ragged).max(min_foot).min(t - 3);
+                            let crown = ((g as f32 + high as f32 - deep) as i32).max(g + 18);
+                            OwnedWhat::Crown { foot, top: t, trunk: (!on_road && far <= (trunk[3] & 255) as f32 + 0.5).then(|| crown + (t - crown) / 3), tint, edge: (far / rim.max(1.0)).min(1.0) }
+                        }
+                    }
+                    _ if tall < 28 && !on_road => OwnedWhat::Crown { foot: g + 1, top: t, trunk: None, tint, edge: 0.6 },
+                    _ => OwnedWhat::Open,
+                }
+            }
+            _ => OwnedWhat::Open,
+        },
+        _ => OwnedWhat::Open,
+    };
+    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(..) | OwnedWhat::Mass(..));
+    let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
+    OwnedColumn { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x, z, size), what, heroes, hero_n }
+}
+
+/// Fast single-cell kind query for unedited Bay columns (#73). Uses a 512-entry direct-mapped cache for simple open columns.
+pub fn kind_single(x: i32, y: i32, z: i32) -> Kind {
+    let epoch = PACK_GEN.get();
+    let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
+    let cached = SOLID_CACHE.with_borrow(|cache| {
+        let e = cache[idx];
+        (e.epoch == epoch && e.x == x && e.z == z && y < e.ceil).then_some(e)
+    });
+    if let Some(e) = cached {
+        return if y <= e.g {
+            if y >= e.g - 6 { e.ground } else { kind(EARTH, OWN) }
+        } else if y <= e.top {
+            e.ground
+        } else {
+            0
+        };
+    }
+    PACKS.with_borrow(|packs| {
+        let c = column(packs, x, z, 1);
+        if matches!(c.what, What::Open) && c.hero_n == 0 {
+            let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
+            SOLID_CACHE.with_borrow_mut(|cache| {
+                cache[idx] = SolidEntry { x, z, epoch, top: c.g + c.kerb, g: c.g, ground: c.ground, ceil };
+            });
+        }
+        kind_at(&c, x, y, z, 1)
+    })
+}
+
+/// Fast single-cell solidity query for unedited Bay columns (#73), used by `Ground::solid` so moving cars never build 262k-cell sectors.
+#[inline]
+pub fn solid_single(x: i32, y: i32, z: i32) -> bool {
+    let epoch = PACK_GEN.get();
+    let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
+    let cached = SOLID_CACHE.with_borrow(|cache| {
+        let e = cache[idx];
+        (e.epoch == epoch && e.x == x && e.z == z && y < e.ceil).then_some(e)
+    });
+    if let Some(e) = cached {
+        return y <= e.top;
+    }
+    kind_single(x, y, z) != 0
+}
+
+/// Fast single-column top solid cell + 1 at or below `y` within `depth` cells (#73), or `i32::MIN` if none.
+pub fn under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
+    let epoch = PACK_GEN.get();
+    let idx = ((x.wrapping_mul(73856093) ^ z.wrapping_mul(19349663)) as usize) & 511;
+    let cached = SOLID_CACHE.with_borrow(|cache| {
+        let e = cache[idx];
+        (e.epoch == epoch && e.x == x && e.z == z && y < e.ceil).then_some(e)
+    });
+    if let Some(e) = cached {
+        return if y <= e.top {
+            y + 1
+        } else if e.top > y - depth {
+            e.top + 1
+        } else {
+            i32::MIN
+        };
+    }
+    PACKS.with_borrow(|packs| {
+        let c = column(packs, x, z, 1);
+        if matches!(c.what, What::Open) && c.hero_n == 0 {
+            let top = c.g + c.kerb;
+            let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
+            SOLID_CACHE.with_borrow_mut(|cache| {
+                cache[idx] = SolidEntry { x, z, epoch, top, g: c.g, ground: c.ground, ceil };
+            });
+            if y < ceil {
+                return if y <= top { y + 1 } else if top > y - depth { top + 1 } else { i32::MIN };
+            }
+        }
+        let end = y - depth;
+        let mut at = y;
+        while at > end {
+            if kind_at(&c, x, at, z, 1) != 0 {
+                return at + 1;
+            }
+            at -= 1;
+        }
+        i32::MIN
+    })
+}
+
+/// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
 struct Column<'a> {
     g: i32,
     road_top4: Option<i32>,
@@ -889,47 +2270,74 @@ struct Column<'a> {
     kerb: i32,
     what: What<'a>,
     fixtures: Vec<FixtureSpan>,
-    /// A landmark this column is in, and where in its frame the column's middle is (u, w, in metres).
-    hero: Option<(Hero, f32, f32)>,
+    /// Up to two overlapping landmarks this column is in (e.g. Fort Point under the Golden Gate arch), and each
+    /// column's middle in its frame (u, w, in metres).
+    heroes: [Option<(Hero, f32, f32)>; 2],
+    hero_n: u8,
 }
 
 enum What<'a> {
     Open,
-    /// In a building: its roof's cell and colour.
-    In(&'a Building, Probe, i32, u8),
-    /// Just outside one, where its bays and cornice stand: how high its wall is there.
-    By(&'a Building, Probe, i32),
+    /// In a building: its roof's cell, colour, whether its roof rises into a pitched gable behind the front,
+    /// its clean wall-top eave height (above which interior roof slopes are painted `ROOFING` rather than stucco),
+    /// and (for stepped-back upper walls behind a lower wing) the lower roof height and depth into the step.
+    In(&'a Building, Probe, i32, u8, bool, i32, i32, f32),
+    /// Just outside one, where its bays and cornice stand: how high its wall is there, and whether a pitched gable
+    /// or taller upper wall rises directly behind it.
+    By(&'a Building, Probe, i32, bool),
     /// Leaves from here up to there, and a trunk up to so high if one stands in this column.
     Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
     /// A building seen from far, from a pack with no outlines: its roof's cell and colour, and its wall.
     Mass(i32, u8, Kind),
 }
 
-/// The landmark a column is in, where the world's cells are fine enough to show it (heroes.rs `REALM_MOST`).
-fn hero_at(x: i32, z: i32, size: i32) -> Option<(Hero, f32, f32)> {
+/// The landmarks a column is in (up to two overlapping), where the world's cells are fine enough to show them.
+fn heroes_at(x: i32, z: i32, size: i32) -> ([Option<(Hero, f32, f32)>; 2], u8) {
     if size > heroes::REALM_MOST || !LANDMARKS.get() {
-        return None;
+        return ([None, None], 0);
     }
     HEROES.with_borrow(|all| {
-        all.iter().filter(|h| x >= h.low[0] && z >= h.low[1] && x <= h.high[0] && z <= h.high[1]).find_map(|h| {
-            // A column of the finest cells is named by its cell; a coarser one by its middle.
-            let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
-            let (dx, dz) = ((x - h.at[0]) as f32 + half, (z - h.at[2]) as f32 + half);
-            let (u, w) = ((dx * h.along[0] + dz * h.along[1]) * 0.1, (dz * h.along[0] - dx * h.along[1]) * 0.1);
-            let r = heroes::reach(h.sort)?;
-            (u >= r[0] && u < r[3] && w >= r[2] && w < r[5]).then_some((*h, u, w))
-        })
+        let mut out = [None, None];
+        let mut n = 0u8;
+        let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+        for h in all.iter().filter(|h| x >= h.low[0] && z >= h.low[1] && x <= h.high[0] && z <= h.high[1]) {
+            let (u, w) = h.local(x, z, half);
+            if let Some(r) = heroes::reach(h.sort) {
+                if u >= r[0] && u < r[3] && w >= r[2] && w < r[5] {
+                    out[n as usize] = Some((*h, u, w));
+                    n += 1;
+                    if n == 2 {
+                        break;
+                    }
+                }
+            }
+        }
+        (out, n)
+    })
+}
+
+/// The top solid cell of a measured stair tread. Its upper face is the walking height.
+fn tread_ground(places: &[Option<(Hero, f32, f32)>]) -> Option<f32> {
+    places.iter().flatten().find_map(|(h, u, w)| {
+        if h.sort != heroes::CONSERVATORY { return None; }
+        heroes::conservatory_stairs(*u, *w).map(|height| h.at[1] as f32 + height * 10.0 - 1.0)
     })
 }
 
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
-    let hero = hero_at(x, z, size);
+    let (heroes, hero_n) = heroes_at(x, z, size);
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, hero };
+        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, heroes, hero_n };
     };
-    let ground_height = p.ground_height(x, z);
+    let tread = tread_ground(&heroes[..hero_n as usize]);
+    let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
     let g = (ground_height + 0.5).floor() as i32;
     let (mut class, tint) = p.surface(x, z);
+    if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
+        h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
+    }) {
+        class = GRASS_HERE;
+    }
     // Where the graph's marks are drawn, the bake's paint and rails are not (`Marks`).
     let graphed = class & 7 == ROAD && marked_place(x, z);
     if graphed { class &= !96; }
@@ -947,53 +2355,103 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         })
     } else { None };
     let (ground, kerb) = match class & 7 {
+        _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
         // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
         PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
-        // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
-        WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
+        // Elevated inland water (park ponds, lagoons, lakes, rivers): render as real water so it ripples and reflects (#60).
+        WATER_HERE if g > 4 => (kind(WATER, colour(13, 5)), 0),
         WATER_HERE => (kind(SAND, OWN), 0),
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
     };
     let what = match p.building(x, z) {
         Some((b, probe)) if probe.inside => {
-            let raster = p.top(x, z).unwrap_or(b.base + 2 * b.storey);
+            let raster = p.roof_raster(b, x, z);
             // Glass and the vertical wall can be the highest lidar return at its edge.
             // Give a surveyed plane one eave; blend into the roof over the next metre.
-            let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
+            // On pitched gables where lidar rises > 0.6 m above the eave, keep the gable slope intact instead of
+            // decapitating it flat at `eave + 3` (#60).
+            let mut pitched = false;
+            let (roof, wall_top) = if probe.looks & 128 != 0 && probe.far < 15.0 {
                 let eave = (probe.looks >> 8) as i16 as i32;
                 let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
                 let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
-                // Behind a cornice (kind_at `By`, to three cells over the eave) the roof's railings and the lidar's
-                // mixed returns stood up in teeth over it (#450): within 1.5 m of the front it is the wall's top.
-                if probe.looks >> 24 & 2 != 0 { blended.min(eave + 3) } else { blended }
+                pitched = raster > eave + 6;
+                let r = if probe.looks >> 24 & 2 != 0 && !pitched { blended.min(eave + 3) } else { blended };
+                (r, eave)
             } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
                 let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
                 match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
-                    Some(eave) => raster.min(eave + 3),
-                    None => raster,
+                    Some(eave) => {
+                        // Blend from the smoothed eave at the wall face (`far <= 5`) into the roof raster over
+                        // `far = 5..15`, matching surveyed eaves so perimeter lidar dropouts never carve mid-wall
+                        // notches with floating white cornice/roofing strips (#129).
+                        let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                        let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
+                        pitched = raster > eave + 6;
+                        (if pitched { blended } else { blended.min(eave + 3) }, eave)
+                    }
+                    None => (raster, b.eave_med),
                 }
-            } else { raster }.max(g + 22);
-            What::In(b, probe, roof, tint)
+            } else {
+                let eave = if probe.looks & 128 != 0 { (probe.looks >> 8) as i16 as i32 } else { b.eave_med };
+                (raster, eave)
+            };
+            let roof = roof.max(g + 22);
+            // Exposed stepped-back upper walls (e.g. a genuine 2nd storey rising behind a lower 1-storey wing) sit past
+            // `probe.far >= 3*size`; probe 3 depths so recessed glass gets real dark interior backing instead of stucco (#60).
+            let (mut step_below, mut step_far) = (i32::MAX, 1e9f32);
+            if probe.far >= 3.0 * size as f32 && size <= 4 && probe.looks & 2 != 0 {
+                let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+                let far = probe.far.max(0.01);
+                let (ox, oz) = ((probe.on[0] - cx) / far, (probe.on[1] - cz) / far);
+                let d1 = 1.4 * size as f32;
+                let d2 = 2.6 * size as f32;
+                let d3 = 3.8 * size as f32;
+                let f1 = p.top((cx + ox * d1).floor() as i32, (cz + oz * d1).floor() as i32);
+                let f2 = p.top((cx + ox * d2).floor() as i32, (cz + oz * d2).floor() as i32);
+                let f3 = p.top((cx + ox * d3).floor() as i32, (cz + oz * d3).floor() as i32);
+                if let Some(low) = f1.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = if size == 1 { 0.5 } else { 1.5 };
+                } else if let Some(low) = f2.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 1.6;
+                } else if let Some(low) = f3.filter(|&fr| roof > fr + 14) {
+                    step_below = low;
+                    step_far = 2.5;
+                }
+            }
+            What::In(b, probe, roof, tint, pitched, wall_top, step_below, step_far)
         }
         Some((b, probe)) if size <= 2 && probe.looks & 2 != 0 => {
             // The wall's height where this column is nearest it: a little way in from the outline.
             let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
             let far = probe.far.max(0.01);
-            let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
+            let (ux, uz) = (dx / far, dz / far);
+            let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
             let eave = if probe.looks & 128 != 0 {
                 Some((probe.looks >> 8) as i16 as i32)
             } else if probe.looks >> 24 & 2 != 0 {
-                p.eave_near(probe.on, [dx / far, dz / far]).or_else(|| p.top(ix, iz))
+                p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
             } else {
                 p.top(ix, iz)
             };
             match eave {
-                Some(roof) => What::By(b, probe, roof),
+                Some(roof) => {
+                    // Check deeper behind the front edge (1.6 m and 3.6 m inward): if the building rises > 0.8 m
+                    // higher (a pitched gable or a taller upper storey behind a protruding front garage/porch),
+                    // suppress heavy protruding cornice slabs that would otherwise float mid-wall (#60).
+                    let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
+                    let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
+                    let behind = b1.into_iter().chain(b2).max();
+                    let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
+                    What::By(b, probe, roof, stepped)
+                }
                 None => What::Open,
             }
         }
@@ -1007,10 +2465,15 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                 let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
                 let on_road = class & 7 == ROAD;
                 match p.trunk(x, z) {
+                    Some((_, stem)) if tall >= 28 && heroes.iter().flatten().any(|(h, _, _)|
+                        h.sort == heroes::CONSERVATORY && {
+                            let (u, w) = h.local(stem[0], stem[1], 0.0);
+                            heroes::valley_palm_stem(u, w)
+                        }) => What::Open,
                     // A tree: its crown is round underneath, deepest at the trunk and rising to its rim; past the
                     // rim what the lidar saw is a spray of leaves and no more.
                     Some((far, trunk)) if tall >= 28 => {
-                        let high = (trunk[2] - g).max(tall);
+                        let high = (trunk[2] - g).max(tall).min(tall + 40);
                         let measured = trunk[3] >> 8;
                         let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
                         // Suppress detached lidar leaf specks hovering past the tree's own crown rim (e.g. on adjacent upper walls).
@@ -1042,13 +2505,18 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     // The ground's top in quarter cells, for the finest cells' ramp (`grade_rows`): a road's, a pavement's (over its
     // kerb, so the kerb keeps its height up a hill) and a bank's, wherever the ground is open to the sky. Only the
     // measured asphalt had it, and every pavement and bank up Nob Hill and Telegraph Hill was a stair of 10 cm (#450).
-    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
+    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
-    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, hero }
+    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, heroes, hero_n }
 }
 
 fn measured_foliage(tint: u8) -> bool {
     tint >= 16 && (3..=10).contains(&((tint-16)/10)) && matches!((tint-16)%10, 2 | 5 | 6 | 8 | 9)
+}
+
+/// True when a building roof's aerial tint is genuine green meadow/foliage (living green roofs).
+fn living_roof_foliage(tint: u8) -> bool {
+    tint >= 16 && (5..=10).contains(&((tint - 16) / 10)) && matches!((tint - 16) % 10, 2 | 3 | 4 | 5 | 6 | 8 | 9)
 }
 
 /// A crown and the asphalt underneath share one column. Carry nearby open-road
@@ -1116,40 +2584,71 @@ fn tower_base(b: &Building, p: &Probe, rise: i32, size: i32) -> Option<Kind> {
 fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     // A coarse cell is what its middle is.
     let mid = y + size / 2;
+    let s_m = size as f32 * 0.1;
     if mid <= c.g {
-        return if mid >= c.g - 3 * size.max(2) { c.ground } else { kind(EARTH, OWN) };
+        if mid >= c.g - 3 * size.max(2) {
+            for slot in 0..c.hero_n as usize {
+                if let Some((h, u, w)) = c.heroes[slot] {
+                    if let Some(surf) = heroes::surface_at(h.sort, u, w, c.g as f32 * 0.1, s_m) {
+                        return surf;
+                    }
+                }
+            }
+            return c.ground;
+        }
+        return kind(EARTH, OWN);
     }
-    // A landmark (#423, #450): what its rule says, and where the rule owns its place, its air too.
-    if let Some((h, u, w)) = c.hero {
-        let up = (y - h.at[1]) as f32 * 0.1 + size as f32 * 0.05;
-        let made = heroes::kind_at(h.sort, u, up, w, size as f32 * 0.1);
-        if made != 0 {
-            return made;
+    // Landmarks (#423, #450, #60): check all overlapping rules; what a rule says wins, and where a rule owns its
+    // place, its air clears underlying lidar clutter.
+    let over_g = (y - c.g) as f32 * 0.1 + size as f32 * 0.05;
+    let mut owned_air = false;
+    for slot in 0..c.hero_n as usize {
+        if let Some((h, u, w)) = c.heroes[slot] {
+            let up = (y - h.at[1]) as f32 * 0.1 + size as f32 * 0.05;
+            let made = heroes::kind_at_world(h.sort, u, up, over_g, w, s_m);
+            if made != 0 {
+                return made;
+            }
+            if heroes::owns_world(h.sort, u, up, over_g, w) {
+                owned_air = true;
+            }
         }
-        if heroes::owns(h.sort, u, up, w) && up >= 0.0 {
-            return 0;
-        }
+    }
+    if owned_air {
+        return 0;
     }
     for fixture in &c.fixtures {
         if mid >= fixture.low && mid <= fixture.high { return fixture.rod[7] as Kind; }
     }
     match &c.what {
         What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
-        What::In(b, p, roof, tint) => {
+        What::In(b, p, roof, tint, pitched, wall_top, step_below, step_far) => {
+            let on_roof_slope = (p.far >= 3.0 * size as f32 || (b.home && p.looks & 2 == 0))
+                && *roof - *wall_top <= 30 && mid > *wall_top && mid <= *step_below;
             if mid > *roof {
                 0
-            } else if mid > *roof - size {
-                kind(ROOFING, *tint)
+            } else if mid > *roof - size || on_roof_slope {
+                if material(b.wall) == GLASS {
+                    kind(GLASS, colour(14, 7))
+                } else if living_roof_foliage(*tint) {
+                    kind(GRASS, *tint)
+                } else {
+                    kind(ROOFING, *tint)
+                }
             } else if let Some(form) = tower_base(b, p, mid - c.g, size) {
                 form
             } else if p.far < 3.0 * size as f32 && size <= 8 {
-                front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size)
+                front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size, *pitched)
+            } else if mid >= b.base + b.storey && mid > step_below.saturating_add(4) && *step_far < 3.0 * size as f32 && size <= 4 {
+                front(b, p, mid - b.base, *roof - b.base, (mid - c.g).max(32), *step_far, size, *pitched)
             } else {
                 b.wall
             }
         }
-        What::Mass(roof, tint, wall) => if mid > *roof { 0 } else if mid > *roof - size { kind(ROOFING, *tint) } else { *wall },
-        What::By(b, p, roof) => {
+        What::Mass(roof, tint, wall) => if mid > *roof { 0 } else if mid > *roof - size {
+            if material(*wall) == GLASS { kind(GLASS, colour(14, 7)) } else if living_roof_foliage(*tint) { kind(GRASS, *tint) } else { kind(ROOFING, *tint) }
+        } else { *wall },
+        What::By(b, p, roof, stepped) => {
             if size == 1 && mid <= c.g + c.kerb {
                 return c.ground;
             }
@@ -1184,15 +2683,24 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                     return kind(STEEL, grey(13));
                 }
             }
-            // A cornice is a painted moulding in the trim's colour: concrete's slab joints every 1.6 m cut it into
-            // merlons (#450).
-            if detail & 2 != 0 && p.far <= 4.0 && up >= top-4 && up <= top+3 { return kind(PLASTER, (b.trim >> 8) as u8); }
-            // The cornice stands a cell or two out from the wall's top.
-            if p.far < 2.0 && up >= top - 3 && up <= top {
+            // A cornice is a painted moulding in the trim's colour on flat/parapet fronts. Never protrude a thick
+            // parapet slab on a stepped lower porch/garage, a pitched gable, an unsurveyed/jagged roofline, or a short stub (#60).
+            let flat_eave = p.looks & 128 != 0;
+            if detail & 2 != 0 && flat_eave && !*stepped && p.long >= 18.0 && top >= 44 && p.far <= 3.5 && up >= top - 4 && up <= top + 1 {
+                return kind(PLASTER, (b.trim >> 8) as u8);
+            }
+            // Slim eave trim at the wall's top (never protrude on stepped mid-wall garage/porch eaves).
+            if !*stepped && p.far < 1.8 && up >= top - 2 && up <= top {
                 return b.trim;
             }
-            // Bay windows: on a home's street front, over every other bay of it, from the first floor to the cornice.
-            if (if detail != 0 { detail & 1 == 0 } else { !b.home }) || p.long < b.module as f32 || up < b.storey || up > top - 4 {
+            // Synthetic bay windows: only on plain flat-fronted homes whose surveyed outline does NOT already trace
+            // bay windows (#60), and wide enough for a real bay.
+            if b.has_surveyed_bays
+                || (if detail != 0 { detail & 1 == 0 } else { !b.home })
+                || p.long < (b.module as f32 * 1.4).max(40.0)
+                || up < b.storey
+                || up > top - 4
+            {
                 return 0;
             }
             let module = b.module as f32;
@@ -1228,11 +2736,12 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 0
             } else if measured_foliage(*tint) {
                 // Correlated openings expose the branch structure and the sky.
-                // Keep the trunk and the denser centre of the surveyed crown.
-                let fringe = *edge > 0.76 || mid < *foot + 7 || mid > *top - 6;
+                // Keep the trunk, denser centre, and compact ground shrubs intact.
+                let bush = trunk.is_none() && *top - *foot < 28;
+                let fringe = if bush { mid > *top - 3 } else { *edge > 0.76 || mid < *foot + 7 || mid > *top - 6 };
                 let cluster = hash3((x+z).div_euclid(9), mid.div_euclid(6), (x-z).div_euclid(9), 43);
-                let gap = size <= 8 && cluster % 100 < if fringe { 48 } else { 22 };
-                if gap || (size <= 2 && hash3(x >> 1, mid >> 1, z >> 1, 3) % 9 == 0) {
+                let gap = !bush && size <= 8 && cluster % 100 < if fringe { 48 } else { 22 };
+                if gap || (size <= 2 && (!bush || fringe) && hash3(x >> 1, mid >> 1, z >> 1, 3) % 9 == 0) {
                     0
                 } else { kind(LEAVES, *tint) }
             } else if size == 1 && hash3(x >> 1, y >> 1, z >> 1, 3) % 7 == 0 {
@@ -1246,7 +2755,10 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
 
 /// How high the ground is at a column: its top cell.
 pub fn ground(x: i32, z: i32) -> i32 {
-    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| p.ground(x, z)))
+    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| {
+        let (places, n) = heroes_at(x, z, 1);
+        tread_ground(&places[..n as usize]).map_or_else(|| p.ground(x, z), |height| height.round() as i32)
+    }))
 }
 
 /// Where someone on foot stands at a column, whether it is paved, and the sort of place (always 0: the town's
@@ -1255,9 +2767,9 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
         match c.what {
-            What::In(b, ref probe, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
+            What::In(b, ref probe, _, _, _, _, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
                 (c.g + 1, true, 0),
-            What::In(_, _, roof, _) => (roof + 1, false, 0),
+            What::In(_, _, roof, _, _, _, _, _) => (roof + 1, false, 0),
             _ => (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
         }
     })
@@ -1308,6 +2820,14 @@ fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
     let fill = top4.rem_euclid(4);
     if fill == 0 || y < low_y || y >= low_y + SIDE as i32 ||
         c.fixtures.iter().any(|s| s.low <= y && y <= s.high) { return; }
+    // Do not carve or pad raw terrain grade over a landscape hero's pond, plaza or floral parterre (#60).
+    for slot in 0..c.hero_n as usize {
+        if let Some((h, u, w)) = c.heroes[slot] {
+            if heroes::surface_at(h.sort, u, w, c.g as f32 * 0.1, 0.1).is_some() {
+                return;
+            }
+        }
+    }
     // Its top cell is the ground's, or a pavement's kerb over it. The grade is carved only from that ground and laid
     // only into air: not into a tree's trunk, a stoop's step or a landmark's foot, which stand in the same cells.
     let (lo, hi, kind) = if y <= c.g + c.kerb { (fill, 4, 0) } else { (0, fill, c.ground) };
@@ -1322,35 +2842,136 @@ fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
 }
 
 /// Makes one sector of the Bay in `s`, at the coarseness `s` was started with.
+/// Caches the 4,096 column evaluations for the current `(low_x, low_z, lod)` across vertical sectors `sy`,
+/// hoists sector-invariant pack/hero/mark filters outside the loop, and early-exits above open/roof tops (#73).
 pub fn make(s: &mut Scratch) {
     let (k, size) = (s.lod, 1i32 << s.lod);
     let side = SIDE as i32;
     let mut cables = Vec::new();
     let mut road = Vec::new();
+    let epoch = PACK_GEN.get();
+    let x_min = (s.low[0] << k) + size / 2;
+    let z_min = (s.low[2] << k) + size / 2;
+    let x_max = ((s.low[0] + side - 1) << k) + size / 2;
+    let z_max = ((s.low[2] + side - 1) << k) + size / 2;
+    let least = least_step(size);
+    let low_y = s.low[1] << k;
+    let skip_cables = s.finer && k == 0;
+
     PACKS.with_borrow(|packs| {
-        for cz in 0..side {
-            for cx in 0..side {
-                let (x, z) = (((s.low[0] + cx) << k) + size / 2, ((s.low[2] + cz) << k) + size / 2);
-                let mut c = column(packs, x, z, size);
-                if s.finer && k == 0 {
-                    grade_rows(&c, x, z, s.low[1], &mut road);
-                    c.fixtures.retain(|fixture| {
-                        if fixture.rod[6] > 3 { return true; }
-                        fixture.cable_rows(x,z,s.low[1],&mut cables);
-                        false
-                    });
+        SECTOR_COLS.with_borrow_mut(|cache| {
+            if cache.epoch != epoch || cache.low_x != s.low[0] || cache.low_z != s.low[2] || cache.lod != k || cache.cols.len() != SIDE * SIDE {
+                let sector_packs: Vec<usize> = packs.iter().enumerate().filter_map(|(i, p)| {
+                    let wide = (p.gw - 1) * p.gstep;
+                    (x_max >= p.gx0 && z_max >= p.gz0 && x_min < p.gx0 + wide && z_min < p.gz0 + wide).then_some(i)
+                }).collect();
+                let sector_heroes: Vec<Hero> = if size <= heroes::REALM_MOST && LANDMARKS.get() {
+                    HEROES.with_borrow(|all| {
+                        all.iter().copied().filter(|h| x_max >= h.low[0] && z_max >= h.low[1] && x_min <= h.high[0] && z_min <= h.high[1]).collect()
+                    })
+                } else {
+                    Vec::new()
+                };
+                let sector_marks: Vec<[i32; 4]> = MARKS.with_borrow(|m| {
+                    m.covers.iter().copied().filter(|c| x_max >= c[0] && z_max >= c[1] && x_min < c[2] && z_min < c[3]).collect()
+                });
+                cache.cols.clear();
+                cache.cols.reserve(SIDE * SIDE);
+                for cz in 0..side {
+                    let z = ((s.low[2] + cz) << k) + size / 2;
+                    for cx in 0..side {
+                        let x = ((s.low[0] + cx) << k) + size / 2;
+                        cache.cols.push(owned_column(packs, &sector_packs, &sector_heroes, &sector_marks, x, z, size, least));
+                    }
                 }
-                for cy in 0..side {
-                    let v = kind_at(&c, x, (s.low[1] + cy) << k, z, size);
-                    if v != 0 {
-                        s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                cache.low_x = s.low[0];
+                cache.low_z = s.low[2];
+                cache.lod = k;
+                cache.epoch = epoch;
+            }
+
+            let half = size / 2;
+            let ground_band = 3 * size.max(2);
+            for cz in 0..side {
+                let z = ((s.low[2] + cz) << k) + half;
+                let row_base = (cz as usize) * SIDE;
+                for cx in 0..side {
+                    let x = ((s.low[0] + cx) << k) + half;
+                    let oc = &cache.cols[row_base + cx as usize];
+                    let has_fixtures = !oc.fixtures.is_empty();
+                    if skip_cables {
+                        if oc.road_top4.is_some() {
+                            let mut c = oc.as_column(packs);
+                            if has_fixtures { c.fixtures = oc.fixtures.clone(); }
+                            grade_rows(&c, x, z, s.low[1], &mut road);
+                        }
+                        if has_fixtures {
+                            for fixture in &oc.fixtures {
+                                if fixture.rod[6] <= 3 {
+                                    fixture.cable_rows(x, z, s.low[1], &mut cables);
+                                }
+                            }
+                        }
+                    }
+                    let has_solid_fixture = if skip_cables {
+                        oc.fixtures.iter().any(|f| f.rod[6] > 3)
+                    } else {
+                        has_fixtures
+                    };
+                    if matches!(oc.what, OwnedWhat::Open) && oc.hero_n == 0 && !has_solid_fixture {
+                        let top = if size == 1 { oc.g + oc.kerb } else { oc.g };
+                        let min_mid = low_y + half;
+                        if min_mid > top {
+                            continue;
+                        }
+                        let cy_end = (((top - min_mid) >> k) + 1).min(side);
+                        let earth_cut = oc.g - ground_band;
+                        for cy in 0..cy_end {
+                            let mid = low_y + (cy << k) + half;
+                            let v = if mid <= oc.g {
+                                if mid >= earth_cut { oc.ground } else { kind(EARTH, OWN) }
+                            } else {
+                                oc.ground
+                            };
+                            if v != 0 {
+                                s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                            }
+                        }
+                        continue;
+                    }
+                    let cy_end = if oc.hero_n == 0 && !has_solid_fixture {
+                        let max_mid = match oc.what {
+                            OwnedWhat::Open => if size == 1 { oc.g + oc.kerb } else { oc.g },
+                            OwnedWhat::In(_, _, _, roof, ..) | OwnedWhat::Mass(roof, _, _) => roof.max(oc.g),
+                            OwnedWhat::By(_, _, _, roof, _) => (roof + 3).max(oc.g + oc.kerb),
+                            OwnedWhat::Crown { top, .. } => top.max(oc.g + oc.kerb),
+                        };
+                        let min_mid = low_y + half;
+                        if min_mid > max_mid { continue; }
+                        (((max_mid - min_mid) >> k) + 1).min(side)
+                    } else {
+                        side
+                    };
+                    let mut c = oc.as_column(packs);
+                    if has_solid_fixture {
+                        if skip_cables {
+                            c.fixtures.extend(oc.fixtures.iter().copied().filter(|f| f.rod[6] > 3));
+                        } else {
+                            c.fixtures.extend_from_slice(&oc.fixtures);
+                        }
+                    }
+                    for cy in 0..cy_end {
+                        let v = kind_at(&c, x, low_y + (cy << k), z, size);
+                        if v != 0 {
+                            s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                        }
                     }
                 }
             }
-        }
+        });
     });
-    if !road.is_empty() { s.fine_runs(&road,2); }
-    if !cables.is_empty() { s.fine_runs(&cables,2); }
+    if !road.is_empty() { s.fine_runs(&road, 2); }
+    if !cables.is_empty() { s.fine_runs(&cables, 2); }
 }
 
 #[cfg(test)]
@@ -1457,10 +3078,49 @@ mod tests {
     }
 
     #[test]
+    fn conservatory_replaces_the_whole_surveyed_crown_of_a_matched_trunk() {
+        // Reproduce the western stem in 190_277: lidar merges the two mapped
+        // palms and gives it a 6.4 m radius. Its east rim is outside both new crowns.
+        let mut bytes = pack();
+        let tops = 64 + 65 * 65 * 2;
+        let classes = tops + 128 * 128 * 2;
+        for z in 96..104 {
+            for x in 96..114 {
+                let i = z * 128 + x;
+                bytes[tops + 2 * i..tops + 2 * i + 2].copy_from_slice(&415_i16.to_le_bytes());
+                bytes[classes + i] = CANOPY | GRASS_HERE;
+            }
+        }
+        let end = bytes.len();
+        bytes[end - 8..end - 4].copy_from_slice(&415_i32.to_le_bytes());
+        bytes[end - 4..].copy_from_slice(&((64_i32 << 8) | 4).to_le_bytes());
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()) };
+        assert_eq!(load(), 1);
+        let rim = || {
+            let mut sector = Scratch::new();
+            sector.start(8, 6, 7, 0);
+            make(&mut sector);
+            let mut leaves = 0;
+            for x in 560..565 {
+                for z in 496..506 {
+                    for y in 384..410 {
+                        if material(sector.cells[at(x - 512, y - 384, z - 448)]) == LEAVES { leaves += 1; }
+                    }
+                }
+            }
+            leaves
+        };
+        assert!(rim() > 0, "fixture must emit a raw crown at its rim");
+        hero(heroes::CONSERVATORY, 624, 153, 200, 0);
+        assert_eq!(rim(), 0, "the displaced lidar stem still has a second crown");
+        clear();
+    }
+
+    #[test]
     fn measured_crowns_have_openings_and_keep_the_trunk() {
         let tint = colour(6, 5);
         let mut c = Column { g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
-            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), hero: None };
+            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), heroes: [None, None], hero_n: 0 };
         let mut gaps = 0;
         let mut leaves = 0;
         for x in 0..90 {
@@ -1481,7 +3141,7 @@ mod tests {
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
         let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
-            what: What::Open, fixtures: Vec::new(), hero: None };
+            what: What::Open, fixtures: Vec::new(), heroes: [None, None], hero_n: 0 };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
         assert_eq!(rows.len(), 4);
@@ -1770,6 +3430,554 @@ mod tests {
         let packs = [pack];
         let c = column(&packs, 285, 285, 1);
         assert!(matches!(c.what, What::Open), "trunkless tall canopy should not float");
+    }
+
+    #[test]
+    fn faceted_bays_get_windows_without_double_bays_or_floating_cornices() {
+        // An 8-vertex house with a surveyed 3-sided bay front whose angled facets were left unmarked by erosion.
+        let mut ring = [
+            [0, 0, 3], [20, 0, 0], [32, -8, 0], [44, 0, 0], [64, 0, 3],
+            [64, 80, 1], [0, 80, 1], [0, 40, 4 | 1],
+        ];
+        propagate_fronts(&mut ring);
+        assert!(ring[1][2] & 3 == 3 && ring[2][2] & 3 == 3 && ring[3][2] & 3 == 3, "bay facets inherit street facing");
+        assert!(ring_has_surveyed_bays(&ring), "surveyed bay geometry detected to prevent double bay extrusion");
+        // An outer ring with zero open faces gets its longest edge opened so no house is a blind concrete box.
+        let mut blind = [[0, 0, 0], [50, 0, 0], [50, 30, 0], [0, 30, 4]];
+        propagate_fronts(&mut blind);
+        assert!(blind[0][2] & 1 != 0 && blind[2][2] & 1 != 0, "blind building opens longest walls");
+        // Narrow 1.4 m street-facing bay facet centers a real glass sash window (mullion at centre, glass on either pane).
+        let b = Building {
+            first: 0, count: 4, wall: kind(PLASTER, WHITE), trim: kind(PLASTER, grey(2)), glass: None,
+            storey: 32, module: 30, home: true, special: 0, ground_floor: 0, seed: 1, base: 100,
+            has_surveyed_bays: true, eave_med: 180, low: [0, 0], high: [100, 100],
+        };
+        let p_pane = Probe { inside: true, far: 1.5, along: 5.0, round: 23.0, long: 14.0, looks: 3, side: 1, on: [5.0, 0.0] };
+        assert_eq!(material(front(&b, &p_pane, 48, 96, 48, 1.5, 1, false)), GLASS);
+        let p = Probe { inside: true, far: 1.5, along: 7.0, round: 25.0, long: 14.0, looks: 3, side: 1, on: [7.0, 0.0] };
+        assert_eq!(front(&b, &p, 48, 96, 48, 1.5, 1, false), b.trim);
+        // Stepped/pitched What::By suppresses protruding 40 cm white cornice slabs that would float mid-wall.
+        let p_by = Probe { inside: false, far: 3.0, along: 10.0, round: 10.0, long: 20.0, looks: 3 | (2 << 24), side: 1, on: [10.0, 0.0] };
+        let c_stepped = Column {
+            g: 100, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
+            what: What::By(&b, p_by, 140, true), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+        };
+        assert_eq!(kind_at(&c_stepped, 10, 141, -3, 1), 0, "stepped roof must not float cornice mid-wall");
+        // Living green roofs and glass roofs render as GRASS / GLASS rather than grey ROOFING shingles.
+        let c_green = Column {
+            g: 100, road_top4: None, ground: kind(GRASS, OWN), kerb: 0,
+            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+        };
+        assert_eq!(material(kind_at(&c_green, 10, 180, 10, 1)), GRASS);
+        // 2-story Outer Sunset house (5.9 m tall, storey 34): floor 1 must get real GLASS windows below its cornice,
+        // never an orphan white sill on a blank wall (#60).
+        let sunset = Building {
+            first: 0, count: 4, wall: kind(PLASTER, colour(6, 7)), trim: kind(PLASTER, WHITE), glass: None,
+            storey: 34, module: 30, home: true, special: 0, ground_floor: 0, seed: 2, base: 585,
+            has_surveyed_bays: false, eave_med: 643, low: [0, 0], high: [100, 100],
+        };
+        let p_sun = Probe { inside: true, far: 1.5, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
+        let glass_cells = (34..58).filter(|&up| material(front(&sunset, &p_sun, up, 58, up, 1.5, 1, false)) == GLASS).count();
+        assert!(glass_cells >= 8, "2-story 5.8 m house floor 1 should have real windows, got {glass_cells}");
+        // Stepped-back 2nd-floor wall behind a lower wing (probe.far = 18.0 >= 3.0) still gets windows on floor >= 1!
+        let p_setback = Probe { inside: true, far: 18.0, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
+        let c_setback = Column {
+            g: 585, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
+            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+        };
+        let setback_glass = (619..643).filter(|&y| material(kind_at(&c_setback, 22, y, 18, 1)) == GLASS).count();
+        assert!(setback_glass >= 8, "stepped-back 2nd floor behind wing should have windows, got {setback_glass}");
+    }
+
+    #[test]
+    fn collapsed_front_lidar_and_garage_overlap_are_repaired() {
+        // Reproduces the exact Outer Sunset fault (owner feedback on IMG_6768.png, #60):
+        // (1) Front 1.0 m of building footprint has ground-level lidar dropouts (base+6) while interior is base+56..68,
+        // (2) Single-cell +3.0 m rooftop spike, (3) Sloped roof rising from eave+0 to eave+14, (4) Garage+entry front.
+        let mut bytes = Vec::new();
+        let (gw, tw, gstep, tstep) = (33i32, 64i32, 10i32, 5i32);
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 4, 0, 0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        // Building spans x=60..180, z=60..140 (base=100, storey=32); west front at x=60 faces street.
+        for j in 12..28 {
+            for i in 12..36 {
+                let k = (j * tw + i) as usize;
+                cls[k] = BUILT | PAVEMENT;
+                if i < 14 {
+                    // Front 1.0 m lidar dropout: ground-level returns (base + 6) that collapsed the front wall to 2.2 m!
+                    top[k] = 106;
+                } else {
+                    // Sloped hip roof rising cleanly from 154 at front to 168 at ridge.
+                    top[k] = (154 + ((i - 14) * 4).min(14)) as i16;
+                }
+            }
+        }
+        // Single-cell rooftop antenna/vent spike (+3.0 m above surrounding roof).
+        top[(20 * tw + 24) as usize] = 198;
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![grey(9); (tw * tw) as usize]);
+        // Building record: first=0, count=4, wall=cream plaster, trim=white, storey=32, mod=28, home=1, base=100
+        let style = 32 | (28 << 8) | (1 << 16);
+        for v in [0i32, 4, kind(PLASTER, colour(3, 1)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes.extend(v.to_le_bytes());
+        }
+        // 4 corners: west front (60,140)->(60,60) has street + garage + entry + cornice (0xf << 24), NO eave bit!
+        let front_looks: i32 = 3 | (0xf << 24);
+        for [x, z, l] in [[60i32, 140, front_looks], [60, 60, 1], [180, 60, 1], [180, 140, 4 | 1]] {
+            for v in [x, z, l] { bytes.extend(v.to_le_bytes()); }
+        }
+        let pack = read(&bytes).expect("valid pack");
+        let packs = [pack];
+        // 1. Collapsed front 1.0 m wall is restored up to the real ~5.4 m eave, never left as a 2.2 m stub!
+        let c_front = column(&packs, 62, 100, 1);
+        match c_front.what {
+            What::In(_, _, roof, _, _, _, _, _) => assert!(roof >= 150, "front wall collapsed to {roof}"),
+            _ => panic!("expected What::In at front wall"),
+        }
+        // 2. Single-cell +3.0 m rooftop spike at (122, 102) is denoised down to the roof plane (~168).
+        assert!(packs[0].top(122, 102).unwrap() <= 172, "rooftop spike survived: {:?}", packs[0].top(122, 102));
+        // 3. Interior sloped roof voxels above the eave render as ROOFING, never flashing bright stucco risers!
+        let c_slope = column(&packs, 92, 100, 1);
+        assert_eq!(material(kind_at(&c_slope, 92, 158, 100, 1)), ROOFING, "sloped roof step flashed wall stucco");
+        // 4. Garage header (over_ground = 23..30) directly above the garage door must NEVER cut a Floor-0 glass window!
+        let p_gar = Probe { inside: true, far: 1.5, along: 52.0, round: 52.0, long: 80.0, looks: front_looks, side: 0, on: [60.0, 88.0] };
+        let b0 = &packs[0].buildings[0];
+        let clipped_glass = (23..31).filter(|&y| material(front(b0, &p_gar, y, 56, y, 1.5, 1, false)) == GLASS).count();
+        assert_eq!(clipped_glass, 0, "window clipped straight into top of garage door ({clipped_glass} cells)");
+    }
+
+    #[test]
+    fn residential_roof_end_corner_fins_are_flattened() {
+        // Reproduces the 36th Ave corner fin artifact (#60): a residential front corner beside a side lightwell has a
+        // ground-level dropout next to a 5.2 m front eave while the rear roof is 6.6 m, plus a 1-sample corner spike.
+        let mut bytes = Vec::new();
+        let (gw, tw, gstep, tstep) = (33i32, 64i32, 10i32, 5i32);
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 6, 0, 0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        bytes.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        // L-shaped front corner: x=60..160, z=60..120 plus a narrow front corner stub x=60..70, z=120..125 (alley behind x=70..160)
+        for j in 12..25 {
+            for i in 12..32 {
+                if j == 24 && i >= 14 { continue; }
+                let k = (j * tw + i) as usize;
+                cls[k] = BUILT | PAVEMENT;
+                top[k] = if i < 16 { 152 } else { 166 };
+            }
+        }
+        // Front-right corner dropout (104) + adjacent 1-sample perimeter fin (168) sticking +1.6 m above the 152 eave.
+        top[(24 * tw + 12) as usize] = 104;
+        top[(24 * tw + 13) as usize] = 168;
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![grey(9); (tw * tw) as usize]);
+        let style = 32 | (28 << 8) | (1 << 16);
+        for v in [0i32, 6, kind(PLASTER, colour(3, 1)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes.extend(v.to_le_bytes());
+        }
+        for [x, z, l] in [
+            [60i32, 125, 3], [60, 60, 1], [160, 60, 1], [160, 120, 1], [70, 120, 1], [70, 125, 4 | 1],
+        ] {
+            for v in [x, z, l] { bytes.extend(v.to_le_bytes()); }
+        }
+        let pack = read(&bytes).expect("valid pack");
+        let corner_drop = pack.top(62, 122).expect("repaired corner");
+        let corner_fin = pack.top(67, 122).expect("flattened fin");
+        assert!(corner_drop <= 156, "corner dropout jumped to rear roof height: {corner_drop}");
+        assert!(corner_fin <= 156, "1-sample perimeter roof-end fin survived: {corner_fin}");
+
+        // A valid baked two-storey eave (160) behind a shallow 0.6 m lower bay shelf (137, rising to 160 at 1.2 m in)
+        // must keep its 160 eave and never collapse to the 137 shelf.
+        let mut bytes2 = Vec::new();
+        for v in [0x31594142i32, 0, 0, 320, gstep, gw, 0, 0, tstep, tw, 0, 0, 1, 4, 0, 0] {
+            bytes2.extend(v.to_le_bytes());
+        }
+        bytes2.extend(vec![100i16; (gw * gw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        let mut top2 = vec![NONE; (tw * tw) as usize];
+        let mut cls2 = vec![PAVEMENT; (tw * tw) as usize];
+        for j in 12..24 {
+            for i in 12..28 {
+                let k = (j * tw + i) as usize;
+                cls2[k] = BUILT | PAVEMENT;
+                top2[k] = if i < 14 { 137 } else { 160 };
+            }
+        }
+        for t in top2 { bytes2.extend(t.to_le_bytes()); }
+        bytes2.extend(&cls2);
+        bytes2.extend(vec![grey(9); (tw * tw) as usize]);
+        for v in [0i32, 4, kind(PLASTER, colour(6, 7)) as i32, kind(PLASTER, WHITE) as i32, style, 100] {
+            bytes2.extend(v.to_le_bytes());
+        }
+        let baked_160: i32 = 3 | 128 | (160 << 8) | (15 << 24);
+        for [x, z, l] in [[60i32, 120, baked_160], [60, 60, 1], [140, 60, 1], [140, 120, 4 | 1]] {
+            for v in [x, z, l] { bytes2.extend(v.to_le_bytes()); }
+        }
+        let pack2 = read(&bytes2).expect("valid pack2");
+        let kept_eave = (pack2.verts[0][2] >> 8) as i16 as i32;
+        assert_eq!(kept_eave, 160, "shallow 0.6 m bay shelf collapsed valid 2-storey eave to {kept_eave}");
+    }
+
+    #[test]
+    fn road_standing_lamps_hydrants_and_poles_are_snapped_or_dropped_cleanly() {
+        let mut bytes = Vec::new();
+        let (gw, tw) = (5i32, 32i32);
+        // Header: gstep=80, gw=5 (320 cells), tstep=10, tw=32 (320 cells), 1 building, 4 verts, 0 trunks
+        let head = [0x3159_4142i32, 1, 0, 0, 80, gw, 0, 0, 10, tw, 0, 0, 1, 4, 0, 0];
+        for w in head { bytes.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { bytes.extend(100i16.to_le_bytes()); }
+        let top = vec![100i16; (tw * tw) as usize];
+        // x < 220 is ROAD; x >= 220 is PAVEMENT (except z < 80, x >= 220 is GRASS_HERE for park road test).
+        let mut cls = vec![ROAD; (tw * tw) as usize];
+        for j in 0..tw {
+            for i in 22..tw {
+                cls[(j * tw + i) as usize] = if j < 8 { GRASS_HERE } else { PAVEMENT };
+            }
+        }
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![0u8; (tw * tw) as usize]);
+        // Building sitting on pavement at x in [220, 290], z in [250, 310]: fixtures must not snap inside it.
+        for w in [0i32, 4, kind(BRICK, OWN) as i32, kind(CONCRETE, OWN) as i32, 30, 100] {
+            bytes.extend(w.to_le_bytes());
+        }
+        for v in [[220i32, 250, 3], [290, 250, 3], [290, 310, 3], [220, 310, 7]] {
+            for w in v { bytes.extend(w.to_le_bytes()); }
+        }
+
+        let steel = kind(STEEL, grey(9)) as i32;
+        let dark = kind(STEEL, grey(14)) as i32;
+        let wood = kind(WOOD, colour(3, 0)) as i32;
+        let white = kind(CONCRETE, grey(1)) as i32;
+        let lamp = kind(LAMP, colour(3, 0)) as i32;
+
+        let fixtures: Vec<[i32; 8]> = vec![
+            // 1. Road-standing lamp at (185, 100, 140), 3.5 m west of pavement -> snaps to x >= 220, arm aims west (-x).
+            [185, 100, 140, 185, 183, 140, 12, steel],
+            [185, 179, 140, 198, 185, 140, 5, steel],  // originally aimed east (into sidewalk!)
+            [198, 185, 140, 203, 185, 140, 12, lamp],
+            // 2. Mid-intersection lamp at (50, 100, 140), 17 m from pavement -> mast, arm, head all dropped.
+            [50, 100, 140, 50, 183, 140, 12, steel],
+            [50, 179, 140, 50, 185, 153, 5, steel],
+            [50, 185, 153, 50, 185, 158, 12, lamp],
+            // 3. Existing sidewalk lamp at (224, 100, 200) + duplicate road lamp at (195, 100, 200) -> road one dropped.
+            [224, 100, 200, 224, 183, 200, 12, steel],
+            [224, 179, 200, 211, 185, 200, 5, steel],
+            [211, 185, 200, 206, 185, 200, 12, lamp],
+            [195, 100, 200, 195, 183, 200, 12, steel],
+            [195, 179, 200, 182, 185, 200, 5, steel],
+            [182, 185, 200, 177, 185, 200, 12, lamp],
+            // 4. Fire hydrant on road at (200, 100, 100) -> body, nozzles, cap all snap to pavement.
+            [200, 100, 100, 200, 107, 100, 15, white],
+            [198, 104, 100, 202, 104, 100, 10, white],
+            [200, 107, 100, 200, 108, 100, 12, white],
+            // 5. Utility pole on road at (205, 100, 170) -> mast + crossarm snap to pavement.
+            [205, 100, 170, 205, 196, 170, 16, wood],
+            [205, 188, 162, 205, 188, 178, 8, wood],
+            // 6. Sensed pole on road at (205, 100, 225) + span wire -> pole snaps & wire endpoint follows it.
+            [205, 100, 225, 205, 190, 225, 14, wood],
+            [205, 186, 225, 260, 180, 225, 3, dark],
+            // 7. Park-road lamp at (200, 100, 40), 2 m west of GRASS_HERE -> snaps onto GRASS_HERE.
+            [200, 100, 40, 200, 183, 40, 12, steel],
+            [200, 179, 40, 213, 185, 40, 5, steel],
+            [213, 185, 40, 218, 185, 40, 12, lamp],
+            // 8. Road lamp right beside the building wall at (205, 100, 280) -> must NOT snap inside building [220..290, 250..310].
+            [205, 100, 280, 205, 183, 280, 12, steel],
+            [205, 179, 280, 192, 185, 280, 5, steel],
+            [192, 185, 280, 187, 185, 280, 12, lamp],
+        ];
+        bytes.extend(b"SFST");
+        bytes.extend((fixtures.len() as u32).to_le_bytes());
+        for f in &fixtures {
+            for w in f { bytes.extend(w.to_le_bytes()); }
+        }
+
+        let pack = read(&bytes).expect("valid pack");
+        // No standing vertical mast/body may remain on ROAD or inside the building.
+        let masts: Vec<_> = pack.fixtures.iter()
+            .filter(|r| r[0] == r[3] && r[2] == r[5] && (r[4] - r[1]) >= 6)
+            .collect();
+        for m in &masts {
+            assert_ne!(pack.surface(m[0], m[2]).0 & 7, ROAD, "fixture mast stayed on ROAD: {m:?}");
+            assert!(!pack.in_building(m[0], m[2], 0.0), "fixture mast snapped into building: {m:?}");
+        }
+        // Kept street lamps: #1 (snapped to pavement), #3a (already on pavement), #7 (snapped to grass).
+        // Dropped: #2 (mid-road), #3b (duplicate), #8 (blocked by building within 4 m).
+        // Wait: #8 at (205, 280) is 3.5 m north of z=246 pavement outside the building, so check count is 3 or 4 and none inside building.
+        let lamp_masts: Vec<_> = masts.iter().filter(|r| r[6] == 12 && r[4] - r[1] == 83).copied().collect();
+        assert!(lamp_masts.len() >= 3 && lamp_masts.len() <= 4, "unexpected lamp mast count: {lamp_masts:?}");
+        // Every luminaire head must correspond to a kept lamp mast (zero orphaned floating lamp heads).
+        let lamp_heads: Vec<_> = pack.fixtures.iter().filter(|r| r[6] == 12 && material(r[7] as Kind) == LAMP).collect();
+        assert_eq!(lamp_heads.len(), lamp_masts.len(), "lamp head/mast mismatch: heads={lamp_heads:?} masts={lamp_masts:?}");
+        // Lamp #1 snapped to pavement near z=140 and its arm now points west (-x) back over the road.
+        let l1 = lamp_masts.iter().find(|r| (r[2] - 140).abs() <= 4).expect("lamp #1 snapped");
+        assert!(l1[0] >= 220);
+        let a1 = pack.fixtures.iter().find(|r| r[6] == 5 && r[0] == l1[0] && r[1] == l1[1] + 79 && r[2] == l1[2]).expect("lamp #1 arm");
+        assert!(a1[3] < a1[0], "snapped lamp arm should reach west over carriageway: {a1:?}");
+        // Hydrant #4: all 3 segments moved off ROAD onto pavement.
+        let h4 = masts.iter().find(|r| r[6] == 15).expect("hydrant #4 snapped");
+        assert!(h4[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 10 && (r[0] + r[3]) / 2 == h4[0] && r[2] == h4[2]));
+        assert!(pack.fixtures.iter().any(|r| r[6] == 12 && r[0] == h4[0] && r[2] == h4[2] && r[4] - r[1] == 1));
+        // Utility pole #5: mast + crossarm moved off ROAD onto pavement.
+        let p5 = masts.iter().find(|r| r[6] == 16).expect("pole #5 snapped");
+        assert!(p5[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 8 && ((r[0] + r[3]) / 2 - p5[0]).abs() <= 1 && ((r[2] + r[5]) / 2 - p5[2]).abs() <= 1));
+        // Sensed pole #6: mast moved off ROAD and span wire endpoint followed it.
+        let s6 = masts.iter().find(|r| r[6] == 14).expect("sensed pole #6 snapped");
+        assert!(s6[0] >= 220);
+        assert!(pack.fixtures.iter().any(|r| r[6] == 3 && r[0] == s6[0] && r[1] == s6[4] - 4 && r[2] == s6[2]));
+    }
+
+    #[test]
+    fn fast_column_queries_and_cached_make_match_reference() {
+        with_pack(|| {
+            let mut s = Scratch::new();
+            // Build sectors across sy = 1..5 in one column (exercising SECTOR_COLS reuse) and compare
+            // every cell against kind_single, solid_single, and under.
+            let (sx, sz) = (4, 4);
+            let mut cached = Vec::new();
+            for sy in 1..5 {
+                s.start(sx, sy, sz, 0);
+                make(&mut s);
+                cached.push(s.cells.clone());
+            }
+            // Invalidate SECTOR_COLS by bumping epoch and rebuild each sy fresh.
+            PACK_GEN.with(|g| g.set(g.get().wrapping_add(1)));
+            for (idx, sy) in (1..5).enumerate() {
+                PACK_GEN.with(|g| g.set(g.get().wrapping_add(1)));
+                s.start(sx, sy, sz, 0);
+                make(&mut s);
+                assert_eq!(s.cells, cached[idx], "cached make drifted at sy={sy}");
+                // Spot-check kind_single / solid_single across the sector (building wall, windows, roof, open road).
+                let x0 = sx * 64;
+                let y0 = sy * 64;
+                let z0 = sz * 64;
+                for lz in (0..64).step_by(7) {
+                    for lx in (0..64).step_by(7) {
+                        for ly in (0..64).step_by(5) {
+                            let expected = s.cells[(lx + 64 * (lz + 64 * ly)) as usize];
+                            let got = kind_single(x0 + lx, y0 + ly, z0 + lz);
+                            assert_eq!(got, expected, "kind_single mismatch at ({},{},{})", x0 + lx, y0 + ly, z0 + lz);
+                            assert_eq!(solid_single(x0 + lx, y0 + ly, z0 + lz), expected != 0);
+                        }
+                    }
+                }
+            }
+            // Verify under(x, y, z, 40) matches a downward scan of kind_single across road, pavement, and roof.
+            for (x, z, y) in [(100, 50, 130), (100, 120, 130), (300, 300, 290), (300, 300, 200), (100, 50, 105)] {
+                let mut expected = i32::MIN;
+                for at in ((y - 39)..=y).rev() {
+                    if kind_single(x, at, z) != 0 {
+                        expected = at + 1;
+                        break;
+                    }
+                }
+                assert_eq!(under(x, y, z, 40), expected, "under mismatch at ({x},{y},{z})");
+            }
+        });
+    }
+
+    #[test]
+    fn rooftop_narrow_pillars_are_despiked_in_fine_and_coarse_packs() {
+        // L0 (tstep=5, 0.5 m samples): a flat roof at 150 with a 2.0 m x 1.5 m (4x3) light-pole pillar at 220,
+        // a 1.5 m parapet at 165, a 4 m x 4 m (8x8) real penthouse at 200, and a tree canopy spike at 240.
+        let (gw, tw) = (5i32, 32i32);
+        let mut b0 = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 160, 40, gw, 0, 0, 5, tw, 0, 0, 0, 0, 0, 0] { b0.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b0.extend(20i16.to_le_bytes()); }
+        let mut top0 = vec![150i16; (tw * tw) as usize];
+        let mut cls0 = vec![YARD; (tw * tw) as usize];
+        for j in 6..9 { for i in 6..10 { top0[(j * tw + i) as usize] = 220; } } // 2.0 m x 1.5 m pillar
+        for i in 4..20 { top0[(12 * tw + i) as usize] = 165; } // 1.5 m parapet
+        for j in 18..26 { for i in 18..26 { top0[(j * tw + i) as usize] = 200; } } // 4 m x 4 m penthouse
+        top0[(3 * tw + 27) as usize] = 240;
+        cls0[(3 * tw + 27) as usize] = YARD | CANOPY; // tree crown must stay untouched
+        for t in &top0 { b0.extend(t.to_le_bytes()); }
+        b0.extend(&cls0);
+        b0.extend(vec![0u8; (tw * tw) as usize]);
+        let p0 = read(&b0).expect("valid L0 pack");
+        for j in 6..9 {
+            for i in 6..10 {
+                assert_eq!(p0.top[(j * tw + i) as usize], 150, "L0 pillar at ({i},{j}) should be removed");
+            }
+        }
+        assert_eq!(p0.top[(12 * tw + 10) as usize], 165, "1.5 m parapet must stay");
+        assert_eq!(p0.top[(21 * tw + 21) as usize], 200, "4 m x 4 m penthouse must stay");
+        assert_eq!(p0.top[(3 * tw + 27) as usize], 240, "canopy spike must stay");
+
+        // L1 (tstep=20, 2.0 m samples): flat BUILT roof at 150 with a 1-cell spike (220), a 2-cell straddling
+        // spike (216), and a 2x5 (4 m x 10 m) taller rowhouse (220).
+        let mut b1 = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 640, 160, gw, 0, 0, 20, tw, 0, 0, 0, 0, 0, 0] { b1.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b1.extend(20i16.to_le_bytes()); }
+        let mut top1 = vec![150i16; (tw * tw) as usize];
+        let cls1 = vec![YARD | BUILT; (tw * tw) as usize];
+        top1[(5 * tw + 5) as usize] = 220; // 1-cell spike
+        top1[(10 * tw + 10) as usize] = 216;
+        top1[(10 * tw + 11) as usize] = 216; // 2-cell straddling spike
+        for j in 16..21 { for i in 16..18 { top1[(j * tw + i) as usize] = 220; } } // 4 m x 10 m rowhouse
+        for t in &top1 { b1.extend(t.to_le_bytes()); }
+        b1.extend(&cls1);
+        b1.extend(vec![0u8; (tw * tw) as usize]);
+        let p1 = read(&b1).expect("valid L1 pack");
+        assert_eq!(p1.top[(5 * tw + 5) as usize], 150, "L1 1-cell spike should be removed");
+        assert_eq!(p1.top[(10 * tw + 10) as usize], 150, "L1 2-cell spike should be removed");
+        assert_eq!(p1.top[(10 * tw + 11) as usize], 150, "L1 2-cell spike should be removed");
+        assert_eq!(p1.top[(18 * tw + 16) as usize], 220, "4 m x 10 m rowhouse must stay");
+    }
+
+    #[test]
+    fn aerial_cables_rasterize_slim_and_open_columns_below_them_hit_cache() {
+        let mut b = pack();
+        // Add a horizontal trolley wire (rad=3 cm in tile format, steel dark) at y=160 spanning x=60..140, z=50 (over road).
+        let wire: [i32; 8] = [60, 160, 50, 140, 160, 50, 3, kind(STEEL, grey(14)) as i32];
+        b.extend_from_slice(b"SFST");
+        b.extend_from_slice(&1u32.to_le_bytes());
+        for w in wire { b.extend_from_slice(&w.to_le_bytes()); }
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+        // Check cable_rows emits slim 1-2 fine subcells per cross-section (never 3x3 bloated pipes) and zero gaps.
+        let p = PACKS.with_borrow(|ps| ps[0].fixture_spans(100, 50, 1));
+        assert_eq!(p.len(), 1);
+        let mut rows = Vec::new();
+        p[0].cable_rows(100, 50, 128, &mut rows);
+        assert!(!rows.is_empty(), "cable must emit fine subcell runs");
+        let min_y = rows.iter().map(|r| r.y).min().unwrap();
+        let max_y = rows.iter().map(|r| r.y).max().unwrap();
+        assert!(max_y - min_y <= 1, "aerial cable vertical thickness must be <= 2 fine subcells (got {})", max_y - min_y + 1);
+        // Check kind_single & under return exact road ground below wire (hitting SolidEntry.ceil cache) AND wire at y=160.
+        let g = ground(100, 50);
+        assert_eq!(material(kind_single(100, g, 50)), ASPHALT);
+        assert_eq!(kind_single(100, g + 10, 50), 0);
+        assert_eq!(under(100, g + 20, 50, 40), g + 1);
+        assert_eq!(material(kind_single(100, 160, 50)), STEEL, "wire remains visible at wire height");
+        clear();
+    }
+
+    #[test]
+    fn unsurveyed_corniced_facade_blends_perimeter_lidar_dropouts() {
+        // Unsurveyed corniced building (detail=2, eave=0) with flat roof at y=260 and a perimeter lidar dropout to y=210
+        // right along the street edge z=200 (x=280..320). Blending from eave_near must keep the facade unbroken up to 260.
+        let mut b = pack();
+        // Patch vertex 0 of the house at (200,200) to carry detail=2 (cornice, unsurveyed eave) and street front flag 0x3.
+        // Header=64, ground=65*65*2=8450, top=128*128*2=32768, class=16384, tint=16384, bld=24 -> verts at 74074.
+        let top_off = 64 + 65 * 65 * 2;
+        let verts_off = top_off + 128 * 128 * 2 + 128 * 128 + 128 * 128 + 24;
+        // Drop lidar top right on the front lip j=40 (z=200..204), i=56..64 (x=280..319) down to 210 while j>=41 stays 260.
+        for i in 56..64 {
+            let k = top_off + (40 * 128 + i) * 2;
+            b[k..k + 2].copy_from_slice(&210i16.to_le_bytes());
+        }
+        // Set v0 looks = 0x3 | (2 << 24) (cornice, unsurveyed eave).
+        let v0_looks = (3i32 | (2 << 24)).to_le_bytes();
+        b[verts_off + 8..verts_off + 12].copy_from_slice(&v0_looks);
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+        // At x=300, z=201 (far=1.5 inside front lip), y=208..212 must NOT be air, ROOFING, or floating mid-wall cornice trim.
+        for y in 207..=214 {
+            let k = kind_single(300, y, 201);
+            assert_ne!(k, 0, "perimeter lidar dropout must not carve air notch at y={y}");
+            assert_ne!(material(k), ROOFING, "perimeter lidar dropout must not emit mid-wall roofing at y={y}");
+        }
+        // Wall continues cleanly up near the eave (260).
+        assert_ne!(kind_single(300, 250, 201), 0, "wall must continue unbroken up to eave");
+        clear();
+    }
+
+    #[test]
+    fn sidewalk_canopy_stubs_and_phantom_roof_trunks_are_cleaned() {
+        // Reproduces Market & Buchanan (1998 Market St):
+        // - 2x2 (4-cell) 2.7..3.5 m sidewalk canopy stub on GRASS_HERE surrounded by PAVEMENT
+        // - 5-cell 26.2 m building-wall lidar spillover sliver + phantom 26.2 m trunk
+        // - Real 6.2 m (6x5 = 30-cell) street tree right next door whose trunk was stolen by the phantom spike
+        // - Real 18 m (7x7 = 49-cell) park tree with its own trunk
+        // - Low 1.2 m (2x2) yard bush surrounded by YARD (must stay intact)
+        let (gw, tw) = (33i32, 64i32); // gstep=10 (1 m), tstep=5 (0.5 m) => 320 x 320 cells (32 m)
+        let g = 100i16;
+        let mut b = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 320, 10, gw, 0, 0, 5, tw, 0, 0, 0, 0, 2, 0] { b.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b.extend(g.to_le_bytes()); }
+        let mut top = vec![NONE; (tw * tw) as usize];
+        let mut cls = vec![PAVEMENT; (tw * tw) as usize];
+        let mut tint = vec![124u8; (tw * tw) as usize];
+
+        // 1. Jagged 2x2 sidewalk canopy stub (2.7..3.5 m tall) at cells i=10..12, j=10..12 (x=50..60, z=50..60).
+        for (di, dj, h) in [(0, 0, 27), (1, 0, 28), (0, 1, 29), (1, 1, 35)] {
+            let k = ((10 + dj) * tw + (10 + di)) as usize;
+            cls[k] = GRASS_HERE | CANOPY;
+            top[k] = g + h;
+            tint[k] = 84;
+        }
+        // 2. 5-cell 26.2 m building-wall spillover sliver at i=18..20, j=14..17 (x=90..100, z=70..85).
+        for (i, j, h) in [(18, 14, 262), (19, 14, 261), (18, 15, 262), (19, 15, 261), (18, 16, 102)] {
+            let k = (j * tw + i) as usize;
+            cls[k] = PAVEMENT | CANOPY;
+            top[k] = g + h;
+        }
+        // 3. Real 6.2 m street tree (6x5 = 30 cells) at i=22..28, j=14..19 (x=110..140, z=70..95), peak at (25, 16).
+        for j in 14..19 {
+            for i in 22..28 {
+                let k = (j * tw + i) as usize;
+                cls[k] = GRASS_HERE | CANOPY;
+                top[k] = g + if i == 25 && j == 16 { 62 } else { 48 };
+            }
+        }
+        // 4. Real 18 m broad park tree (7x7 = 49 cells) at i=42..49, j=42..49 (x=210..245, z=210..245).
+        for j in 42..49 {
+            for i in 42..49 {
+                let k = (j * tw + i) as usize;
+                cls[k] = GRASS_HERE | CANOPY;
+                top[k] = g + if i == 45 && j == 45 { 180 } else { 165 };
+            }
+        }
+        // 5. Low 1.2 m yard bush (2x2) at i=4..6, j=44..46 surrounded by YARD.
+        for j in 42..48 { for i in 2..8 { cls[(j * tw + i) as usize] = YARD; } }
+        for j in 44..46 {
+            for i in 4..6 {
+                let k = (j * tw + i) as usize;
+                cls[k] = GRASS_HERE | CANOPY;
+                top[k] = g + 12;
+            }
+        }
+        for t in &top { b.extend(t.to_le_bytes()); }
+        b.extend(&cls);
+        b.extend(&tint);
+        // Trunks: [0] phantom 26.2 m trunk at spillover (92, 72); [1] real 18 m park trunk at (227, 227).
+        for tr in [[92i32, 72, g as i32 + 262, 2], [227, 227, g as i32 + 180, 2 | (35 << 8)]] {
+            for w in tr { b.extend(w.to_le_bytes()); }
+        }
+
+        let at = room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(load(), 1);
+
+        // Sidewalk stub must be completely gone above ground.
+        for y in (g as i32 + 2)..=(g as i32 + 40) {
+            assert_eq!(kind_single(52, y, 52), 0, "sidewalk canopy stub must be cleared at y={y}");
+            assert_eq!(kind_single(57, y, 57), 0, "sidewalk canopy stub must be cleared at y={y}");
+        }
+        // Phantom 26.2 m roof spillover must be completely gone.
+        for y in (g as i32 + 2)..=(g as i32 + 265) {
+            assert_eq!(kind_single(92, y, 72), 0, "phantom roof canopy spillover must be cleared at y={y}");
+        }
+        // Real 6.2 m street tree must have a grounded WOOD trunk at its peak (127, 82) and thick leafy crown (not a 30 cm wafer).
+        assert_eq!(material(kind_single(127, g as i32 + 10, 82)), WOOD, "real street tree must receive a grounded trunk");
+        let leaf_span = ((g as i32 + 20)..=(g as i32 + 60)).filter(|&y| material(kind_single(122, y, 82)) == LEAVES).count();
+        assert!(leaf_span >= 12, "real street tree crown must be thick, not a thin floating crust (got {leaf_span} cells)");
+        // Real 18 m park tree and low 1.2 m yard bush must remain intact.
+        assert_eq!(material(kind_single(227, g as i32 + 30, 227)), WOOD, "real 18 m park tree trunk must stay");
+        assert!(((g as i32 + 120)..=(g as i32 + 178)).any(|y| material(kind_single(220, y, 227)) == LEAVES), "real 18 m park tree crown must stay");
+        assert_eq!(material(kind_single(22, g as i32 + 6, 222)), LEAVES, "low 1.2 m yard bush must stay");
+        clear();
     }
 }
 

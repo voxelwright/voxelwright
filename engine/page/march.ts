@@ -8,7 +8,20 @@ import { SIDE, type World } from './world.ts'
 import { grid as marksGrid, MARKS } from './marks.ts'
 
 // One more than as things are only where `?fine=2` (#259, finer boxes round the eye) asks for an eleventh box.
-export const MAX_LEVELS = 10 + Math.max(0, Number(new URLSearchParams(globalThis.location?.search ?? '').get('fine') ?? 0) - 1)
+/**
+ * A number an address asks for (#81: the measuring knobs, `?workers=`, `?pool=`, `?farfaces=` and the like), kept
+ * between `least` and `most`, and whole where `whole`. Where the address says nothing, or nothing that is a finite
+ * number, the fallback: a crafted link cannot ask for a billion workers, a pool past the device, or a shader with NaN in it.
+ */
+export function bounded(said: string | null | undefined, fallback: number, least: number, most: number, whole = false): number {
+  const n = said === null || said === undefined || said.trim() === '' ? NaN : Number(said)
+  if (!Number.isFinite(n)) return fallback
+  const kept = Math.min(most, Math.max(least, n))
+  return whole ? Math.round(kept) : kept
+}
+/** `?fine=` (#259): 0, 1 or 2 more boxes of finer cells. */
+export const FINE_ASKED = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('fine'), 0, 0, 2, true)
+export const MAX_LEVELS = 10 + Math.max(0, FINE_ASKED - 1)
 
 /** The colours every thing in the world shares: 0 is the material's own, 1 to 15 white to black, then 24 hues in ten tones (kinds.rs). */
 export function palette(): Float32Array<ArrayBuffer> {
@@ -45,6 +58,11 @@ const EDITS_AT = 256 * 16 + 16 * 32 + 16 + 512 + 64 + (2 + 2 * LIT_LETTERS) * 16
  * pixel covers there. The answer is light to add, before the weather's share of the dark is taken.
  */
 export const LANDMARK_LIGHT = /* wgsl */ `
+// Radius of the illuminated envelope at a fraction of its height. The corners
+// of its square plan and projecting skin also receive light.
+fn beaconRadius(h: Beacon, t: f32) -> f32 {
+  return mix(h.at.w, h.span.z, t) * 1.45 + 3.0;
+}
 fn landmarkLight(p: vec3f, wide: f32) -> vec3f {
   var out = vec3f(0.0);
   for (var i = 0u; i < 8u; i++) {
@@ -53,8 +71,7 @@ fn landmarkLight(p: vec3f, wide: f32) -> vec3f {
     let q = (p - h.at.xyz) * 0.1;
     if (q.y < h.span.x - 0.5 || q.y > h.span.y + 1.0) { continue; }
     let t = clamp((q.y - h.span.x) / max(h.span.y - h.span.x, 1.0), 0.0, 1.0);
-    // (Round its middle: a square's corner is 1.42 of its half width out, and its skin some metres proud.)
-    if (length(q.xz) > mix(h.at.w, h.span.z, t) * 1.45 + 3.0) { continue; }
+    if (length(q.xz) > beaconRadius(h, t)) { continue; }
     var light = h.colour.a;
     if (h.span.w > 0.0) {
       // A screen of lamps behind a grid: dark rings across it while they are wider than a pixel, and a slow tide of
@@ -587,17 +604,15 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
       over = vec4f(0.56, 0.54, 0.5, max(step(fu, 0.17), select(0.0, step(fa, 0.11), starts)) * lines * 0.85);
     }
   } else if (stuff == 9u) {
-    // A painted wall of boards two cells high, each lapped over the one below: the lower cell is in its shade.
+    // Painted stucco & fine architectural siding: smooth troweled plaster finish with subtle horizontal course
+    // modulation so residential stucco walls stay crisp rather than ribbed barn clapboard (#60).
     if (wall) {
-      // Far off the lower cell of a board is in the shade of the one above; near, it is a line of shadow under the lap.
       let lower = (up & 1) == 0;
-      let lap = select(0.0, 1.0, !lower && fu > 0.7);
-      // Where a board's two cells are under three pixels, its shade alternates faster than pixels and beats with
-      // them into ribs: take the mean shade.
-      let boards = clamp((sharp - 1.5) / 1.5, 0.0, 1.0);
-      v -= mix(mix(0.085, select(0.0, 0.17, lower), boards) * fine, lap * 0.42 + ((f32(up & 1) + fu) * 0.5 - 0.5) * 0.07, lines);
+      let course = select(0.0, 1.0, !lower && fu > 0.78);
+      let fine_band = clamp((sharp - 2.0) / 2.0, 0.0, 1.0);
+      v -= mix(mix(0.025, select(0.0, 0.055, lower), fine_band) * fine, course * 0.13 + ((f32(up & 1) + fu) * 0.5 - 0.5) * 0.03, lines);
     }
-    v += worn * 0.14 + speck * 0.03 * grain;
+    v += worn * 0.11 + speck * 0.055 * grain;
   } else if (stuff == 10u) {
     // Wood: planks two cells wide, upright on a wall and along a floor, each its own shade, with a grain along it.
     var plank = vec3i(along >> 1u, across, 0);
@@ -651,7 +666,7 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
  * between them it is marched on from the cell's far side.
  */
 /** How many cells of finer cells a ray may pass through between their cells before one is taken whole (`tries`, for measuring). */
-const TRIES = Number(new URLSearchParams(globalThis.location?.search ?? '').get('tries') ?? 16)
+const TRIES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('tries'), 16, 1, 64, true)
 const FINER = /* wgsl */ `
 // Where a cell's block of finer cells is in its sector's tree (and, in the top bit, whether it is 8 a side and not
 // 4): 0 where the cell holds none. The cell's leaf is found from the top: this is asked of a ray that met such a
@@ -760,14 +775,14 @@ const MARCHED = (bricks: boolean | undefined) => /* wgsl */ `var hit = march(ro,
   if ((hit.kind & 64u) != 0u && !through) { hit = refine(ro, rd, hit, most, wide, spread, rough, eyed); }`}`
 
 /** How many pixels wide a cell of a pane must be for the look to go through it (`through`, for measuring). */
-const THROUGH = Number(new URLSearchParams(globalThis.location?.search ?? '').get('through') ?? 2).toFixed(2)
+const THROUGH = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('through'), 2, 0.1, 64).toFixed(2)
 /**
  * How many panes of glass a look may meet (#163, `panes` for measuring): it goes through all but the last, which is
  * drawn with what is likely behind it (a dim room, or from inside, the day outside). 1 is none. Past one pane, a
  * look out of a tower to the next one cost three quarters of the frame again, and the far side of a car or a room
  * is seldom made out through two tints.
  */
-const PANES = Number(new URLSearchParams(globalThis.location?.search ?? '').get('panes') ?? 2)
+const PANES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('panes'), 2, 1, 8, true)
 
 const INLOOP = new URLSearchParams(globalThis.location?.search ?? '').get('walk') === 'loop'
 
@@ -874,6 +889,55 @@ fn meet(lo: vec3f, hi: vec3f, q0: vec3f, k: vec3f) -> Met {
   return Met(min(a, b), min(far.x, min(far.y, far.z)));
 }
 
+${HANDOVER}
+${EDITED('looks.edits')}
+// Whether the far model holds the tile a point is in (far.ts).
+fn farHeld(p: vec3f) -> bool {
+  let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
+  if (any(t < vec2i(0)) || any(t >= vec2i(64))) { return false; }
+  let bit = u32(t.y * 64 + t.x);
+  let word = bit >> 5u;
+  return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
+}
+// Entering a protected box ends a run through far-owned land, even if the coarse node spans the box.
+fn beforeBox(next: f32, lo: vec4f, hi: vec4f, ro: vec3f, inv: vec3f, t: f32) -> f32 {
+  if (hi.w <= 0.0) { return next; }
+  let m = meet(lo.xyz, hi.xyz, ro, inv);
+  let enter = max(m.near.x, max(m.near.y, m.near.z));
+  return select(next, enter, enter > t && enter < min(next, m.leave));
+}
+// A held tile can precede an unheld ridge on the same look. Skip to the next ownership boundary.
+fn farExit(ro: vec3f, rd: vec3f, inv: vec3f, p: vec3f, t: f32) -> f32 {
+  let tile = floor((p.xz - looks.far.xy) / looks.far.z);
+  let sides = looks.far.xy + (tile + vec2f(rd.xz > vec2f(0.0))) * looks.far.z;
+  let ends = (sides - ro.xz) * inv.xz;
+  var next = min(ends.x, ends.y);
+  for (var i = 0u; i < ${EDITS}u; i++) {
+    if (looks.edits[2u * i + 1u].w <= 0.0) { break; }
+    next = beforeBox(next, looks.edits[2u * i], looks.edits[2u * i + 1u], ro, inv, t);
+  }
+  // Before the ordinary reach the ray is inside the wedge. Its ownership can end at either
+  // bearing, at the circle, or at the box kept for cells. Test them before skipping the tile.
+  if (t < looks.far.w) {
+    let d = ro.xz - looks.wedge.xy;
+    for (var i = 0u; i < 2u; i++) {
+      let normal = vec2f(cos(looks.bear[i]), sin(looks.bear[i]));
+      let along = dot(rd.xz, normal);
+      if (abs(along) > 1e-8) {
+        let cross = -dot(d, normal) / along;
+        if (cross > t) { next = min(next, cross); }
+      }
+    }
+    let a = dot(rd.xz, rd.xz);
+    let b = dot(d, rd.xz);
+    let c = dot(d, d) - looks.wedge.z * looks.wedge.z;
+    let leave = (-b + sqrt(max(0.0, b * b - a * c))) / a;
+    next = min(next, max(t, leave));
+    next = beforeBox(next, looks.keep0, looks.keep1, ro, inv, t);
+  }
+  return next;
+}
+
 // A ray from ro along rd (both in the finest cells from the anchor), starting t0 along it in box level0.
 // It need not see anything smaller than its own width, which is wide at its start and grows by spread a cell:
 // a node narrower than the ray is taken whole, as the kind most of it is. A rough ray (one towards the sun)
@@ -907,6 +971,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   var leaveAt = 0.0;
   var last = vec3i(0);
   var fresh = true;
+  var skipping = false;
   for (var i = 0u; i < most; i++) {
     work++;
     if (fresh) {
@@ -941,6 +1006,11 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       if (rd.y < 0.0 && ro.y + rd.y * t > roof && !plain) { t = min((roof - ro.y) * inv.y, leaveAt) + eps; }
     }
     if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
+    var size = 0;
+    var low = vec3i(0);
+    var kind = 0u;
+    var cell = vec3i(0);
+    if (!skipping) {
     let q = q0 + rd * (t * lv.scale);
     let c = clamp(vec3i(floor(q)), vec3i(0), last);
     // Which of the kept nodes still hold this cell: the highest bit in which it differs from the last one says.
@@ -949,9 +1019,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     if (apart >= 64u) { have = 0u; } else if (apart >= 16u) { have = min(have, 1u); } else if (apart >= 4u) { have = min(have, 2u); }
     held = c;
     let width = (wide + spread * t) * lv.scale;
-    var size = 0;
-    var low = c;
-    var kind = 0u;
+    low = c;
     // A node's contents are met further on: the ray skips to them and looks again.
     var skip = -1.0;
     var face = vec3f(0.0);
@@ -1080,7 +1148,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       t = skip + eps;
       continue;
     }
-    var cell = c;
+    cell = c;
     if (have == 3u && size == 0 && kind == 0u) {
       // Inside a leaf: from cell to cell across whichever side comes first, until one is solid or the ray is out.
       let leaf = c >> vec3u(2u);
@@ -1114,7 +1182,22 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       }
       if (kind == 0u) { t += eps; continue; }
     }
-    if (kind != 0u && !through) {
+    }
+    if ((skipping || kind != 0u) && !through) {
+      if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
+        let p = ro + rd * (t + 0.25 * eps);
+        let reach = select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u);
+        if (t > reach && farHeld(p) && !edited(p)) {
+          // One shared farExit site: skip consecutive far-owned tiles without adding a nested loop or re-descending the octree.
+          let next = farExit(ro, rd, inv, p, t);
+          if (next <= t) { hit.t = -1.0; hit.left = true; return hit; }
+          t = next + eps;
+          skipping = true;
+          have = 0u;
+          continue;
+        }
+      }
+      if (skipping) { skipping = false; continue; }
       hit.t = t;
       hit.kind = kind & 0xffffu;
       hit.n = n;
@@ -1135,16 +1218,6 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   return hit;
 }
 ${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
-${HANDOVER}
-${EDITED('looks.edits')}
-// Whether the far model holds the tile a point is in (far.ts).
-fn farHeld(p: vec3f) -> bool {
-  let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
-  if (any(t < vec2i(0)) || any(t >= vec2i(64))) { return false; }
-  let bit = u32(t.y * 64 + t.x);
-  let word = bit >> 5u;
-  return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
-}
 // What a ray meets: what is in the world's cells (march), or the sea. The still sea is not cells: it is all that
 // lies under its top with nothing else in it. A look that comes down from over it meets the top where it crosses
 // that level, if it has met nothing before, or has gone out through the far side of the last box by then. Past the
@@ -1154,15 +1227,6 @@ fn farHeld(p: vec3f) -> bool {
 // dearer, sea in it or not.
 fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
   ${MARCHED(world.options.bricks && !INLOOP)}
-  // Past the far model's reach, where it holds the tile, what the cells met there is its to draw (far.ts): the coarse
-  // boxes stand far wider than the buildings they hold. The look goes on to meet the sea, as though it had left the boxes.
-  // Only a look from the eye (through a pane too): the water's look at what it mirrors starts at the water, and the far
-  // model is not drawn into what is mirrored. A tool's aim (CELLS) is handed over only past the reach, not the wedge's:
-  // what it edits nearer is in the cells.
-  if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
-    let p = ro + rd * hit.t;
-    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p) && !edited(p)) { hit.t = -1.0; hit.left = true; }
-  }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }
@@ -2052,6 +2116,8 @@ export const PANES_FORMAT: GPUTextureFormat = 'rgba16float'
 export const SUN_TILES_A_FRAME = 8
 
 export interface Marcher {
+  /** The last draw used the requested glass pipeline, including any reflections. */
+  readonly glassReady: boolean
   /** Draws the world into `to`, and how far off each pixel's thing is into its depth. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number]): void
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
@@ -2129,7 +2195,7 @@ export interface Marcher {
    * much of a pane's own lamp it puts out), how far it is up (0: off, and no window asks it), and how much larger
    * than its own the moon's disc is drawn (0: its own).
    */
-  readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number }
+  readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number; sky: boolean; rect: [number, number, number, number] }
   /** The moon (#524): how its disc is drawn and how much light it gives. Set after `light`; WHOLE_MOON is the hour's own. */
   moon: Moon
 }
@@ -2147,8 +2213,8 @@ export interface Beacon { at: readonly [number, number, number]; night: readonly
 /** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
 export interface Air { haze: number; clouds: number; sky?: { zenith: readonly [number, number, number]; horizon: readonly [number, number, number] } }
 
-/** `behind`: a marcher for a world seen through a window, whose looks may begin at a plane (`draw`'s `starts`). */
-export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false): Promise<Marcher> {
+/** `behind` allows a look to begin at a window plane. A released city's first view can draw while Metal compiles its mirrors. */
+export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false, deferMirrors = false): Promise<Marcher> {
   const grid = world.options.grid
   const module = await shader(device, 'march', code(world, behind))
   // The sun stands in the south-west, two fifths of the way up.
@@ -2159,9 +2225,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const F = GPUShaderStage.FRAGMENT
   const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }] })] })
   const marchingAs = (module: GPUShaderModule, mirrors: boolean, foggy = false) => device.createRenderPipelineAsync({ label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}`, layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
-  const marching = (module: GPUShaderModule) => Promise.all([marchingAs(module, true), marchingAs(module, false)])
+  const marching = (module: GPUShaderModule, defer = false) => Promise.all([defer ? null : marchingAs(module, true), marchingAs(module, false)])
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
-  let [pipeline, plainPipeline] = await marching(module)
+  let [pipeline, plainPipeline] = await marching(module, deferMirrors)
+  let mirrorsStarted = !deferMirrors
   // The same in fog (FOGGY), made the first time there is fog, and made again with the shader: until they are made a
   // look is drawn as without it, which is the fog's first moment as it comes in (it comes in over seconds).
   let shaderNow = module, foggy: GPURenderPipeline[] | null = null, makingFoggy: Promise<unknown> | null = null
@@ -2185,6 +2252,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   }
   const panesViews = new WeakMap<GPUTexture, GPUTextureView>()
   // Those a march with mirrors has written: one without them (which writes none) clears them first.
+  let glassReady = true
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512 + 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
@@ -2193,11 +2261,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
   const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT })
-  const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0 }
+  const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0, sky: false, rect: [0, 0, 1, 1] as [number, number, number, number] }
   // The road's marks (marks.ts), empty until `marks` is told them.
   let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   const binding = () => device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
+    layout: plainPipeline.getBindGroupLayout(0),
     entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }],
   })
   let bind = binding()
@@ -2385,6 +2453,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       picking = next.catch(() => {})
       return next
     },
+    get glassReady() { return glassReady },
     get sun() { return sunMaps },
     get looks() { return looks },
     get globals() { return globals },
@@ -2442,7 +2511,18 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     draw(encoder, to, view, flags, time, timing, only, starts) {
       tell(view, to.size, flags, time, starts)
       // With mirrors off no pane is looked through, and the march writes no panes (writing them was 1 to 2% of its time with mirrors off).
-      const mirrors = (flags & MIRRORS) !== 0, panes = panesFor(to.size)
+      const wantsMirrors = (flags & MIRRORS) !== 0
+      if (wantsMirrors && !mirrorsStarted && !pipeline) {
+        mirrorsStarted = true
+        // A reshade can finish first. Keep its pipeline if it did.
+        void marchingAs(module, true).then((ready) => { pipeline ??= ready }, (error: unknown) => {
+          console.error('The march with mirrors could not be compiled', error)
+        })
+      }
+      const inFog = fog > 0 ? fogPipelines() : null
+      const reflected = wantsMirrors ? inFog?.[0] ?? pipeline : null
+      const mirrors = !!reflected, panes = panesFor(to.size)
+      glassReady = !wantsMirrors || mirrors
       if (mirrors) panesWritten.add(panes)
       else if (panesWritten.has(panes)) { encoder.beginRenderPass({ colorAttachments: [{ view: panesView(to.size), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end(); panesWritten.delete(panes) }
       const pass = encoder.beginRenderPass({
@@ -2451,8 +2531,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         ...(timing ? { timestampWrites: timing } : {}),
       })
       // With mirrors off, the pipeline that has none of their text (MIRRORS): its bindings are the same.
-      const inFog = fog > 0 ? fogPipelines() : null
-      pass.setPipeline(inFog ? inFog[mirrors ? 0 : 1] : mirrors ? pipeline : plainPipeline)
+      pass.setPipeline(reflected ?? inFog?.[1] ?? plainPipeline)
       pass.setBindGroup(0, bind)
       if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
       pass.draw(3)

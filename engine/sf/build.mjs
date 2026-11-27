@@ -14,19 +14,20 @@
 //
 // Modules are written as player/build.mjs writes them: Node's own stripper over each module the page reaches, with
 // `.ts` addresses written `.js`, nothing bundled. The tiles, the car and this folder never go in git.
-import { stripTypeScriptTypes } from 'node:module'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { constants as fsConstants, copyFileSync, cpSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { availableParallelism, homedir } from 'node:os'
 import { Worker } from 'node:worker_threads'
 import { eggOverlay, landingVideos } from '../../site/lib/egg-overlay.mjs'
 import { memes } from './add-egg.mjs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { marksBytes, marksIn, said, squaresBytes } from './marks.mjs'
 import { buildMap } from './map.mjs'
+import { buildPlaces } from './places.mjs'
 import { releaseCredits } from '../page/release-credits.ts'
 import { seated } from './boards.mjs'
 
@@ -75,24 +76,186 @@ if (streetManifest) {
 }
 
 // ── The page and every module it reaches ──
+const noBundle = process.argv.includes('--no-bundle')
+const noPacks = process.argv.includes('--no-packs')
+const repoRoot = dirname(root)
+function loadEsbuild() {
+  for (const dir of [root, join(repoRoot, 'site'), join(repoRoot, 'deploy')]) {
+    const pkg = join(dir, 'node_modules/esbuild/package.json')
+    if (existsSync(pkg)) return createRequire(join(dir, 'package.json'))('esbuild')
+  }
+  return null
+}
+const esbuild = noBundle ? null : loadEsbuild()
 const modules = new Set(), todo = []
 const reachOf = (from, text) => { for (const [, , , path, ext] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(from), `${path}.${ext}`)); if (!modules.has(to)) { modules.add(to); todo.push(to) } } }
 modules.add('page/main.ts'); todo.push('page/main.ts')
 while (todo.length) {
   const path = todo.pop(), source = readFileSync(join(root, path), 'utf8'), text = path.endsWith('.ts') ? stripTypeScriptTypes(source) : source
   reachOf(path, text)
-  put(path.replace(/\.(ts|mjs)$/, '.js'), js(text))
+  if (!esbuild) put(path.replace(/\.(ts|mjs)$/, '.js'), js(text))
 }
 // The maker in the page (page/maker.ts) must reach nothing of Node: a module that imports it would not load there.
 for (const path of modules) if (path.endsWith('.mjs') && /\bfrom\s*['"]node:|\bimport\s*['"]node:/.test(readFileSync(join(root, path), 'utf8'))) fail(`${path} imports Node at its top, and the page reaches it`)
 if (!existsSync(join(root, 'page/core.wasm'))) fail('page/core.wasm is not built: npm run core')
-cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
-// ── The realm's controls (page/realm-ui.ts): the Voxelmorphism kit beside the page ──
-// The page asks for the kit by address, not by import, so the walk above does not reach it: its modules (the .js as
-// they are, with .ts addresses written .js), the engine's renderer they draw with (blocks/renderer.ts and what it
-// reaches), its stylesheet, and every font it names: IBM Plex for text, and the kit's own faces (page/typeface.ts picks
-// which of them sets the legends on the keys and the lettering on the boards).
-{
+
+const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8')
+let mainScriptHref = '../page/main.js'
+let bundleCount = 0
+
+if (esbuild) {
+  // Content-hashed immutable bundles under assets/ (#82): cuts ~240 module fetches and repeat-visit revalidations
+  // to ~20 immutable ES module chunks while keeping page/serve.mjs unbundled for local development.
+  const coreBytes = readFileSync(join(root, 'page/core.wasm'))
+  const coreHash = createHash('sha256').update(coreBytes).digest('hex').slice(0, 8)
+  const coreAsset = `core-${coreHash}.wasm`
+  put(`assets/${coreAsset}`, coreBytes)
+
+  const sheetHash = createHash('sha256').update(sheet).digest('hex').slice(0, 8)
+  const sheetAsset = `voxelmorphism-${sheetHash}.css`
+  put(`kit/${sheetAsset}`, sheet)
+  for (const [, font] of sheet.matchAll(/url\("?(fonts\/[^")]+)/g)) {
+    mkdirSync(dirname(join(out, 'kit', font)), { recursive: true })
+    copyFileSync(join(root, 'kit', font), join(out, 'kit', font))
+    const ofl = join('kit', dirname(font), 'OFL.txt')
+    if (existsSync(join(root, ofl))) copyFileSync(join(root, ofl), join(out, ofl))
+  }
+
+  // AudioWorklet (sound/dsp.ts) is built as a single self-contained ES module for cross-browser addModule compatibility.
+  const stripOnly = {
+    name: 'vw-strip',
+    setup(build) {
+      build.onLoad({ filter: /\.ts$/ }, (a) => ({ contents: stripTypeScriptTypes(readFileSync(a.path, 'utf8')), loader: 'js' }))
+    },
+  }
+  const dspBuilt = await esbuild.build({
+    absWorkingDir: root,
+    entryPoints: ['page/sound/dsp.ts'],
+    bundle: true,
+    splitting: false,
+    format: 'esm',
+    minify: true,
+    target: 'es2022',
+    platform: 'browser',
+    write: false,
+    plugins: [stripOnly],
+  })
+  const dspBytes = Buffer.from(dspBuilt.outputFiles[0].contents)
+  const dspAsset = `dsp-${createHash('sha256').update(dspBytes).digest('hex').slice(0, 8)}.js`
+  put(`assets/${dspAsset}`, dspBytes)
+
+  const entries = {
+    main: 'page/main.ts',
+    worker: 'page/worker.ts',
+    mover: 'page/mover.ts',
+    streetfaces: 'page/streetfaces.ts',
+    'robotaxi-maker': 'page/robotaxi-maker.ts',
+    'far-unpack': 'page/far-unpack.ts',
+    'music-worker': 'page/sound/music/worker.ts',
+    kit: 'kit/src/index.js',
+    'fonts-index': 'kit/src/core/fonts/index.js',
+    'fonts-zakon': 'kit/src/core/fonts/zakon.js',
+    'fonts-zakon-text': 'kit/src/core/fonts/zakon-text.js',
+    'fonts-block': 'kit/src/core/fonts/block.js',
+    'fonts-sign': 'kit/src/core/fonts/sign.js',
+  }
+  const tokenForPath = {
+    'page/core.wasm': `./${coreAsset}`,
+    'kit/voxelmorphism.css': `../kit/${sheetAsset}`,
+    'page/sound/dsp.ts': `./${dspAsset}`,
+    ...Object.fromEntries(Object.entries(entries).map(([key, src]) => [src, `__VW_ASSET_${key}__`])),
+  }
+  const rewritePlugin = {
+    name: 'vw-strip-and-urls',
+    setup(build) {
+      build.onLoad({ filter: /\.(ts|js|mjs)$/ }, (a) => {
+        const raw = readFileSync(a.path, 'utf8')
+        let text = a.path.endsWith('.ts') ? stripTypeScriptTypes(raw) : raw
+        const fromDir = dirname(a.path)
+        const relSelf = relative(root, a.path).split(sep).join('/')
+        // Rewrite explicit `new URL('<relative>', import.meta.url)` asset/worker/kit references.
+        text = text.replace(/(new URL\(\s*['"`])(\.{1,2}\/[^'"`?$]+?\.(?:ts|js|mjs|wasm|css))(?=['"`$])/g, (match, lead, relPath) => {
+          const resolved = relative(root, resolve(fromDir, relPath)).split(sep).join('/')
+          const mapped = tokenForPath[resolved]
+          return mapped ? `${lead}${mapped}` : match
+        })
+        // Rewrite typeface.ts dynamic font glyph table addresses.
+        if (relSelf === 'page/typeface.ts') {
+          text = text.replace(/(at:\s*['"])(\.\.\/kit\/src\/core\/fonts\/[^'"]+\.js)(['"])/g, (match, lead, relPath, tail) => {
+            const resolved = relative(root, resolve(fromDir, relPath)).split(sep).join('/')
+            const mapped = tokenForPath[resolved]
+            return mapped ? `${lead}${mapped}${tail}` : match
+          })
+        }
+        return { contents: text, loader: 'js' }
+      })
+    },
+  }
+  const built = await esbuild.build({
+    absWorkingDir: root,
+    entryPoints: entries,
+    outdir: join(out, 'assets'),
+    bundle: true,
+    splitting: true,
+    format: 'esm',
+    minify: true,
+    target: 'es2022',
+    platform: 'browser',
+    external: ['node:*'],
+    metafile: true,
+    entryNames: '[name]-[hash]',
+    chunkNames: 'c-[name]-[hash]',
+    plugins: [rewritePlugin],
+  })
+  const resolvedTargets = {}
+  for (const [outPath, info] of Object.entries(built.metafile.outputs)) {
+    if (!info.entryPoint) continue
+    const entrySrc = info.entryPoint.split(sep).join('/')
+    const key = Object.entries(entries).find(([, src]) => src === entrySrc)?.[0]
+    if (key) resolvedTargets[`__VW_ASSET_${key}__`] = `./${basename(outPath)}`
+  }
+  const assetDir = join(out, 'assets')
+  const jsFiles = () => readdirSync(assetDir).filter((f) => f.endsWith('.js'))
+  for (const file of jsFiles()) {
+    let text = readFileSync(join(assetDir, file), 'utf8')
+    let changed = false
+    for (const [token, target] of Object.entries(resolvedTargets)) {
+      if (text.includes(token)) { text = text.replaceAll(token, target); changed = true }
+    }
+    if (changed) writeFileSync(join(assetDir, file), text)
+  }
+  // Compute deterministic content hashes once across the resolved chunk graph (handles cyclic ESM chunk imports cleanly).
+  const renames = new Map()
+  for (const file of jsFiles()) {
+    const m = /^(.+)-([A-Z0-9]{8})\.js$/.exec(file)
+    if (!m) continue
+    const nextHash = createHash('sha256').update(readFileSync(join(assetDir, file))).digest('hex').slice(0, 8)
+    const nextFile = `${m[1]}-${nextHash}.js`
+    if (nextFile !== file) renames.set(file, nextFile)
+  }
+  for (const [oldName, newName] of renames) renameSync(join(assetDir, oldName), join(assetDir, newName))
+  let mainFile = resolvedTargets.__VW_ASSET_main__.replace(/^\.\//, '')
+  if (renames.has(mainFile)) mainFile = renames.get(mainFile)
+  for (const file of jsFiles()) {
+    let text = readFileSync(join(assetDir, file), 'utf8')
+    let changed = false
+    for (const [oldName, newName] of renames) {
+      if (text.includes(oldName)) { text = text.replaceAll(oldName, newName); changed = true }
+    }
+    if (changed) writeFileSync(join(assetDir, file), text)
+  }
+  for (const file of jsFiles()) {
+    if (readFileSync(join(assetDir, file), 'utf8').includes('__VW_ASSET_')) fail(`unresolved asset token in assets/${file}`)
+  }
+  mainScriptHref = `../assets/${mainFile}`
+  bundleCount = jsFiles().length
+} else {
+  cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
+  // ── The realm's controls (page/realm-ui.ts): the Voxelmorphism kit beside the page ──
+  // The page asks for the kit by address, not by import, so the walk above does not reach it: its modules (the .js as
+  // they are, with .ts addresses written .js), the engine's renderer they draw with (blocks/renderer.ts and what it
+  // reaches), its stylesheet, and every font it names: IBM Plex for text, and the kit's own faces (page/typeface.ts picks
+  // which of them sets the legends on the keys and the lettering on the boards).
   const kitTodo = []
   for (const file of files(join(root, 'kit/src')).map((f) => relative(root, f))) {
     const text = readFileSync(join(root, file), 'utf8')
@@ -105,8 +268,6 @@ cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
     for (const [, , , to, ext] of text.matchAll(NAMED)) { const next = relative(root, resolve(root, dirname(path), `${to}.${ext}`)); if (!modules.has(next)) { modules.add(next); kitTodo.push(next) } }
     put(path.replace(/\.ts$/, '.js'), js(text))
   }
-  // The stylesheet as it is, and each font file it names beside it (with Plex's OFL.txt).
-  const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8')
   put('kit/voxelmorphism.css', sheet)
   for (const [, font] of sheet.matchAll(/url\("?(fonts\/[^")]+)/g)) {
     mkdirSync(dirname(join(out, 'kit', font)), { recursive: true })
@@ -127,9 +288,6 @@ if (!page.includes('src="/page/main.ts"')) fail('page/index.html no longer loads
 if (realm.release !== 'current.json') fail('sf/realm.json must name its release pointer: "release": "current.json"')
 const cloneFile = (from, to) => {
   mkdirSync(dirname(to), { recursive: true })
-  if (process.platform === 'linux') {
-    try { linkSync(from, to); return } catch { /* cross-device or existing */ }
-  }
   try { copyFileSync(from, to, fsConstants.COPYFILE_FICLONE) } catch { copyFileSync(from, to) }
 }
 const cloneTree = (from, to) => {
@@ -180,9 +338,10 @@ const farFrom = arg('far-folder', join(VILLAGE, 'sf', 'far', 'release'))
 const farApart = realm.far && !manifest.far && existsSync(join(farFrom, 'far.json'))
 if (farApart) { cpSync(join(farFrom, 'far.json'), join(out, 'sf', 'far.json')); cpSync(join(farFrom, 'far'), join(out, 'sf', 'far'), { recursive: true }) }
 else if (realm.far && !manifest.far) console.log(`  no far model in the release or at ${farFrom}: the realm draws cells all the way`)
-// Landmarks by rule (#450, core/src/heroes.rs): where each stands, read by every core (bay.ts `open`).
+// Landmarks by rule (#450, core/src/heroes.rs): where each stands, embedded in the page record and copied beside tiles.
 mkdirSync(join(out, 'bay'), { recursive: true })
-copyFileSync(join(root, 'sf/heroes.json'), join(out, 'bay/heroes.json'))
+const heroesRaw = readFileSync(join(root, 'sf/heroes.json'), 'utf8')
+writeFileSync(join(out, 'bay/heroes.json'), heroesRaw)
 // The road's paint and rails for the whole city (#450, sf/marks.mjs), from the city run's street graphs (the release
 // holds the pilot's six), drawn by the march (page/marks.ts). Without them every street but the pilot's kept the bake's
 // 50 cm blocks of paint, so a build without them fails.
@@ -190,10 +349,96 @@ const GRAPHS = arg('graphs', join(VILLAGE, 'bay', 'sf-450-city', 'packs', 'graph
 if (!existsSync(GRAPHS)) fail(`no street graphs for the road's marks at ${GRAPHS} (--graphs <the city run's packs/graph>)`)
 const marksMade = marksIn(GRAPHS), marks = marksBytes(marksMade)
 writeFileSync(join(out, 'bay/marks.bin'), marks)
-// The squares they cover alone, for every core at once (page/bay.ts); the marks come after the first picture.
-writeFileSync(join(out, 'bay/marks-squares.bin'), squaresBytes(marksMade))
+// The squares they cover alone, embedded in the page record (page/bay.ts) and written beside tiles; marks come later.
+const squaresBin = squaresBytes(marksMade)
+writeFileSync(join(out, 'bay/marks-squares.bin'), squaresBin)
+realm.bay = { heroes: JSON.parse(heroesRaw), marksSquares: Buffer.from(squaresBin).toString('base64') }
 console.log(`  road marks: ${said(marks)}`)
-const mapMade = buildMap({ releaseDir: join(out, 'sf', dirname(pointer.manifest)), graphDir: GRAPHS })
+
+// ── Release packs (#82): bundle tiny release objects into VXPK packs under releases/<pin>/packs/ without touching manifest.json ──
+if (!noPacks) {
+  const relDir = join(out, 'sf', dirname(pointer.manifest))
+  const packsDir = join(relDir, 'packs')
+  const makePack = (entries) => {
+    const dir = {}
+    let at = 0
+    for (const [name, bytes] of entries) { dir[name] = [at, bytes.length]; at += bytes.length }
+    const head = Buffer.from(JSON.stringify(dir)), lead = Buffer.alloc(8)
+    lead.write('VXPK', 0, 'latin1'); lead.writeUInt32LE(head.length, 4)
+    return Buffer.concat([lead, head, ...entries.map(([, b]) => b)])
+  }
+  const writePack = (name, paths) => {
+    const entries = [...paths].sort().map((p) => [p, readFileSync(join(relDir, p))])
+    mkdirSync(packsDir, { recursive: true })
+    writeFileSync(join(packsDir, name), makePack(entries))
+    return entries.length
+  }
+  const packsMeta = { dir: 'packs/' }
+  let packedFiles = 0, packCount = 0
+  // 1. Landing cut: all landing .far tiles in one pack.
+  const landingPaths = Object.values(manifest.far?.landing?.tiles ?? {}).map((r) => r.path)
+  if (landingPaths.length) {
+    packedFiles += writePack('landing.pack', landingPaths); packCount++
+    packsMeta.landing = 'packs/landing.pack'
+  }
+  // 2. Band-0 far tiles: 2 km squares (4x4 tiles of 500 m).
+  const far0Sets = new Map()
+  for (const [key, recs] of Object.entries(manifest.far?.tiles ?? {})) {
+    if (!recs?.[0]) continue
+    const [x, z] = key.split('_').map(Number)
+    const name = `far0-${Math.floor(x / 4)}_${Math.floor(z / 4)}.pack`
+    if (!far0Sets.has(name)) far0Sets.set(name, [])
+    far0Sets.get(name).push(recs[0].path)
+  }
+  if (far0Sets.size) {
+    for (const [name, paths] of far0Sets) { packedFiles += writePack(name, paths); packCount++ }
+    packsMeta.far0 = 4
+  }
+  // 3. Cars: index + all vehicle JSONs in one pack.
+  if (manifest.cars?.index && manifest.cars?.objects && !streetManifest) {
+    const carPaths = [manifest.cars.index.path, ...Object.values(manifest.cars.objects).map((r) => r.path)]
+    packedFiles += writePack('cars.pack', carPaths); packCount++
+    packsMeta.cars = 'packs/cars.pack'
+  }
+  // 4. Street life: index + transit in life-meta.pack, and squares in 4 km UTM packs.
+  if (manifest.life?.index && manifest.life?.objects && !streetManifest) {
+    const metaPaths = [manifest.life.index.path]
+    const lifeSets = new Map()
+    for (const [key, rec] of Object.entries(manifest.life.objects)) {
+      if (key === 'transit') { metaPaths.push(rec.path); continue }
+      const [e, n] = key.split('_').map(Number)
+      if (!Number.isFinite(e) || !Number.isFinite(n)) continue
+      const name = `life-${Math.floor(e / 4)}_${Math.floor(n / 4)}.pack`
+      if (!lifeSets.has(name)) lifeSets.set(name, [])
+      lifeSets.get(name).push(rec.path)
+    }
+    packedFiles += writePack('life-meta.pack', metaPaths); packCount++
+    packsMeta.lifeMeta = 'packs/life-meta.pack'
+    for (const [name, paths] of lifeSets) { packedFiles += writePack(name, paths); packCount++ }
+    if (lifeSets.size) packsMeta.life = 4
+  }
+  // 5. Street names: 4 km UTM packs.
+  const nameSets = new Map()
+  for (const [sq, rec] of Object.entries(manifest.names ?? {})) {
+    const [e, n] = sq.split('_').map(Number)
+    if (!Number.isFinite(e) || !Number.isFinite(n)) continue
+    const name = `names-${Math.floor(e / 4)}_${Math.floor(n / 4)}.pack`
+    if (!nameSets.has(name)) nameSets.set(name, [])
+    nameSets.get(name).push(rec.path)
+  }
+  if (nameSets.size) {
+    for (const [name, paths] of nameSets) { packedFiles += writePack(name, paths); packCount++ }
+    packsMeta.names = 4
+  }
+  if (packCount > 0) {
+    realm.packs = packsMeta
+    console.log(`  release packs: ${packedFiles} objects into ${packCount} packs`)
+  }
+}
+const placesMade = buildPlaces()
+writeFileSync(join(out, 'bay/places.json'), placesMade.bytes)
+console.log(`  neighborhoods: ${placesMade.summary}`)
+const mapMade = buildMap({ releaseDir: join(out, 'sf', dirname(pointer.manifest)), graphDir: GRAPHS, extraPlaces: placesMade.mapPlaces })
 writeFileSync(join(out, 'bay/map.bin'), mapMade.bytes)
 console.log(`  3D map & GPS: ${mapMade.summary}`)
 // The loader (page/loading.html): the realm's name and its first view under fog, there from the first byte (just after
@@ -214,7 +459,7 @@ const pictures = shots && Object.fromEntries(['wide', 'upright'].map((k) => {
 const loader = readFileSync(join(root, 'page/loading.html'), 'utf8').replaceAll('{{name}}', () => escaped).replace('/*pictures*/null', () => JSON.stringify(pictures))
 // The engine's page with the realm's record in it (as the release made it), and its script beside it.
 if (!page.includes('<body>\n<canvas></canvas>\n')) fail('page/index.html no longer opens its body with its canvas: change where the loader goes')
-put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,"><link rel="modulepreload" href="../page/main.js">`).replace('<body>\n<canvas></canvas>\n', () => `<body${eggOverlay ? ' data-egg-media' : ''}>\n<canvas></canvas>\n${loader}\n`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
+put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,"><link rel="modulepreload" href="${mainScriptHref}">`).replace('<body>\n<canvas></canvas>\n', () => `<body${eggOverlay ? ' data-egg-media' : ''}>\n<canvas></canvas>\n${loader}\n`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="${mainScriptHref}">`))
 
 // Only the private build installs media and gives its clips lockers.
 const MEMES = eggOverlay ? memes() : []
@@ -265,7 +510,7 @@ put('sf/CREDITS.txt', [
   ...(farApart ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
   ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos and music (sf/eggs/), used as parody on the owner\'s ruling, for these eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira; music from the soundtrack of "The Matrix" (1999, the Wachowskis, Warner Bros.), as WMG / The Orchard Music. The meme clips, each as its uploader posted it on YouTube, its rights its makers\': ' + MEMES.filter((m) => EGG_VIDEOS.includes(`${m.id}.mp4`)).map((m) => `"${m.source}" (${m.by}, youtu.be/${m.youtube})`).join('; ') + '.'] : []),
   '',
-  'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0.',
+  'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0. Neighborhood places & plazas: Overture Maps Foundation (CDLA-Permissive-2.0), OpenStreetMap contributors (ODbL 1.0), and DataSF Recreation & Parks (PDDL 1.0).',
   '',
 ].join('\n'))
 
@@ -356,7 +601,7 @@ for (const { file, size, cached, media } of entries) {
 }
 
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`
-console.log(`${relative(process.cwd(), out)}: ${modules.size} modules, ${mb(raw)} in all, ${mb(br)} as Brotli (${compressed} compressed now)`)
+console.log(`${relative(process.cwd(), out)}: ${esbuild ? `${bundleCount} bundled chunks (from ${modules.size} modules)` : `${modules.size} modules`}, ${mb(raw)} in all, ${mb(br)} as Brotli (${compressed} compressed now)`)
 console.log(`  page, code and kept things: ${mb(code)} (${mb(codeBr)} brotli)`)
 console.log(`  release ${pointer.release.slice(0, 12)}${pointer.release === pinned.release ? ' (the pin)' : ''}: ${tiles} tiles, ${sea} sea keys, ${Object.keys(manifest.names).length} names, ${Object.keys(manifest.graph ?? {}).length} graphs, ${Object.keys(manifest.far?.tiles ?? {}).length} far keys; ${mb(raw - code)} (${mb(br - codeBr)} brotli)`)
 console.log(`  open sf/index.html from any host of plain files (node player/serve.mjs --dir ${relative(root, out)})`)

@@ -369,51 +369,44 @@ const fromFirst = async () => {
     await bannerIn()
     const began = await firstLook(page)
     const boards = await boardBoxes(page, touch)
-    for (const id of ['banner', 'pyramid', 'crown']) {
+    for (const id of ['banner']) {
       const s = began.spots[id]
       if (!s) { check(false, `${kind}: ${id} is on the picture`); continue }
       const nearest = boards.map((b) => ({ id: b.id, gap: apart(boxOf(s), b) })).sort((a, b) => a.gap - b.gap)[0]
       r.spots[id] = { ...s, nearest }
       check(s.x > 0 && s.x < viewport.width && s.y > 0 && s.y < viewport.height && (!touch || (s.w >= 44 && s.h >= 44)) && nearest.gap > 0, `${kind}: the ${id} at ${s.x}, ${s.y}, its target ${s.w} x ${s.h} px${touch ? ' (asked: 44 at least)' : ''}, ${nearest.gap} px from the nearest board's (${nearest.id})`)
     }
-    check(began.spots.lamps && !began.engaged && began.called, `${kind}: the lamps are lit, the visitor not in, the banner's plane called`)
-    // (The picture with the lamps steady, as under reduced motion: blinking, a picture may catch them between flashes.)
-    await page.emulateMedia({ reducedMotion: 'reduce' })
+    const noLamps = await page.evaluate(() => !document.getElementById('egg-lamps'))
+    check(noLamps && !began.engaged && began.called, `${kind}: no blinking tower lamps, the visitor not in, the banner's plane called`)
     await page.screenshot({ path: join(dir, `${kind}-first.png`) })
-    await page.emulateMedia({ reducedMotion: 'no-preference' })
     if (kind === 'landscape') {
-      // Turned wide, a video's player stands clear of the spots and the boards too.
-      const s = began.spots.pyramid
-      await press(s.x, s.y)
+      // Turned wide, a video's player stands clear of the banner and the boards too.
+      await page.evaluate(() => globalThis.engine.eggs.say('bad apple'))
       await page.waitForFunction(() => globalThis.engine.eggs.state.playing, null, { timeout: 30_000 }).catch(() => null)
       await page.waitForTimeout(1500)
       const p = await page.evaluate(() => { const p = document.querySelector('.egg-player').getBoundingClientRect(), s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
-        return { box: [p.left, p.top, p.right, p.bottom].map(Math.round), under: [...['banner', 'pyramid', 'crown'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)], running: globalThis.engine.eggs.state.running } })
-      check(p.running === 'apple' && !p.under.length, `${kind}: the Pyramid's lamp tapped starts Bad Apple!!, and its player at ${p.box.join(' ')} is over ${p.under.join(', ') || 'no spot and no board'}`)
+        return { box: [p.left, p.top, p.right, p.bottom].map(Math.round), under: [...['banner'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)], running: globalThis.engine.eggs.state.running } })
+      check(p.running === 'apple' && !p.under.length, `${kind}: Bad Apple!! plays, and its player at ${p.box.join(' ')} is over ${p.under.join(', ') || 'no spot and no board'}`)
       const clear = await clearOfVideo(page)
       check(clear.ok, `${kind}: Bad Apple!!: ${saysClear(clear)}`)
-      await page.screenshot({ path: join(dir, `${kind}-pyramid-apple.png`) })
-      const t = (await firstLook(page)).spots.pyramid
-      await press(t.x, t.y)
+      await page.screenshot({ path: join(dir, `${kind}-apple.png`) })
+      await page.evaluate(() => globalThis.engine.eggs.say('stop'))
       await page.waitForTimeout(500)
-      check((await firstLook(page)).eggs.running === null, `${kind}: the lamp tapped again ends it`)
+      check((await firstLook(page)).eggs.running === null, `${kind}: stop ends it`)
       await page.close()
       continue
     }
     if (!touch) {
-      // On a desk the pointer over a spot is a hand, and a lamp under it brightens; over a board, the board's.
-      const hovered = []
-      for (const id of ['pyramid', 'crown', 'banner']) {
-        if (id === 'banner') await bannerIn()
-        const s = (await firstLook(page)).spots[id]
-        await page.mouse.move(s.x, s.y)
-        await page.waitForTimeout(100)
-        hovered.push(await page.evaluate((id) => ({ id, cursor: document.querySelector('canvas').style.cursor, hot: !!document.querySelector('#egg-lamps i.hot'), wave: globalThis.engine.boards.plane.cloth.wave }), id))
-      }
+      // On a desk the pointer over the banner is a hand and the cloth waves harder; away, the default.
+      await bannerIn()
+      const s = (await firstLook(page)).spots.banner
+      await page.mouse.move(s.x, s.y)
+      await page.waitForTimeout(100)
+      const hovered = await page.evaluate(() => ({ cursor: document.querySelector('canvas').style.cursor, wave: globalThis.engine.boards.plane.cloth.wave }))
       await page.mouse.move(viewport.width - 40, viewport.height - 40)
       await page.waitForTimeout(100)
-      const off = await page.evaluate(() => ({ cursor: document.querySelector('canvas').style.cursor, hot: !!document.querySelector('#egg-lamps i.hot'), wave: globalThis.engine.boards.plane.cloth.wave }))
-      check(hovered.every((h) => h.cursor === 'pointer' && (h.id === 'banner' ? h.wave > 5 : h.hot)) && off.cursor !== 'pointer' && !off.hot && off.wave === 5, `${kind}: the pointer over each spot is a hand and it answers (a lamp brightens, the banner waves): ${hovered.map((h) => `${h.id} ${h.cursor} ${h.id === 'banner' ? `wave ${h.wave}` : `hot ${h.hot}`}`).join('; ')}; away, ${off.cursor || 'the default'}`)
+      const off = await page.evaluate(() => ({ cursor: document.querySelector('canvas').style.cursor, wave: globalThis.engine.boards.plane.cloth.wave }))
+      check(hovered.cursor === 'pointer' && hovered.wave > 5 && off.cursor !== 'pointer' && off.wave === 5, `${kind}: the pointer over the banner is a hand and it waves (${hovered.cursor}, wave ${hovered.wave}); away, ${off.cursor || 'the default'} (wave ${off.wave})`)
     }
 
     /** A spot tapped or clicked where it is now; then what the first view is. */
@@ -443,35 +436,6 @@ const fromFirst = async () => {
     l = await firstLook(page)
     stillFirst(l, `the roll ends facing as it began (${round(((l.yaw - began.yaw) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) % (2 * Math.PI - 1e-6), 3)} rad off)`)
     check(Math.abs(Math.sin((l.yaw - began.yaw) / 2)) < 0.01 && l.spin === 0, `${kind}: the eye is turned round whole`)
-
-    // The crown: the Matrix, and again out of it.
-    l = await hit('crown')
-    const matrix = await until(() => globalThis.engine.eggs.state.running === 'matrix', null)
-    check(matrix, `${kind}: the Salesforce crown's lamp starts the Matrix`)
-    await still(page)
-    l = await firstLook(page)
-    stillFirst(l, `the Matrix is on (banner "${l.banner}")`)
-    await page.screenshot({ path: join(dir, `${kind}-crown-matrix.png`) })
-    l = await hit('crown')
-    check(l && l.eggs.running === null && l.called, `${kind}: the crown again ends it, and the plane is still called (${l?.called})`)
-    await still(page)
-
-    // The Pyramid: Bad Apple!!, its sound from the tap; the lamp again, the lights back.
-    await page.evaluate(() => { globalThis.playedIn = [] })
-    l = await hit('pyramid')
-    const apple = await until(() => globalThis.engine.eggs.state.running === 'apple' && globalThis.engine.eggs.state.playing, null)
-    await page.waitForTimeout(1500)
-    l = await firstLook(page)
-    const inClick = await page.evaluate(() => globalThis.playedIn)
-    check(apple && !l.eggs.muted && l.eggs.sound > 0 && inClick[0] === 'click', `${kind}: the Pyramid's lamp starts Bad Apple!! with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${inClick.join(', ')}; muted ${l.eggs.muted}, ${l.eggs.sound} bytes of sound decoded)`)
-    stillFirst(l, 'Bad Apple!! is on')
-    const lampFree = await page.evaluate(() => { const s = globalThis.engine.eggs.first.spots.pyramid, top = s && document.elementFromPoint(s.x, s.y); return top?.tagName === 'CANVAS' })
-    check(lampFree, `${kind}: nothing lies over the Pyramid's lamp while it plays (the player stands clear of it)`)
-    await still(page)
-    await page.screenshot({ path: join(dir, `${kind}-pyramid-apple.png`) })
-    l = await hit('pyramid')
-    check(l && l.eggs.running === null && l.called, `${kind}: the Pyramid's lamp again ends it, the plane still in the picture`)
-    await still(page)
 
     // The banner's lines, each in its turn: tapped, its egg; and the banner (or the player's Stop) ends it.
     const wants = { 'Wake up, Neo…': 'matrix', 'Never gonna…': 'rickroll', 'Barrel roll!': 'roll', 'Bad Apple!!': 'apple' }
@@ -505,7 +469,7 @@ const fromFirst = async () => {
           const c = document.querySelector('#first .credits').getBoundingClientRect(), p = document.querySelector('.egg-player').getBoundingClientRect()
           // (Nor over a spot that ends it, or a board.)
           const s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
-          const under = [...['banner', 'pyramid', 'crown'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)]
+          const under = [...['banner'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)]
           return { keys, under, shown: !document.querySelector('.egg-player').hidden, box: [p.left, p.top, p.right, p.bottom].map(Math.round), credits: [c.left, c.top, c.right, c.bottom].map(Math.round), meets: [c, ...[document.querySelector('#realm > .fold')].filter((g) => g?.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((g) => g.getBoundingClientRect())].some((c) => p.left < c.right && p.right > c.left && p.top < c.bottom && p.bottom > c.top), ...globalThis.engine.eggs.state }
         })
         r.eggs[egg].player = player
@@ -515,7 +479,9 @@ const fromFirst = async () => {
         const played = await page.evaluate(() => globalThis.playedIn)
         check(player.playing && !player.muted && player.sound > 0 && played[0] === 'click', `${kind}: ${egg} plays with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${played.join(', ')}; muted ${player.muted}, ${player.sound} bytes of sound decoded; Chrome, not Safari)`)
         await page.screenshot({ path: join(dir, `${kind}-${egg === 'matrix' ? 'line-matrix-on' : egg}.png`) })
-        if (egg === 'apple') {
+        if (egg === 'apple' || egg === 'rickroll') {
+          const planeAbove = await page.evaluate(() => { const e = globalThis.engine, p = e.boards?.plane, top = e.march.screen.rect[1] * innerHeight; return !p || (!p.cloth.hidden && p.above !== null && (!p.box || p.box.y1 <= top + 6)) })
+          check(planeAbove, `${kind}: while ${egg}'s sky drone swarm is up, the tow plane flies above the drones`)
           const stop = player.keys.find((k) => k.text === 'Stop')
           await press(stop.x, stop.y)
           await page.waitForTimeout(500)
@@ -523,6 +489,8 @@ const fromFirst = async () => {
           check(l.eggs.running === null, `${kind}: Stop on the player ${touch ? 'tapped' : 'clicked'} ends ${egg}`)
           stillFirst(l, `after ${egg}`)
           await still(page)
+          const planeBack = await page.evaluate(() => { const p = globalThis.engine.boards?.plane; return !p || (p.above === null && !p.cloth.hidden) })
+          check(planeBack, `${kind}: after ${egg} stops and drones land, the tow plane returns to its normal round`)
           continue
         }
       }
@@ -532,18 +500,8 @@ const fromFirst = async () => {
       await still(page)
     }
 
-    // EXPLORE asked once, then the crown: the ask is put back and the Matrix starts; the crown again ends it.
-    const w = await page.evaluate(() => globalThis.engine.boards.where('explore'))
-    await press(w.x, w.y)
-    await page.waitForTimeout(400)
-    const asked = await page.evaluate(() => globalThis.engine.explore.state)
-    l = await hit('crown')
-    const calmed = await until(() => globalThis.engine.eggs.state.running === 'matrix', null)
-    l = await firstLook(page)
-    check(asked === 'armed' && calmed && l.way === 'idle' && !l.engaged, `${kind}: EXPLORE asked once (${asked}), then the crown: the ask is put back (${l.way}) and the Matrix starts${touch ? '' : ' (on a desk the pointer going to the crown puts it back first, explore.ts away)'}`)
-    await hit('crown')
-    await still(page)
     // EXPLORE asked once and let go of, then the site's name while its eye leans back: the roll waits for it, and the eye comes round whole.
+    const w = await page.evaluate(() => globalThis.engine.boards.where('explore'))
     // (From the end of a line, so the name is up for its whole 10 s: from wherever the turn of lines was, a line came
     // up between the ask and the click, and the click started its egg, #450.)
     // (A line its plane has to fly in for is seen only once it is in: it can be up for more than named()'s 20 s.)
@@ -565,27 +523,25 @@ const fromFirst = async () => {
     const net = leant + from - asking
     check(Math.abs(net - 2 * Math.PI) < 0.05 && l.way === 'idle', `${kind}: a barrel roll asked while the eye leans back from EXPLORE turns it round once all the same (${round(net, 3)} rad from where the ask found it)${Math.abs(net - 2 * Math.PI) < 0.05 ? '' : `: ${JSON.stringify({ line: s.line ?? null, eggs: l.eggs, way: l.way, banner: l.banner })}`}`)
 
-    // Sound held back by the browser: the Pyramid's lamp plays it muted, and Unmute on the player, in the first view, is the tap that brings it.
-    await page.evaluate(() => { globalThis.refuseSound = true })
-    await hit('pyramid')
+    // Sound held back by the browser: Bad Apple!! plays muted, and Unmute on the player, in the first view, is the tap that brings it.
+    await page.evaluate(() => { globalThis.refuseSound = true; globalThis.engine.eggs.say('bad apple') })
     const muted = await until(() => globalThis.engine.eggs.state.blocked && globalThis.engine.eggs.state.playing, null)
     const unmute = await page.evaluate(() => { const b = [...document.querySelectorAll('.egg-player button')].find((k) => k.textContent === 'Unmute'), q = b?.getBoundingClientRect(); return q && { x: q.left + q.width / 2, y: q.top + q.height / 2, w: Math.round(q.width), h: Math.round(q.height), onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2) === b } })
     await page.evaluate(() => { globalThis.refuseSound = false })
     if (unmute) await press(unmute.x, unmute.y)
     const sounded = await until(() => { const s = globalThis.engine.eggs.state; return !s.muted && s.playing && s.sound > 0 }, null, 10_000)
-    check(muted && unmute?.onTop && (!touch || unmute.h >= 44) && sounded, `${kind}: with the sound held back the lamp plays Bad Apple!! muted, and Unmute (${unmute ? `${unmute.w} x ${unmute.h}, on top ${unmute.onTop}` : 'not shown'}) ${touch ? 'tapped' : 'clicked'} in the first view brings the sound`)
+    check(muted && unmute?.onTop && (!touch || unmute.h >= 44) && sounded, `${kind}: with the sound held back Bad Apple!! plays muted, and Unmute (${unmute ? `${unmute.w} x ${unmute.h}, on top ${unmute.onTop}` : 'not shown'}) ${touch ? 'tapped' : 'clicked'} in the first view brings the sound`)
     await page.screenshot({ path: join(dir, `${kind}-unmuted.png`) })
 
-    // And the way in, after it all, with the video still playing: EXPLORE asked twice goes, and the player is then where the realm lays it, clear of its controls.
+    // And the way in, after it all, with the video still playing: EXPLORE opens the map picker and Start goes in.
     await press(w.x, w.y)
-    await page.waitForTimeout(450)
-    const armed = await page.evaluate(() => globalThis.engine.explore.state)
-    await press(w.x, w.y)
+    const picked = await until(() => globalThis.engine.explore.state === 'picking' && globalThis.engine.map?.picking, null, 5000)
+    await page.locator('#world-map .wm-visit').click()
     const went = await until(() => ['going', 'in'].includes(globalThis.engine.explore.state), null, 5000)
-    check(armed === 'armed' && went, `${kind}: after the eggs EXPLORE is asked once (${armed}) and again goes in`)
+    check(picked && went, `${kind}: after the eggs EXPLORE opens the map picker (${picked}) and Start goes in`)
     await page.waitForTimeout(800)
     l = await firstLook(page)
-    check(!l.spots.lamps && !l.spots.still, `${kind}: on the way in the lamps are out and the first view's spots are off`)
+    check(!l.spots.still, `${kind}: on the way in the first view's spots are off`)
     const playerIn = () => page.evaluate(() => {
       const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), stop = p.querySelector('.stop').getBoundingClientRect()
       // (The thumbs' keys, the tools, the keys in the top corners (credits, settings, Back) and the street's name.)
@@ -628,8 +584,6 @@ const fromFirst = async () => {
     await page.waitForTimeout(1000)
     await tapAt('banner'); await page.waitForTimeout(6000)
     await tapAt('banner'); await page.waitForTimeout(4000)
-    await tapAt('pyramid'); await page.waitForTimeout(7000)
-    await tapAt('pyramid'); await page.waitForTimeout(4000)
     const video = page.video()
     await context.close()
     const out = join(clips, 'first-phone.mp4')
@@ -855,17 +809,17 @@ try {
   check(s.running === null && !s.playing, 'Esc ends it')
   await still(page)
 
-  // ── The Rickroll, with sound, and its title on the banner ──
+  // ── The Rickroll, with sound, and the tow plane flying above its sky drones ──
   console.log('\nthe Rickroll')
   await sayTo(page, 'never gonna give you up')
   await started(page, 'rickroll')
   await begun()
-  seen = await bannerSeen(page)
-  results.rickroll = { banner: seen }
-  check(seen.seen, `the banner's plane brings "${(await state(page)).signs.banner}" into the picture: ${JSON.stringify(seen)}`)
   await page.waitForTimeout(2500)
   s = await state(page)
-  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0 && s.dark === true, `Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"; the boards' light off (${s.dark})`)
+  const planeClear = await page.evaluate(() => { const e = globalThis.engine, p = e.boards?.plane, droneTop = e.march.screen.rect[1] * innerHeight; return p ? { above: p.above, clothHidden: p.cloth.hidden, box: p.box, droneTop: Math.round(droneTop) } : null })
+  results.rickroll = { planeClear }
+  check(planeClear && planeClear.above !== null && !planeClear.clothHidden && (!planeClear.box || planeClear.box.y1 <= planeClear.droneTop + 6), `while Rickroll's sky drone swarm is up, the tow plane flies above the drones: ${JSON.stringify(planeClear)}`)
+  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0 && s.dark === true, `Rick is on every window, with his sound (${s.sound} bytes decoded); the boards' light off (${s.dark})`)
   await still(page)
   await page.evaluate(() => globalThis.engine.eggs.hold(20))
   await page.waitForTimeout(1200)
@@ -877,6 +831,8 @@ try {
   await page.waitForTimeout(300)
   check((await state(page)).running === null, '"stop" ends it')
   await still(page)
+  const planeReturned = await page.evaluate(() => { const p = globalThis.engine.boards?.plane; return !p || (p.above === null && !p.cloth.hidden) })
+  check(planeReturned, 'after Rickroll stops and the sky drones land, the tow plane returns to its normal round')
 
   // ── The memes: each one's file built, each started by a phrase and heard; the shortest played to its end, the sky back; “meme”, any one ──
   console.log('\nthe memes')

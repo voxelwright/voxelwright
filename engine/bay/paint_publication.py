@@ -28,7 +28,7 @@ def stage():
     if squares != coverage["lidar"] or any(s not in state for s in squares):
         return
     # The frozen city runner writes the index atomically once all its tile groups finish.
-    planned = set(plan(squares, coverage["planet"], True))
+    planned = set(plan(squares, coverage["planet"], True, coverage.get("landmarkExtras", ())))
     listed = {
         (l, x, z)
         for kind in ("tiles", "sea")

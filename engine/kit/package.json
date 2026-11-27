@@ -14,5 +14,5 @@
     "./fonts/*": "./fonts/*"
   },
   "files": ["browser", "browser.mjs", "css", "fonts", "voxelmorphism.css", "SPEC.md", "README.md", "NOTICE"],
-  "sideEffects": false
+  "sideEffects": ["./src/looks/*.js", "./src/core/fonts/*.js"]
 }

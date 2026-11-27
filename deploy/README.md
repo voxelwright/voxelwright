@@ -8,9 +8,10 @@ Builds and ships the two Cloudflare Workers. `voxelwright` serves the San Franci
 
 | File | What it holds |
 | --- | --- |
-| `assemble.mjs` | Writes `dist/` (zahynailo.dev: `site/dist` as it is) and `dist-world/` (voxelwright.world: `engine/dist-sf` with the alpha notice, the share card, the favicon, a dark 404 and `_headers` whose CSP hashes the pages' inline scripts). |
+| `assemble.mjs` | Writes `dist/` (zahynailo.dev: `site/dist` as it is) and `dist-world/` (voxelwright.world: `engine/dist-sf` with the alpha notice, the share card, the favicon, the PWA manifest, icons and generated service worker, a dark 404 and `_headers` with immutable caching for content-hashed `/assets/*` and `/kit/voxelmorphism-*.css` and a CSP that hashes the pages' inline scripts). |
+| `manifest.webmanifest`, `sw.js`, `icons/`, `make-icons.mjs` | The PWA manifest (`fullscreen` / `standalone`, shortcuts, `focus-existing` launch handler), Voxelmorphism PNG icons (`192`, `512`, `maskable`, `apple-touch-icon`) and service worker (shell precache, bounded LRU `/releases/*` tile cache with old-release pruning on `/current.json`, `/bay/*` stale-while-revalidate and offline `/weather` fallback). |
 | `notice.mjs`, `alpha.js` | The early-alpha notice that assembly adds to the realm's pages. |
-| `worker.mjs`, `world-worker.mjs`, `encoding.mjs` | The `voxelwright` Worker's code: `/weather`, each release and bay file sent as its stored `.br` copy, and the security headers and CSP both the Worker and `_headers` use. |
+| `worker.mjs`, `world-worker.mjs`, `encoding.mjs` | The `voxelwright` Worker's code: `/weather`, each release (`.bay`, `.far`, `.pack`, JSON) and bay file sent as its stored `.br` copy, and the security headers and CSP both the Worker and `_headers` use. |
 | `og-world.png` | voxelwright.world's share card (1200 × 630), published as `/og.png`. |
 | `cloudflare.config.ts`, `wrangler.config.ts` | Both Workers. `--mode world` is `voxelwright`; the default is `zahynailo`. |
 | `data.mjs`, `data.json` | The realm's data bundle and the release that holds it. |
@@ -35,7 +36,7 @@ npm --prefix deploy run ship
 npm --prefix deploy run ship -- --dry-run      # print the steps only
 ```
 
-It builds the core, the realm, the site and both folders, deploys `voxelwright` then `zahynailo` with `HEAD`'s SHA as the message, and checks what is live. Flags: `--world-only`, `--site-only`, `--egg-media` (build the private egg clips in; the default is procedural eggs), `--public` (procedural eggs even when `VOXELWRIGHT_EGG_MEDIA` is set), `--skip-build`, `--skip-live`, `--allow-dirty`, `--dry-run`. It does not install packages, run tests or fetch the data bundle.
+It builds the core, the realm, the site and both folders, deploys `voxelwright` then `zahynailo` with `HEAD`'s SHA as the message, and checks what is live. Flags: `--world-only`, `--site-only`, `--public` (procedural eggs only), `--skip-build`, `--skip-live`, `--allow-dirty`, `--dry-run`. It does not install packages, run tests or fetch the data bundle.
 
 Or step by step:
 
@@ -70,7 +71,7 @@ cd engine && node sf/loading.mjs
 
 ## Private egg media
 
-The realm's and the landing's video eggs read clips from the folder in `VOXELWRIGHT_EGG_MEDIA`: `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A build without it ships procedural eggs only. `ship` builds procedural eggs unless `--egg-media` (for `~/.village/engine/sf/eggs/media`) or `VOXELWRIGHT_EGG_MEDIA` asks for the clips. The public data bundle never holds the clips.
+The realm's and the landing's video eggs read clips from the folder in `VOXELWRIGHT_EGG_MEDIA`: `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A build without it ships procedural eggs only. `ship` uses `~/.village/engine/sf/eggs/media` when it exists (unless `--public` is passed). Easter eggs stay enabled in production: keep `EGG_OVERLAY_TAG` set on the repository and never disable them. The public data bundle never holds the clips.
 
 CI reads them from a private release. The repository variable `EGG_OVERLAY_TAG` names it (`eggs-overlay-<first 16 hex of the archive's SHA-256>`), `EGG_OVERLAY_REPO` picks the repository (default: this one), and the production secret `EGG_OVERLAY_TOKEN` reads another repository. Leave the tag unset for procedural eggs. When a clip changes, rebuild the archive and upload it:
 

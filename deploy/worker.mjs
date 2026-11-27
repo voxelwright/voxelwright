@@ -16,7 +16,7 @@
 // assets, with the page's inline scripts' hashes in the CSP, and every answer below carries them too.
 import { takesBrotli } from './encoding.mjs'
 
-const TYPES = { '.json': 'application/json', '.bin': 'application/octet-stream', '.bay': 'application/octet-stream', '.far': 'application/octet-stream', '.txt': 'text/plain; charset=utf-8' }
+const TYPES = { '.json': 'application/json', '.bin': 'application/octet-stream', '.bay': 'application/octet-stream', '.far': 'application/octet-stream', '.pack': 'application/octet-stream', '.txt': 'text/plain; charset=utf-8' }
 const extension = (path) => (path.includes('.') ? path.slice(path.lastIndexOf('.')) : '')
 
 export const WEATHER = 'https://api.weather.gov/stations/KSFO/observations?limit=8'
@@ -39,6 +39,7 @@ export function worldCsp(hashes = []) {
     "connect-src 'self' https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://openrouter.ai https: wss:",
     "object-src 'none'",
     "base-uri 'self'",
+    "manifest-src 'self'",
     "frame-ancestors 'self' https://zahynailo.dev",
   ].join('; ')
 }

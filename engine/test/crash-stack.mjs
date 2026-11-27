@@ -190,7 +190,14 @@ if (!parts.includes('sf')) {
   // Another checkout's page and core over the built folder's, each module stripped as sf/build.mjs strips it.
   const from = resolve(arg('page', here)), NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1,2}\/[^'"`?$]+?)\.(ts|mjs)\b/g
   const extra = (req, res) => {
-    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname), m = /^\/(page|make|blocks)\/([\w./-]+)\.(js|wasm)$/.exec(path)
+    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname)
+    if (path === '/sf/index.html') {
+      const html = readFileSync(join(dist, 'sf/index.html'), 'utf8').replace(/\.\.\/assets\/main-[^"]+\.js/g, '../page/main.js')
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+      res.end(html)
+      return true
+    }
+    const m = /^\/(page|make|blocks)\/([\w./-]+)\.(js|wasm)$/.exec(path)
     if (!m || m[2].includes('..')) return false
     const source = m[3] === 'wasm' ? join(from, m[1], `${m[2]}.wasm`) : [join(from, m[1], `${m[2]}.ts`), join(from, m[1], `${m[2]}.mjs`)].find((f) => existsSync(f) && statSync(f).isFile())
     if (!source || !existsSync(source)) return false
@@ -217,9 +224,18 @@ if (!parts.includes('sf')) {
       await page.evaluate(() => globalThis.engine.first?.engage())
       await settle()
     }
-    // Each kept vehicle's half length and width by its name, from the library the page itself reads.
+    // Each kept vehicle's half length and width by its base and variant-painted names (#74), from the library the page itself reads.
     const realm = JSON.parse(readFileSync(join(dist, 'sf/index.html'), 'utf8').match(/<script type="application\/json" id="realm">([^<]+)<\/script>/)[1])
-    const sizes = Object.fromEntries(JSON.parse(readFileSync(join(dist, 'sf', realm.street.cars, 'index.json'), 'utf8')).cars.map((c) => [c.name, (c.front ?? 0) < 2 ? [c.size[0] / 2, c.size[2] / 2] : [c.size[2] / 2, c.size[0] / 2]]))
+    const COLOUR_PREFIX = /^(grey|gray|blue|red|white|black|silver|green|beige|navy|yellow|orange|brown|gold|tan)\s+/i
+    const sizes = {}
+    for (const c of JSON.parse(readFileSync(join(dist, 'sf', realm.street.cars, 'index.json'), 'utf8')).cars) {
+      const dim = (c.front ?? 0) < 2 ? [c.size[0] / 2, c.size[2] / 2] : [c.size[2] / 2, c.size[0] / 2]
+      sizes[c.name] = dim
+      for (const v of c.variants ?? []) {
+        const vn = v === 'taxi' ? 'yellow taxi' : COLOUR_PREFIX.test(c.name) ? c.name.replace(COLOUR_PREFIX, `${v} `) : `${v} ${c.name}`
+        sizes[vn] ??= dim
+      }
+    }
     await page.evaluate((sizes) => {
       const e = globalThis.engine
       /** Every vehicle near a place as an outline: the solver's (alive), by where they are, and the street's drawn ones by their kind. */

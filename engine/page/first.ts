@@ -33,8 +33,8 @@ const STYLE = /* css */ `
    opens (realm-ui.ts), with the weather, the hour and the graphics (#506): what is for playing, saying and putting the
    world back (its foot) is the realm's. */
 html.first :is(#hud, #aim, #where, #over, #realm > :not(.fold, .sky)) { visibility: hidden; opacity: 0; }
-/* (Over the first view's own .part display: contents on a phone on its side, below.) */
-html.first #realm .sky .part.acts { display: none !important; }
+/* (Over the first view's own .part display: contents on a phone on its side, below: only Credits shows in the first view.) */
+html.first #realm .sky .part.acts .foot > :not(.sky-credits-link) { display: none !important; }
 /* Open in the first view, the panel leaves the EXPLORE board, its tower and BLOG in sight (#506, measured by
    test/sf-sky.mjs). On a desk it hangs in the top right corner as in the realm, right of the tower. Held upright, a
    phone has EXPLORE and its tower down the last eighth of its picture and BLOG low in the middle: the panel hangs
@@ -61,8 +61,10 @@ html.first #realm .sky .part.acts { display: none !important; }
   html.first #realm.folds .sky header.g { grid-column: 2; grid-row: 3; }
   html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; grid-auto-flow: row; grid-template-columns: 0.85fr 1.15fr; }
   html.first #realm.folds .sky .graphics > label:last-child { grid-column: 1 / -1; }
-  /* (The resolution's rows would take the panel down over BLOG: in the first view they wait for the realm's own panel.) */
-  html.first #realm.folds .sky .part.res > * { display: none; }
+  /* (The resolution's and window glow's rows would take the panel down over BLOG on a short landscape phone: in the first view they wait for portrait or the realm's own panel.) */
+  html.first #realm.folds .sky :is(.part.res > *, .win-fx) { display: none; }
+  html.first #realm.folds .sky .part.acts .vx-groove { display: none; }
+  html.first #realm.folds .sky .part.acts .foot { grid-column: 1 / -1; }
 }
 /* A short screen at a desk (under 800 px: 1280 x 720, a laptop window of 1366 x 650): with the sky's keys the panel runs
    off its foot. As on a phone on its side, the resolution's rows wait for the realm's own panel (#524). */
@@ -89,20 +91,25 @@ html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 #realm :is(.tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 #first { position: fixed; inset: 0; z-index: 6; pointer-events: none; font: 400 14px/1.4 var(--vx-font, system-ui, sans-serif); }
 #first > * { pointer-events: auto; }
-/* The corner the credits key stands in, and beside it the count of the windows opened (eggs-lockers.ts). */
+/* The corner for the first view's lockers count (eggs-lockers.ts); Credits lives in Settings. */
 #first .corner { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; pointer-events: none; }
 #first .corner > * { pointer-events: auto; }
-#first .credits { --vx: 3px; --vx-key-size: var(--vx-key-small); opacity: 0.86; }
-#first .credits:is(:hover, :focus-visible, [aria-expanded="true"]) { opacity: 1; }
-/* By touch the bottom corners are the thumbs': the credits key is at the top, where a phone shows no line of numbers. */
+/* By touch the bottom corners are the thumbs': the corner sits at the top, where a phone shows no line of numbers. */
 /* (Its voxel body stands out past its box to the left and up: further in from the corner than 12 px, or the screen's edge cuts it.) */
 @media (pointer: coarse) { #first .corner { bottom: auto; left: max(22px, calc(env(safe-area-inset-left) + 10px)); top: max(20px, calc(env(safe-area-inset-top) + 8px)); } }
-/* On its side (760 px wide and more) a phone's settings panel lies beside the credits key: what else is in the corner
-   stands under it. (On a smaller one the panel lies under the corner, which stays a row.) */
+/* On its side (760 px wide and more) a phone's settings panel lies beside the corner: stack items vertically there. */
 @media (pointer: coarse) and (orientation: landscape) and (min-width: 760px) { #first .corner { flex-direction: column; align-items: flex-start; gap: 10px; } }
-#first-credits { max-block-size: min(60vh, 420px); overflow: auto; }
-#first-credits ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(var(--vx) * 2); font-size: 0.8125rem; line-height: 1.4; color: var(--vx-ink-quiet); }
-/* The street's name stands over the credits key. */
+/* Keep .vx-popover itself overflow: visible so its live WebGPU slab (.vx-canvas) never clips or scrolls away; scroll the list inside. */
+#first-credits { --vx: 3px; inline-size: min(calc(var(--vx) * 100), calc(100vw - 24px)); background: rgba(15, 21, 32, 0.84); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#first-credits .credits-scroll { max-block-size: min(44dvh, 280px); overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--vx-steel) transparent; padding-inline-end: 4px; }
+#first-credits ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(var(--vx) * 2.5); font-size: 0.8125rem; line-height: 1.45; color: var(--vx-ink-quiet); }
+#first-credits .credits-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding-block-start: calc(var(--vx) * 2); border-block-start: 1px solid color-mix(in oklab, var(--vx-steel, #4e5d75) 45%, transparent); }
+#first-credits .credits-foot a { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; font-weight: 600; color: var(--vx-enamel-top, #6ea0ff); text-decoration: none; }
+#first-credits .credits-foot a:is(:hover, :focus-visible) { text-decoration: underline; }
+#first-credits .credits-foot a.credits-mapillary { color: #3ce089; }
+#first-credits .credits-foot a.credits-mapillary[hidden] { display: none; }
+#first-credits .credits-mapillary svg { flex: none; display: block; }
+/* The street's name stands over the corner. */
 #where { bottom: 58px !important; }
 @media (prefers-reduced-motion: reduce) { :is(#hud, #aim, #where, #over, #realm, #realm *) { transition: none !important; } }
 `
@@ -115,17 +122,16 @@ export function firstView(on: boolean): First {
   const root = document.createElement('div')
   root.id = 'first'
   root.innerHTML = /* html */ `
-    <div class="corner"><button class="vx-button credits" type="button" popovertarget="first-credits" aria-label="Credits: whose data this place is made from">Credits</button></div>
-    <div class="vx-popover" id="first-credits" popover aria-label="Credits"><h3>This place is made from</h3><ul></ul><a href="./CREDITS.txt">Full source credits</a></div>`
-  const mapillary = document.createElement('a')
-  mapillary.href = 'https://www.mapillary.com/'
-  mapillary.target = '_blank'
-  mapillary.rel = 'noopener noreferrer'
-  mapillary.setAttribute('aria-label', 'Mapillary street imagery')
-  // Mapillary's attribution mark from its API demo, kept inline for offline realms.
-  mapillary.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" fill="none" viewBox="0 0 35 35"><path fill="#05cb63" fill-rule="evenodd" d="M16.468 25.735c.624.327 15.734 8.542 16.21 8.807.954.528 1.963-.494 1.444-1.45-.261-.48-8.446-15.977-8.722-16.451-.276-.475-.956-.714-1.467-.396-.5.312-1.077.663-1.4.832-.651.34-.731.851-.439 1.42.643 1.248 2.664 5.038 2.896 5.435.484.831-.596 1.78-1.329 1.366-.31-.176-5.107-2.768-5.446-2.971-.339-.203-.94-.201-1.351.484a53.63 53.63 0 00-.837 1.425c-.334.61-.182 1.172.441 1.499zM.517 17.069c-.805-.448-.658-1.613.357-1.91.86-.252 7.844-2.657 9.957-3.386.382-.131.679-.434.807-.82L15.032.724c.317-.957 1.466-.96 1.935-.034.166.33 6.49 12.106 6.71 12.606.22.5.078 1.053-.42 1.372-.5.319-1.312.796-1.596.977-.513.328-1.004.1-1.238-.408-.234-.507-2.038-3.78-2.774-5.169-.368-.694-1.476-.96-1.848.162l-1.224 3.689a1.343 1.343 0 01-.812.827l-3.683 1.254c-.727.247-1.08 1.392-.099 1.874.205.1 4.626 2.538 5.082 2.76.457.224.71.867.443 1.323-.364.622-.83 1.411-1 1.668-.293.444-.87.591-1.353.33C12.671 23.69.804 17.228.517 17.068z" clip-rule="evenodd"></path></svg>'
-  mapillary.hidden = true
-  root.querySelector('.corner')!.append(mapillary)
+    <div class="corner"></div>
+    <div class="vx-popover" id="first-credits" popover aria-label="Credits">
+      <h3>This place is made from</h3>
+      <div class="credits-scroll"><ul></ul></div>
+      <div class="credits-foot">
+        <a class="credits-mapillary" href="https://www.mapillary.com/" target="_blank" rel="noopener noreferrer" aria-label="Mapillary street imagery" hidden><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 35 35" aria-hidden="true"><path fill="#05cb63" fill-rule="evenodd" d="M16.468 25.735c.624.327 15.734 8.542 16.21 8.807.954.528 1.963-.494 1.444-1.45-.261-.48-8.446-15.977-8.722-16.451-.276-.475-.956-.714-1.467-.396-.5.312-1.077.663-1.4.832-.651.34-.731.851-.439 1.42.643 1.248 2.664 5.038 2.896 5.435.484.831-.596 1.78-1.329 1.366-.31-.176-5.107-2.768-5.446-2.971-.339-.203-.94-.201-1.351.484a53.63 53.63 0 00-.837 1.425c-.334.61-.182 1.172.441 1.499zM.517 17.069c-.805-.448-.658-1.613.357-1.91.86-.252 7.844-2.657 9.957-3.386.382-.131.679-.434.807-.82L15.032.724c.317-.957 1.466-.96 1.935-.034.166.33 6.49 12.106 6.71 12.606.22.5.078 1.053-.42 1.372-.5.319-1.312.796-1.596.977-.513.328-1.004.1-1.238-.408-.234-.507-2.038-3.78-2.774-5.169-.368-.694-1.476-.96-1.848.162l-1.224 3.689a1.343 1.343 0 01-.812.827l-3.683 1.254c-.727.247-1.08 1.392-.099 1.874.205.1 4.626 2.538 5.082 2.76.457.224.71.867.443 1.323-.364.622-.83 1.411-1 1.668-.293.444-.87.591-1.353.33C12.671 23.69.804 17.228.517 17.068z" clip-rule="evenodd"></path></svg><span>Mapillary</span></a>
+        <a class="credits-all" href="./CREDITS.txt">Full source credits</a>
+      </div>
+    </div>`
+  const mapillary = root.querySelector<HTMLAnchorElement>('.credits-mapillary')!
   const list = root.querySelector<HTMLUListElement>('ul')!
   if (on) html.classList.add('first')
   // The kit's stylesheet and look, as the realm's controls ask for them too (realm-ui.ts): these keys are there first.
@@ -179,7 +185,6 @@ export function firstView(on: boolean): First {
     credits(said) {
       const hasMly = said.some(c => c.includes('Mapillary'))
       mapillary.hidden = !hasMly
-      html.classList.toggle('has-mapillary', hasMly)
       list.replaceChildren(...said.filter((c, i) => said.findIndex((d) => d.toLowerCase() === c.toLowerCase()) === i).map((c) => Object.assign(document.createElement('li'), { textContent: c })))
     },
   }

@@ -70,6 +70,15 @@ export function engineVent(piece: Piece, bonnet: readonly [number, number, numbe
   const offset = rotate(vent.offset, piece.rot)
   return [piece.pos[0] + offset[0], piece.pos[1] + offset[1], piece.pos[2] + offset[2]]
 }
+/** World horizontal outward direction of a damaged vehicle's nose so steam and smoke clear the hood from every heading (#92). */
+export function engineOut(piece: Piece): readonly [number, number, number] | undefined {
+  const state = piece.deform
+  if (!state) return undefined
+  const local: Point = state.front === 0 ? [1, 0, 0] : state.front === 1 ? [-1, 0, 0] : state.front === 2 ? [0, 0, 1] : [0, 0, -1]
+  const w = rotate(local, piece.rot)
+  const len = Math.hypot(w[0], w[2])
+  return len > 1e-4 ? [w[0] / len, 0, w[2] / len] : undefined
+}
 
 const MOST = 3072
 /** A puff that lives longer than this many seconds is one of the first KEPT. */
@@ -174,11 +183,12 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   // as it goes out. Blue-white plasma flame for nitrous boost when colour encodes cool blue with zero smoke cover.
   let core = body * body;
   let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
-  let warm = mix(mix(vec3f(0.7, 0.06, 0.01), vec3f(1.0, 0.4, 0.05), smoothstep(0.06, 0.36, hot)), vec3f(1.0, 0.9, 0.55), smoothstep(0.42, 0.95, hot));
-  let coolFlame = mix(mix(vec3f(0.06, 0.36, 1.0), vec3f(0.32, 0.8, 1.0), smoothstep(0.06, 0.36, hot)), vec3f(0.9, 0.98, 1.0), smoothstep(0.42, 0.95, hot));
+  let warm = mix(mix(vec3f(0.82, 0.10, 0.01), vec3f(1.0, 0.48, 0.06), smoothstep(0.06, 0.38, hot)), vec3f(1.0, 0.94, 0.65), smoothstep(0.42, 0.92, hot));
+  let coolFlame = mix(mix(vec3f(0.06, 0.36, 1.0), vec3f(0.35, 0.84, 1.0), smoothstep(0.06, 0.36, hot)), vec3f(0.92, 0.99, 1.0), smoothstep(0.42, 0.92, hot));
   let isBlue = step(0.5, in.colour.b - in.colour.r) * step(in.colour.a, 0.05);
   let flame = mix(warm, coolFlame, isBlue);
-  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.3 + billow * 1.15) * body * fade * 0.9;
+  let pureJet = step(in.colour.a, 0.02) * smoothstep(0.5, 0.9, heat);
+  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.32 + billow * 1.15) * body * fade * (0.9 + pureJet * 0.85);
   return vec4f(smoke * cover + glow, cover);
 }
 `
@@ -202,8 +212,8 @@ export interface Puffs {
   exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean, boost?: boolean): void
   /** A crash (#37): a little road dust and grit knocked up where two things met, `strength` 0 to 1; gone in two seconds. */
   crash(at: readonly [number, number, number], strength: number): void
-  /** A struck engine under a vehicle's bonnet (#37), for one frame of `dt` seconds: white steam from `level` 0.35, thick dark smoke from 0.7, and flames in it from 0.92. */
-  engine(at: readonly [number, number, number], level: number, dt: number): void
+  /** A struck engine under a vehicle's bonnet (#37, #92), for one frame of `dt` seconds: white steam from `level` 0.35, thick dark smoke from 0.7, and flames in it from 0.92. `out` is the nose's outward world direction. */
+  engine(at: readonly [number, number, number], level: number, dt: number, out?: readonly [number, number, number]): void
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -228,24 +238,25 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3)
   const size = new Float32Array(MOST), grow = new Float32Array(MOST), life = new Float32Array(MOST), span = new Float32Array(MOST)
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
-  const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST)
+  const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST), wind = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
-  let next = 0, lasting = 0, live = 0, flamePhase = 0
+  let next = 0, lasting = 0, live = 0, flamePhase = 0, smokeAcc = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
-  const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number; /** How far through its life it has come before it shows at all. */ late?: number }) => {
+  const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number; /** How far through its life it has come before it shows at all. */ late?: number; /** How strongly world wind pushes this puff (default 1). */ wind?: number; /** Initial horizontal drift added to velocity. */ drift?: readonly [number, number, number] }) => {
     // What lasts has places of its own: a street on fire makes hundreds of flames a second, and they would take the
     // place of the smoke and dust over it within seconds.
     const i = o.life > LASTS ? lasting++ % KEPT : KEPT + (next++ % (MOST - KEPT))
     let dx = 0, dy = 0, dz = 0
     do { dx = Math.random() * 2 - 1; dy = Math.random() * 2 - 1; dz = Math.random() * 2 - 1 } while (dx * dx + dy * dy + dz * dz > 1)
     p[i * 3] = at[0] + dx * spread; p[i * 3 + 1] = at[1] + dy * spread; p[i * 3 + 2] = at[2] + dz * spread
-    v[i * 3] = dx * out; v[i * 3 + 1] = dy * out + up; v[i * 3 + 2] = dz * out
+    v[i * 3] = dx * out + (o.drift?.[0] ?? 0); v[i * 3 + 1] = dy * out + up + (o.drift?.[1] ?? 0); v[i * 3 + 2] = dz * out + (o.drift?.[2] ?? 0)
     size[i] = o.size; grow[i] = o.grow; life[i] = span[i] = o.life; heat[i] = o.heat; cool[i] = o.cool; rise[i] = o.rise; drag[i] = o.drag
     tone.set([o.colour[0], o.colour[1], o.colour[2], o.cover], i * 4)
     seed[i] = Math.floor(Math.random() * 65536)
     late[i] = o.late ?? 0
+    wind[i] = o.wind ?? 1
   }
   return {
     get live() { return live },
@@ -318,54 +329,68 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       const k = Math.max(0, Math.min(1, intensity))
       if (k <= 0.02) return
       const i = KEPT + (next++ % (MOST - KEPT))
-      const dx = (Math.random() - 0.5) * 2.2, dy = Math.random() * 0.8, dz = (Math.random() - 0.5) * 2.2
-      p[i * 3] = at[0] + dx; p[i * 3 + 1] = at[1] + dy + 0.6; p[i * 3 + 2] = at[2] + dz
-      v[i * 3] = vel[0] * 0.22 + (Math.random() - 0.5) * 10
-      v[i * 3 + 1] = 4 + 8 * k + Math.random() * 5
-      v[i * 3 + 2] = vel[2] * 0.22 + (Math.random() - 0.5) * 10
-      size[i] = 2.4 + 2.4 * k + Math.random() * 1.4
-      grow[i] = 5.5 + 5.0 * k
-      life[i] = span[i] = 0.75 + 0.85 * k + Math.random() * 0.45
-      heat[i] = 0; cool[i] = 0; rise[i] = 6 + 4 * k; drag[i] = 2.2
-      tone.set([colour[0], colour[1], colour[2], 0.24 + 0.32 * k], i * 4)
+      const dx = (Math.random() - 0.5) * 1.8, dy = 0.25 + Math.random() * 0.55, dz = (Math.random() - 0.5) * 1.8
+      p[i * 3] = at[0] + dx; p[i * 3 + 1] = at[1] + dy; p[i * 3 + 2] = at[2] + dz
+      v[i * 3] = vel[0] * 0.28 + (Math.random() - 0.5) * 8.5
+      v[i * 3 + 1] = 2.6 + 5.2 * k + Math.random() * 3.2
+      v[i * 3 + 2] = vel[2] * 0.28 + (Math.random() - 0.5) * 8.5
+      size[i] = 2.1 + 2.5 * k + Math.random() * 1.2
+      grow[i] = 6.2 + 5.5 * k
+      life[i] = span[i] = 0.85 + 0.95 * k + Math.random() * 0.45
+      heat[i] = 0; cool[i] = 0; rise[i] = 3.4 + 2.8 * k; drag[i] = 2.4
+      tone.set([colour[0], colour[1], colour[2], 0.28 + 0.36 * k], i * 4)
       seed[i] = Math.floor(Math.random() * 65536)
       late[i] = 0
     },
     exhaust(at, dir, pop = false, boost = false) {
       if (boost) {
-        for (let k = 0; k < 2; k++) {
+        // Sleek 3-stage nitrous jet hugging the diffuser nozzle: tight white-cyan core, electric-blue plume,
+        // and fiery amber-gold shock diamond kiss trailing cleanly out the tailpipe.
+        for (let k = 0; k < 3; k++) {
           const i = KEPT + (next++ % (MOST - KEPT))
-          const step = k * 1.4
+          const step = k * 0.85
           p[i * 3] = at[0] + dir[0] * step; p[i * 3 + 1] = at[1] + dir[1] * step; p[i * 3 + 2] = at[2] + dir[2] * step
-          v[i * 3] = dir[0] * (44 + k * 16) + (Math.random() - 0.5) * 3
-          v[i * 3 + 1] = dir[1] * (44 + k * 16) + 1.5
-          v[i * 3 + 2] = dir[2] * (44 + k * 16) + (Math.random() - 0.5) * 3
-          size[i] = 1.5 + k * 0.45; grow[i] = 5.2; life[i] = span[i] = 0.11 + k * 0.03
-          heat[i] = 0.98; cool[i] = 6.2; rise[i] = 3; drag[i] = 4.5
-          tone.set([0.08, 0.65, 1.0, 0.0], i * 4)
+          v[i * 3] = dir[0] * (26 + k * 16) + (Math.random() - 0.5) * 1.2
+          v[i * 3 + 1] = dir[1] * (26 + k * 16) + 0.35
+          v[i * 3 + 2] = dir[2] * (26 + k * 16) + (Math.random() - 0.5) * 1.2
+          size[i] = k === 0 ? 1.0 : k === 1 ? 1.22 : 0.92
+          grow[i] = 1.6 + k * 0.75
+          life[i] = span[i] = 0.08 + k * 0.02
+          heat[i] = k === 0 ? 1.0 : k === 1 ? 0.90 : 0.78
+          cool[i] = 6.0; rise[i] = 1.2; drag[i] = 5.4
+          tone.set(k === 2 ? [1.0, 0.55, 0.08, 0.0] : [0.08, 0.68, 1.0, 0.0], i * 4)
           seed[i] = Math.floor(Math.random() * 65536)
           late[i] = 0
         }
         return
       }
       if (pop) {
-        const i = KEPT + (next++ % (MOST - KEPT))
-        p[i * 3] = at[0]; p[i * 3 + 1] = at[1]; p[i * 3 + 2] = at[2]
-        v[i * 3] = dir[0] * 26; v[i * 3 + 1] = dir[1] * 26 + 2; v[i * 3 + 2] = dir[2] * 26
-        size[i] = 1.4; grow[i] = 6.5; life[i] = span[i] = 0.13
-        heat[i] = 0.92; cool[i] = 5.5; rise[i] = 6; drag[i] = 5
-        tone.set([0.2, 0.18, 0.17, 0.28], i * 4)
-        seed[i] = Math.floor(Math.random() * 65536)
-        late[i] = 0
+        // Crisp 3-stage fiery orange-yellow-white exhaust flame tongue (upshift, launch, overrun pop).
+        for (let k = 0; k < 3; k++) {
+          const i = KEPT + (next++ % (MOST - KEPT))
+          const step = k * 0.9
+          p[i * 3] = at[0] + dir[0] * step; p[i * 3 + 1] = at[1] + dir[1] * step; p[i * 3 + 2] = at[2] + dir[2] * step
+          v[i * 3] = dir[0] * (24 + k * 12) + (Math.random() - 0.5) * 1.4
+          v[i * 3 + 1] = dir[1] * (24 + k * 12) + 0.5
+          v[i * 3 + 2] = dir[2] * (24 + k * 12) + (Math.random() - 0.5) * 1.4
+          size[i] = k === 0 ? 0.95 : k === 1 ? 1.18 : 0.90
+          grow[i] = 1.6 + k * 0.8
+          life[i] = span[i] = 0.11 + k * 0.024
+          heat[i] = k === 0 ? 1.0 : k === 1 ? 0.88 : 0.68
+          cool[i] = 5.0; rise[i] = 1.8; drag[i] = 5.6
+          tone.set([1.0, 0.5, 0.08, 0.0], i * 4)
+          seed[i] = Math.floor(Math.random() * 65536)
+          late[i] = 0
+        }
       }
       const j = KEPT + (next++ % (MOST - KEPT))
       p[j * 3] = at[0]; p[j * 3 + 1] = at[1]; p[j * 3 + 2] = at[2]
-      v[j * 3] = dir[0] * 18 + (Math.random() - 0.5) * 4; v[j * 3 + 1] = dir[1] * 18 + 4; v[j * 3 + 2] = dir[2] * 18 + (Math.random() - 0.5) * 4
-      size[j] = 1.6; grow[j] = 4.5; life[j] = span[j] = pop ? 0.55 : 0.42
-      heat[j] = 0; cool[j] = 0; rise[j] = 8; drag[j] = 3.0
-      tone.set([0.28, 0.29, 0.32, pop ? 0.36 : 0.22], j * 4)
+      v[j * 3] = dir[0] * 18 + (Math.random() - 0.5) * 3.5; v[j * 3 + 1] = dir[1] * 18 + 3.2; v[j * 3 + 2] = dir[2] * 18 + (Math.random() - 0.5) * 3.5
+      size[j] = 1.45; grow[j] = 4.2; life[j] = span[j] = pop ? 0.48 : 0.38
+      heat[j] = 0; cool[j] = 0; rise[j] = 6.5; drag[j] = 3.2
+      tone.set([0.28, 0.29, 0.32, pop ? 0.26 : 0.18], j * 4)
       seed[j] = Math.floor(Math.random() * 65536)
-      late[j] = 0
+      late[j] = pop ? 0.22 : 0
     },
     crash(at, strength) {
       for (let k = Math.round(3 + strength * 4); k > 0; k--) {
@@ -373,28 +398,36 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         puff(at, 1.6, rnd(10, 24) * (0.5 + strength), rnd(3, 9), { size: rnd(1.3, 2.5), grow: rnd(2.8, 4.6), life: rnd(1.0, 1.8), heat: 0, cool: 0, rise: 4, drag: 2.6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.36 })
       }
     },
-    engine(at, level, dt) {
-      // Start in the open socket and let each puff fan out as it rises.
+    engine(at, level, dt, out) {
+      const ox = out ? out[0] : 0, oz = out ? out[2] : 0
+      const forward = (speed: number): readonly [number, number, number] => [ox * speed, 0, oz * speed]
+      // Start in the open nose and drift gently forward/upward so steam and smoke clear the hood from every heading (#92).
       if (level < 0.7) {
         const frac = (level - 0.35) / 0.35
+        const origin: readonly [number, number, number] = out ? [at[0] + ox * 1.45, at[1] + 0.5, at[2] + oz * 1.45] : at
         if (Math.random() < dt * (14 + 12 * frac)) {
           const w = rnd(0.84, 0.95)
-          puff(at, 0, rnd(0.6, 1.7), rnd(12, 18), { size: rnd(0.37, 0.59), grow: rnd(2.6, 3.5), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.19 + 0.06 * frac, late: 0.22 })
+          puff(origin, 0, rnd(0.4, 1.0), rnd(14, 19), { size: rnd(0.35, 0.52), grow: rnd(2.1, 2.9), life: rnd(0.95, 1.45), heat: 0, cool: 0, rise: 18, drag: 1.45, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.19 + 0.06 * frac, late: 0.18, wind: 0.12, drift: forward(rnd(2.8, 4.6)) })
         }
         return
       }
+      const burning = level > 0.92
+      // Emerge clear of the nose lip and directly from the upper flame tongue with no horizontal gap (#92).
+      const smokeAt: readonly [number, number, number] = [at[0] + ox * 1.45, at[1] + (burning ? 1.55 : 0.9), at[2] + oz * 1.45]
       // A few lighter wisps mix with the darker engine smoke.
-      if (Math.random() < dt * 15) {
+      if (Math.random() < dt * 14) {
         const wisp = rnd(0.68, 0.79)
-        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.55, 0.85), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.18, late: 0.12 })
+        puff(smokeAt, 0, rnd(0.35, 0.95), rnd(13, 18), { size: rnd(0.44, 0.66), grow: rnd(1.7, 2.5), life: rnd(1.0, 1.5), heat: 0, cool: 0, rise: 20, drag: 1.4, colour: [wisp, wisp, wisp * 1.02], cover: 0.17, late: 0.02, wind: 0.12, drift: forward(rnd(3.2, 5.0)) })
       }
-      // Oil smoke rises from the same opening and expands as it cools.
-      if (Math.random() < dt * 10) {
+      // Oil smoke rises steadily from the upper flame without random droughts or a visible gap, staying clear of the hood.
+      smokeAcc = Math.min(smokeAcc + dt, 0.14)
+      while (smokeAcc >= 0.042) {
+        smokeAcc -= 0.042
         const grey = rnd(0.30, 0.43)
-        puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.22, late: 0.10 })
+        puff(smokeAt, 0, rnd(0.35, 0.95), rnd(13, 18), { size: rnd(0.45, 0.64), grow: rnd(1.8, 2.7), life: rnd(1.25, 1.75), heat: 0, cool: 0, rise: 21, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.21, late: 0.0, wind: 0.12, drift: forward(rnd(3.2, 5.0)) })
       }
       // Redraw one attached flame while the engine burns. Smoke alone drifts away.
-      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
+      if (burning) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
     },
     step(dt) {
       flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)
@@ -406,7 +439,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         life[i] -= dt
         live++
         const slow = Math.max(0, 1 - drag[i] * dt)
-        v[i * 3] = v[i * 3] * slow + 6 * dt // a light wind along x
+        v[i * 3] = v[i * 3] * slow + 6 * wind[i] * dt // a light wind along x
         v[i * 3 + 1] = v[i * 3 + 1] * slow + rise[i] * dt
         v[i * 3 + 2] *= slow
         for (let a = 0; a < 3; a++) p[i * 3 + a] += v[i * 3 + a] * dt

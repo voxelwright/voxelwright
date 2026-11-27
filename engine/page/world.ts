@@ -167,8 +167,8 @@ function holdsFiner(words: Int32Array): boolean {
   return false
 }
 
-/** A maker of sectors as the world keeps it: how many asks it has in hand, which, when it was last heard, and how to let it go. */
-interface Maker { worker: Worker; busy: number; asked: Set<number>; lose: () => void }
+/** A maker of sectors as the world keeps it: how many asks it has in hand, which, when each was sent, and how to let it go. */
+interface Maker { worker: Worker; busy: number; asked: Set<number>; askedAt: Map<number, number>; lose: () => void }
 
 export class World {
   levels: Level[]
@@ -207,9 +207,15 @@ export class World {
   /** A maker of sectors (worker.ts). One that fails is let go and another hired: what it was making is asked again. */
   private hire(): Maker {
     const worker = share(new Worker(new URL(`./worker.ts${BAY}`, import.meta.url), { type: 'module' }))
-    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), lose: () => {} }
+    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), askedAt: new Map<number, number>(), lose: () => {} }
     if (this.core) worker.postMessage({ core: this.core })
-    worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; slot.asked.delete(e.data.id); this.take(e.data) }
+    worker.onmessage = (e: MessageEvent<Answer>) => {
+      if (e.data.failed) { lose(); return }
+      slot.busy = Math.max(0, slot.busy - 1)
+      slot.asked.delete(e.data.id)
+      slot.askedAt.delete(e.data.id)
+      this.take(e.data)
+    }
     worker.onerror = (e) => { e.preventDefault(); lose() }
     const lose = (slot.lose = () => {
       if (!this.workers.includes(slot)) return
@@ -228,8 +234,26 @@ export class World {
   }
   /** How long a maker may say nothing, not even to the page's pings (bay.ts `share`), before it is taken for gone, ms. */
   patience = 10_000
-  /** First level wholly past the far model's reach: made after the near boxes so cold landing fetches only what precedes the handover. */
+  /** First level past the far reach. Its cells and coarser ones stream after the near columns. */
   farFrom = Infinity
+  /** True when surveyed far-model ground owns `[x0..x1, z0..z1]` with no failed fetch or overflow edit, so coarse columns past `farFrom` with no edits need not stream redundant tiles until `refreshFar` falls back. */
+  farCovered: ((x0: number, z0: number, x1: number, z1: number) => boolean) | null = null
+  /** Re-queue coarse columns past `farFrom` overlapping `[x0..x1, z0..z1]` when far-model ground falls back to cells (e.g. after a 404 or overflow edit). */
+  refreshFar(x0: number, z0: number, x1: number, z1: number) {
+    for (const level of this.levels) {
+      if (level.index < this.farFrom) continue
+      const size = SIDE << level.index, g = level.grid, o = level.origin
+      const sx0 = Math.max(o[0], Math.floor(x0 / size)), sx1 = Math.min(o[0] + g[0] - 1, Math.floor((x1 - 1) / size))
+      const sz0 = Math.max(o[2], Math.floor(z0 / size)), sz1 = Math.min(o[2] + g[2] - 1, Math.floor((z1 - 1) / size))
+      for (let sz = sz0; sz <= sz1; sz++) for (let sx = sx0; sx <= sx1; sx++) {
+        for (let sy = o[1]; sy < o[1] + g[1]; sy++) {
+          const slot = level.slot(sx, sy, sz)
+          if (level.state[slot] === READY) { level.state[slot] = STALE; this.plan = true }
+          else if (level.state[slot] === FLYING) { level.state[slot] = STALE_FLYING; this.plan = true }
+        }
+      }
+    }
+  }
   /** The core the workers were last told to use (`recore`), for one hired after. */
   private core: string | null = null
   /** Columns made while a tile they need had not come (#450): made again when due, a little later each time. */
@@ -332,6 +356,17 @@ export class World {
   /** The edits that reach a column of the finest box's sectors, in order. */
   reaching(sx: number, sz: number): readonly Edit[] { return this.reach[0]?.get(column(sx, sz)) ?? [] }
 
+  /** Live maker worker queue depth and oldest in-flight column ask (ms), for diagnostics. */
+  workerHealth(): { busy: number[]; maxAskMs: number } {
+    const now = performance.now()
+    let maxAskMs = 0
+    const busy = this.workers.map((w) => {
+      for (const sent of w.askedAt.values()) { const age = now - sent; if (age > maxAskMs) maxAskMs = age }
+      return w.busy
+    })
+    return { busy, maxAskMs: Math.round(maxAskMs) }
+  }
+
   /** Everything done to the world so far, in order. */
   done(): readonly Edit[] { return this.edits }
 
@@ -364,8 +399,13 @@ export class World {
       }
     }
     if (this.again.length) this.retry()
-    // A worker that has gone silent is gone too (a tab out of memory ends a worker without a word).
-    for (const w of this.workers) if (silent(w.worker) > this.patience) w.lose()
+    // A worker that has gone silent, or whose in-flight column ask has stalled past the watchdog, is replaced.
+    const now = performance.now(), askLimit = Math.max(this.patience, 15_000)
+    for (const w of this.workers) {
+      let stalled = false
+      for (const sent of w.askedAt.values()) if (now - sent > askLimit) { stalled = true; break }
+      if (silent(w.worker) > this.patience || stalled) w.lose()
+    }
     if (this.plan) this.replan(eye)
     this.send()
     this.flush()
@@ -430,8 +470,9 @@ export class World {
         }
         if (!any) continue
         const reach = this.reach[ask.level]?.get(column(ask.sx, ask.sz)) ?? []
-        if (ask.level >= this.farFrom && reach.length === 0) {
-          // Past the far model's handover with no edits: mark empty air directly without fetching coarse city tiles.
+        const size = SIDE << ask.level
+        if (ask.level >= this.farFrom && reach.length === 0 && this.farCovered?.(ask.sx * size, ask.sz * size, (ask.sx + 1) * size, (ask.sz + 1) * size)) {
+          // Past the far model's handover where verified far-model ground is already resident: skip fetching redundant coarse tiles.
           for (let sy = ask.y0; sy <= ask.y1; sy++) {
             const slot = level.slot(ask.sx, sy, ask.sz)
             if (level.state[slot] !== FLYING && level.state[slot] !== STALE_FLYING) continue
@@ -448,8 +489,10 @@ export class World {
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
         w.busy++
-        w.asked.add(this.nextId)
-        w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)
+        const askId = this.nextId++
+        w.asked.add(askId)
+        w.askedAt.set(askId, performance.now())
+        w.worker.postMessage({ id: askId, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)
       }
     }
   }

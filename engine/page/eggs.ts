@@ -35,7 +35,7 @@ import type { Marcher, View } from './march.ts'
 import { OWN_HOUR } from './weather.ts'
 import type { Skies, Weather } from './weather.ts'
 import type { Signs } from './signs.ts'
-import type { Clear, Picture } from './eggs-pictures.ts'
+import type { Clear, Picture, WindowEffect } from './eggs-pictures.ts'
 import type { Hud } from './hud.ts'
 import type { Pieces } from './pieces.ts'
 import { things, type ThingId } from './eggs-things.ts'
@@ -99,6 +99,8 @@ export interface EggsPage {
   ground(x: number, z: number): number
   /** The far model, which lights the windows that hold an egg (far.ts `lockers`). */
   far: Pick<Far, 'lockers' | 'lockerHeader' | 'listing'>
+  /** What the unused lower/outer windows show during video eggs: 'ambilight' (default), 'equalizer', or 'off'. */
+  windowEffect?(): WindowEffect
 }
 
 // Original line drawing from the park's east-southeast view (the site's, the same view).
@@ -113,7 +115,7 @@ If you managed to find this, you can send your resume… oh wait I'm not hiring,
 export { words } from './eggs-said.ts'
 
 type Pane = readonly [number, number, number, number]
-interface Video { file: string; title: string; outside: Pane; contrast: number; start: string; end: string }
+interface Video { file: string; title: string; outside: Pane; contrast: number; start: string; end: string; /** Whether sky-gap drones + fog display this egg over open sky (default true for videos). */ sky?: boolean }
 type Egg = string
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA']
 /** The moon's sizes against its own (the site's three radii, 0.017, 0.028 and 0.044 of the view). */
@@ -290,8 +292,17 @@ export function eggs(page: EggsPage) {
     }
     return files.get(url)!
   }
+  let wakeAudioFn: ((media: HTMLVideoElement | null, effect: WindowEffect) => void) | null = null
+  const getWindowEffect = (): WindowEffect => page.windowEffect?.() ?? 'ambilight'
+  const wakeAudio = () => {
+    const effect = getWindowEffect()
+    if (effect !== 'equalizer' || !media) return
+    if (wakeAudioFn) wakeAudioFn(media, effect)
+    else void import('./eggs-pictures.ts').then((m) => { wakeAudioFn = m.wakeVideoAudio; m.wakeVideoAudio(media, getWindowEffect()) })
+  }
   const run = (current: NonNullable<typeof running>) => {
     const m = current.media!
+    wakeAudio()
     void m.play().catch((e: Error) => {
       if (running !== current || e.name !== 'NotAllowedError') return
       // The browser wants a fresh tap for sound: the video plays muted, and Unmute is that tap.
@@ -311,8 +322,6 @@ export function eggs(page: EggsPage) {
     showPlayer()
     tell('Sound on.')
   }
-  /** What draws the videos, once one has been asked for. */
-  let pictures: typeof import('./eggs-pictures.ts') | null = null
   /** The meme played last, which “meme” does not play again straight away. */
   let lastMeme: string | null = null, memesPlayed = 0
   const play = async (egg: Egg) => {
@@ -326,6 +335,7 @@ export function eggs(page: EggsPage) {
     m.loop = false
     // Started inside the gesture before it has a file: some browsers let an element play sound later only if it was
     // first started from a tap.
+    wakeAudio()
     void m.play().catch(() => {})
     const started = ++clock
     const current: NonNullable<typeof running> = { egg, picture: null, started: performance.now(), media: m }
@@ -336,10 +346,10 @@ export function eggs(page: EggsPage) {
     banner(`Now playing: ${v.title}`)
     tell(`Tuning in: ${v.title}…`)
     try {
-      const [loaded, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
-      pictures = loaded
+      const [{ videoPicture, wakeVideoAudio }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
+      wakeAudioFn = wakeVideoAudio
       if (running !== current || started !== clock) return
-      current.picture = loaded.videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, clear: strip })
+      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true, windowEffect: getWindowEffect, clear: strip })
       m.src = url
       // It plays once the windows are its screen (every frame below): a 5 s clip started as the screen comes up was
       // half over before it could be seen. Until then its first frame stands on the windows. (The play started in the
@@ -856,7 +866,7 @@ export function eggs(page: EggsPage) {
   }) : null
   void memesCame.then(() => locks?.relabel())
 
-  // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines and the towers' lamps ──
+  // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines ──
   /** Whether anything of the eggs' is on: what a tap on the banner ends. */
   const on = () => !!(running || shield || moon || moonlit || saying)
   /** The meme the banner said last in the first view. */
@@ -864,15 +874,10 @@ export function eggs(page: EggsPage) {
   const TAPS: Record<Spot, (line: string | null) => void> = {
     // While an egg is on, the banner ends it (Unmute is the player's: a tap here stops). Its line starts its egg; the site's name, a barrel roll.
     banner: (line) => (on() ? undo() : act(line ?? 'roll')),
-    // The Pyramid's lamp: Bad Apple!! in shadow, the lamp the one red light left; again, the lights back.
-    pyramid: () => (running?.egg === 'apple' ? stop() : act('apple')),
-    // The crown of lamps: the Matrix on the city's windows, the crown's own screen among them; again, out of it.
-    crown: () => (running?.egg === 'matrix' ? stop() : void enter()),
   }
   const taps = firstTaps({
     hasMedia,
-    canvas: page.canvas, view: page.view, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
-    beacons: () => march.beacons, fog: () => march.fog,
+    canvas: page.canvas, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
     quiet: () => !on() && !typing,
     // A meme whose title is no longer than the site's name (a line is not: first.ts), not the last one said.
     more: () => {
@@ -903,9 +908,19 @@ export function eggs(page: EggsPage) {
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)
     else if (up < march.screen.up) march.screen.up = Math.max(0, march.screen.up - dt * 1.5)
     if (running?.waiting && march.screen.up >= 0.9) { running.waiting = false; if (!running.paused) run(running) }
-    // A picture going down keeps its last frame.
-    if (running?.picture) running.picture.draw(device, march.screen.texture, (performance.now() - running.started) / 1000)
-    if (march.screen.up === 0 && fading) { fading.dispose(); fading = null }
+    // A picture going down keeps its last frame and sky setting until screen.up reaches 0.
+    if (running?.picture) {
+      running.picture.draw(device, march.screen.texture, (performance.now() - running.started) / 1000)
+      march.screen.sky = running.picture.sky
+      march.screen.rect[0] = running.picture.rect[0]
+      march.screen.rect[1] = running.picture.rect[1]
+      march.screen.rect[2] = running.picture.rect[2]
+      march.screen.rect[3] = running.picture.rect[3]
+    }
+    if (march.screen.up === 0 && fading) { fading.dispose(); fading = null; march.screen.sky = false }
+    // Fly the tow plane and banner above the sky-gap drone swarm while it is active.
+    const plane = page.plane()
+    if (plane) plane.above = march.screen.sky && march.screen.up > 0 ? march.screen.rect[1] : null
     if (pending !== null) { page.sky.glide(pending); pending = null }
     // The hour goes home once the fog an egg left has thinned, or after four seconds of waiting for it.
     if (leaving && (march.fog < 0.12 || performance.now() - leaving.since > 4000)) { const hour = leaving.hour; leaving = null; home(hour) }
@@ -942,7 +957,9 @@ export function eggs(page: EggsPage) {
 
   return {
     /** For the checks: what is going on. */
-    get state() { return { memesPlayed, paused: !!running?.paused, running: running?.egg ?? null, up: march.screen.up, shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
+    get state() { return { memesPlayed, paused: !!running?.paused, running: running?.egg ?? null, up: march.screen.up, windowEffect: getWindowEffect(), shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
+    /** Resumes the equalizer's audio tap inside a user gesture (e.g. toggling Window glow -> EQ in Settings). */
+    wakeAudio,
     say: heard,
     /** Opens the line, as Enter or the slash does in the realm (main.ts asks for it in the first view, where they are not heard). */
     open,
@@ -962,12 +979,12 @@ export function eggs(page: EggsPage) {
     },
     /** For the checks: how many bytes of the video's sound were decoded (Chrome), and the picture's light where it is drawn. */
     get media() { return running?.media ?? null },
-    /** For the checks: where the video stands on the page now (client px, as videoRect has it), or null with none. */
+    /** For the checks: where the video stands on the page now (client px), as its picture last drew it on the windows and the sky, or null with none. */
     get screen() {
-      const m = running?.media
-      if (!m?.videoWidth || !pictures) return null
-      const v = page.canvas.getBoundingClientRect(), r = pictures.videoRect(page.aspect(), m.videoWidth / m.videoHeight, 0.5, strip())
-      return { left: v.left + r.x * v.width, top: v.top + r.y * v.height, right: v.left + (r.x + r.w) * v.width, bottom: v.top + (r.y + r.h) * v.height }
+      const m = running?.media, r = running?.picture?.rect
+      if (!m?.videoWidth || !r) return null
+      const v = page.canvas.getBoundingClientRect()
+      return { left: v.left + r[0] * v.width, top: v.top + r[1] * v.height, right: v.left + r[2] * v.width, bottom: v.top + r[3] * v.height }
     },
     /** The things that start the eggs: where each is, and which is offered now. */
     things: found,

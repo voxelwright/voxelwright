@@ -4,7 +4,7 @@
 //
 //   node test/models.mjs
 import assert from 'node:assert/strict'
-import { ABOUT, AT, Unanswered, keep, kept, models, preferred, reply } from '../page/models.ts'
+import { ABOUT, AT, Unanswered, keep, kept, models, preferred, remembered, reply } from '../page/models.ts'
 
 let steps = 0
 const step = async (name, run) => { await run(); steps++; console.log(`ok  ${name}`) }
@@ -212,20 +212,39 @@ await step('smarter defaults across all four providers', async () => {
   assert.equal(preferred('openai', []), undefined)
 })
 
-await step('what is connected is kept in this browser only, and a record that is not one is nothing', async () => {
-  const held = new Map()
-  globalThis.localStorage = { getItem: (k) => held.get(k) ?? null, setItem: (k, v) => held.set(k, v), removeItem: (k) => held.delete(k) }
+await step('what is connected is kept for this tab, remembered by this browser only when asked, and a record that is not one is nothing', async () => {
+  const stand = () => { const held = new Map(); return { held, getItem: (k) => held.get(k) ?? null, setItem: (k, v) => held.set(k, v), removeItem: (k) => held.delete(k) } }
+  const tab = stand(), browser = stand()
+  globalThis.sessionStorage = tab; globalThis.localStorage = browser
   assert.equal(kept(), null)
+  // By default this tab alone (#81): nothing is written that outlives it.
   assert.equal(keep({ route: 'gemini', key: KEY, model: 'gemini-x' }), true)
   assert.deepEqual(kept(), { route: 'gemini', key: KEY, model: 'gemini-x' })
-  held.set('village.ai', JSON.stringify({ route: 'elsewhere', key: KEY, model: 'm' }))
-  assert.equal(kept(), null)
-  held.set('village.ai', '{not json')
-  assert.equal(kept(), null)
+  assert.equal(browser.held.size, 0, 'a key not asked to be remembered is not in localStorage')
+  assert.equal(remembered(), false)
+  // Remembered when asked: in this browser's storage, and out of the tab's.
+  assert.equal(keep({ route: 'gemini', key: KEY, model: 'gemini-y' }, true), true)
+  assert.equal(tab.held.size, 0)
+  assert.equal(remembered(), true)
+  assert.deepEqual(kept(), { route: 'gemini', key: KEY, model: 'gemini-y' })
+  // A key remembered before this change is still read.
+  tab.held.clear(); browser.held.set('village.ai', JSON.stringify({ route: 'openai', key: KEY, model: 'gpt-x' }))
+  assert.deepEqual(kept(), { route: 'openai', key: KEY, model: 'gpt-x' })
+  // This tab's own comes first.
+  tab.held.set('village.ai', JSON.stringify({ route: 'anthropic', key: KEY, model: 'claude-x' }))
+  assert.equal(kept()?.route, 'anthropic')
+  // Forgotten from both.
   keep(null)
-  assert.equal(held.size, 0)
-  globalThis.localStorage = { getItem() { throw new Error('no') }, setItem() { throw new Error('no') }, removeItem() { throw new Error('no') } }
+  assert.equal(tab.held.size + browser.held.size, 0)
+  browser.held.set('village.ai', JSON.stringify({ route: 'elsewhere', key: KEY, model: 'm' }))
+  assert.equal(kept(), null)
+  browser.held.set('village.ai', '{not json')
+  assert.equal(kept(), null)
+  browser.held.clear()
+  const refuses = { getItem() { throw new Error('no') }, setItem() { throw new Error('no') }, removeItem() { throw new Error('no') } }
+  globalThis.sessionStorage = refuses; globalThis.localStorage = refuses
   assert.equal(keep({ route: 'gemini', key: KEY, model: 'gemini-x' }), false)
+  assert.equal(keep({ route: 'gemini', key: KEY, model: 'gemini-x' }, true), false)
   assert.equal(kept(), null)
 })
 

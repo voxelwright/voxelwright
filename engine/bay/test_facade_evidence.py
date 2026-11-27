@@ -1,8 +1,12 @@
 """Photographs as evidence: the trust test, the tile rows it writes, and the geometry of a face."""
 
+import hashlib
+import json
 import math
 import struct
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -155,6 +159,82 @@ class Rows(unittest.TestCase):
         self.assertEqual(drawn([150, 80, 64], views=1, confidence=0.56), 9)
         # Without a trusted colour a brick call no longer paints the wall brick red.
         self.assertEqual(evidence_tile.apply(blob, {self.key: {"wall": {"palette": 57, "trusted": False, "srgb": [150, 80, 64]}, "material": {"cls": "brick", "drawn": 8, "p": {"brick": 0.93}, "confidence": 0.93, "views": 2}}}), blob)
+
+
+class ReviewedWalls(unittest.TestCase):
+    key = Rows.key
+    old = 9 | 7 << 8
+    trim = 9 | 1 << 8 | 1 << 24 | 42 << 17
+    home = 1 << 16
+
+    def source(self):
+        return {
+            "version": 1, "frame": "10n4250", "credit": "Synthetic facade survey",
+            "poses": {"a": [0, 0], "b": [42, 0], "ref": [100, 10]},
+            "buildings": {self.key: {
+                "fromWall": self.old, "palette": 46, "ends": [3], "views": ["a", "b"], "reference": "ref"
+            }},
+        }
+
+    def test_a_supplied_survey_reaches_the_release_and_its_credit(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "packs/tiles/0"
+            folder.mkdir(parents=True)
+            blob = tile([(0, 4, self.old, self.trim, self.home, 0)], Rows.verts)
+            (folder / "0_0.bay").write_bytes(blob)
+            (folder.parent / "index.json").write_text(json.dumps({
+                "levels": [{"size": 2500, "gstep": 10}], "tiles": [[[0, 0]]], "sea": [[]], "squares": []
+            }))
+            (root / "state.json").write_text(json.dumps({"done": {"tile": {
+                "packs/tiles/0/0_0.bay": hashlib.sha256(blob).hexdigest()
+            }}}))
+            source = root / "facades.json"
+            source.write_text(json.dumps(self.source()))
+            cli = Path(__file__).resolve().parents[1] / "sf/release.py"
+            subprocess.run([sys.executable, cli, root, root / "out", "--facades", source], check=True, capture_output=True)
+            stage, = (root / "out/releases").iterdir()
+            emitted = (stage / "tiles/0/0_0.bay").read_bytes()
+            manifest = json.loads((stage / "manifest.json").read_text())
+            self.assertIn("Synthetic facade survey", manifest["credits"])
+            expected = tile([(0, 4, 9 | 46 << 8, self.trim | evidence_tile.WALL_BIT, self.home, 0)], Rows.verts)
+            self.assertEqual(emitted, expected)
+            self.assertEqual(manifest["levels"][0]["tiles"]["0_0"]["sha256"], hashlib.sha256(expected).hexdigest())
+            from evidence_check import check_tiles
+            self.assertEqual(check_tiles(source, folder, folder)["missedRows"], 1)
+            self.assertTrue(check_tiles(source, folder, stage / "tiles/0")["ok"])
+
+    def test_prior_paint_known_walls_parcel_use_and_different_rings_win(self):
+        rec = self.source()["buildings"]
+        paint = struct.pack("<4sIIiHHB", b"SFPT", 1, 2, 0, 1, 1, 57)
+        for wall, trim, style, verts, tail in (
+            (self.old, self.trim, self.home, Rows.verts, paint),
+            (self.old, self.trim | self.home, self.home, Rows.verts, b""),
+            (self.old - 2, self.trim, self.home, Rows.verts, b""),
+            (self.old + 256, self.trim, self.home, Rows.verts, b""),
+            (self.old, self.trim, 0, Rows.verts, b""),
+            (self.old, self.trim, self.home | (1 << 17), Rows.verts, b""),
+            (self.old, self.trim, self.home, [*Rows.verts[:3], (101, 300, 5)], b""),
+            (self.old, self.trim, self.home, [*Rows.verts[:2], (300, 300, 5), Rows.verts[3]], b""),
+        ):
+            blob = tile([(0, 4, wall, trim, style, 0)], verts, tail)
+            self.assertEqual(evidence_tile.apply(blob, rec, reviewed=True), blob)
+        del rec[self.key]["palette"]
+        rec[self.key]["material"] = 7
+        blob = tile([(0, 4, self.old, self.trim, self.home, 0)], Rows.verts)
+        self.assertEqual(evidence_tile.apply(blob, rec, reviewed=True),
+                         tile([(0, 4, self.old - 2, self.trim, self.home, 0)], Rows.verts))
+
+    def test_solved_poses_enforce_independence_even_for_different_image_ids(self):
+        source = self.source()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "facades.json"
+            for pose in ([42, 0], [92, 0]):
+                source["poses"]["ref"] = pose
+                path.write_text(json.dumps(source))
+                with self.assertRaisesRegex(ValueError, "separate reference"):
+                    evidence_tile.load_reviewed(path, "10n4250")
 
 
 class Far(unittest.TestCase):

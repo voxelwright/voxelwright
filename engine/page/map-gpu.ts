@@ -3,6 +3,7 @@
 // anti-aliased multi-tier vector roads, real 3D extruded SF buildings with architectural shading,
 // and a glowing animated neon-pink GPS route ribbon + 3D destination beacon.
 import { palette } from './march.ts'
+import { TIER } from './bay.ts'
 import type { MapData } from './nav-data.ts'
 import type { GpsRoute } from './gps.ts'
 
@@ -42,6 +43,7 @@ export interface MapCamera {
 interface ChunkRange {
   first: number
   count: number
+  baseVertex: number
   x0: number
   z0: number
   x1: number
@@ -421,15 +423,11 @@ struct Out {
 `
 
 // 3D Extruded Buildings shader (GTA VI Ref Image 2 architectural look!).
-// Vertex layout (32 bytes/vert):
-// loc 0: pos (vec3f) — world metres (x, y_local_height, z)
-// loc 1: nrm (vec3f) — outward unit normal (nx, ny, nz)
-// loc 2: colorMeta (vec4f) — rgb (0..1) + w = packed (alongM in integer part, flags/roof in fractional? Wait: use two vec4s or vec3+vec3+vec4+vec2!)
-// Better: 40 bytes/vert, super clean & aligned:
-// loc 0: pos (vec3f)        0..12   (wx, heightAboveBase, wz)
-// loc 1: nrm (vec3f)       12..24   (nx, ny, nz)
-// loc 2: col (vec3f)       24..36   (r, g, b architectural tint)
-// loc 3: uvFlags (vec2f)   36..44   (x = alongWallMetres, y = totalHeightMetres + sign: negative if glass tower)
+// Compact 20-byte vertex layout (#83 — cuts GPU building VBO by 55%+ vs float32, lossless on XZ since map.bin stores u16):
+// loc 0: posXZ (unorm16x2)      0..4    normalized [0..1] in u.bounds (x0..x0+spanX, z0..z0+spanZ)
+// loc 1: heightUV (unorm16x4)   4..12   (y/512, totalH/512, along/2048, 0)
+// loc 2: nrm4 (snorm8x4)       12..16   (nx, ny, nz, 0)
+// loc 3: colFlags (unorm8x4)   16..20   (r, g, b, isGlass)
 const BLDG_WGSL = /* wgsl */ `
 ${COMMON}
 struct Out {
@@ -443,28 +441,32 @@ struct Out {
 }
 
 @vertex fn vs(
-  @location(0) pos: vec3f,
-  @location(1) nrm: vec3f,
-  @location(2) col: vec3f,
-  @location(3) uvFlags: vec2f,
+  @location(0) posXZ: vec2f,
+  @location(1) heightUV: vec4f,
+  @location(2) nrm4: vec4f,
+  @location(3) colFlags: vec4f,
 ) -> Out {
   let extrude = u.player.z;
-  let isGlass = select(0.0, 1.0, uvFlags.y < 0.0);
-  let totalH = abs(uvFlags.y);
+  let wx = u.bounds.x + posXZ.x * u.bounds.z;
+  let wz = u.bounds.y + posXZ.y * u.bounds.w;
+  let yLocal = heightUV.x * 512.0;
+  let totalH = heightUV.y * 512.0;
+  let along = heightUV.z * 2048.0;
+  let isGlass = colFlags.a;
   let style = u.eyeStyle.w;
 
   // Smooth uniform height compression on the 3D minimap: every roof stays 100% level & flat (zero warping!),
   // mid-rise blocks stay architectural & readable (like Ref 2), and tall skyscrapers stand proud without blocking the road.
-  let hSoft = select(pos.y, 44.0 * log(1.0 + pos.y / 44.0), style < 0.5);
+  let hSoft = select(yLocal, 44.0 * log(1.0 + yLocal / 44.0), style < 0.5);
   let y = hSoft * extrude;
   var out: Out;
-  out.pos = u.vp * vec4f(pos.x, y, pos.z, 1.0);
-  out.nrm = nrm;
-  out.col = col;
-  out.wallUV = vec2f(uvFlags.x, pos.y);
+  out.pos = u.vp * vec4f(wx, y, wz, 1.0);
+  out.nrm = normalize(nrm4.xyz);
+  out.col = colFlags.rgb;
+  out.wallUV = vec2f(along, yLocal);
   out.totalH = max(totalH, 1.0);
   out.isGlass = isGlass;
-  out.wxz = pos.xz;
+  out.wxz = vec2f(wx, wz);
   return out;
 }
 
@@ -668,10 +670,16 @@ export class MapGpu {
   private map: MapData | null = null
   private surfaces = new Map<HTMLCanvasElement, SurfaceState>()
   private pal = palette()
+  private palSrgb = new Float32Array(256 * 3)
 
   constructor(device: GPUDevice, format: GPUTextureFormat) {
     this.device = device
     this.format = format
+    for (let i = 0; i < 256; i++) {
+      this.palSrgb[i * 3] = Math.pow(Math.max(0, this.pal[i * 4] || 0.45), 0.45)
+      this.palSrgb[i * 3 + 1] = Math.pow(Math.max(0, this.pal[i * 4 + 1] || 0.40), 0.45)
+      this.palSrgb[i * 3 + 2] = Math.pow(Math.max(0, this.pal[i * 4 + 2] || 0.36), 0.45)
+    }
     this.uniformBuf = device.createBuffer({ label: 'map-uniforms', size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     this.sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' })
 
@@ -734,12 +742,12 @@ export class MapGpu {
         module: bMod,
         entryPoint: 'vs',
         buffers: [{
-          arrayStride: 44,
+          arrayStride: 20,
           attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x3' },
-            { shaderLocation: 1, offset: 12, format: 'float32x3' },
-            { shaderLocation: 2, offset: 24, format: 'float32x3' },
-            { shaderLocation: 3, offset: 36, format: 'float32x2' },
+            { shaderLocation: 0, offset: 0, format: 'unorm16x2' },
+            { shaderLocation: 1, offset: 4, format: 'unorm16x4' },
+            { shaderLocation: 2, offset: 12, format: 'snorm8x4' },
+            { shaderLocation: 3, offset: 16, format: 'unorm8x4' },
           ],
         }],
       },
@@ -871,48 +879,107 @@ export class MapGpu {
     this.bldgVBuf?.destroy()
     this.bldgIBuf?.destroy()
     this.bldgChunks = []
-    const { nBldgs, bldgFirst, bldgCount, bldgColor, bldgFlags, bldgHeight, bldgVerts } = map
+    const { nBldgs, bldgFirst, bldgCount, bldgColor, bldgFlags, bldgHeight, bldgVerts, x0, z0, spanX, spanZ } = map
     if (nBldgs === 0) return
+
+    // Tier-aware simplification (#83): desktop keeps 100% lossless footprints. On phone/tablet, only simplify
+    // compact, nearly axis-aligned rectangular low-rises (<= 32 m side, polygon area >= 75% of AABB) so angled piers
+    // and L-shaped blocks keep their exact silhouettes without oversized boxes.
+    const minH = TIER === 'phone' ? 4.5 : 0
+    const boxBelow = TIER === 'phone' ? 14 : TIER === 'tablet' ? 10 : 0
+    const canBox = new Uint8Array(nBldgs)
+    const boxBounds = boxBelow > 0 ? new Float32Array(nBldgs * 4) : null
 
     // Group buildings into 500 m spatial chunks for fast frustum/distance culling on the minimap!
     const CHUNK = 500
     const buckets = new Map<string, number[]>()
+    let totalVerts = 0, totalIdx = 0
     for (let i = 0; i < nBldgs; i++) {
       const f = bldgFirst[i], c = bldgCount[i]
       if (c < 3) continue
+      const rawH = bldgHeight[i], isGlass = (bldgFlags[i] & 1) !== 0
+      if (!isGlass && rawH < minH) continue
       let sx = 0, sz = 0
-      for (let k = 0; k < c; k++) { sx += bldgVerts[(f + k) * 2]; sz += bldgVerts[(f + k) * 2 + 1] }
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity
+      for (let k = 0; k < c; k++) {
+        const vx = bldgVerts[(f + k) * 2], vz = bldgVerts[(f + k) * 2 + 1]
+        sx += vx; sz += vz
+        if (vx < minX) minX = vx
+        if (vx > maxX) maxX = vx
+        if (vz < minZ) minZ = vz
+        if (vz > maxZ) maxZ = vz
+      }
+      let vcEff = c
+      if (boxBounds && !isGlass && rawH < boxBelow && c > 4) {
+        const bw = maxX - minX, bd = maxZ - minZ
+        if (bw > 0.5 && bd > 0.5 && bw <= 32 && bd <= 32) {
+          let area2 = 0
+          for (let k = 0; k < c; k++) {
+            const k2 = (k + 1) % c
+            area2 += bldgVerts[(f + k) * 2] * bldgVerts[(f + k2) * 2 + 1] - bldgVerts[(f + k2) * 2] * bldgVerts[(f + k) * 2 + 1]
+          }
+          if (Math.abs(area2) * 0.5 >= bw * bd * 0.75) {
+            canBox[i] = 1
+            boxBounds[i * 4] = minX; boxBounds[i * 4 + 1] = maxX
+            boxBounds[i * 4 + 2] = minZ; boxBounds[i * 4 + 3] = maxZ
+            vcEff = 4
+          }
+        }
+      }
+      totalVerts += vcEff * 5 // 4 per wall edge + 1 per roof vertex
+      totalIdx += vcEff * 6 + (vcEff - 2) * 3
       const cx = Math.floor(sx / c / CHUNK), cz = Math.floor(sz / c / CHUNK)
       const key = `${cx},${cz}`
       let list = buckets.get(key)
       if (!list) buckets.set(key, (list = []))
       list.push(i)
     }
+    if (totalVerts === 0) return
 
-    // Estimate max vertices & indices upfront.
-    let totalVerts = 0, totalIdx = 0
-    for (let i = 0; i < nBldgs; i++) {
-      const c = bldgCount[i]
-      if (c < 3) continue
-      totalVerts += c * 5 // 4 per wall edge + 1 per roof vertex
-      totalIdx += c * 6 + (c - 2) * 3
-    }
-    const vData = new Float32Array(totalVerts * 11) // 44 bytes/vert
-    const iData = new Uint32Array(totalIdx)
+    const vBuf = new ArrayBuffer(totalVerts * 20)
+    const vU16 = new Uint16Array(vBuf)
+    const vI8 = new Int8Array(vBuf)
+    const vU8 = new Uint8Array(vBuf)
+    // Chunk-local uint16 indices (+1 padding slot for 4-byte writeBuffer alignment).
+    const iData = new Uint16Array(totalIdx + 1)
     let vc = 0, ic = 0
 
-    const pushV = (x: number, y: number, z: number, nx: number, ny: number, nz: number, r: number, g: number, b: number, u0: number, v0: number) => {
-      const o = vc * 11
-      vData[o] = x; vData[o + 1] = y; vData[o + 2] = z
-      vData[o + 3] = nx; vData[o + 4] = ny; vData[o + 5] = nz
-      vData[o + 6] = r; vData[o + 7] = g; vData[o + 8] = b
-      vData[o + 9] = u0; vData[o + 10] = v0
+    const invSpanX = spanX > 0 ? 65535 / spanX : 0
+    const invSpanZ = spanZ > 0 ? 65535 / spanZ : 0
+    const H_SCALE = 65535 / 512
+    const ALONG_SCALE = 65535 / 2048
+    const boxXs = new Float32Array(4)
+    const boxZs = new Float32Array(4)
+
+    const pushV = (x: number, y: number, z: number, nx: number, ny: number, nz: number, rByte: number, gByte: number, bByte: number, glassByte: number, along: number, totalH: number) => {
+      const o16 = vc * 10
+      const px = Math.round((x - x0) * invSpanX)
+      const pz = Math.round((z - z0) * invSpanZ)
+      vU16[o16] = px < 0 ? 0 : px > 65535 ? 65535 : px
+      vU16[o16 + 1] = pz < 0 ? 0 : pz > 65535 ? 65535 : pz
+      const hy = Math.round(y * H_SCALE)
+      const ht = Math.round(totalH * H_SCALE)
+      const ha = Math.round((along % 2048) * ALONG_SCALE)
+      vU16[o16 + 2] = hy < 0 ? 0 : hy > 65535 ? 65535 : hy
+      vU16[o16 + 3] = ht < 0 ? 0 : ht > 65535 ? 65535 : ht
+      vU16[o16 + 4] = ha < 0 ? 0 : ha > 65535 ? 65535 : ha
+      vU16[o16 + 5] = 0
+      const o8 = vc * 20
+      vI8[o8 + 12] = Math.round(nx * 127)
+      vI8[o8 + 13] = Math.round(ny * 127)
+      vI8[o8 + 14] = Math.round(nz * 127)
+      vI8[o8 + 15] = 0
+      vU8[o8 + 16] = rByte
+      vU8[o8 + 17] = gByte
+      vU8[o8 + 18] = bByte
+      vU8[o8 + 19] = glassByte
       return vc++
     }
 
     for (const [key, list] of buckets) {
       const [cx, cz] = key.split(',').map(Number)
-      const chunkStart = ic
+      const bx0 = cx * CHUNK - 30, bz0 = cz * CHUNK - 30, bx1 = (cx + 1) * CHUNK + 30, bz1 = (cz + 1) * CHUNK + 30
+      let chunkStart = ic, chunkBaseV = vc
       for (const bi of list) {
         const first = bldgFirst[bi], count = bldgCount[bi]
         if (count < 3) continue
@@ -920,55 +987,92 @@ export class MapGpu {
         const rawH = bldgHeight[bi]
         const h = rawH <= 140 ? rawH : 140 + (rawH - 140) * 0.45
         const isGlass = (bldgFlags[bi] & 1) !== 0
-        const ci = bldgColor[bi]
-        // Blend real SF palette color (gamma-decoded back to gentle sRGB) with warm architectural sandstone/terracotta (Ref Image 2!).
-        const pr = Math.pow(Math.max(0, this.pal[ci * 4] || 0.45), 0.45)
-        const pg = Math.pow(Math.max(0, this.pal[ci * 4 + 1] || 0.40), 0.45)
-        const pb = Math.pow(Math.max(0, this.pal[ci * 4 + 2] || 0.36), 0.45)
+        const useBox = canBox[bi] === 1
+        const effCount = useBox ? 4 : count
+        if (vc - chunkBaseV + effCount * 5 > 65535) {
+          if (ic > chunkStart) {
+            this.bldgChunks.push({ first: chunkStart, count: ic - chunkStart, baseVertex: chunkBaseV, x0: bx0, z0: bz0, x1: bx1, z1: bz1 })
+          }
+          chunkStart = ic
+          chunkBaseV = vc
+        }
+        const ci = bldgColor[bi] & 255
+        // Blend real SF palette color (gamma-decoded back to gentle sRGB via precomputed LUT) with warm architectural sandstone/terracotta.
+        const pr = this.palSrgb[ci * 3], pg = this.palSrgb[ci * 3 + 1], pb = this.palSrgb[ci * 3 + 2]
         const warmR = isGlass ? 0.62 : 0.78, warmG = isGlass ? 0.68 : 0.63, warmB = isGlass ? 0.74 : 0.54
-        const r = warmR * 0.62 + pr * 0.38
-        const g = warmG * 0.62 + pg * 0.38
-        const b = warmB * 0.62 + pb * 0.38
-        const hSigned = isGlass ? -h : h
+        const rByte = Math.min(255, Math.round((warmR * 0.62 + pr * 0.38) * 255))
+        const gByte = Math.min(255, Math.round((warmG * 0.62 + pg * 0.38) * 255))
+        const bByte = Math.min(255, Math.round((warmB * 0.62 + pb * 0.38) * 255))
+        const glassByte = isGlass ? 255 : 0
 
-        // Extruded vertical walls (4 verts per edge, flat normal for crisp edges!).
-        let along = 0
-        for (let k = 0; k < count; k++) {
-          const k2 = (k + 1) % count
-          const ax = bldgVerts[(first + k) * 2], az = bldgVerts[(first + k) * 2 + 1]
-          const bx = bldgVerts[(first + k2) * 2], bz = bldgVerts[(first + k2) * 2 + 1]
-          const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz)
-          if (len < 0.05) continue
-          // For CCW in (x, z), outward normal is (dz, 0, -dx) / len.
-          const nx = dz / len, nz = -dx / len
-          const v0 = pushV(ax, 0, az, nx, 0, nz, r, g, b, along, hSigned)
-          const v1 = pushV(bx, 0, bz, nx, 0, nz, r, g, b, along + len, hSigned)
-          const v2 = pushV(bx, h, bz, nx, 0, nz, r, g, b, along + len, hSigned)
-          const v3 = pushV(ax, h, az, nx, 0, nz, r, g, b, along, hSigned)
-          iData[ic++] = v0; iData[ic++] = v1; iData[ic++] = v2
-          iData[ic++] = v0; iData[ic++] = v2; iData[ic++] = v3
-          along += len
-        }
+        if (useBox && boxBounds) {
+          const minX = boxBounds[bi * 4], maxX = boxBounds[bi * 4 + 1]
+          const minZ = boxBounds[bi * 4 + 2], maxZ = boxBounds[bi * 4 + 3]
+          // CCW in (x, z) matching outward normal (dz, 0, -dx).
+          boxXs[0] = minX; boxZs[0] = minZ
+          boxXs[1] = maxX; boxZs[1] = minZ
+          boxXs[2] = maxX; boxZs[2] = maxZ
+          boxXs[3] = minX; boxZs[3] = maxZ
+          let along = 0
+          for (let k = 0; k < 4; k++) {
+            const k2 = (k + 1) & 3
+            const ax = boxXs[k], az = boxZs[k], bx = boxXs[k2], bz = boxZs[k2]
+            const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz)
+            if (len < 0.05) continue
+            const nx = dz / len, nz = -dx / len
+            const v0 = pushV(ax, 0, az, nx, 0, nz, rByte, gByte, bByte, glassByte, along, h) - chunkBaseV
+            const v1 = pushV(bx, 0, bz, nx, 0, nz, rByte, gByte, bByte, glassByte, along + len, h) - chunkBaseV
+            const v2 = pushV(bx, h, bz, nx, 0, nz, rByte, gByte, bByte, glassByte, along + len, h) - chunkBaseV
+            const v3 = pushV(ax, h, az, nx, 0, nz, rByte, gByte, bByte, glassByte, along, h) - chunkBaseV
+            iData[ic++] = v0; iData[ic++] = v1; iData[ic++] = v2
+            iData[ic++] = v0; iData[ic++] = v2; iData[ic++] = v3
+            along += len
+          }
+          const roofBase = vc - chunkBaseV
+          for (let k = 0; k < 4; k++) pushV(boxXs[k], h, boxZs[k], 0, 1, 0, rByte, gByte, bByte, glassByte, 0, h)
+          iData[ic++] = roofBase; iData[ic++] = roofBase + 1; iData[ic++] = roofBase + 2
+          iData[ic++] = roofBase; iData[ic++] = roofBase + 2; iData[ic++] = roofBase + 3
+        } else {
+          // Extruded vertical walls (4 verts per edge, flat normal for crisp edges!).
+          let along = 0
+          for (let k = 0; k < count; k++) {
+            const k2 = (k + 1) % count
+            const ax = bldgVerts[(first + k) * 2], az = bldgVerts[(first + k) * 2 + 1]
+            const bx = bldgVerts[(first + k2) * 2], bz = bldgVerts[(first + k2) * 2 + 1]
+            const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz)
+            if (len < 0.05) continue
+            // For CCW in (x, z), outward normal is (dz, 0, -dx) / len.
+            const nx = dz / len, nz = -dx / len
+            const v0 = pushV(ax, 0, az, nx, 0, nz, rByte, gByte, bByte, glassByte, along, h) - chunkBaseV
+            const v1 = pushV(bx, 0, bz, nx, 0, nz, rByte, gByte, bByte, glassByte, along + len, h) - chunkBaseV
+            const v2 = pushV(bx, h, bz, nx, 0, nz, rByte, gByte, bByte, glassByte, along + len, h) - chunkBaseV
+            const v3 = pushV(ax, h, az, nx, 0, nz, rByte, gByte, bByte, glassByte, along, h) - chunkBaseV
+            iData[ic++] = v0; iData[ic++] = v1; iData[ic++] = v2
+            iData[ic++] = v0; iData[ic++] = v2; iData[ic++] = v3
+            along += len
+          }
 
-        // Roof cap via ear-clipping.
-        const roofBase = vc
-        for (let k = 0; k < count; k++) {
-          const rx = bldgVerts[(first + k) * 2], rz = bldgVerts[(first + k) * 2 + 1]
-          pushV(rx, h, rz, 0, 1, 0, r, g, b, 0, hSigned)
+          // Roof cap via ear-clipping.
+          const roofBase = vc - chunkBaseV
+          for (let k = 0; k < count; k++) {
+            const rx = bldgVerts[(first + k) * 2], rz = bldgVerts[(first + k) * 2 + 1]
+            pushV(rx, h, rz, 0, 1, 0, rByte, gByte, bByte, glassByte, 0, h)
+          }
+          const tris = earClip(bldgVerts, bldgVerts, first, count)
+          for (let t = 0; t < tris.length; t++) iData[ic++] = roofBase + tris[t]
         }
-        const tris = earClip(bldgVerts, bldgVerts, first, count)
-        for (let t = 0; t < tris.length; t++) iData[ic++] = roofBase + tris[t]
       }
       if (ic > chunkStart) {
-        this.bldgChunks.push({ first: chunkStart, count: ic - chunkStart, x0: cx * CHUNK - 30, z0: cz * CHUNK - 30, x1: (cx + 1) * CHUNK + 30, z1: (cz + 1) * CHUNK + 30 })
+        this.bldgChunks.push({ first: chunkStart, count: ic - chunkStart, baseVertex: chunkBaseV, x0: bx0, z0: bz0, x1: bx1, z1: bz1 })
       }
     }
 
     if (ic === 0) return
-    const vSlice = vData.subarray(0, vc * 11), iSlice = iData.subarray(0, ic)
-    this.bldgVBuf = this.device.createBuffer({ label: 'map-bldgs-v', size: vSlice.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+    const vByteLen = vc * 20
+    const iSlice = iData.subarray(0, (ic + 1) & ~1)
+    this.bldgVBuf = this.device.createBuffer({ label: 'map-bldgs-v', size: vByteLen, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
     this.bldgIBuf = this.device.createBuffer({ label: 'map-bldgs-i', size: iSlice.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST })
-    this.device.queue.writeBuffer(this.bldgVBuf, 0, vSlice)
+    this.device.queue.writeBuffer(this.bldgVBuf, 0, vBuf, 0, vByteLen)
     this.device.queue.writeBuffer(this.bldgIBuf, 0, iSlice)
   }
 
@@ -1023,6 +1127,7 @@ export class MapGpu {
   private surface(canvas: HTMLCanvasElement, w: number, h: number): SurfaceState | null {
     let s = this.surfaces.get(canvas)
     if (!s) {
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
       const context = canvas.getContext('webgpu')
       if (!context) return null
       context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' })
@@ -1122,10 +1227,10 @@ export class MapGpu {
       pass.setPipeline(this.bldgPipe)
       pass.setBindGroup(0, this.commonBind)
       pass.setVertexBuffer(0, this.bldgVBuf)
-      pass.setIndexBuffer(this.bldgIBuf, 'uint32')
+      pass.setIndexBuffer(this.bldgIBuf, 'uint16')
       for (const ch of this.bldgChunks) {
         if (ch.x1 < tx - cullR || ch.x0 > tx + cullR || ch.z1 < tz - cullR || ch.z0 > tz + cullR) continue
-        pass.drawIndexed(ch.count, 1, ch.first)
+        pass.drawIndexed(ch.count, 1, ch.first, ch.baseVertex)
       }
     }
 
@@ -1134,11 +1239,15 @@ export class MapGpu {
     return vp
   }
 
-  /** Frees GPU attachments for a canvas when removed. */
+  /** Frees GPU attachments & swapchain textures for a canvas when hidden or removed (#83). */
   release(canvas: HTMLCanvasElement) {
     const s = this.surfaces.get(canvas)
     if (!s) return
-    s.msaaTex?.destroy(); s.depthTex?.destroy()
+    s.msaaTex?.destroy()
+    s.depthTex?.destroy()
+    s.context.unconfigure()
+    canvas.width = 1
+    canvas.height = 1
     this.surfaces.delete(canvas)
   }
 }

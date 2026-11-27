@@ -68,14 +68,14 @@ scripts/hygiene.sh --install     # copy to ~/.village/bin and run it hourly with
 scripts/hygiene.sh               # remove finished worktrees, prune, check the disk
 ```
 
-It looks in `~/.t3/worktrees/Voxelwright` for worktrees of the checkout at `~/Developer/voxelwright`. Set `VILLAGE_WORKTREES` and `VILLAGE_REPO` to point it elsewhere. A worktree is removed only when all of these hold:
+It looks in `~/.t3/worktrees/voxelwright` for worktrees of the checkout at `~/Developer/voxelwright`. Set `VILLAGE_WORKTREES` and `VILLAGE_REPO` to point it elsewhere. Paths match in any letter case on macOS and exactly on Linux. A worktree is removed only when all of these hold:
 
 - It has no modified files, and no untracked files apart from `node_modules`, `dist`, `target`, `.venv` and `__pycache__`.
 - Its HEAD is merged into origin/main, or its branch is gone on the remote, or it is on a pushed branch and nothing in it changed for 3 days.
 - Nothing in it changed in the last 2 hours.
 - It is not under `feature-450-*`, not locked, and no running process has a file or working directory inside it.
 
-A HEAD that no branch contains is kept as `refs/backup/wt-<name>` first. Below 60 GiB free it posts a notification. Each removal and disk alarm is logged to `~/.village/hygiene.log`. Rerun `--install` after changing the script.
+If the script cannot check file times, it counts the worktree as changed and keeps it. A HEAD that no branch contains is kept as `refs/backup/wt-<name>` first. Below 60 GiB free it posts a notification. Each removal and disk alarm is logged to `~/.village/hygiene.log`. Rerun `--install` after changing the script. `scripts/hygiene.test.mjs`, run with Node's test runner, tries it on a throwaway repository; `npm run check` does not run it.
 
 ## Check a change to this process
 

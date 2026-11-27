@@ -49,16 +49,18 @@ const FLY_SVG = '<svg class="hud-ic ic-fly" viewBox="0 0 20 20" width="17" heigh
 const WALK_SVG = '<svg class="hud-ic ic-walk" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4.5v10.5"/><path d="M5.5 10.5L10 15l4.5-4.5"/><path d="M5 17.5h10"/></svg>'
 const DOWN_SVG = '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 5v10"/><path d="M5.5 10.5L10 15l4.5-4.5"/></svg>'
 const DRIVE_ICONS: Record<string, string> = {
-  drift: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15.5c1.5-5 4.5-7 11-7"/><path d="M12.5 5.5L15.5 8.5 12.5 11.5"/><path d="M4.5 11.5c1-2.5 2.8-4 5.5-4.5" opacity="0.55"/></svg>',
-  horn: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5h3.2L12 5v10l-5.3-3.5H3.5z"/><path d="M15 7.5a3.5 3.5 0 0 1 0 5"/><path d="M17 5.5a6.5 6.5 0 0 1 0 9" opacity="0.6"/></svg>',
-  cam: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="10.5" height="8" rx="1.5"/><path d="M13 8.8l4.5-2.3v7L13 11.2z"/></svg>',
-  seat: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="1.6"/><path d="M4 9.5h4.4M11.6 9.5H16M10 11.6V16"/></svg>',
-  leave: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4.5v12H8"/><path d="M10 10h6.5"/><path d="M13.5 7l3 3-3 3"/></svg>',
-  radio: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="9" rx="1.5"/><path d="M6 7l7-3.5"/><circle cx="7.5" cy="11.5" r="2"/><path d="M12 10h2.5M12 13h2.5"/></svg>',
-  repair: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.8a3.8 3.8 0 0 0-4.9 4.9L4 13.3a1.6 1.6 0 1 0 2.3 2.3l4.6-4.6a3.8 3.8 0 0 0 4.9-4.9l-2.1 2.1-2.3-2.3 2.1-2.1z"/></svg>',
-  lights: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6a4 4 0 0 0 0 8H11V6H9.5z"/><path d="M13.5 7l3.5-1M13.5 10H17.5M13.5 13l3.5 1"/></svg>',
-  rear: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5L3 11l2.5 2.5"/><path d="M3.5 11h9a3.5 3.5 0 0 0 0-7H9"/></svg>',
-  boost: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5L4.5 11h5l-1 6.5L15.5 9h-5l.5-6.5z"/></svg>',
+  gas: '<svg class="hud-ic ic-gas" viewBox="0 0 24 28" width="24" height="28" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 12L12 6.5 17.5 12"/><path d="M6.5 18L12 12.5 17.5 18" opacity="0.72"/><path d="M7.5 23h9" stroke-width="2" opacity="0.5"/></svg>',
+  brake: '<svg class="hud-ic ic-brake" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 7.5L12 13l5.5-5.5"/><path d="M5.5 17.5h13" stroke-width="2.6"/></svg>',
+  drift: '<svg class="hud-ic" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15.5c1.5-5 4.5-7 11-7"/><path d="M12.5 5.5L15.5 8.5 12.5 11.5"/><path d="M4.5 11.5c1-2.5 2.8-4 5.5-4.5" opacity="0.55"/></svg>',
+  horn: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5h3.2L12 5v10l-5.3-3.5H3.5z"/><path d="M15 7.5a3.5 3.5 0 0 1 0 5"/><path d="M17 5.5a6.5 6.5 0 0 1 0 9" opacity="0.6"/></svg>',
+  cam: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="10.5" height="8" rx="1.5"/><path d="M13 8.8l4.5-2.3v7L13 11.2z"/></svg>',
+  seat: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="1.6"/><path d="M4 9.5h4.4M11.6 9.5H16M10 11.6V16"/></svg>',
+  leave: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4.5v12H8"/><path d="M10 10h6.5"/><path d="M13.5 7l3 3-3 3"/></svg>',
+  radio: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="9" rx="1.5"/><path d="M6 7l7-3.5"/><circle cx="7.5" cy="11.5" r="2"/><path d="M12 10h2.5M12 13h2.5"/></svg>',
+  repair: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.8a3.8 3.8 0 0 0-4.9 4.9L4 13.3a1.6 1.6 0 1 0 2.3 2.3l4.6-4.6a3.8 3.8 0 0 0 4.9-4.9l-2.1 2.1-2.3-2.3 2.1-2.1z"/></svg>',
+  lights: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6a4 4 0 0 0 0 8H11V6H9.5z"/><path d="M13.5 7l3.5-1M13.5 10H17.5M13.5 13l3.5 1"/></svg>',
+  rear: '<svg class="hud-ic" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5L3 11l2.5 2.5"/><path d="M3.5 11h9a3.5 3.5 0 0 0 0-7H9"/></svg>',
+  boost: '<svg class="hud-ic" viewBox="0 0 20 20" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5L4.5 11h5l-1 6.5L15.5 9h-5l.5-6.5z"/></svg>',
 }
 const toolSvg = (toolName: string) => {
   const path = TOOL_ICONS[toolName]
@@ -118,8 +120,8 @@ html:not(.first)[data-hud]:has(#realm.open) :is(#ask:not(.open), #realm .held),
 html:not(.first)[data-hud].choosing #ask:not(.open) { visibility: hidden !important; }
 
 #realm[data-hud] .help, #realm[data-hud] .stick { display: none !important; }
-/* A thing's cue in the world ("E Take the van", hud.ts) is not drawn over the open Settings panel. */
-html[data-hud]:has(#realm.open) #over > #cues { visibility: hidden; }
+/* A thing's cue in the world ("E Take the van", hud.ts) is not drawn over the open Settings panel or radial wheel. */
+html[data-hud]:is(:has(#realm.open), .choosing) #over > #cues { visibility: hidden; }
 /* The street's name steps aside while the line to say something on is open (on a phone on its side they share the top). */
 html[data-hud]:has(#realm .egg-line:not([hidden])) #where { visibility: hidden; }
 
@@ -269,10 +271,10 @@ html[data-hud].hung #aim, html.choosing #aim, html.drawer #aim, html:has(#ask.op
 @media (pointer: fine) { html[data-hud="quiet"]:not(.away) #realm[data-hud="quiet"] .tools { opacity: 1; pointer-events: auto; } }
 
 /* Active play fade (pointer locked on desktop): fade secondary chrome so San Francisco fills the screen. */
-html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#first .credits, #realm .fold, #realm .sky, #hud) { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.35s ease-out; }
+html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#realm .fold, #realm .sky, #hud) { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.35s ease-out; }
 html:is([data-hud="quiet"], [data-hud="wheel"]).away #ask:not(.open) { opacity: 0 !important; pointer-events: none !important; }
 html:is([data-hud="quiet"], [data-hud="wheel"]).away:not(.arrived) #where { opacity: 0 !important; transition: opacity 0.4s ease-out; }
-html[data-hud="quiet"] :is(#where, #first .credits, #realm .fold) { transition: opacity 0.25s ease-out; }
+html[data-hud="quiet"] :is(#where, #realm .fold) { transition: opacity 0.25s ease-out; }
 
 /* ── Collapsed Ask trigger: real slim voxel keycap behind ✦ Make ↵ (desktop) and ✦ (mobile) ── */
 html:not(.first)[data-hud] #ask:not(.open) #ask-row {
@@ -429,7 +431,7 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   /* Contextual auto-dimming when idle so the city shines through. */
   #realm[data-hud="quiet"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.22; }
   #realm[data-hud="wheel"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.7; }
-  html[data-hud="wheel"].away :is(#first .credits, #realm .fold) { opacity: 0.86 !important; pointer-events: auto !important; }
+  html[data-hud="wheel"].away #realm .fold { opacity: 0.86 !important; pointer-events: auto !important; }
   html[data-hud="wheel"].away #ask:not(.open) { opacity: 0.72 !important; pointer-events: auto !important; }
 
   /* The Settings gear alone in the top right, matching the minimap top-left. (Back to the view is in its panel, #75.) */
@@ -541,45 +543,109 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html:not(.first)[data-hud]:is(.thumb-down, .riding, .drawer, .choosing) :is(#realm .foot-summon, [data-panel="summon"]),
   html:not(.first)[data-hud]:has(#ask.open) :is(#realm .foot-summon, [data-panel="summon"]) { opacity: 0 !important; pointer-events: none !important; }
 
-  /* Riding keys (living.ts): compact slim voxel cluster at bottom-right, leaving bottom-left clear for thumbstick & radio-yt (216x200). */
+  /* Riding keys (living.ts): non-drive schemes sit in a compact bottom-right column. */
   html[data-hud] [data-panel="living"] { right: calc(env(safe-area-inset-right, 0px) + 14px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); gap: 8px; }
-  html[data-hud] [data-panel="living"] .vx-button { min-inline-size: 74px; min-block-size: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; }
+  html[data-hud] [data-panel="living"] .vx-button { min-inline-size: 74px; min-block-size: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; touch-action: none; user-select: none; -webkit-user-select: none; }
+
+  /* Ergonomic two-zone touch driving HUD (GTA Definitive Edition & CarX Street):
+     1. Bottom-right .drive-pedals: only 4 pure icon-only driving controls (Gas, Brake/Rev, Drift, Boost) — zero text clutter.
+     2. Top-right .drive-util: quiet 44x44 icon-only utility keys (Horn, Radio, Cam, Exit + contextual Repair when damaged). */
   html[data-hud].driving [data-panel="living"] {
-    display: grid;
-    grid-template-columns: 52px 58px;
-    grid-auto-rows: 46px;
-    gap: 8px;
-    align-items: stretch;
-    justify-items: stretch;
+    position: fixed;
+    inset: 0;
+    display: block;
+    max-height: none;
+    pointer-events: none;
   }
   html[data-hud].driving [data-panel="living"] .vx-button {
-    inline-size: 100%;
-    block-size: 100%;
     min-inline-size: 44px;
     min-block-size: 44px;
     padding: 0;
+    pointer-events: auto;
+    opacity: 0.82;
+    transition: opacity 0.2s ease-out;
   }
+  html[data-hud].driving [data-panel="living"] .vx-button[aria-pressed="true"] { opacity: 1; }
+  html[data-hud="wheel"].away.driving [data-panel="living"] .vx-button:not([aria-pressed="true"]) { opacity: 0.64; }
   html[data-hud].driving [data-panel="living"] .vx-button .vx-label {
     display: inline-flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
   }
-  html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { font: 600 9px/1 var(--hud-font); letter-spacing: 0.02em; opacity: 0.92; }
-  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Cam, Radio, Repair.
-     No Seat key while driving (#75): Cam goes round the views, the seat among them (#74). */
+  html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { display: none; }
   html[data-hud].driving [data-panel="living"] [data-act="seat"] { display: none !important; }
-  html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 4; }
-  html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 2; grid-row: 3; }
-  html[data-hud].driving [data-panel="living"] [data-act="horn"] { grid-column: 2; grid-row: 2; }
-  html[data-hud].driving [data-panel="living"] [data-act="leave"] { grid-column: 2; grid-row: 1; }
-  html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 4; }
-  html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 3; }
-  html[data-hud].driving [data-panel="living"] [data-act="repair"] { grid-column: 1; grid-row: 2; }
+  html[data-hud].driving [data-panel="living"] [data-act="repair"][hidden] { display: none !important; }
+
+  /* Bottom-right primary driving cluster: tall Gas pedal (right), shorter Brake/Rev (left), Drift (above Gas), Boost (above Brake).
+     114px wide on portrait (leaves 34px clearance to bottom-left 216x200 radio-yt on 390px phones). */
+  html[data-hud].driving [data-panel="living"] .drive-pedals {
+    position: absolute;
+    right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    display: grid;
+    grid-template-columns: 50px 56px;
+    grid-template-rows: 46px 76px;
+    gap: 8px;
+    align-items: end;
+    justify-items: stretch;
+    pointer-events: none;
+  }
+  html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 1; grid-row: 1; inline-size: 50px; block-size: 46px; }
+  html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 1; inline-size: 56px; block-size: 46px; opacity: 0.92; }
+  html[data-hud].driving [data-panel="living"] [data-act="brake"] { grid-column: 1; grid-row: 2; inline-size: 50px; block-size: 56px; }
+  html[data-hud].driving [data-panel="living"] [data-act="gas"] { grid-column: 2; grid-row: 2; inline-size: 56px; block-size: 76px; opacity: 0.9; }
+
+  /* Top-right quiet utility rail (portrait: clean row below drive-hud & Settings gear; landscape: beside Settings gear). */
+  html[data-hud].driving [data-panel="living"] .drive-util {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 72px);
+    right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+  }
+  html[data-hud].driving [data-panel="living"] .drive-util .vx-button {
+    inline-size: 44px;
+    block-size: 44px;
+    opacity: 0.76;
+  }
+  html[data-hud].driving [data-panel="living"] .drive-util [data-act="repair"] {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 124px);
+    right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+    opacity: 0.92;
+  }
+  /* Keep street name neatly under the top-left minimap on portrait while driving so it never meets the top-right utility rail. */
+  @media (orientation: portrait) {
+    html:not(.first)[data-hud].driving #where {
+      display: block;
+      max-inline-size: 132px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
   @media (orientation: landscape) {
     html[data-hud]:not(.driving) [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 10px); inline-size: calc(2 * 96px + 10px); column-gap: 10px; }
-    html[data-hud].driving [data-panel="living"] { grid-auto-rows: 44px; gap: 6px; }
+    html[data-hud].driving [data-panel="living"] .drive-pedals {
+      grid-template-columns: 54px 60px;
+      grid-template-rows: 48px 80px;
+      gap: 10px;
+    }
+    html[data-hud].driving [data-panel="living"] [data-act="boost"] { inline-size: 54px; block-size: 48px; }
+    html[data-hud].driving [data-panel="living"] [data-act="drift"] { inline-size: 60px; block-size: 48px; }
+    html[data-hud].driving [data-panel="living"] [data-act="brake"] { inline-size: 54px; block-size: 60px; }
+    html[data-hud].driving [data-panel="living"] [data-act="gas"] { inline-size: 60px; block-size: 80px; }
+    html[data-hud].driving [data-panel="living"] .drive-util {
+      top: calc(env(safe-area-inset-top, 0px) + 14px);
+      right: calc(max(14px, env(safe-area-inset-right, 0px) + 14px) + 54px);
+    }
+    html[data-hud].driving [data-panel="living"] .drive-util [data-act="repair"] {
+      top: calc(env(safe-area-inset-top, 0px) + 66px);
+      right: max(14px, calc(env(safe-area-inset-right, 0px) + 14px));
+    }
   }
 }
 `

@@ -11,6 +11,7 @@ import { OWN_HOUR, skies, UNSET, WEATHERS, type Weather } from './weather.ts'
 import { modes, MODES, type Mode, type ModesPage } from './modes.ts'
 import type { Input } from './input.ts'
 import type { Marcher } from './march.ts'
+import type { WindowEffect } from './eggs-pictures.ts'
 import { legends } from './typeface.ts'
 
 export interface RealmPage {
@@ -33,6 +34,8 @@ export interface RealmPage {
     /** The resolution (main.ts `resolve`): a scale of the screen's pixels, pinned or steered for a frame rate (0: the screen's own). */
     resolution?: { rates: readonly number[]; get(): { scale: number; auto: boolean; target: number; fixed: boolean }; set(to: { scale?: number; auto?: boolean; target?: number }): void }
   }
+  /** What the unused lower/outer windows show during video Easter eggs (eggs-pictures.ts): Ambilight, Equalizer, or Off. */
+  windowEffect?: { modes: readonly WindowEffect[]; get(): WindowEffect; set(mode: WindowEffect): void }
   /** Opens the line to say something to the city on (eggs.ts), where the page has one: by touch there is no Enter or slash. */
   say?(): void
   /** Opens the panel where a visitor connects their own AI (connect.ts), where the page makes things itself (#526). */
@@ -45,12 +48,20 @@ export interface RealmPage {
   modes?: Omit<ModesPage, 'sky' | 'hour' | 'setHour'>
   /** Opens the in-game feedback / bug reporter (#64, feedback.ts). */
   report?(): void
+  /** Unobtrusive PWA install action (pwa.ts): shown in Settings only when installable and not yet installed. */
+  install?: { available(): boolean; prompt(): Promise<unknown>; subscribe(fn: () => void): () => void }
 }
 
 const MODE_NAMES: Record<Mode, string> = { light: 'Light', dark: 'Dark', sf: 'SF now' }
 const MODE_TITLES: Record<Mode, string> = { light: 'The city at a quarter past five, the sun low and the towers warm', dark: 'The city at half past nine at night, every window lit', sf: "San Francisco's own time, sun and moon, and its weather as the National Weather Service last saw it at SFO" }
 
 const GRAPHICS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' }
+const WINDOW_FX_NAMES: Record<WindowEffect, string> = { ambilight: 'Ambient', equalizer: 'EQ', off: 'Off' }
+const WINDOW_FX_TITLES: Record<WindowEffect, string> = {
+  ambilight: 'Ambilight: soft skylight spill from video eggs onto the windows below',
+  equalizer: 'Equalizer: live audio-reactive bars across the windows below video eggs',
+  off: 'Off: dim the windows below video eggs',
+}
 
 const NAMES: Record<Weather, string> = { clear: 'Clear', overcast: 'Overcast', fog: 'Fog', rain: 'Rain' }
 const clock = (h: number) => { const m = Math.round(h * 60) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
@@ -100,6 +111,8 @@ const STYLE = /* css */ `
 }
 /* The graphics: three quality tiers across one row, with Medium given extra room so its words stay clear of its walls. */
 #realm .sky .graphics { grid-auto-flow: column; grid-template-columns: 1fr 1.4fr 1fr; }
+#realm .sky .win-fx { display: grid; gap: calc(var(--vx) * 2); }
+#realm .sky .window-fx { grid-auto-flow: column; grid-template-columns: 1.45fr 0.8fr 0.85fr; }
 /* Dynamic resolution: a slide switch on its header row; when on, a bank of Target FPS keys; when off, a resolution fader. */
 #realm .sky .res-auto { display: flex; align-items: center; justify-content: space-between; inline-size: 100%; min-block-size: calc(var(--vx) * 9); gap: calc(var(--vx) * 2); }
 #realm .sky .res-auto .r-title { font: 600 13px/1.2 var(--vx-font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--vx-ink-quiet); }
@@ -235,6 +248,12 @@ export function realmControls(page: RealmPage) {
       <div class="vx-toggle-group graphics" role="radiogroup" aria-label="Graphics">
         ${page.graphics.presets.map((g) => `<label><input type="radio" name="realm-graphics" value="${g}">${GRAPHICS[g] ?? g}</label>`).join('')}
       </div>
+      ${page.windowEffect ? `<div class="win-fx">
+        <header class="sub g"><h3>Window glow</h3></header>
+        <div class="vx-toggle-group window-fx" role="radiogroup" aria-label="Window glow">
+          ${page.windowEffect.modes.map((m) => `<label title="${WINDOW_FX_TITLES[m]}"><input type="radio" name="realm-window-fx" value="${m}">${WINDOW_FX_NAMES[m]}</label>`).join('')}
+        </div>
+      </div>` : ''}
       </div>` : ''}
       ${page.graphics?.resolution ? `<div class="part res" role="group" aria-label="Resolution">
       <label class="vx-toggle res-auto" title="Dynamic resolution: adjust resolution automatically to hold the target FPS">
@@ -255,7 +274,7 @@ export function realmControls(page: RealmPage) {
       </div>` : ''}
       <div class="part acts" role="group" aria-label="Actions">
       <div class="vx-groove" role="separator"></div>
-      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}${page.report ? '<button class="vx-button report" type="button" aria-haspopup="dialog" title="Report a bug or something that looks off (F8)">Report…</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.radio ? '<button class="vx-button radio" type="button" aria-haspopup="dialog" title="In-car radio &amp; YouTube Music playlists (R while driving)">Radio…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}${page.report ? '<button class="vx-button report" type="button" aria-haspopup="dialog" title="Report a bug or something that looks off (F8)">Report…</button>' : ''}${page.install ? '<button class="vx-button install" type="button" hidden title="Install Voxelwright for fullscreen and offline play">Install app</button>' : ''}<button class="vx-button sky-credits-link" type="button" popovertarget="first-credits" title="Whose data this place is made from">Credits</button><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
     </section>
     <div class="vx-toggle-group tools" role="radiogroup" aria-label="Tool">
@@ -281,6 +300,7 @@ export function realmControls(page: RealmPage) {
   const modeKeys = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-mode]')]
   const tools = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-tool]')]
   const graphics = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-graphics]')]
+  const windowFx = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-window-fx]')]
   const res = page.graphics?.resolution, resAuto = root.querySelector<HTMLInputElement>('input.res-auto'), resFps = root.querySelector<HTMLElement>('.res-fps'), resManual = root.querySelector<HTMLElement>('.res-manual'), resIn = root.querySelector<HTMLInputElement>('input.res'), resOut = root.querySelector<HTMLOutputElement>('output.res')
   const rates = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-rate]')]
   const panel = $<HTMLElement>('.sky'), fold = $<HTMLButtonElement>('.fold')
@@ -307,7 +327,24 @@ export function realmControls(page: RealmPage) {
   root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
   root.querySelector('button.radio')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.radio?.() })
   root.querySelector('button.report')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.report?.() })
+  const installBtn = root.querySelector<HTMLButtonElement>('button.install')
+  if (installBtn && page.install) {
+    const syncInstall = () => {
+      const show = !!page.install?.available()
+      if (installBtn.hidden !== !show) {
+        installBtn.hidden = !show
+        if (show && !panel.hidden && kit) { kit.refresh?.(installBtn); kit.refresh?.(panel) }
+      }
+    }
+    syncInstall()
+    page.install.subscribe(syncInstall)
+    installBtn.addEventListener('click', () => {
+      if (coarse.matches || root.classList.contains('folds')) folded(true)
+      void page.install?.prompt()
+    })
+  }
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
+  for (const fx of windowFx) fx.addEventListener('change', () => { if (fx.checked) page.windowEffect?.set(fx.value as WindowEffect) })
   // Dynamic resolution On/Off: On steers resolution to hold Target FPS; Off pins it where the slider stands.
   let sizing = false
   resIn?.addEventListener('pointerdown', () => { sizing = true })
@@ -347,7 +384,7 @@ export function realmControls(page: RealmPage) {
   $<HTMLButtonElement>('.use').addEventListener('click', () => page.controls.use())
 
   // Every frame: the sky goes on towards what was asked, and the controls show what the page has.
-  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', shownRes = '', shownMode: Mode | null | undefined, night: boolean | null = null, stickAt = ''
+  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', shownWindowFx = '', shownRes = '', shownMode: Mode | null | undefined, night: boolean | null = null, stickAt = ''
   page.watch((gap) => {
     sky.step(gap / 1000)
     mode?.step(gap / 1000)
@@ -363,6 +400,8 @@ export function realmControls(page: RealmPage) {
     if (t !== shownTool) { shownTool = t; tools.forEach((el, i) => { el.checked = i === t }) }
     const g = page.graphics?.get() ?? ''
     if (g !== shownGraphics) { shownGraphics = g; for (const el of graphics) el.checked = el.value === g }
+    const fx = page.windowEffect?.get() ?? ''
+    if (fx !== shownWindowFx) { shownWindowFx = fx; for (const el of windowFx) el.checked = el.value === fx }
     // Dynamic resolution: On shows the Target FPS bank; Off shows the manual resolution fader.
     if (res && resAuto && resFps && resManual && resIn && resOut) {
       const r = res.get(), at = String(Math.round(r.scale * 100)), key = `${at},${r.auto},${r.target},${r.fixed}`

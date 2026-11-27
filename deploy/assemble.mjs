@@ -31,7 +31,7 @@ const SENT_BY_WORKER = (path) => path.startsWith('releases/') || path.startsWith
 // Binary city tiles, far faces and road/map tables are only read by WebGPU browsers (all of which send
 // Accept-Encoding: br): drop their uncompressed copies when a quality-11 .br sibling exists so dist-world stays
 // compact (~800 MB / ~6,800 files instead of ~6.7 GB / ~12,400 files). Text and JSON keep both plain and .br.
-const BROTLI_ONLY_BINARY = (path) => SENT_BY_WORKER(path) && /\.(bay|far|bin)$/.test(path)
+const BROTLI_ONLY_BINARY = (path) => SENT_BY_WORKER(path) && /\.(bay|far|bin|pack)$/.test(path)
 // releases/<pin>/graph/: the street graphs, plain and .br. No page code reads them (engine/page has no reference).
 const UNUSED = (path) => /^releases\/[^/]+\/graph\//.test(path)
 const worldFiles = new Map()
@@ -49,6 +49,10 @@ for (const file of files(realm)) {
 }
 placeWorld(join(here, 'alpha.js'), 'alpha.js')
 placeWorld(join(here, 'og-world.png'), 'og.png')
+placeWorld(join(here, 'manifest.webmanifest'), 'manifest.webmanifest')
+for (const icon of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) {
+  placeWorld(join(here, 'icons', icon), `icons/${icon}`)
+}
 
 const siteFiles = new Map()
 let siteHeaders = ''
@@ -72,7 +76,14 @@ function worldPage(html) {
   const page = html.replace(/(["'])\/blog\//g, `$1${personal}/blog/`)
     .replace(/<title>[^<]*<\/title>/, `<title>${attr(TITLE)}</title>`)
     .replace('<link rel="icon" href="data:,">', '<link rel="icon" href="/favicon.svg" type="image/svg+xml">')
-  return page.replace('</head>', `<link rel="canonical" href="${worldOrigin}/">
+  const themeMeta = /<meta\s+name="theme-color"/i.test(page) ? '' : '<meta name="theme-color" content="#10141a">\n'
+  return page.replace('</head>', `${themeMeta}<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Voxelwright">
+<link rel="canonical" href="${worldOrigin}/">
 <meta name="description" content="${attr(DESCRIPTION)}">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Voxelwright">
@@ -144,6 +155,32 @@ function assemble(folder, entries, headers, world) {
   if (world) {
     page('404.html', NOT_FOUND)
     writeFileSync(join(out, 'robots.txt'), 'User-agent: *\nAllow: /\n')
+    // Build the PWA service worker with a deterministic shell version and precache list from the assembled output.
+    const isCoreShell = (p) => (
+      p === 'manifest.webmanifest' ||
+      p === 'favicon.svg' ||
+      p === 'alpha.js' ||
+      p === 'page/main.js' ||
+      p === 'page/core.wasm' ||
+      /^assets\/(?:main|core)-[^/]+\.(?:js|wasm)$/.test(p) ||
+      /^kit\/voxelmorphism(?:-[0-9a-f]+)?\.css$/.test(p) ||
+      /^loading-[^/]+\.webp$/.test(p) ||
+      /^kit\/fonts\/.*\.woff2$/.test(p) ||
+      /^icons\/icon-(?:192|512)\.png$/.test(p)
+    )
+    const precachePaths = [...entries.keys()].filter(isCoreShell).sort()
+    const shellHash = createHash('sha256')
+    for (const rel of ['index.html', ...precachePaths]) {
+      const full = join(out, rel)
+      if (existsSync(full)) shellHash.update(rel).update('\0').update(readFileSync(full))
+    }
+    const shellVersion = shellHash.digest('hex').slice(0, 12)
+    const precacheUrls = ['/', ...precachePaths.map((p) => `/${p}`)]
+    const swSource = readFileSync(join(here, 'sw.js'), 'utf8')
+      .replace("/*SHELL_VERSION*/'dev'", JSON.stringify(shellVersion))
+      .replace("/*PRECACHE*/['/', '/manifest.webmanifest', '/favicon.svg']", JSON.stringify(precacheUrls))
+    writeFileSync(join(out, 'sw.js'), swSource)
+
     const security = Object.entries(securityHeaders([...hashes].sort())).map(([name, value]) => `  ${name}: ${value}`)
     // Workers static assets reads at most 2,000 characters a line.
     if (security.some((line) => line.length > 2000)) fail('a security header line is over 2,000 characters: too many inline scripts')
@@ -155,8 +192,21 @@ function assemble(folder, entries, headers, world) {
       ...security,
       '/current.json',
       '  Cache-Control: no-cache',
+      '# The service worker is revalidated on every visit so shell updates take effect promptly.',
+      '/sw.js',
+      '  Cache-Control: no-cache',
+      '/manifest.webmanifest',
+      '  Content-Type: application/manifest+json; charset=utf-8',
+      '  Cache-Control: public, max-age=3600',
+      '/icons/*',
+      '  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000',
       '# The loader\'s pictures are named by their content.',
       '/loading-*.webp',
+      '  Cache-Control: public, max-age=31536000, immutable',
+      '# Content-hashed engine bundles, chunks, WebAssembly core and stylesheet.',
+      '/assets/*',
+      '  Cache-Control: public, max-age=31536000, immutable',
+      '/kit/voxelmorphism-*.css',
       '  Cache-Control: public, max-age=31536000, immutable',
       '# Fonts keep their names but almost never change: a week, then checked in the background for a month.',
       '/kit/fonts/*',

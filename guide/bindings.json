@@ -37,6 +37,20 @@
     "engine/plugins/sound/check.mjs": "lines:includes\\(\\`\\$\\{k\\} \\(",
     "engine/page/sound/radio.ts": "lines:^\\{ id: '|^(whoosh|whooshTail): \\{ how|^const MIN_WHOOSH_KMH =|^const (targetGain|amt) =|^for \\(const lateral of|^if \\(absSide > "
   },
+  ".agents/skills/game-studio/SKILL.md": {
+    ".mcp.json": [
+      "mcpServers.voxelwright-game"
+    ],
+    ".claude/settings.json": [
+      "enabledMcpjsonServers"
+    ],
+    ".codex/config.toml": "file",
+    "engine/studio/mcp.mjs": "lines:name: 'game_",
+    "engine/package.json": [
+      "scripts.dev",
+      "scripts.studio"
+    ]
+  },
   ".agents/skills/jolt-physics/SKILL.md": {
     "home/package.json": [
       "dependencies.jolt-physics"
@@ -357,6 +371,16 @@
     "engine/bay/transport.py": "lines:\"0\" if k == \"layer\"|allWay=|cli.add_argument",
     "engine/sf/life.py": "lines:^ap.add_argument"
   },
+  "engine/studio/README.md": {
+    "engine/studio/bridge.mjs": "lines:^export async function createStudioBridge|flag\\('(port|game|secret)'|--no-auto-t3",
+    "engine/studio/mcp.mjs": "lines:name: 'game_",
+    "engine/studio/t3-client.mjs": "lines:^export const (ORCHESTRATION_PROTOCOL_VERSION|SOCKET_FRAME_PART_PREFIX|STUDIO_DEFAULT_SCOPES)",
+    "engine/page/studio/index.ts": "lines:^export async function bootStudio",
+    "engine/package.json": [
+      "scripts.dev",
+      "scripts.studio"
+    ]
+  },
   "engine/workshop/README.md": {
     "engine/workshop/route.mjs": "lines:^//   (GET|POST) |^export const briefFor|const branch = `feature/264-plugin-|execFile\\(t3, \\['thread', 'start'|if \\(door !== 'near'\\)|^const timer = setInterval",
     "engine/page/workshop.ts": "lines:^interface Sent",
@@ -388,7 +412,7 @@
     ],
     "scripts/docs.mjs": "lines:^const usage =|^const schema = ",
     "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\[",
-    "scripts/hygiene.sh": "lines:^REPO=|^WORKTREES=|^LOG=|^STALE_DAYS=|^GRACE_S=|^MIN_FREE_GIB=|^JUNK=|feature-450|^--dry-run\\)|^--install\\)",
+    "scripts/hygiene.sh": "lines:^REPO=|^WORKTREES=|^fold_case\\(\\)|cannot check file times|^LOG=|^STALE_DAYS=|^GRACE_S=|^MIN_FREE_GIB=|^JUNK=|feature-450|^--dry-run\\)|^--install\\)",
     "scripts/checks.mjs": "checks"
   },
   "guide/cells.md": {
@@ -396,7 +420,7 @@
     "engine/core/src/kinds.rs": "lines:^pub const [A-Z_]+: (u8|Kind) =|^pub const fn (kind|material|colour|grey)",
     "engine/core/src/bay.rs": "lines:^//! The frame|^fn pick\\(|^pub fn least_step",
     "engine/page/bay.ts": "lines:^export const FRAME",
-    "engine/page/main.ts": "lines:levels: Number\\(query.get\\('levels'\\)",
+    "engine/page/main.ts": "lines:levels: bounded\\(query.get\\('levels'\\)",
     "engine/serve.mjs": "lines:^const frame = \\(kind, seq, payload\\)|keep\\((ECHO|LOG),",
     "engine/page/frames.ts": "lines:^export const LOG"
   },
@@ -670,7 +694,7 @@
       "forwardPorts"
     ],
     "engine/page/keys.ts": "lines:^Key[WEMB]: ",
-    "engine/page/street.ts": "lines:E  Take the",
+    "engine/page/street.ts": "lines:Take the \\$\\{carName",
     "engine/page/connect.ts": "lines:Forget this key",
     "engine/sf/boards.json": "lines:\"text\": \"EXPLORE\""
   },
@@ -719,6 +743,13 @@
     "engine/page/sound/radio.ts": "lines:^\\{ id: '|^(click|static|whoosh|whooshTail): \\{ how|^const (MIN_WHOOSH_KMH|TOAST_MS) =|^const (targetGain|amt) =|^let remembered =|^autoStartDelay = 0\\.|^for \\(const lateral of|^if \\(absSide > |^nearCarCool\\.set|^if \\(scanAcc <|^if \\(s [<>] 0\\) whooshCool",
     "engine/page/sound/music/conductor.ts": "lines:^cut\\(mood|^const \\[lo, hi\\] = steady",
     "engine/test/radio.mjs": "lines:^b?check\\("
+  },
+  "guide/studio.md": {
+    "engine/studio/bridge.mjs": "lines:^export async function createStudioBridge|url\\.pathname === '/(mcp|studio/)",
+    "engine/studio/mcp.mjs": "lines:name: 'game_",
+    "engine/studio/session-control.mjs": "lines:^export class SessionControl",
+    "engine/page/studio/index.ts": "lines:^export async function bootStudio",
+    "engine/page/studio/ext.ts": "lines:^export class StudioExtensionRegistry"
   },
   "guide/village.md": {
     "scripts/checks.mjs": "lines:cwd: '(home|host|street)'",

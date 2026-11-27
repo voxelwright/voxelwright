@@ -1,0 +1,37 @@
+{
+  "source": "USGS CA_SanFrancisco_1_B23, square 543.7_4178.5, top_mm at 0.25 m. Each section gives world z and roof heights in BAY1 decimetres, east from firstX at half-metre intervals.",
+  "sampling": "Median roof returns over 0.5 m east by 1 m south, pooled along the 2.5 m straight white front. Under three roof returns use the measured lip (638 and 636 respectively). Rising sections are limited to 9 and 10 cells per interval to preserve interpolation. The cutter clips each profile to the surveyed footprint and the existing roof heights.",
+  "roofs": [
+    {
+      "osmWay": 285266662,
+      "sf16_bldgid": "201006.0049468",
+      "edge": [[445043, 710835], [445041, 710785]],
+      "firstX": 445042,
+      "sections": [
+        [710787, [638, 638, 638, 640, 639, 639, 639, 640, 641, 644]],
+        [710792, [638, 638, 638, 643, 647, 647, 647, 648, 649, 649]],
+        [710797, [638, 638, 638, 645, 652, 655, 656, 656, 656, 656]],
+        [710802, [638, 638, 638, 645, 654, 657, 657, 657, 657, 657]],
+        [710822, [638, 638, 638, 643, 652, 657, 657, 657, 656, 656]],
+        [710827, [638, 638, 638, 642, 649, 655, 655, 655, 655, 655]],
+        [710837, [638, 638, 638, 638, 643, 650, 654, 654, 653, 653]],
+        [710842, [638, 638, 638, 638, 640, 649, 654, 654, 653, 653]],
+        [710847, [638, 638, 638, 638, 639, 646, 648, 647, 647, 646]]
+      ]
+    },
+    {
+      "osmWay": 285266687,
+      "sf16_bldgid": "201006.0095218",
+      "edge": [[445049, 710910], [445047, 710880]],
+      "firstX": 445047,
+      "sections": [
+        [710872, [636, 636, 636, 637, 638, 648]],
+        [710877, [636, 636, 636, 636, 642, 650]],
+        [710882, [636, 636, 637, 638, 648, 654]],
+        [710907, [636, 636, 637, 638, 648, 654]],
+        [710912, [636, 636, 636, 637, 642, 647]],
+        [710917, [636, 636, 636, 636, 637, 645]]
+      ]
+    }
+  ]
+}

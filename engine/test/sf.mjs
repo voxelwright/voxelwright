@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet, timed, turn } from './kit.mjs'
+import { arg, REALM_CHROME, has, here, quiet, realmShot, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'runtime')), seconds = Number(arg('seconds', '10')), mbit = Number(arg('mbit', '25'))
@@ -69,7 +69,7 @@ const alone = async (name, minutes, measure) => {
     return rest ? r : { ...r, sharedGPU: drawing() }
   } finally { rest?.() }
 }
-const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
+const browser = await chromium.launch({ ...REALM_CHROME, headless: !has('headed') })
 // The helper a visitor might be offered (a link, or something kept from another page): it must never be asked.
 const HELPER = 'http://127.0.0.1:5762'
 const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
@@ -137,7 +137,7 @@ try {
     // Measured again (kit.mjs `timed`): a cold visit as the first, in a browser of its own (nothing of the page's
     // shaders kept) on a host of its own (what this one was asked stays this visit's), with this page resting.
     const cold = async () => {
-      const other = await plain(dist, '127.0.0.1', 0, {}), fresh = await chromium.launch({ ...CHROME, headless: !has('headed') })
+      const other = await plain(dist, '127.0.0.1', 0, {}), fresh = await chromium.launch({ ...REALM_CHROME, headless: !has('headed') })
       const ctx = await fresh.newContext({ viewport: { width: 1280, height: 720 } })
       await page.evaluate(() => { globalThis.engine.resting = true })
       try {
@@ -184,7 +184,7 @@ try {
       r = next.p50 < r.p50 ? next : { ...r, tries: next.tries }
     }
     if (r.tries > 1) r.besideOthers = drawing()
-    if (!pin) await page.screenshot({ path: join(shots, `${name}.png`) })
+    if (!pin) await realmShot(page, join(shots, `${name}.png`))
     console.log(`  ${name}: ${JSON.stringify(r)}`)
     return r
   }
@@ -255,9 +255,9 @@ try {
     return { name: thing.name, from, to, moved: Math.hypot(to[0] - from[0], to[2] - from[2]) / 10, riding, look: e.alive.look(thing).parts.length, stands }
   })
   // The picture of it parked, taken while the page waits on it.
-  if (await page.waitForFunction(() => globalThis.__parked === true, null, { timeout: 30_000 }).then(() => true, () => false)) { await page.screenshot({ path: join(shots, 'car-parked.png') }); await page.evaluate(() => { globalThis.__parked = false }) }
+  if (await page.waitForFunction(() => globalThis.__parked === true, null, { timeout: 30_000 }).then(() => true, () => false)) { await realmShot(page, join(shots, 'car-parked.png')); await page.evaluate(() => { globalThis.__parked = false }) }
   const car = await driving
-  await page.screenshot({ path: join(shots, 'car-driven.png') })
+  await realmShot(page, join(shots, 'car-driven.png'))
   if (car?.missing) console.log(`  car missing: ${JSON.stringify(car.missing)}`)
   f.car = car
   check(!!car?.stands && car.stands.top === 6 && car.stands.inBox === 0, `the kept car stands at a kerb: on asphalt (ground kind ${car?.stands.top}), ${car?.stands.inBox} cells of the world in its box, at ${car?.stands.at}`)
@@ -277,13 +277,13 @@ try {
   const broken = hit && { edits: await page.evaluate(() => globalThis.engine.world.done().length - (globalThis.engine.boards?.edits ?? 0)), solid: await solid(hit.at) }
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, { ...p, x: p.x - 25 * Math.sin(p.yaw), z: p.z + 25 * Math.cos(p.yaw), pitch: -0.1 }), aim)
   await page.waitForTimeout(1500)
-  await page.screenshot({ path: join(shots, 'blast.png') })
+  await realmShot(page, join(shots, 'blast.png'))
   f.blast = { at: hit?.at, material: hit?.material, metresOff: hit ? round(hit.t / M) : null, editsAfter: broken?.edits, solidWithin3mAfter: broken?.solid }
   check(!!hit && broken.edits > 0, `a blast ${hit ? round(hit.t / M) : '?'} m off (material ${hit?.material}): ${broken?.edits} edits in the world, ${broken?.solid} solid cells left within 3 m`)
   // The hour and the weather.
   const look = await page.evaluate(() => { const e = globalThis.engine; e.hour = 20.5; e.rain = 1; return { hour: e.hour, rain: e.rain } })
   await page.waitForTimeout(2500)
-  await page.screenshot({ path: join(shots, 'night-rain.png') })
+  await realmShot(page, join(shots, 'night-rain.png'))
   f.look = look
   check(look.hour === 20.5 && look.rain === 1, `the hour set to ${look.hour} and rain to ${look.rain}`)
   await page.evaluate(() => { const e = globalThis.engine; e.hour = 15; e.rain = 0 })
@@ -300,7 +300,7 @@ try {
   reset.solidWithin3m = hit ? await solid(hit.at) : null
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, { ...p, x: p.x - 25 * Math.sin(p.yaw), z: p.z + 25 * Math.cos(p.yaw), pitch: -0.1 }), aim)
   await page.waitForTimeout(2000); await settle()
-  await page.screenshot({ path: join(shots, 'reset.png') })
+  await realmShot(page, join(shots, 'reset.png'))
   f.reset = reset
   check(reset.edits === 0 && reset.solidWithin3m > (broken?.solid ?? Infinity) && reset.things === 1, `reset: ${reset.edits} edits left beyond the ${reset.boards} that lay the billboards, ${reset.solidWithin3m} solid cells within 3 m of the blast again (${broken?.solid} after it), ${reset.things} kept car set down again, in ${reset.ms} ms`)
   // No helper: however a helper was offered, rules.models is false, an untyped non-kept ask is refused, and nothing is sent off-site.
@@ -361,7 +361,7 @@ try {
     return { lacking: e.world.stats.lacking, crashed: e.world.stats.crashed, failed: e.tiles.tally.failed, retried: e.tiles.tally.retried, groundM: e.ground(x, z), drawnPlaces: places.filter((p) => p.drawn).length, places: places.length, notDrawn: places.filter((p) => !p.drawn), drawn: places.every((p) => p.drawn) }
   }, fidi)
   ff.tile.requests = site.asked.filter((a) => a.path === tileThere).map((a) => a.status)
-  await page.screenshot({ path: join(shots, 'after-faults.png') })
+  await realmShot(page, join(shots, 'after-faults.png'))
   check(cameBack && ff.tile.drawn && ff.tile.requests.at(-1) === 200, `a tile that failed ${ff.tile.requests.filter((s) => s !== 200).length} times came on try ${ff.tile.requests.length}: ${ff.tile.lacking} columns made without it were made again, the ground drawn at ${ff.tile.drawnPlaces} of ${ff.tile.places} places across the tile${ff.tile.notDrawn.length ? ` (not: ${JSON.stringify(ff.tile.notDrawn.slice(0, 3))})` : ''}`)
   check(ff.tile.crashed >= 1, `a maker of sectors that died was hired again (${ff.tile.crashed}) and the world there came whole`)
   await page.evaluate(() => { globalThis.engine.patience = 10_000 })
@@ -391,7 +391,7 @@ try {
       return path
     }, kind)
     const cost = sent(from, Date.now())
-    await page.screenshot({ path: join(shots, `${name}.png`) })
+    await realmShot(page, join(shots, `${name}.png`))
     console.log(`  ${name}: ${JSON.stringify(cost.tiles)} from ${where[0]} to ${where[where.length - 1]}`)
     return cost.tiles
   }
@@ -407,7 +407,7 @@ try {
   const tilesAsked = site.asked.filter((a) => isTile(a.path))
   const tileFiles = new Set(tilesAsked.map((a) => a.path))
   const failedOnPurpose = tilesAsked.filter((a) => a.status === 503).length
-  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path.startsWith('/make/') || a.path === '/text.js' || a.path === '/sf/index.html' || a.path.startsWith('/sf/loading-') || a.path.startsWith('/sf/shelf/') || a.path === '/bay/heroes.json' || a.path === '/bay/marks.bin' || a.path === '/bay/marks-squares.bin' || a.path === '/bay/map.bin' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || eggIndexes.has(a.path) || listed.has(a.path)))
+  const outside = site.asked.filter((a) => !(a.path.startsWith('/assets/') || a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path.startsWith('/make/') || a.path === '/text.js' || a.path === '/sf/index.html' || a.path.startsWith('/sf/loading-') || a.path.startsWith('/sf/shelf/') || a.path === '/bay/heroes.json' || a.path === '/bay/marks.bin' || a.path === '/bay/marks-squares.bin' || a.path === '/bay/map.bin' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || a.path.startsWith(releaseAt + 'packs/') || eggIndexes.has(a.path) || listed.has(a.path)))
   const pointerAsked = site.asked.filter((a) => a.path === '/sf/current.json').length
   const notFound = site.asked.filter((a) => a.status === 404)
   results.asked = { requests: site.asked.length, tileRequests: tilesAsked.length - failedOnPurpose, tileFiles: tileFiles.size, perFile: round((tilesAsked.length - failedOnPurpose) / tileFiles.size, 2), pointer: pointerAsked, outside: outside.map((a) => a.path), notFound: notFound.map((a) => a.path) }
@@ -451,7 +451,7 @@ try {
     const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b)
     return { device: e.tiles.device, workers: m.workers.length, coresMB: Math.round((m.page + m.workers.reduce((a, b) => a + b, 0)) / 1048576), pageCoreMB: Math.round(m.page / 1048576), workerCoresMB: m.workers.map((b) => Math.round(b / 1048576)), tilesHeldMB: Math.round(m.tiles / 1048576), jsHeapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, wholeMs: Math.round(e.seen.whole), parkP50: g[Math.floor(g.length / 2)], scale: e.scale }
   }, 5000)
-  await small.screenshot({ path: join(shots, 'phone-class.png') })
+  await realmShot(small, join(shots, 'phone-class.png'))
   await handheld.close()
   console.log(`  phone: ${JSON.stringify(results.phone)}`)
   check(results.phone.device === 'phone' && results.phone.workers === 3 && results.phone.tilesHeldMB <= 24, `a phone holds less: ${results.phone.workers} workers (two makers and the mover), ${results.phone.coresMB} MB in its cores, ${results.phone.tilesHeldMB} MB of tiles (cap 24)`)

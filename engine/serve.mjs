@@ -44,6 +44,9 @@ import { createInboxRoutes, DEFAULT_INBOX } from './inbox.mjs'
 const root = dirname(fileURLToPath(import.meta.url))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const port = Number(arg('port', '5740'))
+const studioOn = process.argv.includes('--studio')
+const studioPort = Number(arg('studio-port', '5764'))
+let studioBridge = null
 const reports = arg('reports', join(homedir(), '.village', 'engine', 'reports.jsonl'))
 const inboxDir = arg('inbox', DEFAULT_INBOX)
 const handleInbox = createInboxRoutes(inboxDir, { send: (res, code, body, type) => send(res, code, body, type), foreign })
@@ -68,17 +71,20 @@ async function file(res, path, host = '') {
   // A page talks to this server and to a helper on this machine or on the host it came from, and to nothing else:
   // a wish and a picture cannot be sent anywhere a made-up address says.
   if (extname(rel) === '.html' && rel === join('page', 'index.html') && realms.size) body = pageWith(body)
+  if (extname(rel) === '.html' && rel === join('page', 'index.html') && studioOn) {
+    body = Buffer.from(body.toString('utf8').replace('</head>', '<meta name="vw-studio" content="1">\n</head>'))
+  }
   if (extname(rel) === '.html') {
-    const local = tailnet(host) ? ` https://${host}:*` : ''
+    const local = tailnet(host) ? ` https://${host}:* wss://${host}:*` : ''
     // The loading template contains one bundled inline script. Allow its exact bytes.
     const loading = rel === join('page', 'loading.html') && /<script>([\s\S]*?)<\/script>/.exec(body.toString())
     const hash = loading ? ` 'sha256-${createHash('sha256').update(loading[1]).digest('base64')}'` : ''
     const policy = [
       "default-src 'self'", "frame-ancestors 'self'", "base-uri 'none'", "object-src 'none'",
       `script-src 'self' 'wasm-unsafe-eval'${hash} https://www.youtube.com https://s.ytimg.com https://sdk.scdn.co https://js-cdn.music.apple.com`,
-      "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "worker-src 'self' blob:",
+      "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*", "worker-src 'self' blob:",
       "frame-src 'self' https://www.youtube.com https://sdk.scdn.co",
-      `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*${local}`,
+      `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*${local}`,
     ]
     res.writeHead(200, { ...HEADERS, 'Content-Type': TYPES['.html'], 'Content-Security-Policy': policy.join('; ') })
     return res.end(body)
@@ -1299,8 +1305,8 @@ function gapsAll() {
 }
 
 let topsAsked = 0, topsSince = Date.now()
-/** The road's marks (/bay/marks.bin) and 3D map binary (/bay/map.bin), once made. */
-let roadMarks = null, navMap = null
+/** The road's marks (/bay/marks.bin), neighborhood places (/bay/places.json) and 3D map binary (/bay/map.bin), once made. */
+let roadMarks = null, navMap = null, bayPlaces = null
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
@@ -1311,6 +1317,20 @@ const server = createServer((req, res) => {
   if (url.pathname === '/core/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(coreLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (url.pathname === '/plugins/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(pluginsLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
+  if (req.method === 'GET' && url.pathname === '/studio/bootstrap') {
+    const reqHost = String(req.headers.host ?? '').replace(/:\d+$/, '').toLowerCase()
+    if (foreign(req) || !['127.0.0.1', 'localhost', '[::1]'].includes(reqHost)) return send(res, 403, 'loopback only')
+    if (studioBridge) return send(res, 200, JSON.stringify({ active: true, url: studioBridge.url, secret: studioBridge.secret }), TYPES['.json'])
+    const statePath = join(homedir(), '.village', 'engine', 'studio', 'bridge-runtime.json')
+    try {
+      const info = JSON.parse(readFileSync(statePath, 'utf8'))
+      if (info?.url && info?.secret && Number.isInteger(info?.pid)) {
+        process.kill(info.pid, 0)
+        return send(res, 200, JSON.stringify({ active: true, url: info.url, secret: info.secret }), TYPES['.json'])
+      }
+    } catch { /* no running bridge */ }
+    return send(res, 200, JSON.stringify({ active: false }), TYPES['.json'])
+  }
   if (handleInbox(req, res, url)) return
   if (url.pathname === '/gaps' && req.method === 'GET') return foreign(req) ? send(res, 403, 'not from another site') : send(res, 200, JSON.stringify({ gaps: gapsAll() }), TYPES['.json'])
   if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
@@ -1383,6 +1403,11 @@ const server = createServer((req, res) => {
     if (bytes) return send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream')
     if (url.pathname !== '/bay/map.bin') return send(res, 404, 'no road marks')
   }
+  // Neighborhood storefronts & plazas (/bay/places.json), lazily compiled from sf/places-raw.json.br + brands.json + plazas.json.
+  if (url.pathname === '/bay/places.json') {
+    bayPlaces ??= import('./sf/places.mjs').then((m) => m.buildPlaces())
+    return void bayPlaces.then((made) => send(res, 200, made.bytes, TYPES['.json']), (e) => { bayPlaces = null; console.error(`no neighborhood places: ${e.message}`); send(res, 404, 'no neighborhood places') })
+  }
   // The 3D minimap & GPS navigation binary (/bay/map.bin), lazily compiled once from the staged SF release + street graphs.
   if (url.pathname === '/bay/map.bin') {
     const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
@@ -1390,7 +1415,7 @@ const server = createServer((req, res) => {
     const pin = JSON.parse(readFileSync(join(root, 'sf', 'pilot', 'current.json'), 'utf8'))
     const stagedRel = join(staged, dirname(pin.manifest)), builtRel = join(root, 'dist-sf', 'sf', dirname(pin.manifest))
     const relDir = existsSync(join(stagedRel, 'tiles')) ? stagedRel : builtRel
-    navMap ??= import('./sf/map.mjs').then((m) => m.buildMap({ releaseDir: relDir, graphDir: graphs }).bytes)
+    navMap ??= Promise.all([import('./sf/map.mjs'), import('./sf/places.mjs').then((p) => p.buildPlaces().mapPlaces).catch(() => [])]).then(([m, extraPlaces]) => m.buildMap({ releaseDir: relDir, graphDir: graphs, extraPlaces }).bytes)
     return void navMap.then((bytes) => send(res, 200, bytes, 'application/octet-stream'), (e) => { navMap = null; console.error(`no 3D map binary: ${e.message}`); send(res, 404, 'no 3D map') })
   }
   // The road's marks for the whole city (#450, sf/marks.mjs over the city run's street graphs), as sf/build.mjs writes
@@ -1412,4 +1437,23 @@ const server = createServer((req, res) => {
   done(file(res, path, String(req.headers.host ?? '').replace(/:\d+$/, '')))
 })
 try { coreIs = coreOnDisk() } catch { /* no core built: nothing serves a world anyway */ }
-server.listen(port, '127.0.0.1', () => console.log(`engine page on http://127.0.0.1:${server.address().port}/ (reports kept in ${reports})`))
+server.listen(port, '127.0.0.1', () => {
+  const pageUrl = `http://127.0.0.1:${server.address().port}`
+  console.log(`engine page on ${pageUrl}/ (reports kept in ${reports})`)
+  if (studioOn) {
+    void import('./studio/bridge.mjs').then(({ createStudioBridge }) =>
+      createStudioBridge({
+        port: studioPort,
+        gameUrl: pageUrl,
+        say: (m) => console.log(`[studio] ${m}`),
+      }).then((b) => {
+        studioBridge = b
+        console.log(`Voxelwright Studio Bridge on ${b.url} (MCP: ${b.url}/mcp)`)
+        console.log(`Open ${pageUrl}/city — native T3 Studio IDE loads automatically`)
+        const stop = () => void b.close().finally(() => process.exit(0))
+        process.once('SIGINT', stop)
+        process.once('SIGTERM', stop)
+      }),
+    ).catch((e) => console.error(`studio bridge failed to start: ${e.message}`))
+  }
+})

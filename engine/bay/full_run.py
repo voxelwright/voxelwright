@@ -17,7 +17,7 @@ import zipfile
 from collections import defaultdict
 from pathlib import Path
 
-from coverage import bounds, tile_keys
+from coverage import RADIUS, bounds, tile_keys
 import compact_store
 from street_inputs import fixture_option, sidecars
 from street_furniture import decode, encode, standing, verify_tile_tail
@@ -32,7 +32,6 @@ PILOT = [
     "551.7_4184.5",
     "552.7_4183.5",
 ]
-RADIUS = (500, 4000, 16000)  # includes the desktop clip boxes' sector alignment
 
 
 def digest(path):
@@ -120,7 +119,7 @@ def verify(path, x, z, size, gstep, tstep, margin, walls):
                 raise ValueError(f"invalid building vertex range: {path}")
 
 
-def plan(names, planet, horizon):
+def plan(names, planet, horizon, landmark_extras=()):
     contributors = defaultdict(list)
     blended = set()
     for name in names:
@@ -131,6 +130,10 @@ def plan(names, planet, horizon):
     if horizon:
         for name in names + planet:
             needed.update(tile_keys(name, RADIUS))
+        for address in landmark_extras:
+            level, tile = address.split("/")
+            x, z = tile.split("_")
+            needed.add((int(level), int(x), int(z)))
     return {k: contributors[k] if k in blended else [] for k in sorted(needed)}
 
 
@@ -144,7 +147,7 @@ def build(args, lock_fd):
     packs = root / "packs"
     square_list = json.loads((source / "sf-squares.json").read_text())
     names = PILOT if args.pilot else square_list["lidar"]
-    keys = plan(names, square_list["planet"], not args.pilot)
+    keys = plan(names, square_list["planet"], not args.pilot, square_list.get("landmarkExtras", ()))
     recipe = [
         digest(source / f)
         for f in (
@@ -173,6 +176,10 @@ def build(args, lock_fd):
         )
         if f != "paint_tile.py" or (source / f).exists()
     ]
+    if (source / "mapped_water.py").is_file():
+        recipe.extend(digest(source / name) for name in ("mapped_water.py", "sf-garden-water.json"))
+    if (source / "sf-roof-fronts.json").is_file():
+        recipe.append(digest(source / "sf-roof-fronts.json"))
     recipe += [args.pilot]
     # Frozen recipes predating fixture selection can resume only with their original Public Works survey.
     legacy = not (source / "street_inputs.py").is_file()

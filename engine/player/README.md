@@ -27,9 +27,9 @@ node test/player.mjs      # measures it in Chrome and WebKit; pictures in ~/.vil
   and writes each `.ts` address as `.js`. Nothing is bundled or minified. `dist/` keeps the engine's layout
   (`player/`, `page/`, `probe/`, `landing/`, `blocks/`, `kit/`), so it can sit under any folder of a site. It also
   carries the kit's renderer, modules, stylesheet and the fonts the stylesheet names.
-- **The host** (`serve.mjs`) serves plain files as a static host would: the usual types, an ETag, ten minutes'
+- **The host** (`serve.mjs`) serves plain files as a static host would: the usual types (including `.webmanifest` and `.pack`), an ETag, ten minutes'
   keeping, and none of the page server's headers (no COOP, COEP or CSP). Unless asked to serve plainly, it also sends
-  a file's `.br` copy to a browser that takes Brotli and keeps `releases/` a year, as the realm's host does. Tests
+  a file's `.br` copy to a browser that takes Brotli and keeps `releases/`, content-hashed asset bundles (`/assets/*`), `loading-*.webp` and hashed kit CSS a year (`immutable`), as the realm's host does. Tests
   import its `plain()`.
 
 ## A scene

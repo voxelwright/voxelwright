@@ -74,9 +74,11 @@ const panelLaid = (page) => page.evaluate(() => {
 const slimKey = (page, sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el) return null; const cs = getComputedStyle(el), cv = el.querySelector(':scope > .vx-canvas'); return { look: cs.getPropertyValue('--vx-look').trim(), live: el.hasAttribute('data-vx-live') && !!cv?.checkVisibility(), faceZ: Number(el.style.getPropertyValue('--vx-face-z')) } }, sel)
 /** The first view, before going in (default only): its keys in the slim look, and its Settings panel in sections with no control on another. */
 const firstView = async (page, phone) => {
-  await page.waitForFunction(() => document.querySelector('#first .credits')?.hasAttribute('data-vx-live') && document.querySelector('#realm .fold')?.hasAttribute('data-vx-live'), null, { timeout: 30_000 }).catch(() => {})
+  await page.waitForFunction(() => document.querySelector('#realm .fold')?.hasAttribute('data-vx-live'), null, { timeout: 30_000 }).catch(() => {})
   await page.waitForTimeout(800)
-  for (const [what, sel] of [['the credits key', '#first .credits'], ['the settings key', '#realm .fold']]) {
+  const hudNoise = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits'), mlyCorner: !!document.querySelector('#first .corner a[href*="mapillary"]'), mlyMap: !!document.querySelector('#minimap .mm-mly') }))
+  check(!hudNoise.credits && !hudNoise.mlyCorner && !hudNoise.mlyMap, `first view: no Credits button or Mapillary icon in HUD (${JSON.stringify(hudNoise)})`)
+  for (const [what, sel] of [['the settings key', '#realm .fold']]) {
     const k = await slimKey(page, sel)
     check(!!k && k.look === 'slim' && k.live && k.faceZ > 0 && k.faceZ <= 3, `first view: ${what} is a slim voxel key (${JSON.stringify(k)})`)
   }
@@ -84,10 +86,34 @@ const firstView = async (page, phone) => {
   if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
   await page.waitForTimeout(700)
   const laid = await panelLaid(page)
-  check(laid.parts.slice(0, 2).join() === 'world,gfx' && !laid.parts.includes('acts') && laid.meet.length === 0 && laid.out.length === 0, `first view: the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
+  check(laid.parts.slice(0, 2).join() === 'world,gfx' && laid.parts.includes('acts') && laid.meet.length === 0 && laid.out.length === 0, `first view: the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
   const panel = await slimKey(page, '#realm .sky')
   check(panel?.look === 'slim' && panel.live && panel.faceZ > 0 && panel.faceZ <= 4, `first view: the Settings panel is built in the slim look, a low enclosure (${JSON.stringify(panel)})`)
   await page.screenshot({ path: join(shots, `default-first-sky-${NAMED[phone ? (page.viewportSize().width > page.viewportSize().height ? 'side' : 'phone') : 'wide']}.png`) })
+  // Open Credits from Settings: Mapillary lives inside Credits and nothing overflows the card box.
+  const cr = await page.evaluate(() => { const b = document.querySelector('#realm .sky .sky-credits-link')?.getBoundingClientRect(); return b && b.width ? [b.left + b.width / 2, b.top + b.height / 2] : null })
+  check(!!cr, 'first view: Credits button is inside Settings')
+  if (cr) {
+    if (phone) await page.touchscreen.tap(cr[0], cr[1]); else await page.mouse.click(cr[0], cr[1])
+    await page.waitForTimeout(400)
+    const card = await page.evaluate(() => {
+      const pop = document.querySelector('#first-credits')
+      if (!pop || !pop.matches(':popover-open')) return null
+      const scroll = pop.querySelector('.credits-scroll')
+      if (scroll) scroll.scrollTop = scroll.scrollHeight
+      const pr = pop.getBoundingClientRect()
+      const overflow = [...pop.querySelectorAll(':scope > :not(.vx-canvas)')].filter((el) => {
+        const er = el.getBoundingClientRect()
+        return er.width > 0 && (er.left < pr.left - 1 || er.right > pr.right + 1 || er.top < pr.top - 1 || er.bottom > pr.bottom + 1)
+      }).map((el) => el.className || el.tagName)
+      const mly = pop.querySelector('a[href*="mapillary.com"]')
+      return { overflow, popoverOverflow: getComputedStyle(pop).overflow, inView: pr.top >= 0 && pr.bottom <= innerHeight + 1, hasMapillaryLink: !!mly && !mly.hidden, text: pop.innerText }
+    })
+    await page.screenshot({ path: join(shots, `default-first-credits-${NAMED[phone ? (page.viewportSize().width > page.viewportSize().height ? 'side' : 'phone') : 'wide']}.png`) })
+    check(!!card && card.overflow.length === 0 && card.popoverOverflow === 'visible' && card.inView && card.hasMapillaryLink, `first view: Credits card stays inside its box with Mapillary inside (${JSON.stringify(card && { overflow: card.overflow, popoverOverflow: card.popoverOverflow, inView: card.inView, hasMapillaryLink: card.hasMapillaryLink })})`)
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+  }
   if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
   await page.waitForTimeout(400)
 }
@@ -123,7 +149,7 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
   // Controls against each other, by their visible bounds (including voxel overhang only where a voxel canvas is drawn).
   const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, cv = el.hasAttribute('data-vx-live') ? el.querySelector(':scope > .vx-canvas') : null, live = !!cv && cv.checkVisibility({ visibilityProperty: true, opacityProperty: true }), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, [data-panel="drive-hud"], #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -161,7 +187,7 @@ try {
       await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.explore && globalThis.engine.playHud, null, { timeout: 300_000 })
       if (mode === 'default') await firstView(page, phone)
       // (Off, and kept off: leaving the first view wakes street life, main.ts `leaveLanding`.)
-      await page.evaluate(() => { const st = globalThis.engine.street; if (st) { st.enabled = false; Object.defineProperty(st, 'enabled', { get: () => false, set() {}, configurable: true }) } globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
+      await page.evaluate(() => { const st = globalThis.engine.street; if (st) { globalThis.__stEnabledDesc = Object.getOwnPropertyDescriptor(st, 'enabled'); st.enabled = false; Object.defineProperty(st, 'enabled', { get: () => false, set() {}, configurable: true }) } globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
       const inside = await until(page, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 90_000)
       check(inside, 'on the roof, the eye behind the body')
       const gate = mode !== 'classic', at = {}
@@ -229,16 +255,69 @@ try {
         })
         check(shown.afoot.length === 0, `${scheme}: the keys of one on foot are not shown while riding${shown.afoot.length ? ` (${shown.afoot.join(', ')})` : ''}`)
         if (phone) {
-          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'boost', 'horn', 'cam', 'radio', 'leave'], acts = shown.keys.map((k) => k.act)
+          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['gas', 'brake', 'drift', 'boost', 'horn', 'cam', 'radio', 'leave'], acts = shown.keys.map((k) => k.act)
           check(want.every((a) => acts.includes(a)), `${scheme}: the thing's keys are shown (${acts.join(', ')})`)
-          // (Driving, Cam goes round the views, the seat among them, #74/#75: no Seat key of its own.)
-          if (scheme === 'drive') check(!acts.includes('seat'), `drive: no Seat key beside Cam (${acts.join(', ')})`)
+          // (Driving: no Seat key beside Cam (#74/#75), Repair stays hidden while undamaged, pedals bottom-right, utilities top-right, icon-only.)
+          if (scheme === 'drive') {
+            check(!acts.includes('seat'), `drive: no Seat key beside Cam (${acts.join(', ')})`)
+            check(!acts.includes('repair'), `drive: Repair stays hidden while car is undamaged (${acts.join(', ')})`)
+            const erg = await page.evaluate(() => {
+              const box = (act) => document.querySelector(`[data-panel="living"] [data-act="${act}"]`)?.getBoundingClientRect()
+              const gas = box('gas'), brake = box('brake'), drift = box('drift'), boost = box('boost')
+              const utilActs = ['horn', 'radio', 'cam', 'leave']
+              const utils = utilActs.map((a) => ({ a, r: box(a) }))
+              const visibleLabels = [...document.querySelectorAll('[data-panel="living"] .hud-lbl')].filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })).length
+              return {
+                pedalsLow: !!(gas && brake && drift && boost) && Math.min(gas.top, brake.top, drift.top, boost.top) > innerHeight * 0.5,
+                gasTall: !!(gas && brake) && gas.height > brake.height,
+                utilsHigh: utils.every((u) => u.r && u.r.bottom < innerHeight * 0.45),
+                visibleLabels,
+              }
+            })
+            check(erg.pedalsLow && erg.gasTall && erg.utilsHigh && erg.visibleLabels === 0, `drive: ergonomic two-zone icon-only layout (${JSON.stringify(erg)})`)
+          }
           const bad = shown.keys.filter((k) => !k.reached || k.w < 44 || k.h < 44)
           check(bad.length === 0, `${scheme}: each of its keys is 44 px a side or more, and a touch at its middle reaches it${bad.length ? `: not ${bad.map((k) => `${k.act} ${k.w}x${k.h}${k.reached ? '' : ' (under something)'}`).join(', ')}` : ''}`)
           check(shown.keys.every((k) => k.kit), `${scheme}: its keys are live Voxelmorphism controls`, gate)
           check(!shown.card, `${scheme}: the card of keyboard keys is not shown by touch`)
           const tap = async (act) => { const k = shown.keys.find((k) => k.act === act); if (k) { await page.touchscreen.tap(k.x, k.y); await page.waitForTimeout(500) } return !!k }
           if (scheme === 'drive') {
+            // Contextual Repair appears only after damage, is reachable and live slim voxel, and hides again once tapped.
+            await page.evaluate(() => {
+              const e = globalThis.engine, car = e.alive.riding, at = car && e.alive.where(car)
+              if (car && at) e.alive.hit(car, [at.at[0] + at.front[0] * 18, at.at[1], at.at[2] + at.front[2] * 18], [-at.front[0], 0, -at.front[2]], 55)
+            })
+            await page.waitForTimeout(350)
+            const rep = await page.evaluate(() => {
+              const el = document.querySelector('[data-panel="living"] [data-act="repair"]')
+              if (!el || !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return null
+              const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y)
+              return { w: Math.round(r.width), h: Math.round(r.height), x, y, reached: !!hit && el.contains(hit), kit: el.hasAttribute('data-vx-live') }
+            })
+            check(!!rep && rep.reached && rep.w >= 44 && rep.h >= 44 && rep.kit, `drive: Repair appears cleanly after damage (${JSON.stringify(rep)})`)
+            if (rep) {
+              await page.touchscreen.tap(rep.x, rep.y)
+              await page.waitForTimeout(350)
+              const hiddenAgain = await page.evaluate(() => document.querySelector('[data-panel="living"] [data-act="repair"]')?.hidden === true)
+              check(hiddenAgain, 'drive: tapping Repair clears damage and hides the Repair key again')
+            }
+            // Holding the Gas pedal with pointer capture accelerates cleanly and sets aria-pressed="true".
+            const gasKey = shown.keys.find((k) => k.act === 'gas')
+            if (gasKey) {
+              const gasRes = await page.evaluate(async () => {
+                const btn = document.querySelector('[data-panel="living"] [data-act="gas"]')
+                if (!btn) return null
+                const r = btn.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2
+                btn.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 11, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true }))
+                const pressed = btn.getAttribute('aria-pressed') === 'true'
+                await new Promise((res) => setTimeout(res, 700))
+                const kmh = globalThis.engine.alive.telemetry?.kmh ?? 0
+                btn.dispatchEvent(new PointerEvent('pointerup', { pointerId: 11, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true }))
+                const released = btn.getAttribute('aria-pressed') === 'false'
+                return { pressed, released, kmh: Math.round(kmh * 10) / 10 }
+              })
+              check(!!gasRes && gasRes.pressed && gasRes.released && gasRes.kmh > 3, `drive: holding Gas pedal accelerates cleanly (${JSON.stringify(gasRes)})`)
+            }
             await tap('radio')
             const opened = await until(page, () => document.querySelector('#radio-picker')?.open, 5000)
             check(opened, 'tapping Radio opens the media picker')
@@ -589,8 +668,56 @@ try {
         if (key) {
           await page.touchscreen.tap(...key)
           const backed = await until(page, () => !globalThis.engine.first.engaged && document.documentElement.classList.contains('first') && globalThis.engine.explore.state !== 'leaving', 20_000)
-          const after = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state }))
-          check(backed && after.credits, `Back to the view in the panel goes back to the view, the credits key there (${JSON.stringify(after)})`)
+          const after = await page.evaluate(() => ({ fold: !!document.querySelector('#realm .fold')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state }))
+          check(backed && after.fold, `Back to the view in the panel goes back to the view, the settings key there (${JSON.stringify(after)})`)
+        }
+      }
+      // Desktop E prompt vs tool wheel (#75): beside a stopped live traffic car, the prompt binds F (not E), avoids
+      // overlapping the player's body, KeyE still opens the radial wheel, and disabling street life clears the cue.
+      if (mode === 'default' && size === 'wide') {
+        const reEnabled = await page.evaluate(async () => {
+          const e = globalThis.engine, st = e.street
+          if (!st || !globalThis.__stEnabledDesc) return { skipped: true }
+          Object.defineProperty(st, 'enabled', globalThis.__stEnabledDesc)
+          st.enabled = true
+          // Move down to a street (Taylor St) and wait for a traffic car to stop beside the player (via triggerStuck).
+          const x = 515900, z = 663000
+          e.me.walk(false)
+          Object.assign(e.pose, { x: x / 10, z: z / 10, y: e.ground(x / 10, z / 10) + 1.8, pitch: -0.08 })
+          e.me.walk(true)
+          for (let i = 0; i < 40 && !st.ready; i++) await new Promise((r) => setTimeout(r, 150))
+          await new Promise((r) => setTimeout(r, 1200))
+          const stuck = st.robotaxis.triggerStuck('intersection') || st.robotaxis.triggerStuck('narrow')
+          if (!stuck) return { skipped: false, ok: false, why: 'no stopped traffic car spawned' }
+          // Stand 1.8 m beside the stopped traffic car (closer than 2.8 m offer reach, on foot, facing it).
+          const sx = stuck.x + Math.cos(stuck.heading + Math.PI / 2) * 18
+          const sz = stuck.z + Math.sin(stuck.heading + Math.PI / 2) * 18
+          e.me.walk(false)
+          Object.assign(e.pose, { x: sx / 10, z: sz / 10, y: e.ground(sx / 10, sz / 10) + 1.8, yaw: Math.atan2(-(stuck.x - sx), stuck.z - sz), pitch: -0.05 })
+          e.me.walk(true)
+          let cueText = ''
+          for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 100))
+            const p = document.querySelector('#over > #cues p:not([hidden])')
+            if (p?.textContent?.includes('Take the')) { cueText = p.textContent.trim(); break }
+          }
+          return { skipped: false, ok: !!cueText, cueText }
+        })
+        if (!reEnabled.skipped) {
+          check(reEnabled.ok && reEnabled.cueText.startsWith('F  Take the '), `stopped nearby traffic car prompts F instead of stealing E (${JSON.stringify(reEnabled)})`)
+          const m = await measure(page, safe)
+          const cueOver = m.over.filter((s) => s.path.includes('cues'))
+          check(cueOver.length === 0, `traffic car cue does not overlap the body (${cueOver.length})`)
+          await page.keyboard.press('KeyE')
+          await page.waitForTimeout(200)
+          const afterE = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, riding: !!globalThis.engine.alive.riding, cueHidden: [...document.querySelectorAll('#over > #cues p')].every((p) => !p.checkVisibility({ visibilityProperty: true, opacityProperty: true })) }))
+          check(afterE.choosing && !afterE.riding && afterE.cueHidden, `beside a stopped traffic car, E opens the radial tool wheel and hides world cues (${JSON.stringify(afterE)})`)
+          await page.keyboard.press('Escape')
+          await page.waitForTimeout(150)
+          await page.evaluate(() => { globalThis.engine.street.enabled = false })
+          await page.waitForTimeout(150)
+          const afterDisable = await page.evaluate(() => document.querySelectorAll('#over > #cues p').length)
+          check(afterDisable === 0, `disabling street life clears any active traffic cue (${afterDisable})`)
         }
       }
       // A preset and resolution setting chosen are there again when the page is opened again (once: a load is long), and an address's ?shadows=0 is kept over it.

@@ -30,10 +30,26 @@
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 //   ?farcutfit=1.6       how many times taller than the cut's tallest picture it is still trusted as the whole of the landing's
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
+import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, bounded, type Marcher, type View } from './march.ts'
+import { BUDGET as HELD } from './bay.ts'
+import { LOCAL } from './local.ts'
 import { LOCKERS, SLOTS } from './lockers.ts'
+import { PACKS_ENABLED, readPackedBytes } from './pack.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
+
+/**
+ * A path an address names for the far model or its landing cut (`?far=`, `?farlanding=`), where it is one of this
+ * site's own: a path from here with no scheme, no `//`, no `..` and no backslash, that stays on this origin. Else null
+ * (#81): a link must not swap the skyline for someone else's, or have the page tell another server who is looking.
+ */
+export function samePath(said: string | null | undefined, here: string = globalThis.location?.href ?? 'https://invalid/'): string | null {
+  if (typeof said !== 'string' || !said || said.length > 512) return null
+  let plain: string
+  try { plain = decodeURIComponent(said) } catch { return null }
+  for (const s of [said, plain]) if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.includes('//') || s.includes('\\') || /(^|\/)\.\.(\/|$)/.test(s) || /[\u0000-\u001f]/.test(s)) return null
+  try { const u = new URL(said, here); return u.origin === new URL(here).origin ? u.href : null } catch { return null }
+}
 
 const CODE = /* wgsl */ `
 struct V {
@@ -85,6 +101,7 @@ struct Out {
   @location(6) @interpolate(flat) style: u32,
   @location(7) along: f32,
   @location(8) @interpolate(flat) way: u32,
+  @location(9) @interpolate(flat) surveySkin: u32,
 }
 // The march's depth (march.ts fs), to leave what its cells hide.
 const NEAR = 1.0;
@@ -122,6 +139,7 @@ const FAR = 100000.0;
   out.shade = f32((w2 >> 13u) & 0xffffu);
   out.high = p.y;
   out.id = w4;
+  out.surveySkin = (w2 >> 29u) & 1u;
   out.way = select(2u + (axis - 1u) * 2u + u32(side), 1u, axis == 0u);
   out.style = w3 >> 24u;
   out.along = select(select(b.u0 + p.x * b.cell * 0.1, b.w0 + p.z * b.cell * 0.1, axis == 1u), 0.0, axis == 0u);
@@ -176,17 +194,40 @@ struct Drawn { @location(0) colour: vec4f }
   // which way it looks.
   let lit = select(1.0, step(in.shade, in.high + 0.5), v.shaded > 0.5);
   let direct = max(dot(in.n, v.sun), 0.0) * lit;
-  var paint = mix(in.rgb, st.glass.rgb, pane);
-  var rough = mix(0.9, 0.35, pane);
+  // On the Pyramid the Ina fit includes the shade and exposure of one afternoon.
+  // Elsewhere light the quartz and aluminium in the current sky. The beacon's
+  // taper bounds the louvres, leaving the lift wings in quartz.
+  var surface = in.rgb;
+  var surfaceRoughness = 0.9;
+  if (in.surveySkin != 0u) {
+    surface = vec3f(0.82, 0.82, 0.80);
+    let at = in.seen + g.eye;
+    for (var i = 0u; i < 8u; i++) {
+      let h = g.beacon[i];
+      if (h.more.w <= 0.0) { break; }
+      let q = (at - h.at.xyz) * 0.1;
+      let t = clamp((q.y - h.span.x) / max(h.span.y - h.span.x, 1.0), 0.0, 1.0);
+      if (h.span.w == 0.0 && q.y >= h.span.x && q.y <= h.span.y + 1.0 && length(q.xz) <= beaconRadius(h, t)) {
+        surface = vec3f(0.76, 0.78, 0.80);
+        surfaceRoughness = 0.5;
+        pane = 0.0;
+        break;
+      }
+    }
+  }
+  let photoFit = select(1.0, v.light.z, in.surveySkin != 0u);
+  var paint = mix(mix(surface, in.rgb, photoFit), st.glass.rgb, pane);
+  var rough = mix(surfaceRoughness, 0.35, pane);
   var col = shade(paint, in.n, rd, v.sun, direct, 1.0, rough, 0.0);
   // The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light fill times the
   // engine's, the whole gain times brighter. Drawn in the engine's own, the wedge's walls were a third darker than
   // the photograph, and its foreground (100 m on, through the park's lens) darker still. Only in the wedge, where the
   // faces take over at 100 m (HANDOVER): the photograph vouches for no more. Out of it (or through a wider lens),
   // downtown's faces lit so stood at 150 against the cells' 89 beside them.
-  if (v.light.x != 1.0 || v.light.y != 1.0) {
+  if (photoFit > 0.0 && (v.light.x != 1.0 || v.light.y != 1.0)) {
     if (inWedge(in.seen, v.wedge, v.bear)) {
-      col = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
+      let fitted = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
+      col = mix(col, fitted, photoFit);
     }
   }
   if (in.style == 15u) {
@@ -333,8 +374,16 @@ export interface Listing {
   wedge?: { at: [number, number]; from: number; to: number; far: number }
   /** The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light `fill` times the engine's, the whole `gain` times brighter. */
   light?: { fill: number; gain: number }
+  /** Tiles that hold only landmarks' faces (pack.mjs owner `hero`): drawn over the cells, which keep their ground. */
+  landmarks?: string[]
+  /** Listed tiles completely inside the packed survey. Older packs carry no footprint. */
+  ground?: string[]
 }
 type Rec = { path: string; bytes: number; sha256: string }
+
+/** A partial or legacy pack may draw faces over the cells without owning the surrounding ground. */
+export const grounded = (listing: Listing): Set<string> => new Set(listing.ground ?? [])
+
 interface Landing { eye: [number, number, number]; tiles: Record<string, Rec>; reach?: number; fov?: number; size?: [number, number]; yaw?: number; pitch?: number; heights?: number[] }
 interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; runs: { way: number; start: number; count: number; lods: number[] }[]; lo: number[]; hi: number[] }
 interface Head { sections: Section[]; styles: { storey: number; bay: number; wide: number; tall: number; glass: number[] }[]; sun: { vector: [number, number, number] } | null; grouped: boolean }
@@ -384,6 +433,10 @@ export interface Far {
    * draw had it: the reach, or in the wedge through a narrow lens the nearer one. Cells; Infinity where nothing is drawn as faces.
    */
   handover(x: number, z: number): number
+  /** Whether every 500 m far tile overlapping `[x0..x1, z0..z1]` is surveyed `far.ground` owned by the far model, with no overflow edits and no failed fetch (so a 404 immediately falls back to coarse cells via `onFallback`). */
+  covers(x0: number, z0: number, x1: number, z1: number): boolean
+  /** Called with `[x0, z0, x1, z1]` (finest cells) when a surveyed `far.ground` tile fails to fetch or overflows edits so the world streams fallback coarse cells immediately. */
+  onFallback: ((x0: number, z0: number, x1: number, z1: number) => void) | null
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
@@ -391,8 +444,8 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
-  const reachAsked = Number(query.get('farreach') ?? 500)
+  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity, covers: () => false, onFallback: null }
+  const reachAsked = bounded(query.get('farreach'), 500, 0, 20_000)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
   const file = base.endsWith('.json') ? base : `${base}far.json`
@@ -400,7 +453,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const listing = await fetch(file).then((r) => (r.ok ? (r.json() as Promise<Listing & { far?: Listing }>) : null)).then((l) => l?.far ?? l).catch(() => null)
   if (!listing || !Object.keys(listing.tiles).length) return none
   // The landing's cut: the release's, or one asked for by address (its own landing.json, its paths from there).
-  const landingAt = query.get('farlanding')
+  const landingAt = samePath(query.get('farlanding'))
   const landing: (Landing & { base: string }) | null = landingAt
     ? await fetch(landingAt).then((r) => (r.ok ? (r.json() as Promise<Landing>) : null)).then((l) => (l ? { ...l, base: new URL('.', new URL(landingAt, location.href)).href } : null)).catch(() => null)
     : listing.landing ? { ...listing.landing, base } : null
@@ -409,7 +462,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const vertex: GPUVertexState = { module, entryPoint: 'vs', buffers: [{ arrayStride: 20, stepMode: 'instance', attributes: [0, 1, 2, 3, 4].map((n) => ({ shaderLocation: n, offset: n * 4, format: 'uint32' as const })) }] }
   const F = GPUShaderStage.FRAGMENT, VF = GPUShaderStage.VERTEX | F
   const viewLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }, { binding: 1, visibility: VF, buffer: {} }, { binding: 2, visibility: F, buffer: {} }, { binding: 3, visibility: F, texture: { sampleType: 'depth' } }, { binding: 4, visibility: F, texture: {} }, { binding: 5, visibility: F, buffer: { type: 'read-only-storage' } }] })
-  const blockLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }] })
+  const blockLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: { hasDynamicOffset: true, minBindingSize: 64 } }] })
   const layout = device.createPipelineLayout({ bindGroupLayouts: [viewLayout, blockLayout] })
   const pipelineFor = (entry: string, ...targets: GPUTextureFormat[]) => device.createRenderPipelineAsync({
     label: `far ${entry}`, layout, vertex, fragment: { module, entryPoint: entry, targets: targets.map((format) => ({ format })) },
@@ -432,9 +485,39 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   let styled = false
   let sunBaked: [number, number, number] | null = null
 
+  // ── Shared dynamic-offset uniform buffer for all section blocks (#83) ──
+  // Replaces thousands of per-section 64 B GPUBuffers and GPUBindGroups with one aligned slab and a slot free-list.
+  const blockStride = Math.max(64, device.limits.minUniformBufferOffsetAlignment)
+  let blockCap = 512, blockUsed = 0
+  const blockFree: number[] = []
+  let blockMirror = new Uint8Array(blockCap * blockStride)
+  let blockBuf = device.createBuffer({ label: 'far sections', size: blockCap * blockStride, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  let blockBind = device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: blockBuf, size: 64 } }] })
+  const secBytes = new Uint8Array(64)
+  const secF32 = new Float32Array(secBytes.buffer)
+  const secU32 = new Uint32Array(secBytes.buffer)
+  const allocBlock = (data: Uint8Array<ArrayBuffer>): number => {
+    const slot = blockFree.length ? blockFree.pop()! : blockUsed++
+    if (slot >= blockCap) {
+      while (slot >= blockCap) blockCap *= 2
+      const next = new Uint8Array(blockCap * blockStride)
+      next.set(blockMirror)
+      blockMirror = next
+      blockBuf.destroy()
+      blockBuf = device.createBuffer({ label: 'far sections', size: blockCap * blockStride, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+      device.queue.writeBuffer(blockBuf, 0, blockMirror, 0, blockUsed * blockStride)
+      blockBind = device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: blockBuf, size: 64 } }] })
+    }
+    blockMirror.set(data, slot * blockStride)
+    device.queue.writeBuffer(blockBuf, slot * blockStride, data)
+    return slot
+  }
+
   // ── Tiles ──
   const size = listing.size, bands = listing.bands, lods = listing.lods
-  interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; bind: GPUBindGroup; mid: number[] }[]; used: number }
+  interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; slot: number; mid: number[] }[]; used: number }
+  /** Lets a band's buffers go: destroys its face buffer and recycles its sections' uniform slots. */
+  const drop = (h: Held) => { h.buffer.destroy(); for (const s of h.sections) blockFree.push(s.slot) }
   // A tile's slots: its bands, then (last) the landing's cut of it.
   interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; recs: (Rec | null)[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[]; full: boolean }
   const C = bands.length
@@ -448,25 +531,95 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const corner: [number, number] = [Math.min(...keys.map((k) => k[0])), Math.min(...keys.map((k) => k[1]))]
   const anchor = [corner[0] * size, 0, corner[1] * size]
   const cover = new Uint32Array(128)
+  /** The tiles whose ground the far model draws: the march hands only these over (`grounded`). */
+  const owned = grounded(listing)
+  /** Surveyed `owned` tiles whose far geometry failed to fetch (e.g. 404), so coarse cells must stand in until a retry succeeds. */
+  const failedGround = new Set<string>()
   let covered = ''
+
+  // Offload header JSON parsing and 20-byte grouped face de-interleaving to a worker (#83) so tile loads never hitch frames.
+  type Unpacked = { head: Head; faces: Uint8Array<ArrayBuffer> }
+  let unpacker: Worker | null = null
+  let unpackSeq = 0
+  const unpacking = new Map<number, { resolve: (u: Unpacked) => void; reject: (e: Error) => void }>()
+  const unpackLocal = (buf: ArrayBuffer): Unpacked => {
+    const bytes = new Uint8Array(buf)
+    const length = new DataView(buf).getUint32(4, true)
+    const head = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as Head
+    let faces = bytes.subarray(8 + length)
+    const n = faces.length / 20
+    if (head.grouped) {
+      const flat = new Uint8Array(faces.length)
+      for (let j = 0; j < 20; j++) { const from = j * n; for (let i = 0; i < n; i++) flat[i * 20 + j] = faces[from + i] }
+      faces = flat
+    }
+    return { head, faces }
+  }
+  const unpack = (buf: ArrayBuffer): Promise<Unpacked> => {
+    if (typeof Worker === 'undefined') return Promise.resolve(unpackLocal(buf))
+    if (!unpacker) {
+      unpacker = new Worker(new URL('./far-unpack.ts', import.meta.url), { type: 'module' })
+      unpacker.onmessage = (e: MessageEvent<{ id: number; head?: Head; buf?: ArrayBuffer; offset?: number; length?: number; error?: string }>) => {
+        const job = unpacking.get(e.data.id)
+        if (!job) return
+        unpacking.delete(e.data.id)
+        if (e.data.error || !e.data.head || !e.data.buf) job.reject(new Error(e.data.error ?? 'far unpack failed'))
+        else job.resolve({ head: e.data.head, faces: new Uint8Array(e.data.buf, e.data.offset ?? 0, e.data.length) })
+      }
+      unpacker.onerror = () => {
+        for (const job of unpacking.values()) job.reject(new Error('far unpack worker failed'))
+        unpacking.clear()
+        unpacker?.terminate()
+        unpacker = null
+      }
+    }
+    const id = ++unpackSeq
+    return new Promise<Unpacked>((resolve, reject) => {
+      unpacking.set(id, { resolve, reject })
+      unpacker!.postMessage({ id, buf }, [buf])
+    })
+  }
+
+  // Release packs (#82): landing cut in one pack and band 0 in 2 km square packs (sf/build.mjs), or an explicit
+  // `?farpacks=<index.json>` override. Falls back cleanly to fetching individual .far objects if a pack is absent.
+  const packs = PACKS_ENABLED && !query.has('far') ? LOCAL?.packs ?? null : null
+  const packsAt = PACKS_ENABLED ? samePath(query.get('farpacks')) : null
+  const packOf: Record<string, string> | null = packsAt
+    ? await fetch(packsAt).then((r) => (r.ok ? (r.json() as Promise<Record<string, string>>) : null)).catch(() => null)
+    : null
+  const releaseBaseUrl = new URL(base, location.href)
+  const packed = (t: Tile, band: number, rec: Rec): Promise<Uint8Array<ArrayBuffer> | null> | null => {
+    if (!PACKS_ENABLED) return null
+    const relPath = band === C ? landing?.tiles[t.key]?.path : rec.path
+    if (!relPath) return null
+    let packUrl: string | null = null
+    if (packOf?.[relPath] && packsAt) {
+      packUrl = new URL(packOf[relPath], new URL(packsAt, location.href)).href
+    } else if (packs) {
+      if (band === C && !landingAt && packs.landing) {
+        packUrl = new URL(packs.landing, releaseBaseUrl).href
+      } else if (band === 0 && packs.far0) {
+        const k = packs.far0
+        const dir = packs.dir ?? 'packs/'
+        packUrl = new URL(`${dir}far0-${Math.floor(t.x / k)}_${Math.floor(t.z / k)}.pack`, releaseBaseUrl).href
+      }
+    }
+    if (!packUrl) return null
+    return readPackedBytes(packUrl, relPath).then((bytes) => (bytes && (rec.bytes === undefined || bytes.byteLength === rec.bytes) ? bytes : null))
+  }
 
   const load = async (t: Tile, band: number) => {
     const rec = t.recs[band]!
     t.held[band] = 'coming'
     stats.coming++
     try {
-      const answer = await fetch(new URL(rec.path, new URL(base, location.href)))
-      if (!answer.ok) throw new Error(`${answer.status}`)
-      const bytes = new Uint8Array(await answer.arrayBuffer())
-      const length = new DataView(bytes.buffer).getUint32(4, true)
-      const head = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as Head
-      let faces = bytes.subarray(8 + length)
-      const n = faces.length / 20
-      if (head.grouped) {
-        const flat = new Uint8Array(faces.length)
-        for (let j = 0; j < 20; j++) { const from = j * n; for (let i = 0; i < n; i++) flat[i * 20 + j] = faces[from + i] }
-        faces = flat
-      }
+      const inPack = await packed(t, band, rec)
+      const answer = inPack ? null : await fetch(new URL(rec.path, releaseBaseUrl))
+      if (answer && !answer.ok) throw new Error(`${answer.status}`)
+      // Copy packed slices before transferring to the unpack worker so the cached VXPK pack buffer is never detached.
+      const raw = inPack ? inPack.slice().buffer : await answer!.arrayBuffer()
+      const wireBytes = raw.byteLength
+      const { head, faces } = await unpack(raw)
       // The windows' styles from the first object that has them (a cut's are its bands').
       if (!styled && head.styles?.length) {
         const s = new Float32Array(16 * 8)
@@ -478,21 +631,23 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const buffer = device.createBuffer({ label: `far ${t.key}/${band}`, size: Math.max(20, faces.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
       device.queue.writeBuffer(buffer, 0, faces)
       const sections = head.sections.map((s) => {
-        const own = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-        device.queue.writeBuffer(own, 0, new Float32Array([s.pos[0] - anchor[0], s.pos[1] - anchor[1], s.pos[2] - anchor[2], s.cell]))
-        device.queue.writeBuffer(own, 16, new Uint32Array([0]))
-        device.queue.writeBuffer(own, 20, new Float32Array(s.uw ?? [0, 0]))
-        device.queue.writeBuffer(own, 28, new Uint32Array([s.layer === 'hero' ? 1 : s.layer.includes('crown') ? 2 : 0]))
-        device.queue.writeBuffer(own, 32, new Float32Array([...s.c0, 0, ...s.c2, 0]))
+        secF32[0] = s.pos[0] - anchor[0]; secF32[1] = s.pos[1] - anchor[1]; secF32[2] = s.pos[2] - anchor[2]; secF32[3] = s.cell
+        secU32[4] = 0
+        secF32[5] = s.uw?.[0] ?? 0; secF32[6] = s.uw?.[1] ?? 0
+        secU32[7] = s.layer === 'hero' ? 1 : s.layer.includes('crown') ? 2 : 0
+        secF32[8] = s.c0[0]; secF32[9] = s.c0[1]; secF32[10] = s.c0[2]; secF32[11] = 0
+        secF32[12] = s.c2[0]; secF32[13] = s.c2[1]; secF32[14] = s.c2[2]; secF32[15] = 0
+        const slot = allocBlock(secBytes)
         // The tile's box is what its faces fill, once any are here (a face may reach past its tile).
         if (!t.bounded) { t.lo = [...s.lo]; t.hi = [...s.hi]; t.bounded = true }
         for (let a = 0; a < 3; a++) { t.lo[a] = Math.min(t.lo[a], s.lo[a]); t.hi[a] = Math.max(t.hi[a], s.hi[a]) }
-        return { s, bind: device.createBindGroup({ layout: blockLayout, entries: [{ binding: 0, resource: { buffer: own } }] }), mid: [0, 1, 2].map((a) => (s.lo[a] + s.hi[a]) / 2) }
+        return { s, slot, mid: [0, 1, 2].map((a) => (s.lo[a] + s.hi[a]) / 2) }
       })
       t.held[band] = { band, buffer, bytes: faces.byteLength, sections, used: frame }
       stats.fetched++
       t.fails[band] = 0
-      stats.fetchedBytes += bytes.length
+      if (failedGround.has(t.key) && t.fails.every((f) => f === 0)) failedGround.delete(t.key)
+      stats.fetchedBytes += wireBytes
     } catch (e) {
       // A listed object that does not come is a load error (release.md): said, left out, and tried again later.
       stats.failed++
@@ -500,6 +655,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       t.held[band] = null
       // Tried again, but not before a while: twice as long after each failure, to a minute.
       t.retry[band] = performance.now() + Math.min(60_000, 1000 * 2 ** Math.min(6, (t.fails[band] = (t.fails[band] ?? 0) + 1)))
+      if (owned.has(t.key) && !failedGround.has(t.key)) {
+        failedGround.add(t.key)
+        self.onFallback?.(t.x * size, t.z * size, (t.x + 1) * size, (t.z + 1) * size)
+      }
     }
     stats.coming--
   }
@@ -542,8 +701,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   }
   /** The bands a tile `d` cells off needs: band k holds faces from bands[k] metres, which are `detail` pixels across out to bands[k] * focal / detail. */
   const needs = (d: number, focal: number, detail: number) => bands.map((least, k) => k === 0 || (d / 10) * detail < bands[k - 1] * focal)
-  /** Faces held at most: past this the furthest tiles' finer bands are let go. */
-  const BUDGET = Number(query.get('farfaces') ?? 12_000_000)
+  /** Faces held at most, by device class (bay.ts `BUDGETS`: 20 bytes each, 60 MiB on a phone): past this the furthest tiles' finer bands are let go. */
+  const BUDGET = bounded(query.get('farfaces'), HELD.faces, 100_000, 20_000_000, true)
   /** The lens (half its height's tangent) the wedge's faces begin nearer through: under 50 degrees, where at 720 pixels tall a cell of the march is over 3 pixels across (the realm's is 25). Not by the picture's own pixels: the page's scale moves with its load, and the foreground would flip between cells and faces. */
   const NARROW = Math.tan((50 * Math.PI) / 360)
   /** The faces' light (Listing `light`, or `?farlight=fill,gain`): the engine's own where neither says. */
@@ -557,8 +716,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const cutLook = landing?.yaw !== undefined && landing.pitch !== undefined ? [Math.sin(landing.yaw) * Math.cos(landing.pitch), Math.sin(landing.pitch), -Math.cos(landing.yaw) * Math.cos(landing.pitch)] : null
   /** The tallest picture the cut is trusted for, pixels: its own tallest (sf/far/landing.mjs `--heights`) and some, `?farcutfit` times (a 1350 px picture of the cut was the bands' but for slivers at the edges, #523); a taller one draws finer faces than it kept. */
   const cutTall = landing?.heights?.length ? Math.max(...landing.heights) * Number(query.get('farcutfit') ?? 1.6) : 0
+  /** Connection hint (#82): trim far radius to 6 km on Data Saver or slow cellular links; keep full 16 km skyline on fast links. */
+  const conn = (globalThis.navigator as (Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }) | undefined)?.connection
+  const defaultFarthest = conn?.saveData || conn?.effectiveType === 'slow-2g' || conn?.effectiveType === '2g' || conn?.effectiveType === '3g' ? 6_000 : 16_000
   /** How far past the reach a tile is still drawn, metres. */
-  const FURTHEST = Number(query.get('farthest') ?? 16_000)
+  const FURTHEST = bounded(query.get('farthest'), defaultFarthest, 100, 50_000)
   let frame = 0
   let whole = true
   /** Until `shown` only the landing's cut of the view is fetched (`ready` says when it is here); then what the view needs; after `left`, the rest. */
@@ -573,7 +735,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   let kept: readonly number[] | null = null
 
   const self: Far = {
-    listing, reach: reachAsked, near: Number(query.get('farnear') ?? 100), detail: Number(query.get('fardetail') ?? 0.75), stats,
+    listing, reach: reachAsked, near: bounded(query.get('farnear'), 100, 0, 5_000), detail: bounded(query.get('fardetail'), 0.75, 0.05, 16), stats,
     get whole() { return whole },
     get ready() { return ready },
     shown() { first = false },
@@ -584,7 +746,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const near = edits.find((e) => gap(e) <= JOIN)
       if (near) { for (let a = 0; a < 3; a++) { near[a] = Math.min(near[a], b[a]); near[a + 3] = Math.max(near[a + 3], b[a + 3]) } return }
       if (edits.length < EDITS) { edits.push(b); return }
-      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
+      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) {
+        const k = `${x}_${z}`, fresh = !changed.has(k)
+        changed.add(k)
+        if (fresh && owned.has(k)) self.onFallback?.(x * size, z * size, (x + 1) * size, (z + 1) * size)
+      }
     },
     forget() { edits.length = 0; changed.clear() },
     keep(box) { kept = box },
@@ -592,6 +758,17 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       if (!handed) return Infinity
       const w = handed.wedge, dx = w ? x - w[0] : 0, dz = w ? z - w[1] : 0, b = Math.atan2(dx, -dz), bearing = b < 0 ? b + 2 * Math.PI : b
       return w && bearing > w[4] && bearing < w[5] && dx * dx + dz * dz < w[2] * w[2] ? Math.min(handed.reach, w[3]) : handed.reach
+    },
+    onFallback: null,
+    covers(x0, z0, x1, z1) {
+      if (!owned.size || x1 <= x0 || z1 <= z0) return false
+      const tx0 = Math.floor(x0 / size), tx1 = Math.floor((x1 - 1) / size)
+      const tz0 = Math.floor(z0 / size), tz1 = Math.floor((z1 - 1) / size)
+      for (let tz = tz0; tz <= tz1; tz++) for (let tx = tx0; tx <= tx1; tx++) {
+        const k = `${tx}_${tz}`
+        if (!owned.has(k) || changed.has(k) || failedGround.has(k)) return false
+      }
+      return true
     },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
@@ -650,19 +827,22 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     for (const t of tiles) {
       const d = away(eye, t.lo, t.hi)
       const seen = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? coverage(view, aspect, t.lo, t.hi) : 0
-      // Out of sight and over a kilometre off, a tile holds only its biggest faces, until the eye turns to it (the
-      // march's cells stand in meanwhile): the park's narrow lens had fetched the whole circle round it.
-      const need = d >= FURTHEST * 10 ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
-      let all = true
+      // Out of sight: past 3 km fetch nothing until the eye turns toward the tile (the march's cells stand in
+      // meanwhile); between 1 km and 3 km keep only band 0 ready so nearby turns stay instant.
+      const need = d >= FURTHEST * 10 || (!seen && d > 30_000) ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
+      let all = true, bandHeld = false
       for (const [k, h] of t.held.entries()) {
         if (k === C || !t.listed[k]) continue
         if (need[k] && (h === null || h === 'coming')) all = false
-        if (h && h !== 'coming') { held += h.bytes / 20; heldBytes += h.bytes; if (need[k]) h.used = frame }
+        if (h && h !== 'coming') {
+          held += h.bytes / 20; heldBytes += h.bytes
+          if (need[k]) { h.used = frame; bandHeld = true }
+        }
       }
       t.full = all
       // The landing's cut is let go once every band the tile needs is here and the view is not the cut's own, or the eye has left the landing.
       const cut = t.held[C]
-      if (((all && !exact) || !there) && cut && cut !== 'coming') { cut.buffer.destroy(); t.held[C] = null }
+      if (((all && !exact) || !there) && cut && cut !== 'coming') { drop(cut); t.held[C] = null }
       const cutHeld = (!all || exact) && there && !!cut && cut !== 'coming'
       if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes; onCut = true }
       const cutting = there && t.listed[C]
@@ -681,9 +861,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // (Through the cut's own view, the cut is a tile's whole, and a tile it has nothing of shows nothing.)
       const hidden = exact && !t.listed[C]
       if (!all && !(exact && cutHeld) && !hidden && seen) whole = false
-      // The march hands a tile over once what it needs is here, or the landing's cut of it while the eye is there (or,
-      // through the cut's own view, a tile it has nothing of): until then its cells stand in. Nor one the world was changed in.
-      if ((all || cutHeld || hidden) && d < FURTHEST * 10 && !changed.has(t.key)) {
+      // A cut taken from another angle, a missing band, an unfetched out-of-view tile past 3 km (`bandHeld === false`),
+      // or a tile touched only by the edge of the survey can add visible faces without replacing the coarse terrain behind them.
+      const replaces = (all && bandHeld) || (exact && (cutHeld || hidden))
+      if (replaces && d < FURTHEST * 10 && !changed.has(t.key) && owned.has(t.key)) {
         const bx = t.x - map[0], bz = t.z - map[1]
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
       }
@@ -693,13 +874,26 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     stats.held = held; stats.heldBytes = heldBytes
     // What the view holds before what it does not; in it the cut, then the coarse band before the finer, the biggest on the screen first.
     want.sort((a, b) => Number(!a.seen) - Number(!b.seen) || (a.seen && b.seen ? a.band - b.band || b.seen - a.seen : 0) || a.d - b.d || a.band - b.band)
-    for (const w of want) { if (stats.coming >= 6) break; void load(w.t, w.band < 0 ? C : w.band) }
-    // Over the budget: the least lately needed bands go, finest first.
+    for (const w of want) {
+      if (stats.coming >= 6) break
+      if (w.band > 0 && held >= BUDGET) continue
+      void load(w.t, w.band < 0 ? C : w.band)
+    }
+    // Over the budget: drop stale bands first, then finest out-of-view / furthest bands so phone/tablet stay within tier VRAM (#83).
     if (held > BUDGET) {
       const loose = tiles.flatMap((t) => t.held.map((h, k) => ({ t, h, k }))).filter((e) => e.k < C && e.h && e.h !== 'coming' && e.h.used < frame - 120) as { t: Tile; h: Held; k: number }[]
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
-      for (const e of loose) { if (held <= BUDGET * 0.9) break; e.h.buffer.destroy(); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
+      for (const e of loose) { if (held <= BUDGET * 0.9) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20; heldBytes -= e.h.bytes }
+      if (held > BUDGET * 1.05) {
+        const finer = tiles.flatMap((t) => {
+          const d = away(eye, t.lo, t.hi), vis = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? 1 : 0
+          return t.held.map((h, k) => ({ t, h, k, d, vis }))
+        }).filter((e) => e.k > 0 && e.k < C && e.h && e.h !== 'coming') as { t: Tile; h: Held; k: number; d: number; vis: number }[]
+        finer.sort((a, b) => a.vis - b.vis || b.k - a.k || b.d - a.d)
+        for (const e of finer) { if (held <= BUDGET) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20; heldBytes -= e.h.bytes }
+      }
     }
+    stats.held = held; stats.heldBytes = heldBytes
     // The faces' light was read off a clear afternoon: it is theirs as far as the day is clear (the march's own overcast).
     const fair = Math.max(0, Math.min(1, march.day)) * (1 - Math.max(march.rain, march.cloud, 0.2 * march.fog))
     // The wedge (HANDOVER): for the march from the frame's corner, here from the eye (where a face is measured from).
@@ -707,8 +901,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut || exact ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
+    // Fade the fitted colour as the eye or lens leaves the calibrated panorama.
+    const photoFit = w && cutTan.y < NARROW ? fair * Math.max(0, 1 - Math.hypot(eye[0] - w.at[0], eye[2] - w.at[1]) / LANDED)
+      * Math.min(1, Math.max(0, (NARROW - view.tanHalf) / (NARROW - cutTan.y))) : 0
     if (!clear) handed = { reach, wedge }
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, photoFit, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
     const boxes = new Float32Array(EDITS * 8)
     for (const [i, e] of edits.entries()) boxes.set([e[0] - eye[0], e[1] - eye[1], e[2] - eye[2], 0, e[3] - eye[0], e[4] - eye[1], e[5] - eye[2], 1], i * 8)
     device.queue.writeBuffer(uniforms, 160, boxes)
@@ -740,7 +937,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       for (const h of (!t.full || exact) && cut && cut !== 'coming' ? [cut] : t.held.slice(0, C)) {
         if (!h || h === 'coming') continue
         out.setVertexBuffer(0, h.buffer)
-        for (const { s, bind: b } of h.sections) {
+        for (const { s, slot } of h.sections) {
+          const sf = Math.hypot(Math.max(Math.abs(s.lo[0] - eye[0]), Math.abs(s.hi[0] - eye[0])), Math.max(Math.abs(s.lo[1] - eye[1]), Math.abs(s.hi[1] - eye[1])), Math.max(Math.abs(s.lo[2] - eye[2]), Math.abs(s.hi[2] - eye[2])))
+          if (sf < (wedge ? near : reach)) continue
           const ds = away(eye, s.lo, s.hi)
           if (!inView(view, aspect, s.lo, s.hi)) continue
           const least = (self.detail * ds) / 10 / focal
@@ -752,7 +951,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
             if (!facing(run.way, s, eye)) continue
             const count = k < 0 ? run.count : run.lods[k]
             if (!count) continue
-            if (!bound) { out.setBindGroup(1, b); bound = true }
+            if (!bound) { out.setBindGroup(1, blockBind, [slot * blockStride]); bound = true }
             out.draw(4, count, 0, run.start)
             faces += count
           }

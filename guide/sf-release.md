@@ -91,9 +91,11 @@ The core and the page choose a level by the same rule, `least_step` in [bay.rs](
 | `bands` | `[4, 1, 0]`: band 0 holds faces 4 m and larger, band 1 faces 1 to 4 m, band 2 the rest. |
 | `lods` | `[16, 8, 4, 2, 1, 0.5, 0.25]`: the face sizes, in metres, each run counts down to. |
 | `tiles` | Key to an array of three records or `null`, one per band at `far/<band>/<key>.far`. An unlisted key has no far coverage. |
-| `credit` | One line, added to the manifest's `credits`. |
+| `credit` | One line, added to the manifest's `credits`. Partial tile replacements combine the previous and incoming credits. |
 | `wedge` | Optional. The finer photographed wedge: apex `at` in cells, bearings `from` and `to`, reach `far` in metres. |
 | `light` | Optional. `fill` and `gain`, the light the wedge's colours were fitted under. |
+| `ground` | Optional. Tiles entirely covered by the surveyed square footprints. A tile can take over from the coarse terrain once its required bands arrive. An older listing without this field keeps the coarse terrain. |
+| `landmarks` | Optional. Tiles that supply only landmark faces. They draw over the coarse terrain. |
 | `landing` | Optional. The faces seen from the first view's eye: `eye` in cells, `tiles` as one record per key at `far/landing/<key>.far`, and the camera it was cut for, such as `fov`, `size`, `yaw`, `pitch` and `heights`. |
 
 `release.py` refuses a far listing unless `version` is 1, `size` is 5000 and `bands` is `[4, 1, 0]`, and it checks each object's path, length and hash. A first-view cut's tiles must be keys the far listing has.
@@ -144,9 +146,13 @@ The body follows at byte 64, in this order:
 
 The building's style word packs cells per storey (bits 0 to 7), cells per bay (8 to 15), a home flag (16), a special form (17 and 18: 1 Coit Tower, 2 the Transamerica Pyramid, 3 a tall lobby or arcade), a triple-storey flag (19), the ground floor's use (20 to 22) and a seed (24 to 31).
 
+SF staging carries three reviewed residential footprints into the near tiles. At Haight and Ashbury a warm cream wall replaces a pink tint. On Valencia Street a slate blue-grey replaces ochre. One Russian Hill apartment has a smooth wall finish. Each field comes from multiple photographs and a separate street view of the same outline. A colour sets bit 16 of the trim word. A material-only record changes the material nibble. Previously painted buildings and known cladding keep their appearance. The operator can supply another credited survey in the same frame with `release.py --facades FILE`.
+
+On loading a fine tile, the core samples the roof inside each ordinary building's footprint to fill low or missing lidar returns along its edge. It also smooths isolated roof spikes, reconstructs missing street eaves in memory, and blends perimeter lidar dropouts into the neighbouring eave height on corniced facades. Previously pinned BAY1 tiles receive these repairs when loaded by the updated core.
+
 Two trailers may follow the trunks, in this order. Any other trailing bytes make the pack invalid.
 
-**`SFST`, street fixtures.** Lamps, poles, signs, wires.
+**`SFST`, street fixtures.** Lamps, poles, signs, wires. When loading a tile, `bay.rs` relocates standing fixtures (lamps, stop signs, hydrants, utility and sensed poles) whose base falls on asphalt onto the nearest street-grade pavement or verge clear of buildings—re-aiming relocated lamp arms back over the carriageway—and drops any with no off-road spot within reach. Overhead aerial cables (`radius <= 3 cm`) rasterize at a slim capped radius (`<= 0.18` cells) at fine detail so wires stay slender on pinned tiles too.
 
 | Offset | Type | Meaning |
 | --- | --- | --- |
@@ -188,18 +194,20 @@ A face is five `u32` words, as the vertex shader in `far.ts` reads them:
 | | 10 and 11 | Axis: 0 a top, 1 and 2 a wall facing either section axis |
 | | 12 | Which side of the cell the wall is on |
 | | 13 to 28 | Shade |
+| | 29 | Surveyed Transamerica Pyramid cladding. The realm lights quartz and the aluminium spire under its sky. The fitted Ina colour fades in near the calibrated eye and lens in fair weather. |
 | 3 | 0 to 23, 24 to 31 | Colour as 8-bit red, green, blue (red highest), and a window style |
 | 4 | all | The building's id |
 
 ## Beside the release
 
-`engine/sf/build.mjs` writes these into its output folder (`<out>`, `engine/dist-sf` by default) next to the page, outside the release and its hash. The marks come from the city run's street graphs, the map from the release's tiles and the graphs, and the landmarks are a copy of `engine/sf/heroes.json`.
+`engine/sf/build.mjs` writes these into its output folder (`<out>`, `engine/dist-sf` by default) next to the page, outside the release and its hash. The marks come from the city run's street graphs, the map from the release's tiles and the graphs, and the landmarks are a copy of `engine/sf/heroes.json`. `build.mjs` also embeds `heroes.json` and `marks-squares.bin` inside `<script id="realm">` (`LOCAL.bay`) so cold and warm visits spend zero extra Worker requests on them, bundles the page, workers, AudioWorklet, Voxelmorphism kit and the compiled WebAssembly core into content-hashed immutable files under `<out>/assets/` (with `--no-bundle` to emit unbundled stripped modules), and writes `VXPK` packs under `<out>/sf/releases/<pin>/packs/` (`landing.pack`, 2 km `far0-<gx>_<gz>.pack`, `cars.pack`, `life-meta.pack`, 4 km `life-<gx>_<gz>.pack` and `names-<gx>_<gz>.pack`; `--no-packs` disables, and `manifest.json` stays untouched so the release pin never changes).
 
 | File | Format | Read by |
 | --- | --- | --- |
 | `<out>/bay/marks.bin` | `int32` words: `MARK` (`0x4b52414d`), square count, segment count, each square as x0, z0, x1, z1, each segment as x0, z0, x1, z1, style | `bay.rs` `marks` and `page/marks.ts`: lane lines, crossings and rails |
 | `<out>/bay/marks-squares.bin` | The same with no segments | Every core, before it makes a sector |
 | `<out>/bay/map.bin` | `MAP1` (`0x3150414d`), version 1 or 2 | `parseMap` in `page/nav-data.ts`: the minimap and GPS. Written by `sf/map.mjs`. |
+| `<out>/bay/places.json` | JSON (served Brotli-compressed via `worker.mjs`) | `page/neighborhood.ts`: street-snapped storefronts (with configurable parody brands from `sf/brands.json`) and civic plazas (`sf/plazas.json`). Written by `sf/places.mjs`. |
 | `<out>/bay/heroes.json` | JSON | Landmarks made by rule in the core |
 
 ## How a release stays fixed
@@ -212,7 +220,7 @@ Never edit a staged release. Stage a new one, which gets a new name. The code ho
 - `release.py --panel` moves a staging pointer only with a receipt naming this candidate, the current predecessor, the tested core's Wasm and the panel spec, with no score below the previous pin or `engine/bay/panel-floors.json`.
 - `build.mjs` by default builds only the release `engine/sf/pilot/current.json` pins, and fails when the staging folder does not hold it.
 - `deploy/data.mjs pack` refuses a staged manifest whose SHA-256 is not the pin.
-- `deploy/data.mjs fetch` refuses a bundle made for another pin or whose index does not hash to the recorded digest, and checks every file's length and SHA-256.
+- `deploy/data.mjs fetch` checks the pin, the index digest and each restored file's length and SHA-256. Later fetches reuse the restore when its stamp, manifest digest and file sizes match. Pass `--force` to download again, or pass a local `data.tar` to verify and restore it from disk.
 </Warning>
 
 ### The data bundle

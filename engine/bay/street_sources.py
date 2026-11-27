@@ -8,11 +8,55 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from pyproj import Transformer
+from mapped_water import is_water
 
 UTM = Transformer.from_crs(26910, 4326, always_xy=True)
 KEEP = set(
     "name ref tunnel bridge layer highway footway cycleway crossing crossing:markings railway gauge operator electrified route type restriction oneway junction lanes lanes:forward lanes:backward access motor_vehicle service surface sidewalk parking:both parking:left parking:right parking:lane:both parking:lane:left parking:lane:right".split()
 )
+SEMANTIC_BUILDING_TAGS = (
+    "name", "building", "building:colour", "building:material", "roof:shape", "roof:colour",
+    "roof:material", "height", "building:levels", "historic", "tourism", "amenity", "wikidata",
+)
+SEMANTIC_PLACE_TAGS = ("name", "natural", "water", "leisure", "landuse", "amenity", "garden:type", "surface", "wikidata")
+KEEP_POI = set(
+    "name brand operator shop amenity healthcare healthcare:speciality cuisine leisure place area outdoor_seating addr:housenumber addr:street".split()
+)
+FURNITURE_AMENITIES = {"bench", "public_bookcase", "drinking_water", "fountain", "marketplace"}
+POI_AMENITIES = {"restaurant", "cafe", "fast_food", "ice_cream", "bar", "pub", "pharmacy", "clinic", "bank", "cinema", "theatre", "marketplace"}
+POI_HEALTHCARE = {"clinic", "urgent_care"}
+
+
+def extract_semantics(items):
+    """Extract architectural building tags, inland water bodies, and botanical/park gardens from an OSM tile
+    without any extra network requests (#60)."""
+    buildings, water, gardens = {}, [], []
+    for (kind, id_), item in items.items():
+        tags = item.get("tags", {})
+        if kind == "relation" and tags.get("type") == "multipolygon" and is_water(tags):
+            parts = []
+            for member in item["members"]:
+                if member["type"] != "way" or member["role"] not in ("outer", "inner", ""):
+                    continue
+                way = items.get(("way", member["ref"]))
+                if not way:
+                    break
+                parts.append({"role": member["role"] or "outer", "ref": member["ref"], "nodes": way["nodes"]})
+            else:
+                if parts:
+                    water.append({"type": "relation", "id": id_, "members": parts,
+                                  "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
+        if kind != "way":
+            continue
+        if tags.get("building") not in (None, "no"):
+            kept = {k: tags[k] for k in SEMANTIC_BUILDING_TAGS if k in tags}
+            if len(kept) > 1 or kept.get("building") not in (None, "yes"):
+                buildings[str(id_)] = kept
+        if is_water(tags):
+            water.append({"id": id_, "nodes": item.get("nodes", []), "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
+        elif tags.get("leisure") in ("garden", "park") or tags.get("landuse") in ("flowerbed", "meadow", "orchard"):
+            gardens.append({"id": id_, "nodes": item.get("nodes", []), "tags": {k: tags[k] for k in SEMANTIC_PLACE_TAGS if k in tags}})
+    return {"buildings": buildings, "water": water, "gardens": gardens}
 
 
 def osm(w, s, e, n):
@@ -51,6 +95,9 @@ def acquire(name, path):
     ways = {}
     relations = []
     nodes = set()
+    pois = []
+    plazas = []
+    furniture = []
     for (kind, id_), item in items.items():
         tags = item.get("tags", {})
         if kind == "way" and ("highway" in tags or "railway" in tags):
@@ -59,6 +106,58 @@ def acquire(name, path):
                 "tags": {k: v for k, v in tags.items() if k in KEEP},
             }
             nodes.update(item["nodes"])
+        if kind == "way" and (
+            tags.get("place") == "square"
+            or (tags.get("highway") == "pedestrian" and tags.get("area") == "yes")
+            or (tags.get("leisure") in ("park", "garden", "common") and tags.get("name"))
+        ):
+            pts = [
+                [items["node", nid]["lon"], items["node", nid]["lat"]]
+                for nid in item.get("nodes", [])
+                if ("node", nid) in items
+            ]
+            if len(pts) >= 3:
+                plazas.append({
+                    "id": id_,
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                    "points": pts,
+                })
+        if kind == "node":
+            if tags.get("amenity") in FURNITURE_AMENITIES:
+                furniture.append({
+                    "id": id_,
+                    "amenity": tags["amenity"],
+                    "lon": item["lon"],
+                    "lat": item["lat"],
+                })
+            if tags.get("name") and (
+                tags.get("shop")
+                or tags.get("amenity") in POI_AMENITIES
+                or tags.get("healthcare") in POI_HEALTHCARE
+            ):
+                pois.append({
+                    "id": id_,
+                    "lon": item["lon"],
+                    "lat": item["lat"],
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                })
+        if kind == "way" and tags.get("name") and (
+            tags.get("shop")
+            or tags.get("amenity") in POI_AMENITIES
+            or tags.get("healthcare") in POI_HEALTHCARE
+        ):
+            pts = [
+                [items["node", nid]["lon"], items["node", nid]["lat"]]
+                for nid in item.get("nodes", [])
+                if ("node", nid) in items
+            ]
+            if pts:
+                pois.append({
+                    "id": id_,
+                    "lon": sum(p[0] for p in pts) / len(pts),
+                    "lat": sum(p[1] for p in pts) / len(pts),
+                    "tags": {k: v for k, v in tags.items() if k in KEEP_POI},
+                })
         if kind == "relation" and (
             tags.get("type") == "restriction" or tags.get("route") == "tram"
         ):
@@ -68,6 +167,11 @@ def acquire(name, path):
                     "tags": {k: v for k, v in tags.items() if k in KEEP},
                 }
             )
+    semantics = extract_semantics(items)
+    for feat in semantics["water"] + semantics["gardens"]:
+        nodes.update(feat.get("nodes", []))
+        for member in feat.get("members", []):
+            nodes.update(member["nodes"])
     coords = {
         id_: [
             items["node", id_]["lon"],
@@ -97,6 +201,10 @@ def acquire(name, path):
                 "nodes": coords,
                 "relations": relations,
                 "businesses": businesses,
+                "semantics": semantics,
+                "pois": pois,
+                "plazas": plazas,
+                "furniture": furniture,
             },
             stream,
             separators=(",", ":"),

@@ -1,0 +1,4 @@
+{
+  "name": "voxelwright-game",
+  "description": "Game-Use MCP control plane (voxelwright-game) for inspecting, driving, and verifying live and headless Voxelwright WebGPU sessions."
+}

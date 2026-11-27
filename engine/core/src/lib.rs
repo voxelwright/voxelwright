@@ -344,6 +344,12 @@ pub extern "C" fn hero_owns(sort: u32, u: f32, w: f32) -> i32 {
     heroes::owns(sort, u, 0.0, w) as i32
 }
 
+/// Only tree faces inside a measured Conservatory palm crown are replaced by its fronds.
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_owns_tree(sort: u32, u: f32, w: f32) -> i32 {
+    (sort == heroes::CONSERVATORY && heroes::valley_palm_return(u, w)) as i32
+}
+
 /// How high the ground is at a column of the finest cells.
 #[unsafe(no_mangle)]
 pub extern "C" fn ground_at(x: i32, z: i32) -> i32 {
@@ -480,6 +486,12 @@ pub extern "C" fn bodies_burning() -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn world_kind(x: i32, y: i32, z: i32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).ground.kind(x, y, z) as u32)
+}
+
+/// Top solid cell + 1 at or below `y` within `depth` cells (edits and all), or `i32::MIN` if none.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ground.under(x, y, z, depth))
 }
 
 /// Whether water is flowing, or may: 1 while the page should keep asking for time.

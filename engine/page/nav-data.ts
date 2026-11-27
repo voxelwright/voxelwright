@@ -7,7 +7,7 @@ export interface MapPlace {
   /** World metres (x east, z south). */
   x: number
   z: number
-  kind: 'landmark' | 'hood' | 'park'
+  kind: 'landmark' | 'hood' | 'park' | 'hospital'
 }
 
 export interface MapData {

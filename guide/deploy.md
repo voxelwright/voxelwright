@@ -40,9 +40,10 @@ Cloudflare runs a zone's Single Redirect rules before either Worker. Then each W
   - adds the early-alpha notice (`alpha.js`) to every HTML page through [notice.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/notice.mjs);
   - gives `index.html` the title `Voxelwright — San Francisco`, a description, the site's favicon (`/favicon.svg`, from the site build), its canonical and Open Graph and X tags, and points its `/blog/` links at zahynailo.dev;
   - publishes the world's own share card, `deploy/og-world.png` (1200 × 630, the voxel skyline under the Voxelwright plate), at `/og.png`;
+  - adds the PWA manifest (`/manifest.webmanifest`, `display: "fullscreen"` with `standalone` fallback, `focus-existing` launch handler, and Explore / Night Drive / Golden Hour shortcuts), Voxelmorphism PNG icons under `/icons/` (`192`, `512`, `maskable` and `apple-touch-icon`), iOS/mobile web-app meta tags and a build-stamped `/sw.js` service worker (precaching the engine shell, caching visited `/releases/*` tiles in a bounded LRU bucket with a 12 s fetch timeout and single-pass buffering that prunes superseded releases when `/current.json` advances, serving `/bay/*` stale-while-revalidate and keeping `/weather` cached for offline fallback);
   - writes `/robots.txt`, a dark `/404.html` in the realm's `#10141a`, and `_headers` (below);
   - keeps `.br` copies only under `releases/` and `bay/`, where the Worker sends them;
-  - drops the plain copy of a `.bay`, `.far` or `.bin` file under those folders when its `.br` copy exists;
+  - drops the plain copy of a `.bay`, `.far`, `.bin` or `.pack` file under those folders when its `.br` copy exists;
   - leaves out the release's street graphs (`releases/<pin>/graph/`), which no page code reads.
 
 The early-alpha notice says the realm is in active development. It never shows over the realm's failure screen: when the page sets `data-failed` on `<html>`, the notice is not added, or leaves.
@@ -53,7 +54,12 @@ The early-alpha notice says the realm is in active development. It never shows o
 | --- | --- |
 | `/*` | `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `Permissions-Policy: camera=(), microphone=(), geolocation=()` and the CSP |
 | `/current.json` | `Cache-Control: no-cache`, so a new pin shows at once |
+| `/sw.js` | `Cache-Control: no-cache`, so service worker shell updates take effect promptly |
+| `/manifest.webmanifest` | `Content-Type: application/manifest+json; charset=utf-8` and `Cache-Control: public, max-age=3600` |
+| `/icons/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
 | `/loading-*.webp` | `public, max-age=31536000, immutable`: the loader's pictures are named by their content |
+| `/assets/*` | `public, max-age=31536000, immutable`: content-hashed ES module bundles, shared chunks, workers and `core-<hash>.wasm` |
+| `/kit/voxelmorphism-*.css` | `public, max-age=31536000, immutable`: content-hashed Voxelmorphism stylesheet |
 | `/kit/fonts/*` | `public, max-age=604800, stale-while-revalidate=2592000` |
 
 [worker.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/worker.mjs) holds the security headers once (`securityHeaders`, `worldCsp`). Assembly writes them into `_headers` and the Worker sets them on every answer it makes. The CSP allows scripts from the realm itself, WebAssembly (`'wasm-unsafe-eval'`) and YouTube's player (the car radio). It allows no inline script except the page's own: assembly hashes each inline `<script>` of the published pages, after every rewrite, and lists each `'sha256-…'` in `script-src`. Styles may be inline. Images, media and workers may come from `blob:`; frames from YouTube; connections from the realm, the AI providers, any `https:` and `wss:` (a player's own provider and the lobbies). It forbids plugins and `<base>`, and only the realm and zahynailo.dev may frame it. A page that gains an inline script gets its hash at the next assembly; a script added to the page at run time is refused.
@@ -62,7 +68,7 @@ Assembly fails when two sources would write the same path, when a folder holds m
 
 ## Binary tiles and Brotli
 
-The realm build writes a quality-11 Brotli copy (`<file>.br`) beside each release file. The Worker sends that copy byte for byte, so what crosses the wire is what the realm's checks measured. Static assets alone can't do this: an asset given `Content-Encoding: br` in `_headers` gets compressed a second time, and the edge sends `.bay`, `.far` and `.bin` files uncompressed.
+The realm build writes a quality-11 Brotli copy (`<file>.br`) beside each release file. The Worker sends that copy byte for byte, so what crosses the wire is what the realm's checks measured. Static assets alone can't do this: an asset given `Content-Encoding: br` in `_headers` gets compressed a second time, and the edge sends `.bay`, `.far`, `.bin` and `.pack` files uncompressed.
 
 For a `GET` or `HEAD` under `/releases/` or `/bay/`, [worker.mjs](https://github.com/voxelwright/voxelwright/blob/main/deploy/worker.mjs) does this:
 
@@ -96,7 +102,8 @@ The release, the street graphs and the kept car live in `~/.village`, not in git
 | --- | --- | --- |
 | `node deploy/data.mjs pack` | The machine with `~/.village`, after the pin moves | Bundles the pinned release (its quality-11 copies from the realm build's cache), the street graphs and the kept car as Brotli in one `data.tar`. Uploads it as release `sf-data-<first 16 hex of the index digest>` unless that release exists, and writes `deploy/data.json` (`pin`, `digest`, `tag`). |
 | `node deploy/data.mjs pack-local PIN DIRECTORY` | Anywhere with the staged release | Writes the archive and `data.json` into `DIRECTORY` instead of uploading. |
-| `node deploy/data.mjs fetch` | CI | Checks that `data.json` is for the pin in `engine/sf/pilot/current.json`, downloads the bundle, checks the index digest and every file's size and SHA-256, and writes them under `~/.village/engine`. |
+| `node deploy/data.mjs fetch` | CI and local builds | Restores the pinned bundle to `~/.village/engine`, checking the index digest and each file’s length and SHA-256. A matching stamp, manifest digest and file sizes let later builds reuse the restore. Pass `--force` to download and verify again. |
+| `node deploy/data.mjs fetch /path/to/data.tar` | Bake machine | Restores a local copy of the bundle with the same pin, index and file checks. |
 
 `fetch` downloads from GitHub, or from `VOXELWRIGHT_DATA_URL` when it is set (HTTPS, or HTTP on a loopback address: `127.0.0.1`, `localhost` or `[::1]`). A mirror serves `<tag>/data.tar` under that address, the layout `pack-local` writes. If the pin and `data.json` disagree, CI fails before it builds the realm, so nothing deploys. Commit `data.json` with the pin.
 
@@ -117,7 +124,7 @@ npm --prefix deploy run ship
     Refuses a dirty working tree (unless `--allow-dirty`). Fails fast if `npx cf accounts list` fails, which means the local `cf` CLI is not signed in.
   </Step>
   <Step title="Build">
-    `npm --prefix engine run core`, `node engine/sf/build.mjs`, `npm --prefix site run build` and `node deploy/assemble.mjs`. The eggs are procedural unless media is asked for: `--egg-media` takes `~/.village/engine/sf/eggs/media` (and fails when it is missing), and `VOXELWRIGHT_EGG_MEDIA` names a folder. `--public` overrides both.
+    `npm --prefix engine run core`, `node engine/sf/build.mjs`, `npm --prefix site run build` and `node deploy/assemble.mjs`. It uses `VOXELWRIGHT_EGG_MEDIA`, or `~/.village/engine/sf/eggs/media` when that folder exists, unless `--public` is passed.
   </Step>
   <Step title="Deploy">
     `npx cf deploy --mode world --message <HEAD sha>` for voxelwright.world, then `npx cf deploy --message <HEAD sha>` for zahynailo.dev.
@@ -130,8 +137,7 @@ npm --prefix deploy run ship
 | Flag | Effect |
 | --- | --- |
 | `--world-only`, `--site-only` | Deploy one Worker. |
-| `--egg-media` | Build the private egg clips in, from `~/.village/engine/sf/eggs/media`. |
-| `--public` | Procedural eggs only, even when `VOXELWRIGHT_EGG_MEDIA` is set. The default already is procedural. |
+| `--public` | Build with procedural eggs only. |
 | `--skip-build` | Deploy whatever the last assembly left in the two folders. |
 | `--skip-live` | Skip the live checks. |
 | `--allow-dirty` | Ship uncommitted changes. The message still names `HEAD`. |
@@ -156,7 +162,7 @@ Changing the workflow, the environment or the redirects changes what the public 
 [publish.sh](https://github.com/voxelwright/voxelwright/blob/main/deploy/publish.sh) then deploys `voxelwright`, then `zahynailo`, and checks each one:
 
 1. `wrangler deployments status` shows the new commit on 100% of traffic.
-2. Pages answer `200`: `/`, `/current.json` and the pinned manifest for voxelwright.world, and `/`, `/blog/` and `/blog/feed.xml` for zahynailo.dev.
+2. Pages answer `200`, retrying briefly while Cloudflare propagates the new Worker version: `/`, `/current.json` (matching the pinned release) and the pinned manifest for voxelwright.world, and `/`, `/blog/` and `/blog/feed.xml` for zahynailo.dev.
 3. For voxelwright.world, the manifest arrives with `Content-Encoding: br` and the same length as its `.br` file in `dist-world`.
 
 If a check fails after the upload, the script runs `wrangler rollback` for that Worker and stops. Each outcome, and the traffic status after an error, goes to the Actions summary. A failure on `zahynailo` leaves `voxelwright` on its new version. `publish.sh` reads `GITHUB_SHA` and `GITHUB_STEP_SUMMARY` and uses GNU `stat`, so it runs only in Actions.

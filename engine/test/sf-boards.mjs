@@ -249,6 +249,7 @@ try {
   await page.waitForFunction(() => window.told.some((m) => m.type === 'ready'), null, { timeout: 300_000 })
   const realm = frame()
   const shown = await untilShown(realm, from)
+  const bundled = site.asked.some((a) => a.at >= from && a.path.startsWith('/assets/main-'))
   const code = site.asked.filter((a) => a.at >= from && /\/page\/(boards|signs|screens|logos|host)\.js$/.test(a.path) && a.status === 200)
   const own = code.reduce((n, a) => n + a.wire, 0) + Buffer.byteLength(JSON.stringify(file))
   results.load = { placeShownMs: shown.ms, wireMB: shown.wireMB, without, boardsOwnKB: round(own / 1024), boardsCodeRawKB: round(code.reduce((n, a) => n + a.bytes, 0) / 1024) }
@@ -259,7 +260,7 @@ try {
   check(own < 33 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 33 KB: 24 until the plane had two rounds, its own far off and a near one to speak on; 25 until a lettering board had a face to be read by from further off than its cells show it, 1.6 KB of boards.js, and the EXPLORE board its record; 27 until the letters were laid from the kit's glyph sets and lit of themselves, 1.2 KB more; 29 until the logos were drawn at the size they are seen, as pixel art when small, 2.6 KB more; 33 when a logo on another site got its card and the flight back to the view, 0.5 KB, the card itself in leaving.js and not counted; the face's glyph set, which sf-type says, and letterlight.js, 4.8 KB as sent, are modules of their own and not counted here)`)
   const whole = `${shown.wireMB} MB over the wire until the park is shown in ${shown.ms} ms; without boards ${without.wireMB} MB in ${without.ms} ms (the realm's bound 8 MB)`
   if (without.wireMB >= 8) console.log(`  WARN ${whole}: the realm is over its bound before any board`); else check(shown.wireMB < 8, whole)
-  check(code.length === 5 && !site.asked.some((a) => a.path.endsWith('boards-edit.js')), `the boards' code is asked for (${code.length} modules) and the editor's is not`)
+  check((bundled || code.length === 5) && !site.asked.some((a) => /boards-edit/.test(a.path)), bundled ? 'bundled page loads without the boards editor chunk' : `the boards' code is asked for (${code.length} modules) and the editor's is not`)
   const ready = await page.evaluate(() => window.told.find((m) => m.type === 'ready'))
   check(ready.boards.length === file.boards.length && file.boards.every((b) => ready.boards.some((r) => r.id === b.id && r.to === (b.to ?? null) && r.name === b.name)) && ready.signs.some((s) => s.id === 'banner'), `the host is told ready with ${ready.boards.length} boards (${ready.boards.map((b) => `${b.id} to ${b.to}`).join(', ')}) and ${ready.signs.length} signs`)
   const links = await realm.evaluate(() => [...document.querySelectorAll('nav[aria-label="Billboards"] a')].map((a) => ({ name: a.textContent, to: a.getAttribute('href'), focusable: a.tabIndex === 0 })))

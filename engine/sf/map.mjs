@@ -47,12 +47,33 @@ const PLACES = [
   ['Pier 39', 37.80867, -122.40982, 'landmark'],
   ...ROBOTAXI_SERVICES.map((s) => [s.station.name, s.station.lat, s.station.lon, 'landmark']),
   ['Golden Gate Bridge', 37.8078, -122.4748, 'landmark'],
-  ['Painted Ladies', 37.7763, -122.4328, 'landmark'],
+  ['Fort Point', 37.8101, -122.4765, 'landmark'],
+  ['Palace of Fine Arts', 37.8029, -122.4484, 'landmark'],
+  ['California Academy of Sciences', 37.7704, -122.4666, 'landmark'],
+  ['de Young Museum', 37.7709, -122.4682, 'landmark'],
+  ['Japanese Tea Garden', 37.7702, -122.4695, 'landmark'],
+  ['San Francisco Botanical Garden', 37.7672, -122.4670, 'landmark'],
+  ['Conservatory of Flowers', 37.7719, -122.4602, 'landmark'],
+  ['Painted Ladies', 37.7763, -122.4335, 'landmark'],
   ['Twin Peaks', 37.7544, -122.4477, 'landmark'],
   ['Sutro Tower', 37.7552, -122.4528, 'landmark'],
   ['Oracle Park', 37.7786, -122.3893, 'landmark'],
   ['Chase Center', 37.7680, -122.3877, 'landmark'],
   ['City Hall', 37.7793, -122.4193, 'landmark'],
+  // Major San Francisco hospitals & medical centers
+  ['UCSF Medical Center (Parnassus)', 37.7631, -122.4586, 'hospital'],
+  ['UCSF Medical Center (Mission Bay)', 37.7662, -122.3899, 'hospital'],
+  ['UCSF Medical Center (Mount Zion)', 37.7848, -122.4393, 'hospital'],
+  ['Zuckerberg SF General Hospital', 37.7555, -122.4044, 'hospital'],
+  ['Kaiser Permanente SF Medical Center', 37.7827, -122.4426, 'hospital'],
+  ['CPMC Van Ness Campus', 37.7852, -122.4219, 'hospital'],
+  ['CPMC Davies Campus', 37.7689, -122.4357, 'hospital'],
+  ['CPMC Mission Bernal Campus', 37.7484, -122.4203, 'hospital'],
+  ['Saint Francis Memorial Hospital', 37.7894, -122.4167, 'hospital'],
+  ['St. Mary’s Medical Center', 37.7740, -122.4543, 'hospital'],
+  ['Chinese Hospital', 37.7955, -122.4090, 'hospital'],
+  ['San Francisco VA Medical Center', 37.7820, -122.5037, 'hospital'],
+  ['Laguna Honda Hospital', 37.7486, -122.4590, 'hospital'],
   // Neighborhoods across all 155 squares of San Francisco
   ['North Beach', 37.8035, -122.4095, 'hood'],
   ['Russian Hill', 37.8008, -122.4192, 'hood'],
@@ -203,7 +224,7 @@ function readBay(buf) {
  * Compiles the San Francisco map binary (MAP1) from a release directory (`manifest.json` + `tiles/`),
  * the city street graphs (`packs/graph/`), `sf/street-tags.json` and `sf/heroes.json`.
  */
-export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-tags.json'), heroesPath = join(HERE, 'heroes.json') }) {
+export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-tags.json'), heroesPath = join(HERE, 'heroes.json'), extraPlaces = [] }) {
   const manifest = JSON.parse(readFileSync(join(releaseDir, 'manifest.json'), 'utf8'))
   const levels = [...manifest.levels].sort((a, b) => a.level - b.level)
   // Determine map extent: on full-city SF releases (>= 20 squares in manifest.names, where L2 spans 88x64 km out to
@@ -458,6 +479,13 @@ export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-t
   const HERO_SHORE = {
     'Golden Gate Bridge': [37.8078, -122.4748],
     'Bay Bridge, western span': [37.7913, -122.3889],
+    'Fort Point': [37.8101, -122.4765],
+    'California Academy of Sciences': [37.7704, -122.4666],
+    'de Young Museum': [37.7709, -122.4682],
+    'Japanese Tea Garden': [37.7702, -122.4695],
+    'San Francisco Botanical Garden': [37.7672, -122.4670],
+    'Conservatory of Flowers': [37.7719, -122.4602],
+    'Painted Ladies': [37.7763, -122.4335],
   }
   const heroes = existsSync(heroesPath) ? JSON.parse(readFileSync(heroesPath, 'utf8')) : []
   const landmarks = []
@@ -482,6 +510,15 @@ export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-t
     const [px, pz] = place(lat, lon)
     if (px >= x0 && px <= x1 && pz >= z0 && pz <= z1 && hasSquare(px, pz)) {
       if (!landmarks.some((l) => l.name === name)) landmarks.push({ name, x: px, z: pz, kind })
+    }
+  }
+  for (const ep of extraPlaces ?? []) {
+    if (!ep?.name || !Number.isFinite(ep.x) || !Number.isFinite(ep.z)) continue
+    if (ep.x < x0 || ep.x > x1 || ep.z < z0 || ep.z > z1 || !hasSquare(ep.x, ep.z)) continue
+    const lower = ep.name.toLowerCase()
+    if (!landmarks.some((l) => l.name.toLowerCase() === lower && Math.hypot(l.x - ep.x, l.z - ep.z) < 4000)) {
+      const k = ep.kind === 'park' || ep.kind === 'hood' || ep.kind === 'hospital' ? ep.kind : 'landmark'
+      landmarks.push({ name: ep.name, x: ep.x, z: ep.z, kind: k })
     }
   }
 

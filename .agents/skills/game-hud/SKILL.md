@@ -16,7 +16,7 @@ than flat CSS glass — by refining the kit itself into a compact, low-profile h
 keycaps with 1.5-voxel press travel, translucent smoked polycarbonate (`transmission: 0.14–0.15`) with Fresnel rim
 gleam, deep cobalt enamel (`transmission: 0.06`) on primary/active actions, and a hollow stepped octagonal voxel
 thumbstick gimbal with backlit compass ticks and a sculpted concave voxel cap. Layout stays lean and contextual: Credits
-moves out of gameplay corners into the Settings panel's keys (Mapillary attribution sits neatly inside the minimap corner); the Make composer collapses to a slim voxel trigger
+moves out of HUD corners (both first view and play) into the Settings panel's keys, and Mapillary attribution moves out of the HUD and minimap into the Credits card; the Make composer collapses to a slim voxel trigger
 (`✦ Make ↵` bottom-right on desktop, `✦` 44×44 voxel key bottom-left on mobile that fades out while steering) and
 expands into a centered composer only when opened; mobile puts the minimap top-left, the Settings (`⚙`) slim voxel key alone top-right, the hollow voxel thumbstick under the left thumb, compact
 icon-led slim voxel thumb controls bottom-right, and suppresses the redundant floating `Fly` banner.
@@ -25,9 +25,9 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
 - **On-foot bottom-left utility slot (`[data-panel="summon"] .vx-button` / `.foot-summon`):** `44×44` slim voxel key
   sitting at `left: safe + 66px, bottom: safe + 14px` beside `✦` Make (`SLIM_ICONS.car`), auto-hiding while steering,
   riding, choosing a tool, or with a drawer/composer open.
-- **Driving 2-column slim voxel keypad (`html.driving [data-panel="living"]`):** compact `118px`-wide (`52px + 8px + 58px`)
-  bottom-right cluster (`Drift` cobalt primary, `Boost`, `Horn`, `Get off` in right column; `Cam`, `Radio`, `Repair`
-  in left column, no `Seat` key: Cam cycles through the seat view, #74), leaving `>= 28px` clearance on `390px` phones to the right of a `216×200` bottom-left `[data-panel="radio-yt"]`).
+- **Driving two-zone slim voxel HUD (`html.driving [data-panel="living"]`):** ergonomic GTA Definitive Edition & CarX Street split, pure icon-only (no text labels) with pointer-captured multi-touch:
+  - **Bottom-right driving pad (`.drive-pedals`):** only 4 driving controls — tall `Gas` pedal (`56×76` portrait / `60×80` landscape) on the right edge, shorter `Brake/Rev` pedal (`50×56` / `54×58`) beside it, cobalt primary `Drift` (`56×46` / `60×48`) above Gas, and `Boost` (`50×46` / `54×48`) above Brake (`114px` wide on `390px` portrait phones, leaving `34px` >= `28px` clearance to bottom-left `216×200` `[data-panel="radio-yt"]`). While Gas or Brake is held, the left thumbstick steers horizontally without accidental throttle drop-out; when neither pedal is held, left-stick vertical remains a one-handed fallback.
+  - **Top-right utility rail (`.drive-util`):** quiet `44×44` icon-only keys (`Horn`, `Radio`, `Cam`, `Get off` — no `Seat` key since Cam cycles through seat, #74) tucked beside Settings (`⚙`) in landscape or cleanly below `drive-hud` & `⚙` in portrait. `Repair` stays hidden while undamaged (Rule 8) and appears below `⚙` (landscape) / `Exit` (portrait) only when the car takes damage.
 
 **Direction (owner, November 26, #75):** the Make bar opened must always have a way out by touch: a × key before the
 line, a press anywhere on the picture (its click is swallowed, so it does nothing else), or Escape; each gives the keys

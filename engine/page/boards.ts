@@ -336,6 +336,8 @@ export interface Boards {
     at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean
     /** It has something to say: it comes in to its near round over some seconds, and goes back out when this is false again. */
     loud: boolean
+    /** Normalized screen-Y ceiling (0 top, 1 bottom) the plane and its banner fly above while the sky-gap drone swarm is up (eggs.ts / eggs-sky.ts), or null for its normal round altitude. */
+    above: number | null
     /** How far it has come in: 0 on its own round, 1 on the near one. */
     readonly come: number
     /** The cloth's box on the page now (client px), or null where any of it is behind the eye. */
@@ -443,7 +445,7 @@ export async function boards(o: Needs): Promise<Boards> {
       // (Each frame, as a far face is made again when its size changes and a reset lays the boards again.)
       if (s.screen) s.screen.unlit = dark
       if (s.far) s.far.unlit = dark
-      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
+      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s, true); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
       if (!s.screen) continue
       if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
       else if (s.b.type === 'logo') { seat(s, view.eye); sharpen(s, view, to.size) }
@@ -498,8 +500,10 @@ export async function boards(o: Needs): Promise<Boards> {
   /**
    * A lettering board's face: a picture of the front of its cells as the world has them now (a letter that fell is
    * not on it), from its posts' feet to its panels' top, a cell proud of them.
+   * When `fromWorld` is false (freshly laid), samples directly from `s.shape.runs` so boot never forces the page's
+   * WASM core to generate distant 64³ sectors synchronously on the main thread.
    */
-  const paintFar = (s: Stood) => {
+  const paintFar = (s: Stood, fromWorld = false) => {
     // A pixel of it a quarter of a letter's stroke, and what it is the mean of the cells under it: from where a face
     // is shown a stroke is a pixel or two of the picture, and one cell picked out of nine lost a letter's diagonals.
     const sh = s.shape!, low = sh.box[1], tall = sh.box[4] - low, step = Math.max(1, Math.round((sh.px ?? 4) / 4)), w = Math.ceil(sh.wide / step), h = Math.ceil(tall / step)
@@ -507,14 +511,35 @@ export async function boards(o: Needs): Promise<Boards> {
     const kinds = (s.farKinds = new Uint8Array(w * h * 3)), each = 255 / (step * step)
     const letters = (sh.letters ?? []).filter((l): l is Laid => !!l)
     s.farLetter = Int16Array.from({ length: w }, (_, i) => letters.findIndex((l) => i * step + step / 2 >= l.k0 && i * step + step / 2 < l.k0 + l.pitch))
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-      const share = [0, 0, 0]
-      for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) {
-        const along = i * step + u + 0.5 - sh.wide / 2
-        const kind = o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(low + tall - j * step - v - 0.5), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15
-        if (kind) share[kind === LAMP ? 2 : kind === STEEL ? 1 : 0] += each
+    let front: Uint8Array | null = null
+    if (!fromWorld && sh.runs.length && sh.wide > 0 && tall > 0) {
+      front = new Uint8Array(sh.wide * tall)
+      const runs = sh.runs, ax = sh.right[0] !== 0, dir = ax ? sh.right[0] : sh.right[2]
+      const plane = Math.floor((ax ? sh.middle[2] - sh.normal[2] * 0.5 : sh.middle[0] - sh.normal[0] * 0.5))
+      const org = Math.round((ax ? sh.middle[0] : sh.middle[2]) - (dir > 0 ? sh.wide / 2 : -sh.wide / 2 + 1))
+      for (let r = 0; r < runs.length; r += 5) {
+        const x0 = runs[r], x1 = runs[r + 1], y = runs[r + 2], z = runs[r + 3], k = runs[r + 4] & 15
+        if (!k || y < low || y >= low + tall) continue
+        const row = (y - low) * sh.wide
+        if (ax) { if (z === plane) for (let x = x0; x < x1; x++) { const c = dir > 0 ? x - org : org - x; if (c >= 0 && c < sh.wide) front[row + c] = k } }
+        else if (plane >= x0 && plane < x1) { const c = dir > 0 ? z - org : org - z; if (c >= 0 && c < sh.wide) front[row + c] = k }
       }
-      kinds.set(share, (j * w + i) * 3)
+    }
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      let s0 = 0, s1 = 0, s2 = 0
+      for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) {
+        let kind: number
+        if (front) {
+          const col = i * step + u, ky = low + tall - 1 - (j * step + v)
+          kind = col < sh.wide && ky >= low && ky < low + tall ? front[(ky - low) * sh.wide + col] : 0
+        } else {
+          const along = i * step + u + 0.5 - sh.wide / 2
+          kind = o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(low + tall - j * step - v - 0.5), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15
+        }
+        if (kind) { if (kind === LAMP) s2 += each; else if (kind === STEEL) s1 += each; else s0 += each }
+      }
+      const off = (j * w + i) * 3
+      kinds[off] = s0; kinds[off + 1] = s1; kinds[off + 2] = s2
     }
     s.stale = false
     s.far!.at = [sh.middle[0] + sh.normal[0], low + tall / 2, sh.middle[2] + sh.normal[2]]; s.far!.hu = [(sh.right[0] * sh.wide) / 2, 0, (sh.right[2] * sh.wide) / 2]; s.far!.hv = [0, tall / 2, 0]
@@ -599,6 +624,8 @@ export async function boards(o: Needs): Promise<Boards> {
     s.seen = key
     s.sharp(key === 'whole' ? undefined : seen)
   }
+  let seenEdits = -1
+  let standingEdits = -1
   const stand = (s: Stood, again = false) => {
     const b = s.b, face = faceOf(b), text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '', face!) : ''
     if (!again && s.shape && s.text === text) return
@@ -606,7 +633,15 @@ export async function boards(o: Needs): Promise<Boards> {
     s.shape = shape(b, text, face ?? undefined); s.text = text
     if (s.shape.runs.length) lay(rows(s.shape.runs, s.shape.box))
     place(s)
-    if (b.type === 'lettering') { s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M]); paintFar(s); keep(); glow.board(b.id, litOf(b, s.shape)) }
+    if (b.type === 'lettering') {
+      s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M])
+      paintFar(s, false)
+      keep()
+      glow.board(b.id, litOf(b, s.shape))
+      glow.standing(b.id, (s.shape.letters ?? []).filter((l): l is Laid => !!l).map((l) => l.squares.filter((q) => q.lit).map(() => true)))
+    }
+    seenEdits = o.done()
+    standingEdits = seenEdits
   }
   /** A lettering board's letters as their light knows them (letterlight.ts): each one's box, which way it faces, the middle of each cell of its lamp. */
   const litOf = (b: Board, sh: Shape): LitLetter[] => (sh.letters ?? []).filter((l): l is Laid => !!l).map((l) => {
@@ -618,8 +653,11 @@ export async function boards(o: Needs): Promise<Boards> {
       cells: l.squares.filter((q) => q.lit).map((q) => [sh.middle[0] + sh.right[0] * (q.along - 0.5), q.y + 0.5, sh.middle[2] + sh.right[2] * (q.along - 0.5)] as [number, number, number]),
     }
   })
-  // What stands of each lettering board's lamp, twice a second: a halo only over the cells of it that are there.
+  // What stands of each lettering board's lamp, twice a second when edits have occurred: a halo only over the cells of it that are there.
   setInterval(() => {
+    const n = o.done()
+    if (n === standingEdits) return
+    standingEdits = n
     for (const s of stood.values()) {
       const sh = s.shape
       if (s.b.type !== 'lettering' || !sh?.letters) continue
@@ -695,13 +733,14 @@ export async function boards(o: Needs): Promise<Boards> {
     }
   }
   // Asked only when the world has changed since: nothing a frame.
-  let seenEdits = -1
+  seenEdits = o.done()
+  standingEdits = seenEdits
   setInterval(() => { const n = o.done(); if (n !== seenEdits) { seenEdits = n; masks(); for (const s of stood.values()) if (s.far) s.stale = true } }, 400)
 
   // ── The plane and its banner ──
   const whole_ = o.file.banner ?? null, shape0 = o.canvas.getBoundingClientRect()
   const towed: Banner | null = whole_ ? (whole_.upright && shape0.height > shape0.width ? { ...whole_, ...whole_.upright } : whole_) : null
-  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
+  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; above: number | null; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
   /** Keeps a called plane in the picture (below, where the picture's projection is): every frame of its flight. */
   let summon: (() => void) | null = null
   let boxAt: (phase: number) => { x0: number; y0: number; x1: number; y1: number } | null = () => null, read: (phase: number) => boolean = () => false
@@ -743,16 +782,43 @@ export async function boards(o: Needs): Promise<Boards> {
     const eased = () => come * come * (3 - 2 * come)
     /** A size of what flies, as far in as it has come. */
     const now = (pick: (r: Round) => number) => { const a = pick(own); return near === own || come === 0 ? a : a + (pick(near) - a) * eased() }
-    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it: between the two rounds as far in as it has come. Coming in, it is a plane that grows as it nears. */
-    const point = (phase: number, back: (r: Round) => number): [number, number, number] => {
+    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it, before any altitude lift. */
+    const basePoint = (phase: number, back: (r: Round) => number): [number, number, number] => {
       const p = own.along(phase * own.whole - back(own))
       if (near === own || come === 0) return p
       const q = near.along(phase * near.whole - back(near)), e = eased()
       return [p[0] + (q[0] - p[0]) * e, p[1] + (q[1] - p[1]) * e, p[2] + (q[2] - p[2]) * e]
     }
+    /** Extra altitude (cells) so the plane and its cloth fly above the sky-gap drone swarm when `above` is set. */
+    let lift = 0
+    const ABOVE_MARGIN = 0.03
+    const reduced = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
+    const neededLift = (phase: number, ceiling: number): number => {
+      const v = o.view(), targetNdcY = 1 - 2 * Math.max(-0.5, ceiling - ABOVE_MARGIN)
+      const drop = now((r) => r.drop), halfTall = now((r) => r.tall) / 2, planeHalf = 7 * now((r) => r.cell)
+      const pts = [basePoint(phase, () => 0), basePoint(phase, (r) => r.body + r.gap), basePoint(phase, (r) => r.body + r.gap + 2 * r.half)]
+      let need = 0
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i], py = i === 0 ? p[1] - planeHalf : p[1] - drop - halfTall
+        const dx = p[0] - v.eye[0], dy = py - v.eye[1], dz = p[2] - v.eye[2]
+        const far = dx * v.forward[0] + dy * v.forward[1] + dz * v.forward[2]
+        if (far <= 1) continue
+        const upDot = dx * v.up[0] + dy * v.up[1] + dz * v.up[2]
+        const denom = v.up[1] - targetNdcY * v.tanHalf * v.forward[1]
+        if (denom <= 0.1) continue
+        const req = (targetNdcY * v.tanHalf * far - upDot) / denom
+        if (req > need) need = req
+      }
+      return Math.min(need, 20000)
+    }
+    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it: between the two rounds as far in as it has come, lifted when flying above drones. */
+    const point = (phase: number, back: (r: Round) => number): [number, number, number] => {
+      const p = basePoint(phase, back)
+      return lift ? [p[0], p[1] + lift, p[2]] : p
+    }
     /** Where on its round it is as it flies on, 0 to 1 (held, `flown.phase` is where it is held). */
     let running = towed.start ?? 0, last = performance.now()
-    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, get come() { return come }, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
+    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, above: null, get come() { return come }, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
     /** Where the plane is and where its cloth's two ends are, at a place on its round (0 to 1). */
     const parts = (phase: number) => [point(phase, () => 0), point(phase, (r) => r.body + r.gap), point(phase, (r) => r.body + r.gap + 2 * r.half)]
     let looked = 0
@@ -811,6 +877,7 @@ export async function boards(o: Needs): Promise<Boards> {
       }
       if (!best) return
       running = f.phase = best.from
+      if (f.above !== null) lift = neededLift(f.phase, f.above)
       // It is out of sight there and comes in within a second or two: not looked for again until it has.
       looked = performance.now() + 5000
     }
@@ -821,6 +888,13 @@ export async function boards(o: Needs): Promise<Boards> {
       come = Math.max(0, Math.min(1, come + (f.loud ? dt : -dt) / 5))
       running = (running + dt / now((r) => r.lap)) % 1
       f.phase = f.hold ?? running
+      const targetLift = f.above !== null ? neededLift(f.phase, f.above) : 0
+      if (reduced?.matches) lift = targetLift
+      else {
+        const rate = targetLift > lift ? 6 : 3
+        lift += (targetLift - lift) * (1 - Math.exp(-dt * rate))
+        if (targetLift === 0 && Math.abs(lift) < 0.5) lift = 0
+      }
       summon?.()
       const at = point(f.phase, () => 0), ahead = point(f.phase, (r) => -10 * r.cell), heading = [ahead[0] - at[0], ahead[2] - at[2]], turn = Math.atan2(-heading[1], heading[0])
       f.at = at

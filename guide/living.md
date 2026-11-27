@@ -34,7 +34,7 @@ A thing lives once its record's `controls` has a motor. The motor is numbers, so
 | `fine` | Its look in finer cells (below) |
 | `rest`, `driven` | Written by the world: where it last slept, and whether anyone has got on or driven it |
 
-**A look in finer cells.** The body that moves is 10 cm cells. A made car's own cells are often finer (a program's are 2.5 cm), so they ride on the body as its look, up to eight parts of 4 or 8 cells to one of the body's, and the body's own cells are not drawn. In a shared world the record holds no cells: each part's cells go first to `POST /world/fine`, which keeps them by their sha256, and the record names them under `controls.fine[].kept`. Every page fetches `GET /world/fine/<kept>` once.
+**A look in finer cells.** The body that moves is 10 cm cells. Every drivable car and kart wears a fine look (2.5 cm or finer, riding on the body in up to eight parts of 4 or 8 cells to one of the body's), and the body's own cells are not drawn; generated streets hold no plain stand-in cars made of world cells. In a shared world the record holds no cells: each part's cells go first to `POST /world/fine`, which keeps them by their sha256, and the record names them under `controls.fine[].kept`. Every page fetches `GET /world/fine/<kept>` once.
 
 There are five ways a thing comes alive:
 

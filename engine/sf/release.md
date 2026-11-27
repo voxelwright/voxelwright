@@ -24,8 +24,19 @@ It checks every object against the run's checkpoint hashes, writes `OUT/releases
 | `--life DIR`, `--cars DIR` | Street life from `sf/life.py` and vehicles from `sf/cars.mjs`. Without them, `<root>/life` and `<root>/cars` are used if present. |
 | `--graphs DIR` | Street graphs from outside the run. Otherwise `<root>/packs/graph` is used. |
 | `--paint BATCH_JSON` | An accepted facade paint batch, written into the level-0 tiles as `SFPT` rows |
+| `--facades FILE` | Replace the bundled three-footprint SF survey with a reviewed wall source in the release frame. Staging applies it after SFPT and carries its credit into the manifest. |
 | `--compact-store DIR` | Keep tiles as shared zstd bases in `DIR` instead of full copies |
 | `--inventory-only` | Write the manifest only, for inspection |
+
+The [bundled survey](../bay/evidence-reviewed-sf.json) is a working input example. Each key lists the ordered 10 cm footprint corners. Each record gives the zero-based last vertex of each ring, the original BAY1 wall word, source camera IDs and a held-out camera ID. Supply only the reviewed `palette` index (1–255), `material` (7 concrete for a smooth finish, 8 brick, 9 plaster with fine horizontal courses), or both. `poses` supplies the solved x,z in cells for each ID. The source names its frame and attribution. Staging requires the same original wall, residential use and ring geometry on each copy. It skips known walls, special forms and any footprint with an SFPT edge.
+
+Check the previous and candidate exported level-0 directories against that source:
+
+```sh
+$PY engine/bay/evidence_check.py engine/bay/evidence-reviewed-sf.json --tiles BEFORE/tiles/0 AFTER/tiles/0
+```
+
+Use corresponding sets of tiles covering all supplied footprints. The check reports missing and unexpected row edits and compares every other byte, including fixtures and paint.
 
 ## 2. Promote after the panel
 
@@ -57,13 +68,13 @@ $PY engine/sf/release.py --restock --far FAR_JSON - OUT
 $PY engine/sf/release.py --restock --landing LANDING_DIR --base DIGEST - OUT
 ```
 
-- `--far` takes a listing holding only the far tiles to replace. Its `wedge` and `light` replace the base's.
+- `--far` takes a listing holding only the tiles to replace. It merges the `ground` and `landmarks` keys for those tiles, preserves known coverage on byte-identical older bands, and retains the credits for both source sets. Incoming `wedge` and `light` settings replace the base values when present.
 - `--landing` takes the folder `sf/far/landing.mjs` wrote (its listing and the `far/landing/<key>.far` objects).
 - `--base DIGEST` starts from another release staged in `OUT` instead of the one `<out>/current.json` pins.
 
 Restock `--far` first, then cut the first view (`landing.mjs`) from that release and restock `--landing` with `--base` set to it, because a cut holds faces of the tiles it was made from.
 
-A restock checks the base manifest against its digest, clones the other objects, refuses a digest that already exists, prints the new digest and never moves `<out>/current.json`. The tiles are unchanged, so it needs no panel.
+A restock checks the base manifest against its digest and stages the changed library in its own directory. macOS clones files on APFS and Linux copies them. A successful restock prints the new digest. It keeps the base tiles and can reuse their panel.
 
 ## 4. Pin, build and bundle
 
