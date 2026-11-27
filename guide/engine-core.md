@@ -28,12 +28,13 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | --- | --- |
 | `city.rs` | The generated town: hills, streets, street furniture (lamps, signs, hydrants, bins, mailboxes), houses, towers, parks. Synthetic data, made by rule, so none of it is stored. Streets carry no cars made of world cells: every car is a fine, drivable vehicle. |
 | `land.rs` | The ground beyond the town: mountains, a plain, open country. |
-| `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes, including slim aerial cables, perimeter cornice blending over lidar dropouts, and solid-probe column caching beneath overhead fixtures. Where no pack is loaded the world is level water. |
+| `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes, including surveyed vector kerbs (`bay_kerbs`) carved at 1.25 cm sub-cell precision, slim aerial cables, perimeter cornice blending over lidar dropouts, and solid-probe column caching beneath overhead fixtures. Where no pack is loaded the world is level water. |
 | `heroes.rs` | Landmarks written as programs, asked for any cell at any size. |
 | `scratch.rs` | Building a sector's cells, edits, blasts, finer cells. |
-| `tree.rs` | Encoding a sector as a tree. |
+| `tree.rs` | Encoding a sector as a tree (reusing thread-local scratch buffers and fast 4-cell leaf paths). |
 | `kinds.rs` | Materials, flags, palette, what a material weighs and how it breaks. |
-| `support.rs` | What stands and what falls after an edit. |
+| `support.rs` | What stands and what falls after an edit (reusing thread-local solver scratch and sparse resets). |
+| `fine.rs` | Fine-voxel meshing (`faces`, `facesWithSmooth` with octahedral smooth normals and AO via `wasm32` SIMD 3D prefix sums), RLE/base64 codec, shell-preserving `coarser` + leak sealing, and procedural vehicle sculptors (`sculptCoupe`, `sculptKart`, `sculptOjai`). |
 | `bodies.rs`, `bodies/living.rs` | Loose bodies, living things, people's bodies. |
 | `bodies/hull.rs` | How two rolling vehicles meet and part, and where a vehicle put into another's place ends up. |
 | `fire.rs`, `water.rs` | Fire spreading from cell to cell. Water as depths over columns, not cells. |
@@ -61,6 +62,7 @@ The exports fall into groups by prefix:
 | `world_edit`, `world_regrow`, `world_forget` | The solver's copy of the world, which loose bodies collide with. |
 | `bodies_*` | Blasts, fire, thrown balls, moving what is loose. |
 | `living_*` | Living things and people's bodies: spawn, drive, `living_drive_aux` (boost, rain wetness, surface grip), walk, place. `living_place` moves a rolling vehicle out of any vehicle that is coming into the place it is put, ahead of it, and moves on the vehicles standing where it lands. |
+| `fine_*` | Fine-voxel buffer I/O, RLE/base64 decode and encode (`fine_unrun`, `fine_encode_runs`), greedy face meshing and smooth normals (`fine_faces`, `fine_faces_smooth`), shell-preserving coarsening and leak sealing (`fine_coarser`, `fine_seal_leaks`), and procedural vehicle sculpting (`fine_sculpt_coupe`, `fine_sculpt_kart`, `fine_sculpt_ojai`). Called from `engine/page/fine-core.ts`. |
 | `material_weighs` | Sets a material's weight while the core runs. |
 
 ## The edit format

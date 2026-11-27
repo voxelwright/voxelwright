@@ -35,6 +35,7 @@ import { under } from './under.ts'
 import { tracks } from './tracks.ts'
 import { wheels, type WheelVehicle } from './wheels.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
+import { useFineCore } from './fine-core.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -49,7 +50,7 @@ import { SIDE, World } from './world.ts'
 import { far as farOf, samePath } from './far.ts'
 import { fog } from './fog.ts'
 import { eggSky } from './eggs-sky.ts'
-import { BAY, BUDGET, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, BUDGET, DEVICE, HOLD, holds, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -69,7 +70,6 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
-import { WORLD as WORLD_SOUND } from './sound/kinds.ts'
 import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
@@ -194,6 +194,7 @@ async function main() {
   type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // Open GPU and the page's WASM core in parallel so core compilation overlaps adapter/device creation (#83).
   const [gpu, innerInit] = await Promise.all([openGpu(), open<Core>(new URL('./core.wasm', import.meta.url).href)])
+  useFineCore(innerInit)
   // The device lost (#81: a GPU reset, a phone short of memory, a long while in the background): the frames stop and
   // the visitor is told, with a key that opens the realm again, rather than a picture that silently stands still.
   gpu.onLost((info) => {
@@ -1158,7 +1159,7 @@ async function main() {
   // pieces wearing it are drawn square; then they are given them (pieces.ts `refit`), and so is every later one.
   const smoothing = new Map<Born, Piece[]>()
   let smoother: Worker | null = null
-  type FaceAnswer = { key: number; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; cells?: Uint16Array; filled?: number }
+  type FaceAnswer = { key: number; faces?: Uint32Array<ArrayBuffer>; smooth?: Uint32Array<ArrayBuffer>; cells?: Uint16Array; size?: [number, number, number]; coarseKinds?: Uint16Array; coarseSize?: [number, number, number]; filled?: number }
   const smoothPending = new Map<number, (ans: FaceAnswer) => void>()
   const ensureSmoother = () => {
     if (!smoother) {
@@ -2150,7 +2151,7 @@ async function main() {
       w.onerror = () => { w.terminate(); resolve(ROBOTAXI_SERVICES.map(buildRobotaxiModel)) }
     }))
     const life = streetOf({
-      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
+      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, fine: (x, z) => !STREAM || holds(inner, x - 40, z - 40, x + 40, z + 40, 1), hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
       faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) },
       robotaxis,
       onNearMiss: (info) => {
@@ -2165,8 +2166,7 @@ async function main() {
         window.dispatchEvent(new CustomEvent('voxelwright:crash', { detail: info }))
       },
       onHorn: (info) => {
-        ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch, dur: info.annoyed ? 0.15 : 0.22, force: 0.65, reach: 18, travels: false })
-        if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
+        ears?.trafficHorn(info.at, info.annoyed)
       },
       onShout: (info) => {
         window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
@@ -2412,7 +2412,28 @@ async function main() {
     origin: () => { const f = me.feet; return f ? { x: f.at[0], z: f.at[2], yaw: f.yaw } : { x: pose.x * M, z: pose.z * M, yaw: pose.yaw } },
     street: () => streetLife,
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
-    onPrewarm: (data) => {
+    bakeCoupe: async (spec, coarserBy) => {
+      const ans = await askSmoother({ sculptCoupe: spec, coarserBy, reach: 5 })
+      return {
+        cells: ans.cells!, size: ans.size!,
+        coarseKinds: ans.coarseKinds!, coarseSize: ans.coarseSize!,
+        faces: ans.faces, smooth: ans.smooth, filled: ans.filled,
+      }
+    },
+    onPrewarm: (data, prebaked) => {
+      const f0 = data.fine?.[0]
+      if (prebaked?.faces && f0 && f0.cells instanceof Uint16Array) {
+        const born: Born = {
+          id: 0, cells: prebaked.filled ?? 0, low: [0, 0, 0],
+          size: [f0.size[0], f0.size[1], f0.size[2]],
+          com: [f0.size[0] / 2, f0.size[1] / 2, f0.size[2] / 2],
+          faces: prebaked.faces,
+          ...(prebaked.smooth ? { smooth: prebaked.smooth } : {}),
+        }
+        let by = lookFaces.get(f0.cells); if (!by) lookFaces.set(f0.cells, by = new Map())
+        by.set(f0.size.join(), born)
+        return
+      }
       (data.fine ?? []).forEach((f, i) => {
         if (!(f.cells instanceof Uint16Array)) return
         void prebakeLook(f.cells, f.size, !(i > 0 && f.per > 4))

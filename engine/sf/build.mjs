@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { marksBytes, marksIn, said, squaresBytes } from './marks.mjs'
+import { kerbsBytes, kerbsIn, said as kerbsSaid } from './kerbs.mjs'
 import { buildMap } from './map.mjs'
 import { buildPlaces } from './places.mjs'
 import { releaseCredits } from '../page/release-credits.ts'
@@ -354,6 +355,9 @@ const squaresBin = squaresBytes(marksMade)
 writeFileSync(join(out, 'bay/marks-squares.bin'), squaresBin)
 realm.bay = { heroes: JSON.parse(heroesRaw), marksSquares: Buffer.from(squaresBin).toString('base64') }
 console.log(`  road marks: ${said(marks)}`)
+const kerbs = kerbsBytes(kerbsIn(GRAPHS))
+writeFileSync(join(out, 'bay/kerbs.bin'), kerbs)
+console.log(`  surveyed kerbs: ${kerbsSaid(kerbs)}`)
 
 // ── Release packs (#82): bundle tiny release objects into VXPK packs under releases/<pin>/packs/ without touching manifest.json ──
 if (!noPacks) {

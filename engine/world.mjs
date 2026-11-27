@@ -62,7 +62,7 @@ if (GROUND) {
   // again (lib.rs `world_regrow`), past its edge as far as a sector reaches. Done again once everything asked for has
   // come (`fresh`), for what was asked meanwhile of a place whose tile was still on its way.
   const taken = (c, x0, z0, size) => { const b = [x0 - 96, z0 - 96, x0 + size + 96, z0 + size + 96]; c.world_regrow(...b); grew.push(b) }
-  const s = await hold({ pointer: GROUND.pointer, read, passed, heroes: JSON.parse(Buffer.from(GROUND.heroes).toString('utf8')), squares: GROUND.squares ? new Uint8Array(GROUND.squares).slice().buffer : null, taken, most: GROUND.most })
+  const s = await hold({ pointer: GROUND.pointer, read, passed, heroes: JSON.parse(Buffer.from(GROUND.heroes).toString('utf8')), squares: GROUND.squares ? new Uint8Array(GROUND.squares).slice().buffer : null, kerbs: GROUND.kerbs ? new Uint8Array(GROUND.kerbs).slice().buffer : null, taken, most: GROUND.most })
   if (s.release !== GROUND.release) throw new Error(`the world's process read release ${s.release}, the server ${GROUND.release}`)
 }
 /** Where tiles have come since what was asked meanwhile was last made again (`fresh`): boxes of columns. */

@@ -9,6 +9,7 @@ pub mod bay;
 pub mod heroes;
 pub mod bodies;
 pub mod city;
+pub mod fine;
 pub mod fire;
 pub mod hash;
 pub mod kinds;
@@ -129,10 +130,12 @@ struct Instance {
     /// For `make_finer`: the finer sector's cells, and which sector of the world's own cells the scratch now holds.
     finer: Vec<tree::Kind>,
     finer_of: Option<[i32; 3]>,
+    /// Reusable scratch for fine-voxel meshing, RLE, coarsening and procedural vehicle sculpts (#139).
+    fine_buf: fine::FineBuf,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new() });
 }
 
 /// What a cell of a material weighs against water, set from outside while the core runs (#264: a kernel table as
@@ -291,6 +294,14 @@ pub extern "C" fn bay_begin() {
 #[unsafe(no_mangle)]
 pub extern "C" fn bay_marks() -> i32 {
     bay::marks()
+}
+
+/// Takes surveyed kerb polylines from the street graph in the room (`bay_room`; bay.rs `kerbs`): every core of a world
+/// is told the same before its sectors are made so sidewalks follow surveyed edges at sub-cell precision. Returns how
+/// many polylines it holds, or -1 where the bytes are not kerbs.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_kerbs() -> i32 {
+    bay::kerbs()
 }
 
 /// Lets go of one pack, named by where its ground starts and how far apart its samples are. Returns how many are held.
@@ -649,6 +660,141 @@ pub extern "C" fn bodies_passing(id: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn living_down(id: u32, dx: f32, dy: f32, dz: f32, cling: i32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).down(id, [dx, dy, dz], cling != 0) as u32)
+}
+
+// ── Fine-voxel geometry, RLE and vehicle sculptors (fine.rs, #139) ──────────
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_cells_room(n: usize) -> *mut u16 {
+    INSTANCE.with_borrow_mut(|i| {
+        i.fine_buf.cells.resize(n, 0);
+        i.fine_buf.cells.as_mut_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_cells_ptr() -> *const u16 {
+    INSTANCE.with_borrow(|i| i.fine_buf.cells.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_out_cells_ptr() -> *const u16 {
+    INSTANCE.with_borrow(|i| i.fine_buf.out_cells.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_bytes_room(n: usize) -> *mut u8 {
+    INSTANCE.with_borrow_mut(|i| {
+        i.fine_buf.bytes.resize(n, 0);
+        i.fine_buf.bytes.as_mut_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_bytes_ptr() -> *const u8 {
+    INSTANCE.with_borrow(|i| i.fine_buf.bytes.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_bytes_len() -> usize {
+    INSTANCE.with_borrow(|i| i.fine_buf.bytes.len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_palette_room(n: usize) -> *mut u16 {
+    INSTANCE.with_borrow_mut(|i| {
+        i.fine_buf.palette.resize(n, 0);
+        i.fine_buf.palette.as_mut_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_palette_ptr() -> *const u16 {
+    INSTANCE.with_borrow(|i| i.fine_buf.palette.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_palette_len() -> usize {
+    INSTANCE.with_borrow(|i| i.fine_buf.palette.len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_params_room(n: usize) -> *mut f64 {
+    INSTANCE.with_borrow_mut(|i| {
+        i.fine_buf.params.resize(n, 0.0);
+        i.fine_buf.params.as_mut_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_faces_ptr() -> *const u32 {
+    INSTANCE.with_borrow(|i| i.fine_buf.faces.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_smooth_ptr() -> *const u32 {
+    INSTANCE.with_borrow(|i| i.fine_buf.smooth.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_filled() -> usize {
+    INSTANCE.with_borrow(|i| i.fine_buf.filled)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_swap_out_to_cells() {
+    INSTANCE.with_borrow_mut(|i| {
+        std::mem::swap(&mut i.fine_buf.cells, &mut i.fine_buf.out_cells);
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_unrun_b64(n: usize) -> i32 {
+    INSTANCE.with_borrow_mut(|i| fine::unrun_b64(&mut i.fine_buf, n))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_encode_runs(n: usize, from_out: u32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let fb = &mut i.fine_buf;
+        let src = if from_out != 0 {
+            &fb.out_cells[..n.min(fb.out_cells.len())]
+        } else {
+            &fb.cells[..n.min(fb.cells.len())]
+        };
+        fine::encode_runs(src, &mut fb.palette, &mut fb.raw_bytes, &mut fb.bytes);
+        fb.bytes.len()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_faces(w: usize, h: usize, d: usize) -> usize {
+    INSTANCE.with_borrow_mut(|i| fine::faces_square(&mut i.fine_buf, w, h, d))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_faces_smooth(w: usize, h: usize, d: usize, reach: usize) -> usize {
+    INSTANCE.with_borrow_mut(|i| fine::faces_with_smooth(&mut i.fine_buf, w, h, d, reach))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_coarser(w: usize, h: usize, d: usize, by: usize) -> usize {
+    INSTANCE.with_borrow_mut(|i| fine::coarser(&mut i.fine_buf, w, h, d, by))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_sculpt_coupe() -> usize {
+    INSTANCE.with_borrow_mut(|i| fine::sculpt_coupe(&mut i.fine_buf))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_sculpt_kart(paint: u32, per: f64) -> usize {
+    INSTANCE.with_borrow_mut(|i| fine::sculpt_kart(&mut i.fine_buf, paint as u16, per))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn fine_sculpt_ojai() -> usize {
+    INSTANCE.with_borrow_mut(|i| fine::sculpt_ojai(&mut i.fine_buf))
 }
 
 #[cfg(test)]

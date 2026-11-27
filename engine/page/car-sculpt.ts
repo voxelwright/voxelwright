@@ -10,6 +10,8 @@
 // Lengths are metres; cells are laid `cells[x + w * (z + d * y)]`, x along the car from its back (its front is +x),
 // z across, y up. No imports: Node reads this file too (sf/fleet.mjs, the tests), and the page draws what it makes.
 
+import { wasmCoarser, wasmSculptCoupe, wasmSculptKart } from './fine-core.ts'
+
 const GLASS = 11, STEEL = 12, ROOFING = 14, LAMP = 15, PLASTER = 9
 const k = (material: number, colour = 0) => material | (colour << 8)
 /** A hue (0 red, 3 orange-yellow, 8 green, 16 blue) in a tone (0 palest .. 6 dark). */
@@ -54,6 +56,8 @@ const through = (pts: readonly (readonly [number, number])[]) => (s: number) => 
 
 /** The coupe's cells: `{ cells, size }`. */
 export function sculptCoupe(o: CoupeSpec): { cells: Uint16Array; size: [number, number, number] } {
+  const fast = wasmSculptCoupe(o)
+  if (fast) return fast
   const { L, H, W, per, wheels: [xr, xf], wheelY, wheelR: R, tyreW, paint } = o, K = COUPE_KINDS
   const S = per * 10, w = Math.ceil(L * S), h = Math.ceil(H * S), d = Math.ceil(W * S), zc = d / (2 * S)
   const n = w * h * d, kinds = new Uint16Array(n)
@@ -378,6 +382,8 @@ export function sculptCoupe(o: CoupeSpec): { cells: Uint16Array; size: [number, 
  * column, rear engine bay with alloy fins, lamps, and four slick tyres carved out for animated 3D wheels.
  */
 export function sculptKart(o: { paint: number; per?: number }): { cells: Uint16Array; size: [number, number, number] } {
+  const fast = wasmSculptKart(o.paint, o.per ?? 4)
+  if (fast) return fast
   const per = o.per ?? 4, paint = o.paint, K = COUPE_KINDS
   const L = 2.4, H = 0.85, W = 1.4, S = per * 10
   const w = Math.ceil(L * S), h = Math.ceil(H * S), d = Math.ceil(W * S), zc = d / (2 * S)
@@ -479,6 +485,8 @@ export function sculptKart(o: { paint: number; per?: number }): { cells: Uint16A
  * what is shut in. Its kind is the one most of its fine cells are, glass counting for less.
  */
 export function coarser(kinds: ArrayLike<number>, size: readonly [number, number, number], by: number): { kinds: Uint16Array; size: [number, number, number] } {
+  const fast = wasmCoarser(kinds, size, by)
+  if (fast) return fast
   const [w, h, d] = size, cs: [number, number, number] = [Math.ceil(w / by), Math.ceil(h / by), Math.ceil(d / by)]
   // The air shut inside: what a flood by faces from the box's edge does not reach.
   const outside = outsideAir(kinds, size)

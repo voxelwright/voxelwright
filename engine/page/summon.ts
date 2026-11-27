@@ -2,10 +2,20 @@
 // within ~60 m at true street level (never on a building roof) and delivers a high-detail 2.5 cm drivable
 // sports coupe aligned with the road, capping to 1 unmounted summoned car so it never leaks bodies.
 import { POLISHED } from './spells.ts'
-import { coarser, GT_COUPE, sculptCoupe } from './car-sculpt.ts'
+import { coarser, GT_COUPE, sculptCoupe, type CoupeSpec } from './car-sculpt.ts'
 import type { Foot, Living, Making, Thing } from './living.ts'
 import type { Hud } from './hud.ts'
 import type { Street } from './street.ts'
+
+export interface BakedCoupe {
+  cells: Uint16Array
+  size: [number, number, number]
+  coarseKinds: Uint16Array
+  coarseSize: [number, number, number]
+  faces?: Uint32Array<ArrayBuffer>
+  smooth?: Uint32Array<ArrayBuffer>
+  filled?: number
+}
 
 export interface SummonLand {
   ground_at(x: number, z: number): number
@@ -24,13 +34,15 @@ export interface SummonOptions {
   street(): Street | null
   /** Optional citywide OSM street ways lookup (bay.ts `names`) for all 155 squares of San Francisco. */
   ways?(at: readonly [number, number], radius: number): Promise<{ ways: { line: readonly (readonly [number, number])[] }[] }[]>
-  /** Optional hook called once when the sculpted sports coupe data is pre-warmed (lets caller pre-build smooth faces off-thread). */
-  onPrewarm?(data: Omit<Making, 'low'>): void
+  /** Optional off-thread coupe sculptor + coarsener + smooth face baker (`streetfaces.ts`, #139) so prewarm never stalls the page thread. */
+  bakeCoupe?(spec: CoupeSpec, coarserBy: number): Promise<BakedCoupe>
+  /** Optional hook called once when the sculpted sports coupe data is pre-warmed (lets caller register or pre-build smooth faces off-thread). */
+  onPrewarm?(data: Omit<Making, 'low'>, prebaked?: BakedCoupe): void
 }
 
 export interface CarSummon {
   summon(): Promise<Thing | null>
-  /** Pre-sculpts and caches the sports coupe on an idle tick so the first summon has zero stutter. */
+  /** Pre-sculpts and caches the sports coupe off-thread (or on an idle tick) so the first summon has zero stutter. */
   prewarm(): void
   clear(): void
   readonly car: Thing | null
@@ -38,20 +50,20 @@ export interface CarSummon {
 
 /** Its paint: red steel (a kind is a material and a colour, kinds.rs), hue 0 at tone 4. */
 const PAINT = 12 | ((16 + 0 * 10 + 4) << 8)
+const COUPE_SPEC: CoupeSpec = { ...GT_COUPE, paint: PAINT | POLISHED }
 
 /** The GT coupe (car-sculpt.ts, the SF library's coupe too) at 2.5 cm, its paint polished, and its 10 cm body made from it; built once. */
 let cachedCoupe: Omit<Making, 'low'> | null = null
+let pendingCoupe: Promise<Omit<Making, 'low'>> | null = null
 
-function sportsCoupeData(): Omit<Making, 'low'> {
-  if (cachedCoupe) return cachedCoupe
-  const { cells, size } = sculptCoupe({ ...GT_COUPE, paint: PAINT | POLISHED })
-  const body = coarser(cells, size, GT_COUPE.per), [, , bd] = body.size, [ex, ey, ez] = GT_COUPE.eye
+function assembleCoupe(cells: Uint16Array, size: [number, number, number], bodyKinds: Uint16Array, bodySize: [number, number, number]): Omit<Making, 'low'> {
+  const [, , bd] = bodySize, [ex, ey, ez] = GT_COUPE.eye
   const foot = (x: number, z: number, front: boolean): Foot => ({ at: [x, 3.0, z], reach: 5.5, steers: front, drives: !front })
   const [xr, xf] = GT_COUPE.wheels.map((x) => x * 10)
-  cachedCoupe = {
+  return {
     name: 'sports coupe',
-    cells: Int32Array.from(body.kinds),
-    size: body.size,
+    cells: Int32Array.from(bodyKinds),
+    size: bodySize,
     controls: 'drive',
     // Blistering & drift-happy sports coupe handling (212 km/h top, matches sf/fleet.mjs HANDLING.coupe).
     motor: {
@@ -63,6 +75,13 @@ function sportsCoupeData(): Omit<Making, 'low'> {
     eye: [ex * 10, ey * 10, ez * 10],
     fine: [{ size, per: GT_COUPE.per, low: [0, 0, 0], cells }],
   }
+}
+
+function sportsCoupeDataSync(): Omit<Making, 'low'> {
+  if (cachedCoupe) return cachedCoupe
+  const { cells, size } = sculptCoupe(COUPE_SPEC)
+  const body = coarser(cells, size, GT_COUPE.per)
+  cachedCoupe = assembleCoupe(cells, size, body.kinds, body.size)
   return cachedCoupe
 }
 
@@ -211,14 +230,35 @@ export function createCarSummon(opts: SummonOptions): CarSummon {
     return null
   }
 
+  const loadCoupeData = async (): Promise<Omit<Making, 'low'>> => {
+    if (cachedCoupe) return cachedCoupe
+    if (pendingCoupe) return pendingCoupe
+    if (opts.bakeCoupe) {
+      pendingCoupe = opts.bakeCoupe(COUPE_SPEC, GT_COUPE.per).then((baked) => {
+        cachedCoupe = assembleCoupe(baked.cells, baked.size, baked.coarseKinds, baked.coarseSize)
+        opts.onPrewarm?.(cachedCoupe, baked)
+        return cachedCoupe
+      }, () => {
+        const data = sportsCoupeDataSync()
+        opts.onPrewarm?.(data)
+        return data
+      })
+      return pendingCoupe
+    }
+    const data = sportsCoupeDataSync()
+    opts.onPrewarm?.(data)
+    return data
+  }
+
   let prewarmed = false
   const prewarm = () => {
     if (prewarmed) return
     prewarmed = true
-    const run = () => {
-      const data = sportsCoupeData()
-      opts.onPrewarm?.(data)
+    if (opts.bakeCoupe) {
+      void loadCoupeData()
+      return
     }
+    const run = () => { void loadCoupeData() }
     const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
     if (ric) ric(run, { timeout: 600 })
     else setTimeout(run, 120)
@@ -237,7 +277,7 @@ export function createCarSummon(opts: SummonOptions): CarSummon {
       busy = true
       lastAt = now
       try {
-        const data = sportsCoupeData()
+        const data = await loadCoupeData()
         const o = opts.origin()
         const spot = await findStreetSpot(o.x, o.z, data.size)
         if (!spot) {
