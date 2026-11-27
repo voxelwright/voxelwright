@@ -59,12 +59,22 @@ earlier street of cells learned is in `voxel-world`.
    A texel holds how far towards the sun the last solid thing on its line is; a point at
    least that far is lit. The line is followed outwards from where it enters the box, by a
    ray that goes through what it meets (`trace` with `through`), so it sees everything
-   up-sun in the coarser boxes too. Eight tiles of 64 x 64 are drawn a frame, finest and
+   up-sun in the coarser boxes too. Up to eight tiles of 64 x 64 are drawn a frame, finest and
    nearest first; an edit spoils the tiles its sun lines cross once its sectors are made
    again; when a box moves its tiles are drawn again as there is room and used until then
    (a line was followed from where it came into the box as the box then stood); the oldest
-   tile is redrawn when there is room. Where no tile is drawn the shader traces as before.
+   tile is redrawn when there is room. Where no tile is drawn the shader asks the next coarser
+   box's map, and traces as before only where none has one.
    This took shadows at street level from about 15 ms to 0.3 ms.
+   A tile is dear (4,096 rays through everything up-sun; 0.5 ms in San Francisco, 2.5 ms in
+   the town, whose far boxes hold land): on a GPU with no time to spare, eight in a frame made
+   one frame in twelve late whenever the eye moved, at any speed from 60 km/h, with the page's
+   thread at 2 ms (#73, `test/drive-smooth.mjs --curve --sun-most 8,own`: none late with the
+   tiles held to their share, in the same session; on a quiet GPU neither was late).
+   While the eye moves the tiles have a twelfth of the frame's GPU time, counted in what a
+   tile was last measured to take (`main.ts` `sunMost`); standing, eight as before. A map is
+   drawn once its own box and every coarser one is nearly whole (`world.ts` `wholeFrom`): its
+   rays never enter a finer box, and going fast the finest boxes are always being made.
 
 ## Measured (M1 Pro, Chrome, 2560 x 1440, paced, standing still, sun maps drawn, GPU otherwise quiet)
 
@@ -489,6 +499,10 @@ size, not 0.40.
   case for a check, not the first that works.
 - The page's parts are set up in order and the frame loop starts before the flight awaits:
   anything the loop reads must be declared before the first await after it.
+- Late frames with the page's thread idle are the GPU's, and the march's own time need not show
+  them: the sun's tile passes are not in `gpuMs`. Pin the picture's size (`engine.scale`) before
+  timing anything that moves, or the steer turns the cost into fewer pixels and hides it; and
+  hold one suspect at a time to none in the same session (#73).
 
 ## Checks, and the bar
 

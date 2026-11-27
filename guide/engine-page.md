@@ -13,7 +13,7 @@ description: The browser side of the engine. Sectors live on the GPU, a ray is m
 - **Ask and Answer** (`engine/page/worker.ts`). The message to a sector worker and its reply. Shown below.
 - **Marcher** (`engine/page/march.ts`). Draws the world into a target with a colour and a depth texture. Flags such as `SHADOWS`, `MIRRORS` and `PICK` change what one draw does.
 - **View** (`View` in `march.ts`). The eye in finest cells and the camera axes. Every pass gets the same view.
-- **Sun maps** (`engine/page/sun.ts`). One shadow map per box, drawn a few tiles a frame. A tile not yet drawn falls back to tracing a ray toward the sun.
+- **Sun maps** (`engine/page/sun.ts`). One shadow map per box, drawn a few tiles a frame. A place whose tile is not yet drawn is answered from the next coarser box's map, and by tracing a ray toward the sun only where no box has one. See [the sun's share of a frame](#the-suns-share-of-a-frame).
 - **Far model** (`engine/page/far.ts`). In San Francisco, the city past the cells' reach is drawn as baked faces. The march leaves those pixels to it (`farCover`).
 
 ## How sectors reach the GPU
@@ -92,6 +92,15 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
 
+## The sun's share of a frame
+
+A tile of a sun map is 4,096 rays that each go through everything up-sun of them. Whenever the eye moves, tiles scroll in at the maps' edges and every box that moved wants its tiles drawn again. Where the GPU had no time to spare (other pages drawing on it, or a picture steered to fill it), eight tiles in a frame made about one frame in twelve late at any speed from 60 km/h, with the page's own thread at 2 ms a frame. With the tiles held to a share, none came late in the same session (#73). On a quiet GPU with the picture pinned small, neither did.
+
+- While the eye moves faster than a metre a second, tiles get a twelfth of the frame's time on the GPU (`sunMost` in `main.ts`). The page measures what a tile takes with timestamp queries round the tile passes (`tend` in `march.ts`) and counts the share in tiles. A tile that costs more than the share is drawn every few frames.
+- An eye that stands still gets eight tiles a frame, as before. Nothing passes there for a late frame to show in, and the first picture's shadows are traced ray by ray until its tiles are drawn.
+- A tile's rays never enter a finer box, so a map is drawn as soon as its own box and every coarser one is whole but for a layer of sectors at each side (`wholeFrom` in `world.ts`). Going fast, the finest boxes are always being made; the coarser maps no longer wait for them.
+- `engine.sunRoom` reports the measured tile time and the last frame's count. `?suntiles=8` (or setting `engine.sunRoom.fixed`) draws a fixed number a frame, to measure what the share is worth.
+
 ## Vehicle damage
 
 Every drivable car and kart wears a 2.5 cm fine look (`car()`, `KEPT.car`, `KEPT.kart`, and street cars), so every car dents where it is struck (#37, #61). The core reports each crash as a `STRUCK` record with a place, a closing speed and a push, but no direction; street-car impacts also dent both vehicles immediately through `living.hit`, and blows on a car before its fine look arrives are queued and replayed as soon as the look loads. `living.ts` keeps the hardest blow each vehicle took in one answer. For a blow at 1.8 m/s or more, it gives each part of the look a dent at that place, pushed in from the side of the part's box nearest the hit. `deform.ts` holds up to six dents a part. Each dent has a centre, a radius, a direction and a depth, all in the part's own cells. Nearby blows deepen an existing dent, and blows near the driver's eye and seats are kept out of it: no dent, however it is moved, reaches that room. The same record holds how scuffed the paint is, how damaged the engine is, and how cracked each of the four window zones (front, rear, left, right) is.
@@ -118,6 +127,9 @@ cd engine
 npm run typecheck
 node test/all.mjs --changed       # the page checks that cover what you changed
 node test/bench.mjs               # frame cost before and after
+node test/drive-smooth.mjs        # going fast against standing: late frames, the page's thread, the sun's tiles
 ```
+
+`test/drive-smooth.mjs` carries the eye along a straight street at 180 km/h with the picture's size pinned and compares it with the same page standing still. `--curve` runs 0, 60, 120 and 180 km/h in one session, `--car` drives the summoned coupe, `--profile` adds Chrome's samples of the page's thread, and `--sf <folder>` serves this checkout's page over a San Francisco folder that `engine/sf/build.mjs` wrote, without copying its tiles.
 
 Add `?pool=`, `?grid=` or `?levels=` to `/city` to try other sizes for the pool, the boxes and the number of levels.
