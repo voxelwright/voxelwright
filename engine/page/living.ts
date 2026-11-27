@@ -397,13 +397,25 @@ export function living(o: {
     o.fx?.lift()
     updateDriveHud(0, 0, 0.15, false, 1, false, 0)
   }
+  // Tapping Exit removes the button on pointerdown before the browser's synthetic click arrives;
+  // swallow that stray click so it never hits a 3D billboard or canvas behind the button on touch.
+  let swallowClickUntil = 0
+  addEventListener('click', (e) => {
+    if (performance.now() < swallowClickUntil) {
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      swallowClickUntil = 0
+    }
+  }, true)
   const button = (act: string, words: string, press: () => void, release?: () => void) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button', textContent: words })
     b.dataset.act = act
+    b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation() })
     if (release) {
       const pointers = new Set<number>()
       b.addEventListener('pointerdown', (e) => {
         e.preventDefault()
+        e.stopPropagation()
         try { b.setPointerCapture(e.pointerId) } catch {}
         pointers.add(e.pointerId)
         b.setAttribute('aria-pressed', 'true')
@@ -415,7 +427,12 @@ export function living(o: {
       }
       for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) b.addEventListener(ev, up)
     } else {
-      b.addEventListener('pointerdown', (e) => { e.preventDefault(); press() })
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        swallowClickUntil = performance.now() + 400
+        press()
+      })
     }
     return b
   }
