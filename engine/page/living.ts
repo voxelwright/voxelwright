@@ -539,6 +539,16 @@ export function living(o: {
   /** Where a look's glass cells are (kind 11), three numbers a cell. Cached per array so waking cars skip rescanning millions of cells. */
   const EMPTY_GLASS = new Int16Array(0)
   const glassCache = new WeakMap<Uint16Array, Int16Array>()
+  const filledCache = new WeakMap<Uint16Array, number>()
+  const carvedCache = new WeakMap<Uint16Array, ReturnType<typeof carveWheelWells>>()
+  const filledOf = (kinds: Uint16Array) => {
+    let n = filledCache.get(kinds)
+    if (n !== undefined) return n
+    n = 0
+    for (let i = 0; i < kinds.length; i++) if (kinds[i]) n++
+    filledCache.set(kinds, n)
+    return n
+  }
   const glassOf = (kinds: Uint16Array, [w, , d]: readonly number[]) => {
     let cached = glassCache.get(kinds)
     if (cached) return cached
@@ -563,13 +573,17 @@ export function living(o: {
     if (!o.look || !thing.alive || !things.includes(thing) || looks.has(thing) || !parts.length) return
     // Within what a look may be, counted before any of it is made into faces: its sizes, and how many of its cells are filled.
     let filled = 0
-    for (const f of parts) for (let i = 0; i < f.kinds.length; i++) if (f.kinds[i]) filled++
+    for (const f of parts) filled += filledOf(f.kinds)
     if (!fineWithin(parts) || filled > FINE_FILLED) { console.warn(`a look of ${parts.length} parts with ${filled} filled cells is more than a look may be: the thing is drawn as its own cells`); return }
     const carveWheels = (thing.controls ?? 'drive') === 'drive' && thing.motor.feet.length >= 2 && !(thing.motor.steer === 0 && thing.motor.upright > 0)
     looks.set(thing, parts.map((f, i) => {
       // High-resolution interior cabin parts (i > 0 && per > 4, e.g. 3.6M-cell 1.25cm seats/dash) need neither wheel-well carving nor smooth shading.
       const interior = i > 0 && f.per > 4
-      const carved = carveWheels && !interior ? carveWheelWells(f.kinds, f.size, f.per, f.low, thing.motor, thing.size) : null
+      let carved = carveWheels && !interior ? carvedCache.get(f.kinds) : null
+      if (carveWheels && !interior && carved === undefined) {
+        carved = carveWheelWells(f.kinds, f.size, f.per, f.low, thing.motor, thing.size)
+        carvedCache.set(f.kinds, carved)
+      }
       if (carved && !thing.wheelProfile) thing.wheelProfile = carved.profile
       const kinds = carved ? carved.kinds : f.kinds
       const piece = o.look!(kinds, f.size, { smooth: !interior, fallback: carved ? f.kinds : undefined })
