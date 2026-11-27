@@ -37,11 +37,13 @@ struct Marks {
 /// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments, or -1.
 pub fn marks() -> i32 {
     let bytes = ROOM.with_borrow_mut(std::mem::take);
+    if bytes.len() % 4 != 0 || bytes.len() > 128 << 20 { return -1; }
     let w: Vec<i32> = bytes.chunks_exact(4).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     if w.len() < 3 || w[0] != 0x4b52_414d { return -1; }
-    let (nc, ns) = (w[1] as usize, w[2] as usize);
-    if w.len() != 3 + nc * 4 + ns * 5 { return -1; }
-    let covers = w[3..3 + nc * 4].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    let (Ok(nc), Ok(ns)) = (usize::try_from(w[1]), usize::try_from(w[2])) else { return -1; };
+    let Some(end) = nc.checked_mul(4).and_then(|n| n.checked_add(3)) else { return -1; };
+    if ns.checked_mul(5).and_then(|n| end.checked_add(n)) != Some(w.len()) { return -1; }
+    let covers = w[3..end].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
     MARKS.with_borrow_mut(|held| *held = Marks { covers });
     ns as i32
 }
@@ -61,6 +63,13 @@ struct Hero {
     along: [f32; 2],
     low: [i32; 2],
     high: [i32; 2],
+}
+
+impl Hero {
+    fn local(&self, x: i32, z: i32, half: f32) -> (f32, f32) {
+        let (dx, dz) = ((x - self.at[0]) as f32 + half, (z - self.at[2]) as f32 + half);
+        ((dx * self.along[0] + dz * self.along[1]) * 0.1, (dz * self.along[0] - dx * self.along[1]) * 0.1)
+    }
 }
 
 /// A landmark stands at (x, z) in cells, its foot at height `foot`, its `u` turned `turn` millionths of a radian from
@@ -240,8 +249,21 @@ fn read(b: &[u8]) -> Option<Pack> {
     if head[0] != 0x3159_4142 || head[4] <= 0 || head[5] <= 1 || head[8] < 0 || head[9] < 0 || head[12..15].iter().any(|&n| n < 0) {
         return None;
     }
-    let (gw, tw) = (head[5] as usize, if head[8] > 0 { head[9] as usize } else { 0 });
-    let (nb, nv, nt) = (head[12] as usize, head[13] as usize, head[14] as usize);
+    let gw = usize::try_from(head[5]).ok()?;
+    let tw = if head[8] > 0 { usize::try_from(head[9]).ok()? } else { 0 };
+    if gw > 8192 || tw > 8192 || (head[8] > 0 && tw < 2) || b.len() > 256 << 20 { return None; }
+    let wide = (head[5] - 1).checked_mul(head[4])?;
+    if wide > 64_000 || head[6].checked_add(wide).is_none() || head[7].checked_add(wide).is_none() { return None; }
+    // The top grid is indexed relative to the ground origin using signed cell coordinates.
+    let top_span = head[9].saturating_sub(1).checked_mul(head[8])?;
+    for axis in [0, 1] {
+        let offset = head[10 + axis].checked_sub(head[6 + axis])?;
+        offset.checked_add(top_span)?;
+        head[10 + axis].checked_add(top_span)?;
+    }
+    let samples = tw.checked_mul(tw)?;
+    let top_bytes = samples.checked_mul(2)?;
+    let (nb, nv, nt) = (usize::try_from(head[12]).ok()?, usize::try_from(head[13]).ok()?, usize::try_from(head[14]).ok()?);
     let mut from: usize = 64;
     let mut take = |n: usize| {
         let part = b.get(from..from.checked_add(n)?)?;
@@ -251,10 +273,10 @@ fn read(b: &[u8]) -> Option<Pack> {
     let shorts = |p: &[u8]| p.chunks_exact(2).map(|w| i16::from_le_bytes([w[0], w[1]])).collect::<Vec<_>>();
     let ints = |p: &[u8]| p.chunks_exact(4).map(|w| i32::from_le_bytes([w[0], w[1], w[2], w[3]])).collect::<Vec<_>>();
     let ground = shorts(take(gw.checked_mul(gw)?.checked_mul(2)?)?);
-    let top = shorts(take(tw * tw * 2)?);
-    let class = take(tw * tw)?.to_vec();
-    let tint = take(tw * tw)?.to_vec();
-    let walls = if head[15] & 1 == 1 { take(tw * tw * 2)?.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).collect() } else { Vec::new() };
+    let top = shorts(take(top_bytes)?);
+    let class = take(samples)?.to_vec();
+    let tint = take(samples)?.to_vec();
+    let walls = if head[15] & 1 == 1 { take(top_bytes)?.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).collect() } else { Vec::new() };
     let rows = ints(take(nb.checked_mul(24)?)?);
     let mut verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
     let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
@@ -285,7 +307,7 @@ fn read(b: &[u8]) -> Option<Pack> {
             let width = u16::from_le_bytes(tail.get(8..10)?.try_into().ok()?) as usize;
             let height = u16::from_le_bytes(tail.get(10..12)?.try_into().ok()?) as usize;
             if edge as usize >= nv || width == 0 || height == 0 { return None; }
-            let end = 12 + width.checked_mul(height)?;
+            let end = 12usize.checked_add(width.checked_mul(height)?)?;
             if paint.insert(edge, tail.get(12..end)?).is_some() { return None; }
             tail = tail.get(end..)?;
         }
@@ -332,7 +354,6 @@ fn read(b: &[u8]) -> Option<Pack> {
     let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     repair_building_roofs(&mut p);
     // Which buildings and trunks reach into each patch.
-    let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
     p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
     p.stems = vec![Vec::new(); (p.pw * p.pw) as usize];
@@ -1266,8 +1287,7 @@ fn heroes_at(x: i32, z: i32, size: i32) -> ([Option<(Hero, f32, f32)>; 2], u8) {
         let mut n = 0u8;
         let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
         for h in all.iter().filter(|h| x >= h.low[0] && z >= h.low[1] && x <= h.high[0] && z <= h.high[1]) {
-            let (dx, dz) = ((x - h.at[0]) as f32 + half, (z - h.at[2]) as f32 + half);
-            let (u, w) = ((dx * h.along[0] + dz * h.along[1]) * 0.1, (dz * h.along[0] - dx * h.along[1]) * 0.1);
+            let (u, w) = h.local(x, z, half);
             if let Some(r) = heroes::reach(h.sort) {
                 if u >= r[0] && u < r[3] && w >= r[2] && w < r[5] {
                     out[n as usize] = Some((*h, u, w));
@@ -1282,14 +1302,28 @@ fn heroes_at(x: i32, z: i32, size: i32) -> ([Option<(Hero, f32, f32)>; 2], u8) {
     })
 }
 
+/// The top solid cell of a measured stair tread. Its upper face is the walking height.
+fn tread_ground(places: &[Option<(Hero, f32, f32)>]) -> Option<f32> {
+    places.iter().flatten().find_map(|(h, u, w)| {
+        if h.sort != heroes::CONSERVATORY { return None; }
+        heroes::conservatory_stairs(*u, *w).map(|height| h.at[1] as f32 + height * 10.0 - 1.0)
+    })
+}
+
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let (heroes, hero_n) = heroes_at(x, z, size);
     let Some(p) = pick(packs, x, z, size) else {
         return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, heroes, hero_n };
     };
-    let ground_height = p.ground_height(x, z);
+    let tread = tread_ground(&heroes[..hero_n as usize]);
+    let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
     let g = (ground_height + 0.5).floor() as i32;
     let (mut class, tint) = p.surface(x, z);
+    if class & 7 == ROAD && heroes[..hero_n as usize].iter().flatten().any(|(h, u, w)| {
+        h.sort == heroes::GOLDEN_GATE && heroes::draped_north_highway(*u, *w, ground_height * 0.1)
+    }) {
+        class = GRASS_HERE;
+    }
     // Where the graph's marks are drawn, the bake's paint and rails are not (`Marks`).
     let graphed = class & 7 == ROAD && marked_place(x, z);
     if graphed { class &= !96; }
@@ -1307,6 +1341,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         })
     } else { None };
     let (ground, kerb) = match class & 7 {
+        _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
@@ -1411,6 +1446,11 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                 let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
                 let on_road = class & 7 == ROAD;
                 match p.trunk(x, z) {
+                    Some((_, stem)) if tall >= 28 && heroes.iter().flatten().any(|(h, _, _)|
+                        h.sort == heroes::CONSERVATORY && {
+                            let (u, w) = h.local(stem[0], stem[1], 0.0);
+                            heroes::valley_palm_stem(u, w)
+                        }) => What::Open,
                     // A tree: its crown is round underneath, deepest at the trunk and rising to its rim; past the
                     // rim what the lidar saw is a spray of leaves and no more.
                     Some((far, trunk)) if tall >= 28 => {
@@ -1446,7 +1486,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     // The ground's top in quarter cells, for the finest cells' ramp (`grade_rows`): a road's, a pavement's (over its
     // kerb, so the kerb keeps its height up a hill) and a bank's, wherever the ground is open to the sky. Only the
     // measured asphalt had it, and every pavement and bank up Nob Hill and Telegraph Hill was a stair of 10 cm (#450).
-    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
+    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
     Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, heroes, hero_n }
 }
@@ -1695,7 +1735,10 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
 
 /// How high the ground is at a column: its top cell.
 pub fn ground(x: i32, z: i32) -> i32 {
-    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| p.ground(x, z)))
+    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| {
+        let (places, n) = heroes_at(x, z, 1);
+        tread_ground(&places[..n as usize]).map_or_else(|| p.ground(x, z), |height| height.round() as i32)
+    }))
 }
 
 /// Where someone on foot stands at a column, whether it is paved, and the sort of place (always 0: the town's
@@ -1911,6 +1954,45 @@ mod tests {
             tint[i] = grey;
         }
         assert_eq!(road_greys(&class,&tint,32), [6,10,7,7]);
+    }
+
+    #[test]
+    fn conservatory_replaces_the_whole_surveyed_crown_of_a_matched_trunk() {
+        // Reproduce the western stem in 190_277: lidar merges the two mapped
+        // palms and gives it a 6.4 m radius. Its east rim is outside both new crowns.
+        let mut bytes = pack();
+        let tops = 64 + 65 * 65 * 2;
+        let classes = tops + 128 * 128 * 2;
+        for z in 96..104 {
+            for x in 96..114 {
+                let i = z * 128 + x;
+                bytes[tops + 2 * i..tops + 2 * i + 2].copy_from_slice(&415_i16.to_le_bytes());
+                bytes[classes + i] = CANOPY | GRASS_HERE;
+            }
+        }
+        let end = bytes.len();
+        bytes[end - 8..end - 4].copy_from_slice(&415_i32.to_le_bytes());
+        bytes[end - 4..].copy_from_slice(&((64_i32 << 8) | 4).to_le_bytes());
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()) };
+        assert_eq!(load(), 1);
+        let rim = || {
+            let mut sector = Scratch::new();
+            sector.start(8, 6, 7, 0);
+            make(&mut sector);
+            let mut leaves = 0;
+            for x in 560..565 {
+                for z in 496..506 {
+                    for y in 384..410 {
+                        if material(sector.cells[at(x - 512, y - 384, z - 448)]) == LEAVES { leaves += 1; }
+                    }
+                }
+            }
+            leaves
+        };
+        assert!(rim() > 0, "fixture must emit a raw crown at its rim");
+        hero(heroes::CONSERVATORY, 624, 153, 200, 0);
+        assert_eq!(rim(), 0, "the displaced lidar stem still has a second crown");
+        clear();
     }
 
     #[test]
@@ -2346,5 +2428,27 @@ mod tests {
         let b0 = &packs[0].buildings[0];
         let clipped_glass = (23..31).filter(|&y| material(front(b0, &p_gar, y, 56, y, 1.5, 1, false)) == GLASS).count();
         assert_eq!(clipped_glass, 0, "window clipped straight into top of garage door ({clipped_glass} cells)");
+    }
+}
+
+#[cfg(test)]
+mod header_limits {
+    use super::*;
+
+    #[test]
+    fn marks_reject_impossible_counts() {
+        for (covers, segments) in [(-1, 0), (0, -1), (i32::MAX, 0), (0, i32::MAX)] {
+            ROOM.with_borrow_mut(|r| *r = [0x4b52_414d, covers, segments].into_iter().flat_map(i32::to_le_bytes).collect());
+            assert_eq!(marks(), -1);
+        }
+    }
+
+    #[test]
+    fn pack_rejects_oversize_grids_and_spans() {
+        for (gw, step, tw) in [(i32::MAX, 1, 0), (2, 1, i32::MAX), (3, i32::MAX, 2)] {
+            let words = [0x3159_4142, 0, 0, 0, step, gw, 0, 0, 1, tw, 0, 0, 0, 0, 0, 0];
+            let bytes: Vec<_> = words.into_iter().flat_map(i32::to_le_bytes).collect();
+            assert!(read(&bytes).is_none());
+        }
     }
 }

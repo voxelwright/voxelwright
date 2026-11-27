@@ -16,7 +16,7 @@ pub type Shared = Arc<State>;
 
 pub struct State {
     pub cfg: Config,
-    pub admin_token: Option<String>,
+    pub admin_token: Option<[u8; 32]>,
     inner: Mutex<Inner>,
 }
 
@@ -24,6 +24,9 @@ pub struct State {
 pub struct Inner {
     /// By id, in order, so the list pages by `after=<id>`.
     pub lobbies: BTreeMap<String, Lobby>,
+    pub listed: usize,
+    last_stun_sweep: Option<Instant>,
+    last_addr_sweep: Option<Instant>,
     pub codes: HashMap<String, String>,
     /// Host sockets open, with or without a hello.
     pub slots: usize,
@@ -95,6 +98,8 @@ pub struct Addr {
     window: Instant,
     pub registrations: u32,
     pub joins: u32,
+    admin_fails: u32,
+    admin_locked_until: Option<Instant>,
     pub lookups: u32,
 }
 
@@ -103,6 +108,7 @@ pub enum Kind {
     Registration,
     Join,
     Lookup,
+    AdminFail,
 }
 
 pub enum Refused {
@@ -117,7 +123,7 @@ impl State {
     pub fn new(cfg: Config, admin_token: Option<String>) -> Shared {
         Arc::new(State {
             cfg,
-            admin_token,
+            admin_token: admin_token.map(|t| text::digest(t.as_bytes())),
             inner: Mutex::new(Inner::default()),
         })
     }
@@ -127,12 +133,20 @@ impl State {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    pub fn operator_locked(&self, addr: IpAddr) -> bool {
+        self.lock()
+            .addrs
+            .get(&addr)
+            .and_then(|a| a.admin_locked_until)
+            .is_some_and(|until| until > Instant::now())
+    }
+
     /// Count one request of `kind` against `addr`, or say why not.
     pub fn charge(&self, addr: IpAddr, kind: Kind) -> Result<(), Refused> {
         let mut g = self.lock();
         let cfg = &self.cfg;
         let now = Instant::now();
-        if g.banned(addr, now) {
+        if !matches!(kind, Kind::AdminFail) && g.banned(addr, now) {
             return Err(Refused::Banned);
         }
         let a = g
@@ -143,6 +157,7 @@ impl State {
             a.registrations = 0;
             a.joins = 0;
             a.lookups = 0;
+            a.admin_fails = 0;
         }
         let (n, most, what) = match kind {
             Kind::Registration => (
@@ -150,6 +165,7 @@ impl State {
                 cfg.registrations_per_minute,
                 "registrations a minute",
             ),
+            Kind::AdminFail => (&mut a.admin_fails, 5, "operator failures a minute"),
             Kind::Join => (&mut a.joins, cfg.joins_per_minute, "joins a minute"),
             Kind::Lookup => (&mut a.lookups, cfg.lookups_per_minute, "lookups a minute"),
         };
@@ -157,6 +173,9 @@ impl State {
             return Err(Refused::Limit(what));
         }
         *n += 1;
+        if matches!(kind, Kind::AdminFail) && *n == most {
+            a.admin_locked_until = Some(now + MINUTE);
+        }
         Ok(())
     }
 
@@ -196,7 +215,7 @@ impl State {
         if g.conns >= self.cfg.max_connections {
             return None;
         }
-        let per_addr = self.cfg.behind_proxy.is_none();
+        let per_addr = !self.cfg.trusts_proxy(peer);
         let key = text::addr_key(peer);
         if per_addr {
             let most = self.cfg.max_connections_per_addr;
@@ -227,11 +246,14 @@ impl State {
     pub fn sweep(&self) {
         let mut g = self.lock();
         let now = Instant::now();
-        g.addrs
-            .retain(|_, a| a.slots > 0 || a.conns > 0 || now.duration_since(a.window) < MINUTE);
+        g.addrs.retain(|_, a| {
+            a.slots > 0
+                || a.conns > 0
+                || now.duration_since(a.window) < MINUTE
+                || a.admin_locked_until.is_some_and(|until| until > now)
+        });
         g.bans.retain(|_, until| *until > now);
-        g.stun
-            .retain(|_, (window, _)| now.duration_since(*window) < MINUTE);
+        g.sweep_stun(now);
     }
 
     /// Whether to answer one STUN request from `addr` (false: over its minute's
@@ -243,8 +265,7 @@ impl State {
             return false;
         }
         if !g.stun.contains_key(&addr) && g.stun.len() >= self.cfg.max_tracked_addrs {
-            g.stun
-                .retain(|_, (window, _)| now.duration_since(*window) < MINUTE);
+            g.sweep_stun(now);
             if g.stun.len() >= self.cfg.max_tracked_addrs {
                 return false;
             }
@@ -262,9 +283,47 @@ impl State {
 }
 
 impl Inner {
+    fn sweep_stun(&mut self, now: Instant) {
+        if self
+            .last_stun_sweep
+            .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+        {
+            return;
+        }
+        self.last_stun_sweep = Some(now);
+        self.stun
+            .retain(|_, (start, _)| now.duration_since(*start) < MINUTE);
+    }
+
     fn addr(&mut self, key: IpAddr, most: usize, now: Instant) -> Option<&mut Addr> {
         if !self.addrs.contains_key(&key) && self.addrs.len() >= most {
-            return None;
+            if most == 0
+                || self
+                    .last_addr_sweep
+                    .is_some_and(|last| now.duration_since(last) < Duration::from_secs(1))
+            {
+                return None;
+            }
+            self.last_addr_sweep = Some(now);
+            self.addrs.retain(|_, a| {
+                a.slots != 0
+                    || a.conns != 0
+                    || now.duration_since(a.window) < MINUTE
+                    || a.admin_locked_until.is_some_and(|until| until > now)
+            });
+            if self.addrs.len() >= most {
+                let oldest = *self
+                    .addrs
+                    .iter()
+                    .filter(|(_, a)| {
+                        a.slots == 0
+                            && a.conns == 0
+                            && a.admin_locked_until.is_none_or(|until| until <= now)
+                    })
+                    .min_by_key(|(_, a)| a.window)?
+                    .0;
+                self.addrs.remove(&oldest);
+            }
         }
         Some(self.addrs.entry(key).or_insert(Addr {
             slots: 0,
@@ -273,6 +332,8 @@ impl Inner {
             registrations: 0,
             joins: 0,
             lookups: 0,
+            admin_fails: 0,
+            admin_locked_until: None,
         }))
     }
 
@@ -294,6 +355,11 @@ impl Inner {
 
     pub fn banned(&self, addr: IpAddr, now: Instant) -> bool {
         self.bans.get(&addr).is_some_and(|until| *until > now)
+            || self
+                .addrs
+                .get(&addr)
+                .and_then(|a| a.admin_locked_until)
+                .is_some_and(|until| until > now)
     }
 
     /// A lobby by id or code, as a page may see it: an id finds listed lobbies
@@ -318,6 +384,7 @@ impl Inner {
 
     pub fn remove(&mut self, id: &str) -> Option<Lobby> {
         let l = self.lobbies.remove(id)?;
+        self.listed -= usize::from(l.listed);
         self.codes.remove(&l.code);
         Some(l)
     }

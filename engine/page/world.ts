@@ -228,7 +228,7 @@ export class World {
   }
   /** How long a maker may say nothing, not even to the page's pings (bay.ts `share`), before it is taken for gone, ms. */
   patience = 10_000
-  /** First level wholly past the far model's reach: made after the near boxes so cold landing fetches only what precedes the handover. */
+  /** First level past the far reach. Its cells and coarser ones stream after the near columns. */
   farFrom = Infinity
   /** The core the workers were last told to use (`recore`), for one hired after. */
   private core: string | null = null
@@ -430,20 +430,6 @@ export class World {
         }
         if (!any) continue
         const reach = this.reach[ask.level]?.get(column(ask.sx, ask.sz)) ?? []
-        if (ask.level >= this.farFrom && reach.length === 0) {
-          // Past the far model's handover with no edits: mark empty air directly without fetching coarse city tiles.
-          for (let sy = ask.y0; sy <= ask.y1; sy++) {
-            const slot = level.slot(ask.sx, sy, ask.sz)
-            if (level.state[slot] !== FLYING && level.state[slot] !== STALE_FLYING) continue
-            if (level.at[slot] >= 0) { this.pool.give(level.at[slot], level.size[slot]); level.at[slot] = -1; level.size[slot] = 0 }
-            level.state[slot] = READY
-            level.show(slot, 0, 0)
-            this.stats.made++
-            this.stats.boxes[ask.level].made++
-          }
-          level.dirty = true
-          continue
-        }
         if (reach.length >= 8) this.tidy(reach, ask.level, ask.sx, ask.sz)
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
@@ -537,8 +523,21 @@ export class World {
   }
 
   /** Whether every box is whole but for a layer of sectors at each side: enough to follow the sun's lines through while the edges are still being made. */
-  nearlyWhole(): boolean {
-    return this.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] - 2))
+  nearlyWhole(): boolean { return this.wholeFrom() === 0 }
+
+  /**
+   * The finest box from which every box is whole but for a layer of sectors at each side, itself and all coarser
+   * (Infinity where the coarsest is not): the sun's lines through those can be followed while the finer boxes are
+   * still being made (sun.ts `plan`).
+   */
+  wholeFrom(): number {
+    let from = Infinity
+    for (let i = this.levels.length - 1; i >= 0; i--) {
+      const l = this.levels[i]
+      if (!l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] - 2)) break
+      from = i
+    }
+    return from
   }
 
   /** How high the contents of each column of a level's slots reach, and of each 4 x 4 columns, and of the whole box. */

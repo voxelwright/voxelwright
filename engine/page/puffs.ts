@@ -4,6 +4,72 @@
 // for the eye. What burns, and what that does to the world, is the core's (fire.rs).
 import { shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
+import { crashOpening } from './crash-opening.ts'
+import type { Piece } from './pieces.ts'
+import { deformPointCpu, type DeformState } from './deform.ts'
+
+type Point = [number, number, number]
+function rotate(point: Point, rotation: Piece['rot'], inverse = false): Point {
+  const [x, y, z, w] = rotation, [px, py, pz] = point
+  const tx = 2 * (y * pz - z * py), ty = 2 * (z * px - x * pz), tz = 2 * (x * py - y * px)
+  const spin = inverse ? -w : w
+  return [px + spin * tx + y * tz - z * ty, py + spin * ty + z * tx - x * tz, pz + spin * tz + x * ty - y * tx]
+}
+const vents = new WeakMap<Piece, { state: DeformState; revision: number; faces: Uint32Array; offset: Point }>()
+/** Find the grille, lamp or trim face nearest the front impact, then carry it with the car. */
+export function engineVent(piece: Piece, bonnet: readonly [number, number, number]): readonly [number, number, number] {
+  const state = piece.deform
+  if (!state?.dentCount || !piece.cell) return bonnet
+  const { faces, size, com } = piece.born
+  let vent = vents.get(piece)
+  if (vent?.state !== state || vent.revision !== state.revision || vent.faces !== faces) {
+    const toBonnet: Point = [bonnet[0] - piece.pos[0], bonnet[1] - piece.pos[1], bonnet[2] - piece.pos[2]]
+    const hood = rotate(toBonnet, piece.rot, true).map((v, i) => com[i] + v / piece.cell)
+    const front = state.front < 2 ? 0 : 2, across = 2 - front
+    const sign = state.front % 2 === 0 ? 1 : -1, nose = sign > 0 ? size[front] : 0
+    let beside = hood[across], deepest = -1
+    for (let i = 0; i < state.dentCount; i++) {
+      const dent = state.dents[i]
+      if (sign * (dent.center[front] - size[front] / 2) > 0 && dent.depth > deepest) {
+        beside = dent.center[across]
+        deepest = dent.depth
+      }
+    }
+    // A part without an opaque nose face vents over the front edge of its bounds.
+    let best = Infinity
+    let face: Point = [size[0] / 2, size[1], size[2] / 2]
+    face[front] = nose
+    face[across] = Math.max(0, Math.min(size[across], beside))
+    for (let i = 0; i < faces.length; i += 2) {
+      const start = faces[i], packed = faces[i + 1]
+      const axis = (packed >>> 8) & 3, side = (packed >>> 10) & 1, kind = packed >>> 16
+      if (axis !== front || side * 2 - 1 !== sign || (kind & 15) === 11) continue
+      const point: Point = [(start & 1023) + 0.5, ((start >>> 10) & 1023) + 0.5, ((start >>> 20) & 1023) + 0.5]
+      point[front] += side - 0.5
+      if (Math.abs(point[front] - nose) > size[front] * 0.24) continue
+      point[across] += Math.max(0, Math.min((packed & 255) - 1, beside - point[across]))
+      const paintPenalty = (kind & 128) ? 7 / piece.cell : 0
+      const distance = (point[across] - beside) ** 2 + 0.3 * (point[1] - hood[1]) ** 2 + (point[front] - nose) ** 2 + paintPenalty ** 2
+      if (distance < best) { best = distance; face = point }
+    }
+    // The flame, the missing outer skin and the recessed walls use the same mouth.
+    const large = state.hoodDamage >= 0.7, prior = piece.opening
+    const sameMouth = prior && prior.axis === front && prior.sign === sign && prior.large === large &&
+      prior.face.every((v, i) => v === face[i]) && prior.cabin.every((v, i) => v === state.cabin[i])
+    if (piece.skin && !sameMouth) {
+      piece.opening = crashOpening(piece.skin, size, piece.cell, face, front, sign, large, state.cabin)
+    }
+    const normal: Point = [0, 0, 0], offset: Point = [0, 0, 0]
+    normal[front] = sign
+    const root = piece.opening?.root
+    const bent = deformPointCpu(root ?? face, normal, state)
+    for (let i = 0; i < 3; i++) offset[i] = (bent.pos[i] - com[i]) * piece.cell + (root ? 0 : bent.norm[i] * 0.16)
+    vent = { state, revision: state.revision, faces, offset }
+    vents.set(piece, vent)
+  }
+  const offset = rotate(vent.offset, piece.rot)
+  return [piece.pos[0] + offset[0], piece.pos[1] + offset[1], piece.pos[2] + offset[2]]
+}
 
 const MOST = 3072
 /** A puff that lives longer than this many seconds is one of the first KEPT. */
@@ -24,7 +90,11 @@ const NEAR = 1.0;
 const FAR = 100000.0;
 @vertex fn vs(@builtin(vertex_index) v: u32, @location(0) at: vec4f, @location(1) colour: vec4f, @location(2) more: vec4f) -> Out {
   let corner = vec2f(f32(v & 1u), f32((v >> 1u) & 1u)) * 2.0 - 1.0;
-  let world = at.xyz - u.eye + (u.right * corner.x + u.up * corner.y) * at.w;
+  var world = at.xyz - u.eye + (u.right * corner.x + u.up * corner.y) * at.w;
+  if (more.w < 0.0) {
+    // Engine fire grows from the vent along world up, anchored at the bottom of the quad.
+    world = at.xyz - u.eye + u.right * corner.x * at.w + vec3f(0.0, (corner.y + 1.0) * at.w * 0.98, 0.0);
+  }
   let d = dot(world, u.forward);
   var out: Out;
   out.pos = vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
@@ -45,28 +115,61 @@ fn cloud(p: vec2f, seed: u32) -> f32 {
   let e = f * f * (3.0 - 2.0 * f);
   return mix(mix(lump(c, seed), lump(c + vec2i(1, 0), seed), e.x), mix(lump(c + vec2i(0, 1), seed), lump(c + vec2i(1, 1), seed), e.x), e.y);
 }
+fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
+  return cloud(uv * 2.2 + drift, seed) * 0.62 + cloud(uv * 4.8 + drift * 1.7, seed + 7u) * 0.38;
+}
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let heat = in.more.x;
   let age = in.more.z;
   let seed = u32(in.more.y);
-  // A puff is a soft ball whose edge is eaten by billows that drift up it as it ages. Things here are made of
-  // cells, but smoke is not a thing: drawn in squares it read as a picture of smoke, not smoke.
+  if (in.more.w < 0.0) {
+    let height = in.uv.y * 0.5 + 0.5;
+    let phase = -in.more.w;
+    let sway = height * (0.17 * sin(phase + height * 6.0) + 0.09 * sin(2.1 * phase - height * 4.0));
+    let foot = 0.20 + 0.80 * smoothstep(0.0, 0.22, height);
+    let width = foot * pow(1.0 - height, 0.68) * (0.67 + 0.11 * sin(phase * 1.4 + height * 9.0));
+    let edge = abs(in.uv.x - sway) / max(width, 0.005);
+    let main = (1.0 - smoothstep(0.42, 1.0, edge)) * (1.0 - smoothstep(0.85, 1.0, height));
+    let forkHeight = 0.68 + 0.09 * sin(phase * 0.76);
+    let forkWidth = foot * 0.35 * max(0.0, 1.0 - height / forkHeight);
+    let forkEdge = abs(in.uv.x + foot * (0.34 + 0.13 * sin(phase - height*8.0))) / max(0.005, forkWidth);
+    let tongue = max(main, (1.0 - smoothstep(0.3, 1.0, forkEdge)) * (1.0 - smoothstep(forkHeight-0.16, forkHeight, height)));
+    let core = (1.0 - smoothstep(0.04, 0.64, edge)) * (1.0 - smoothstep(0.12, 0.68, height));
+    let colour = mix(vec3f(0.93, 0.19, 0.02), vec3f(1.0, 0.73, 0.22), core);
+    return vec4f(colour * tongue, tongue * 0.44);
+  }
+  // A puff is a sculpted curling billow lit with warm sunlight on its sunward folds and cool sky
+  // fill in its shadowed undersides, so smoke reads with 3D volume instead of a flat grey smudge.
   let r = length(in.uv);
   if (r >= 1.0) { discard; }
-  let drift = vec2f(f32(seed & 15u), age * 2.2 + f32((seed >> 4u) & 15u));
-  let billow = cloud(in.uv * 2.1 + drift, seed) * 0.62 + cloud(in.uv * 4.6 + drift * 1.7, seed + 7u) * 0.38;
-  let body = smoothstep(1.0, 0.3, r + (billow - 0.5) * 0.85) * (1.0 - r * r * r);
+  let drift = vec2f(f32(seed & 15u), age * 2.4 + f32((seed >> 4u) & 15u));
+  let billow = billowAt(in.uv, drift, seed);
+  let body = (1.0 - smoothstep(0.42, 0.96, r + (billow - 0.5) * 0.82)) * (1.0 - r * r * r);
   if (body <= 0.004) { discard; }
   // The smoke a blast leaves comes late (more.w): it shows as the ball of fire goes out, not in front of it.
   let fade = smoothstep(in.more.w, in.more.w + 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
   // While it burns it is fire and not smoke: its smoke shows as it cools. Covered by its own smoke from the first, a
   // ball of fire was a dark smudge with a little orange a third of a second after it went off.
   let cover = in.colour.a * body * fade * (1.0 - 0.92 * smoothstep(0.05, 0.6, heat));
-  // Smoke is lit as the ball it is: bright on the sun's side and on top, dark underneath and in its folds.
-  let round = vec3f(in.uv.x, -in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
+  // Directional billow self-shadowing: sample slightly toward the sun in screen space so each lobe
+  // has a bright sunlit crest and a cool shadowed underside matching the world's daylight.
+  let round = vec3f(in.uv.x, in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
   let towards = vec3f(dot(u.sun, u.right), dot(u.sun, u.up), -dot(u.sun, u.forward));
-  let lit = 0.42 + 0.5 * max(dot(round, towards), 0.0) + 0.16 * round.y + (billow - 0.5) * 0.5;
-  let smoke = in.colour.rgb * clamp(lit, 0.18, 1.35) * mix(0.07, 1.0, u.day);
+  let sunStep = normalize(towards.xy + vec2f(0.001, 0.001)) * 0.14;
+  let billowSun = billowAt(in.uv + sunStep, drift, seed);
+  let foldRelief = clamp((billow - billowSun) * 2.2, -0.45, 0.65);
+  let sunFace = clamp(dot(round, towards) * 0.65 + 0.35 + foldRelief * 0.55, 0.0, 1.25);
+  let topLight = 0.5 + 0.5 * round.y;
+  let rim = pow(1.0 - max(round.z, 0.0), 2.2) * (0.25 + 0.55 * max(dot(towards, vec3f(0.0, 0.0, 1.0)), 0.0));
+  // Pale steam scatters light internally (never dark grey in its core); dark oil smoke keeps deep shadowed undersides.
+  let lum = dot(in.colour.rgb, vec3f(0.333));
+  let scatter = smoothstep(0.45, 0.82, lum);
+  let shadowTint = mix(mix(vec3f(0.16, 0.20, 0.28), vec3f(0.30, 0.37, 0.48), topLight), vec3f(0.52, 0.56, 0.62), scatter * 0.65);
+  let sunTint = vec3f(0.76, 0.72, 0.64) * (sunFace * 0.82 + rim * 0.26);
+  let lightCol = (shadowTint + sunTint) * mix(0.08, 1.0, u.day);
+  // Keep non-emissive smoke strictly below glow.ts's 0.80 bloom threshold so bright steam never blooms into a glowing orb.
+  let rawSmoke = in.colour.rgb * lightCol;
+  let smoke = rawSmoke / (vec3f(1.0) + rawSmoke * 0.62);
   // Fire: white-yellow at its heart and when hottest, then yellow, orange for most of its life, and a dull red only
   // as it goes out. Blue-white plasma flame for nitrous boost when colour encodes cool blue with zero smoke cover.
   let core = body * body;
@@ -119,7 +222,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' },
   })
   const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const instances = device.createBuffer({ size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+  const instances = device.createBuffer({ label: 'puff instances', size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
   // Where each is in the world (as doubles: the world is big), how it moves, and how it changes as it ages.
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3)
@@ -127,7 +230,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
   const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST)
   const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
-  let next = 0, lasting = 0, live = 0
+  let next = 0, lasting = 0, live = 0, flamePhase = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
@@ -265,29 +368,41 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       late[j] = 0
     },
     crash(at, strength) {
-      for (let k = Math.round(2 + strength * 3); k > 0; k--) {
-        const pale = rnd(0.5, 0.62)
-        puff(at, 2, rnd(8, 20) * (0.5 + strength), rnd(3, 8), { size: rnd(1.5, 3), grow: rnd(3, 5), life: rnd(1.2, 2.2), heat: 0, cool: 0, rise: 3, drag: 2.4, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.3 })
+      for (let k = Math.round(3 + strength * 4); k > 0; k--) {
+        const pale = rnd(0.54, 0.68)
+        puff(at, 1.6, rnd(10, 24) * (0.5 + strength), rnd(3, 9), { size: rnd(1.3, 2.5), grow: rnd(2.8, 4.6), life: rnd(1.0, 1.8), heat: 0, cool: 0, rise: 4, drag: 2.6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.36 })
       }
     },
     engine(at, level, dt) {
+      // Start in the open socket and let each puff fan out as it rises.
       if (level < 0.7) {
-        // Steam: thin and white, gone within a second or two; more of it the worse the damage.
-        if (Math.random() < dt * (4 + 10 * (level - 0.35) / 0.35)) puff(at, 1.5, rnd(1, 4), rnd(8, 16), { size: rnd(1.4, 2.4), grow: rnd(4, 7), life: rnd(0.9, 1.6), heat: 0, cool: 0, rise: 12, drag: 1.8, colour: [0.9, 0.92, 0.94], cover: 0.26 })
+        const frac = (level - 0.35) / 0.35
+        if (Math.random() < dt * (14 + 12 * frac)) {
+          const w = rnd(0.84, 0.95)
+          puff(at, 0, rnd(0.6, 1.7), rnd(12, 18), { size: rnd(0.37, 0.59), grow: rnd(2.6, 3.5), life: rnd(0.95, 1.5), heat: 0, cool: 0, rise: 15, drag: 1.5, colour: [w, w * 1.01, Math.min(0.97, w * 1.02)], cover: 0.19 + 0.06 * frac, late: 0.22 })
+        }
         return
       }
-      if (Math.random() < dt * 9) {
-        const grey = rnd(0.1, 0.2)
-        // (Quick to climb and thin: from the seat a thick slow plume sat over the road ahead.)
-        puff(at, 1.8, rnd(1, 4), rnd(16, 26), { size: rnd(1.6, 2.8), grow: rnd(5, 8), life: rnd(1.4, 2.4), heat: 0, cool: 0, rise: 24, drag: 1.2, colour: [grey, grey, grey * 1.02], cover: 0.32 })
+      // A few lighter wisps mix with the darker engine smoke.
+      if (Math.random() < dt * 15) {
+        const wisp = rnd(0.68, 0.79)
+        puff(at, 0, rnd(0.7, 1.9), rnd(9, 15), { size: rnd(0.55, 0.85), grow: rnd(1.9, 2.9), life: rnd(1.05, 1.6), heat: 0, cool: 0, rise: 16, drag: 1.45, colour: [wisp, wisp, wisp * 1.02], cover: 0.18, late: 0.12 })
       }
-      // Burning: tongues of flame in the smoke, small (a blast's fire is bigger).
-      if (level > 0.92 && Math.random() < dt * 10) puff(at, 1.2, rnd(1, 3), rnd(14, 28), { size: rnd(1.2, 2.4), grow: rnd(1, 2.5), life: rnd(0.3, 0.6), heat: 0.66, cool: rnd(1, 1.5), rise: 50, drag: 1.5, colour: [0.05, 0.045, 0.04], cover: 0.25 })
+      // Oil smoke rises from the same opening and expands as it cools.
+      if (Math.random() < dt * 10) {
+        const grey = rnd(0.30, 0.43)
+        puff(at, 0, rnd(0.8, 2.1), rnd(12, 16), { size: rnd(0.65, 0.85), grow: rnd(2.8, 4.4), life: rnd(1.35, 1.9), heat: 0, cool: 0, rise: 18, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.22, late: 0.10 })
+      }
+      // Redraw one attached flame while the engine burns. Smoke alone drifts away.
+      if (level > 0.92) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
     },
     step(dt) {
+      flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)
       live = 0
       for (let i = 0; i < MOST; i++) {
         if (life[i] <= 0) continue
+        // An attached flame lives for this draw only, including at a paused simulation rate.
+        if (late[i] < 0) { if (--life[i] > 0) live++; continue }
         life[i] -= dt
         live++
         const slow = Math.max(0, 1 - drag[i] * dt)

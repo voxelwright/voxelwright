@@ -19,6 +19,12 @@
 // pie is not whole and in the middle of the safe area or shows the tool twice, and where the body is
 // so placed that the stick has no room where the left thumb rests.
 // The realm's old controls (`classic`) are measured and said, not failed: they are what the owner asked to change.
+// With the wheel (#75) it also fails where the first view's keys are not slim voxel keys, where the Settings panel is not
+// in its sections or any two of its controls meet (in the first view and in play), where the gameplay HUD has a Back key
+// of its own or the driving keys a Seat key, and where the Make bar opened does not go away again (its × key, a press on
+// the picture, Escape), the input given back to the world and the keys of play shown again.
+// Street life is switched off for it (`engine.street.enabled`, kept off as the first view is left): a car that stops
+// beside the body offers E to take it over the body, and took the E that opens the wheel.
 // A picture with the boxes drawn on (red the body, green what is over the picture) is kept beside each, in `boxes/`.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -50,6 +56,41 @@ const reduced = has('reduced'), less = reduced ? { reducedMotion: 'reduce' } : {
 const SIZES = { wide: { viewport: { width: 1280, height: 720 }, ...less }, phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, ...less }, side: { viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, ...less } }
 const until = (page, what, ms = 60_000) => page.waitForFunction(what, null, { timeout: ms }).then(() => true, () => false)
 
+/** The Settings panel (#75): its sections there, in order, and no two of its controls meeting, nor any outside the panel or the screen. */
+const panelLaid = (page) => page.evaluate(() => {
+  const sky = document.querySelector('#realm .sky'), seen = (el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2
+  const parts = [...sky.querySelectorAll(':scope > .part')].filter((p) => getComputedStyle(p).display !== 'none' && [...p.children].some(seen)).map((p) => p.classList[1])
+  const ctl = [...sky.querySelectorAll('header, .vx-toggle-group > label, .vx-slider, .res-auto, .foot > .vx-button')].filter(seen)
+  const box = (el) => el.getBoundingClientRect(), p = box(sky), name = (el) => (el.textContent.trim() || el.className).slice(0, 24)
+  const meet = [], out = []
+  for (let i = 0; i < ctl.length; i++) {
+    const a = box(ctl[i])
+    if (a.left < p.left - 0.5 || a.right > p.right + 0.5 || a.top < p.top - 0.5 || a.bottom > p.bottom + 0.5 || a.right > innerWidth || a.bottom > innerHeight) out.push(name(ctl[i]))
+    for (let j = i + 1; j < ctl.length; j++) { const b = box(ctl[j]); if (ctl[i].contains(ctl[j]) || ctl[j].contains(ctl[i])) continue; if (a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5) meet.push(`${name(ctl[i])} on ${name(ctl[j])}`) }
+  }
+  return { parts, controls: ctl.length, meet, out, bottom: Math.round(p.bottom), height: innerHeight }
+})
+/** Whether a kit control is built in the slim look: its look, its voxels drawn, and its low cap (3 courses, SPEC). */
+const slimKey = (page, sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el) return null; const cs = getComputedStyle(el), cv = el.querySelector(':scope > .vx-canvas'); return { look: cs.getPropertyValue('--vx-look').trim(), live: el.hasAttribute('data-vx-live') && !!cv?.checkVisibility(), faceZ: Number(el.style.getPropertyValue('--vx-face-z')) } }, sel)
+/** The first view, before going in (default only): its keys in the slim look, and its Settings panel in sections with no control on another. */
+const firstView = async (page, phone) => {
+  await page.waitForFunction(() => document.querySelector('#first .credits')?.hasAttribute('data-vx-live') && document.querySelector('#realm .fold')?.hasAttribute('data-vx-live'), null, { timeout: 30_000 }).catch(() => {})
+  await page.waitForTimeout(800)
+  for (const [what, sel] of [['the credits key', '#first .credits'], ['the settings key', '#realm .fold']]) {
+    const k = await slimKey(page, sel)
+    check(!!k && k.look === 'slim' && k.live && k.faceZ > 0 && k.faceZ <= 3, `first view: ${what} is a slim voxel key (${JSON.stringify(k)})`)
+  }
+  const r = await page.evaluate(() => { const b = document.querySelector('#realm .fold').getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2] })
+  if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
+  await page.waitForTimeout(700)
+  const laid = await panelLaid(page)
+  check(laid.parts.slice(0, 2).join() === 'world,gfx' && !laid.parts.includes('acts') && laid.meet.length === 0 && laid.out.length === 0, `first view: the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
+  const panel = await slimKey(page, '#realm .sky')
+  check(panel?.look === 'slim' && panel.live && panel.faceZ > 0 && panel.faceZ <= 4, `first view: the Settings panel is built in the slim look, a low enclosure (${JSON.stringify(panel)})`)
+  await page.screenshot({ path: join(shots, `default-first-sky-${NAMED[phone ? (page.viewportSize().width > page.viewportSize().height ? 'side' : 'phone') : 'wide']}.png`) })
+  if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1])
+  await page.waitForTimeout(400)
+}
 /** The body's box and every box over the picture that meets it or the safe area (CSS px). */
 const measure = (page, safe) => page.evaluate((safe) => {
   const e = globalThis.engine, body = e.playHud.body(), parts = e.playHud.parts(), vw = innerWidth, vh = innerHeight
@@ -82,7 +123,7 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
   // Controls against each other, by their visible bounds (including voxel overhang only where a voxel canvas is drawn).
   const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, cv = el.hasAttribute('data-vx-live') ? el.querySelector(':scope > .vx-canvas') : null, live = !!cv && cv.checkVisibility({ visibilityProperty: true, opacityProperty: true }), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .home-key, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -118,7 +159,9 @@ try {
       // (The page with no switch has the wheel.)
       const wheel = mode === 'default' || mode === 'wheel'
       await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.explore && globalThis.engine.playHud, null, { timeout: 300_000 })
-      await page.evaluate(() => { globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
+      if (mode === 'default') await firstView(page, phone)
+      // (Off, and kept off: leaving the first view wakes street life, main.ts `leaveLanding`.)
+      await page.evaluate(() => { const st = globalThis.engine.street; if (st) { st.enabled = false; Object.defineProperty(st, 'enabled', { get: () => false, set() {}, configurable: true }) } globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
       const inside = await until(page, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 90_000)
       check(inside, 'on the roof, the eye behind the body')
       const gate = mode !== 'classic', at = {}
@@ -186,8 +229,10 @@ try {
         })
         check(shown.afoot.length === 0, `${scheme}: the keys of one on foot are not shown while riding${shown.afoot.length ? ` (${shown.afoot.join(', ')})` : ''}`)
         if (phone) {
-          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'boost', 'horn', 'cam', 'radio', 'seat', 'leave'], acts = shown.keys.map((k) => k.act)
+          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'boost', 'horn', 'cam', 'radio', 'leave'], acts = shown.keys.map((k) => k.act)
           check(want.every((a) => acts.includes(a)), `${scheme}: the thing's keys are shown (${acts.join(', ')})`)
+          // (Driving, Cam goes round the views, the seat among them, #74/#75: no Seat key of its own.)
+          if (scheme === 'drive') check(!acts.includes('seat'), `drive: no Seat key beside Cam (${acts.join(', ')})`)
           const bad = shown.keys.filter((k) => !k.reached || k.w < 44 || k.h < 44)
           check(bad.length === 0, `${scheme}: each of its keys is 44 px a side or more, and a touch at its middle reaches it${bad.length ? `: not ${bad.map((k) => `${k.act} ${k.w}x${k.h}${k.reached ? '' : ' (under something)'}`).join(', ')}` : ''}`)
           check(shown.keys.every((k) => k.kit), `${scheme}: its keys are live Voxelmorphism controls`, gate)
@@ -199,12 +244,14 @@ try {
             check(opened, 'tapping Radio opens the media picker')
             if (opened) await page.locator('#radio-picker .rp-close').tap()
           }
-          await tap('seat')
-          const inSeat = await page.evaluate(() => globalThis.engine.alive.inside)
-          if (scheme === 'drive') await look('ride-seat', 'riding, the eye in the seat', false, true)
-          await tap('seat')
-          const behind = await page.evaluate(() => !globalThis.engine.alive.inside)
-          check(inSeat && behind, `${scheme}: Seat puts the eye in the seat, and again behind (${inSeat}, ${behind})`)
+          if (scheme === 'hover') {
+            await tap('seat')
+            const inSeat = await page.evaluate(() => globalThis.engine.alive.inside)
+            await look('ride-seat', 'riding, the eye in the seat', false, true)
+            await tap('seat')
+            const behind = await page.evaluate(() => !globalThis.engine.alive.inside)
+            check(inSeat && behind, `${scheme}: Seat puts the eye in the seat, and again behind (${inSeat}, ${behind})`)
+          }
           await tap('leave')
         } else {
           check(shown.keys.length === 0 && shown.card, `${scheme}: on a desk the card says the keys, and no keys are shown`)
@@ -240,8 +287,8 @@ try {
         // By touch, the keys are sized by the touch guidance (game-hud rule 16): 44 px a side or more to hit, and no larger
         // than a key needs (Use 64, the others 48 tall). Main's wheel had Use at 84 and Jump and Fly at 76 by 52.
         if (phone) {
-          const sized = await page.evaluate(() => Object.fromEntries(Object.entries({ use: '#realm .act .use', up: '#realm .act .up', walks: '#realm .act .walks', tool: '#realm .toolkey', sky: '#realm .fold', credits: '#first .credits', wand: '[data-panel="wand-take"] button', back: '#realm .home-key' }).map(([k, sel]) => { const el = document.querySelector(sel), r = el?.getBoundingClientRect(); return [k, r && el.checkVisibility() ? [Math.round(r.width), Math.round(r.height)] : null] })))
-          const most = { use: [64, 64], up: [72, 48], walks: [72, 48], tool: [120, 48], sky: [80, 48], credits: [120, 48], wand: [120, 48], back: [120, 48] }
+          const sized = await page.evaluate(() => Object.fromEntries(Object.entries({ use: '#realm .act .use', up: '#realm .act .up', walks: '#realm .act .walks', tool: '#realm .toolkey', sky: '#realm .fold', credits: '#first .credits', wand: '[data-panel="wand-take"] button' }).map(([k, sel]) => { const el = document.querySelector(sel), r = el?.getBoundingClientRect(); return [k, r && el.checkVisibility() ? [Math.round(r.width), Math.round(r.height)] : null] })))
+          const most = { use: [64, 64], up: [72, 48], walks: [72, 48], tool: [120, 48], sky: [80, 48], credits: [120, 48], wand: [120, 48] }
           const wrong = Object.entries(sized).filter(([k, b]) => b && (b[0] < 44 || b[1] < 44 || b[0] > most[k][0] || b[1] > most[k][1])).map(([k]) => k)
           check(wrong.length === 0 && !!sized.use && !!sized.up && !!sized.walks, `the keys are 44 px a side or more and no larger than they need${wrong.length ? `: not ${wrong.join(', ')}` : ''} (${Object.entries(sized).filter(([, b]) => b).map(([k, b]) => `${k} ${b.join('x')}`).join(', ')})`)
         }
@@ -257,6 +304,29 @@ try {
         // Credits stays on the first view and inside Settings rather than cluttering gameplay corners.
         const creditsInPlay = await page.evaluate(() => !!document.querySelector('#first .corner')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
         check(!creditsInPlay, 'Credits corner does not clutter active gameplay')
+        // No Back key of its own over the picture (#75): Back to the view is in the Settings panel.
+        check(await page.evaluate(() => !document.querySelector('#realm .home-key, #realm > button.home')), 'the gameplay HUD has no Back key of its own')
+      }
+      // The Make bar (#75): opened by its key, it goes away again by its × key, a press on the picture and Escape, each time
+      // giving the keys back to the world (no line being typed on) and the keys of play shown again.
+      if (wheel) {
+        const playing = () => page.evaluate((phone) => ({ open: !!document.querySelector('#ask')?.classList.contains('open'), typing: !globalThis.engine.input.live('moving'), keys: !!document.querySelector(phone ? '#realm .act .use' : '#realm .held')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), trigger: !!document.querySelector('#ask-row')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }) }), phone)
+        const press = async (x, y) => { if (phone) await page.touchscreen.tap(x, y); else await page.mouse.click(x, y); await page.waitForTimeout(400) }
+        const at = (sel) => page.evaluate((sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b && b.width ? [b.left + b.width / 2, b.top + b.height / 2] : null }, sel)
+        const tool = await page.evaluate(() => globalThis.engine.tool)
+        for (const how of ['×', 'a press on the picture', 'Escape']) {
+          const k = await at('#ask-row')
+          if (k) await press(...k)
+          const opened = await playing()
+          const close = await at('#ask-close')
+          if (how === '×' && close) await press(...close)
+          else if (how === 'Escape') { await page.keyboard.press('Escape'); await page.waitForTimeout(300) }
+          else await press(vw / 2, vh * 0.3)
+          const after = await playing(), still = await page.evaluate(() => ({ tool: globalThis.engine.tool, riding: !!globalThis.engine.alive.riding, choosing: globalThis.engine.playHud.choosing }))
+          check(opened.open && opened.typing && (!phone || !opened.keys) && !!close && !after.open && !after.typing && after.keys && after.trigger && still.tool === tool && !still.riding && !still.choosing, `the Make bar opens and ${how} puts it away, the keys of play back (${JSON.stringify({ opened, after })})`)
+          if (how === '×') await look('ask-closed', 'the Make bar put away')
+        }
+        if (!phone) await page.evaluate(() => document.exitPointerLock())
       }
       // Choosing a tool: E (by touch the tool's key) as a person would; the default has its bank.
       if (mode !== 'classic') {
@@ -460,6 +530,8 @@ try {
         const press = async (sel) => { const r = await page.evaluate((sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b && b.width > 0 ? [b.left + b.width / 2, b.top + b.height / 2] : null }, sel); if (!r) return false; if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1]); await page.waitForTimeout(400); return true }
         const opened = await press('#realm .fold')
         await look('sky', 'the Sky panel open', true)
+        const laid = await panelLaid(page)
+        check(laid.parts.join() === 'world,gfx,res,acts' && laid.meet.length === 0 && laid.out.length === 0, `in play the Settings panel is in its sections (${laid.parts.join(', ')}), ${laid.controls} controls, none on another${laid.meet.length ? `: ${laid.meet.join('; ')}` : ''}${laid.out.length ? `, outside: ${laid.out.join(', ')}` : ''}`)
         const keys = await page.evaluate(() => ({
           say: !!document.querySelector('#realm .sky .say')?.checkVisibility(),
           graphics: [...document.querySelectorAll('#realm .sky input[name=realm-graphics]')].map((el) => el.value),
@@ -506,16 +578,19 @@ try {
         await page.evaluate(() => globalThis.engine.eggs.undo())
         if (!phone) await page.evaluate(() => globalThis.engine.realmControls.fold(true))
       }
-      // Back to the view, by touch with the wheel: a key of its own (in the Sky panel it is two taps deep). One tap goes
-      // back, and the first view has its credits key (the wheel had put it away in play, play-hud.ts `away`).
+      // Back to the view, by touch: from the Settings panel (the HUD has no key of its own for it, #75). One tap on the gear
+      // and one on Back go back, and the first view has its credits key (the wheel had put it away in play, play-hud.ts `away`).
       if (mode === 'default' && phone) {
-        const key = await page.evaluate(() => { const el = document.querySelector('#realm .home-key'), r = el?.getBoundingClientRect(); return el && r && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) ? [r.left + r.width / 2, r.top + r.height / 2] : null })
-        check(!!key, 'by touch the wheel has a key back to the view')
+        const at = (sel) => page.evaluate((sel) => { const el = document.querySelector(sel), r = el?.getBoundingClientRect(); return el && r && r.width && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) ? [r.left + r.width / 2, r.top + r.height / 2] : null }, sel)
+        const gear = await at('#realm .fold')
+        if (gear) { await page.touchscreen.tap(...gear); await page.waitForTimeout(500) }
+        const key = await at('#realm .sky .home')
+        check(!!key, 'by touch the Settings panel has Back to the view')
         if (key) {
-          await page.touchscreen.tap(key[0], key[1])
+          await page.touchscreen.tap(...key)
           const backed = await until(page, () => !globalThis.engine.first.engaged && document.documentElement.classList.contains('first') && globalThis.engine.explore.state !== 'leaving', 20_000)
-          const after = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state, key: !!document.querySelector('#realm .home-key')?.checkVisibility() }))
-          check(backed && after.credits && !after.key, `one tap on it goes back to the view, the credits key there and the key gone (${JSON.stringify(after)})`)
+          const after = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state }))
+          check(backed && after.credits, `Back to the view in the panel goes back to the view, the credits key there (${JSON.stringify(after)})`)
         }
       }
       // A preset and resolution setting chosen are there again when the page is opened again (once: a load is long), and an address's ?shadows=0 is kept over it.

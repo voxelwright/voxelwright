@@ -14,9 +14,22 @@ The faces ship in the release as its `far` section and `.far` objects. Their for
 
 `pack.mjs` gives each place one owner. Inside the wedge the wedge's faces win; a tile the wedge holds only in part takes each face by where its middle is. Lidar faces are left out wherever a landmark rule owns the place.
 
+Mapped lagoons can sit at the same elevation as the Bay. The square baker labels their low surfaces and islands `ground-inland`, so the packer preserves them when it filters open sea. The baker merges faces only within the output block. It reads the adjacent cells when calculating a bank’s exposed height. Run `~/.village/engine/landing/ina/venv/bin/python engine/sf/far/test_blocks.py` from the repository root to check that a flat pond and bank remain continuous across block edges. The Palace lagoon and both islands are sampled in the packaged release by `engine/sf/check_water.py`.
+
+### Past the survey
+
+The faces cover only the 155 surveyed squares and the landmarks. The land past them, such as the Marin Headlands behind the Golden Gate and the East Bay, stays the cells' to draw, from the planet's tiles:
+
+- Coarse terrain streams after the first view. The ray marcher defers to distant geometry only in fully surveyed tiles whose required faces have arrived. It continues past a covered cell so it can hit a hill or a player edit farther along the ray.
+- The packer checks the union of the actual square footprints before adding a tile to `ground`. At a partial edge, after a failed fetch or with an older listing, the cells continue to supply the ground. The four landmark-only Golden Gate tiles retain their Marin hillside underneath the bridge.
+
+`node test/far-ground.mjs [--far <manifest.json>]` checks both, without a GPU.
+
 In the wedge, faces begin 100 m from the eye instead of 500 m, but only through a lens narrower than 50 degrees. That is where the first view's 25 degree lens makes each cell 3 to 7 pixels across, and the wedge's finer faces look better. The listing's `wedge` says where it is. Cut the first view (`landing.mjs`) with `--reach 100` so its first picture has that foreground.
 
 The wedge's colours were fitted under the photograph's light (`landing/ina/light.json`). The listing's `light` carries it, and `far.ts` uses it only inside the wedge through a narrow lens, which is all the photograph vouches for. Faces take the march's fog as cells do.
+
+The Transamerica Pyramid uses the DataSF footprint and the lidar surface. Its regular daylight material follows the white quartz concrete and aluminium louvres documented by San Francisco. As the viewer approaches the photograph’s eye and lens in fair weather, its fitted face colours blend into the daylight finish. The aluminium spire has no office window bands. The same footprint selects the wall colour and sloping roof tint in the near square’s appearance pass. [SF landmark record](https://media.api.sf.gov/documents/r0246-26.pdf)
 
 ### Trees
 
@@ -34,6 +47,8 @@ node sf/far/coverage.mjs             # how many lidar squares are archived, bake
 node sf/build.mjs                    # the static realm, with the far model
 node sf/far/check.mjs                # four views: the park beside the photograph, downtown, the Pyramid, a street
 node sf/far/check.mjs --only park    # one view
+node sf/far/check-pyramid.mjs /path/to/release  # trace the registered skyline camera against packed faces
+python sf/check_pyramid.py /path/to/landmark-shots  # compare quartz, aluminium and a shaded wall in the 14:00 PNG
 ```
 
 Baked blocks go to `~/.village/engine/sf/far/squares/<square>/`, the packed listing and tiles to `~/.village/engine/sf/far/release/`, and pictures to `~/.village/engine/sf/far/shots/`. The Python tools use the Ina venv, `~/.village/engine/landing/ina/venv/bin/python`.
@@ -69,4 +84,4 @@ To put new far tiles or a new first-view cut into a release, restock it ([releas
 | `?farlanding=URL` | | A first-view cut's listing, for a release without one |
 | `?farcutfit=` | 1.6 | How much taller than its tallest picture the first-view cut is still trusted |
 
-The two-metre ground cells use the same inland shorelines as the near bake. A mapped island keeps its own ground colour. The source signature includes the water geometry for the square, so a changed shore invalidates its distant ground.
+The two-metre ground cells use the same inland shorelines as the near bake. A mapped island keeps its own ground colour. The source signature includes the water geometry and any measured pond levels. The packaged water check reads the elevation of actual FAR1 faces and all four near-ground samples at two points in each levelled pond.

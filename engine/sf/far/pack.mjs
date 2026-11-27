@@ -55,6 +55,13 @@ const blocks = []
 const meta = { styles: null, sun: null, light: null, credits: [] }
 const read = (dir, owner) => {
   const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8'))
+  let footprint = null
+  if (owner === 'squares' && typeof index.square === 'string') {
+    // bake.py owns exactly this kilometre, regardless of the padding and face bounds in its blocks.
+    const [e, n] = index.square.split('_').map(Number)
+    const x = Math.round(e * 10000) - E0 * 10, z = N0 * 10 - Math.round(n * 10000)
+    if (Number.isFinite(x) && Number.isFinite(z)) footprint = [x, z - 10000, x + 10000, z]
+  }
   const turn = ((index.turn ?? 0) * Math.PI) / 180
   for (const b of index.blocks) {
     const c0 = b.c0 ?? [Math.cos(turn), 0, -Math.sin(turn)], c2 = b.c2 ?? [Math.sin(turn), 0, Math.cos(turn)], st = statSync(join(dir, b.file))
@@ -63,7 +70,7 @@ const read = (dir, owner) => {
     const tiles = []
     if (b.tile) tiles.push(b.tile)
     else for (let x = Math.floor(Math.min(...xs) / SIZE); x <= Math.floor(Math.max(...xs) / SIZE); x++) for (let z = Math.floor(Math.min(...zs) / SIZE); z <= Math.floor(Math.max(...zs) / SIZE); z++) tiles.push(`${x}_${z}`)
-    blocks.push({ owner, path: join(dir, b.file), faces: b.faces, layer: b.layer, frame: { pos: b.pos, cell: b.cell, c0, c2, uw: b.uw ?? [0, 0] }, tiles, sign: `${dir}/${b.file}:${st.size}:${Math.round(st.mtimeMs)}` })
+    blocks.push({ owner, footprint, path: join(dir, b.file), faces: b.faces, layer: b.layer, frame: { pos: b.pos, cell: b.cell, c0, c2, uw: b.uw ?? [0, 0] }, tiles, sign: `${dir}/${b.file}:${st.size}:${Math.round(st.mtimeMs)}` })
   }
   meta.styles ??= index.styles
   if (owner === 'place') { meta.sun = index.sun; meta.light = index.light ?? null }
@@ -87,7 +94,12 @@ const stands = (heroes?.stands ?? []).map((h) => {
   return { ...h, cos: c, sin: sn, lo: [Math.min(...xs), Math.min(...zs)], hi: [Math.max(...xs), Math.max(...zs)] }
 })
 /** Whether a landmark's rule owns the place at (x, z), in cells. */
-const ruled = (x, z) => stands.some((h) => x >= h.lo[0] && x <= h.hi[0] && z >= h.lo[1] && z <= h.hi[1] && (() => { const dx = x - h.at[0], dz = z - h.at[1]; return core.hero_owns(h.sort, (dx * h.cos + dz * h.sin) * 0.1, (dz * h.cos - dx * h.sin) * 0.1) === 1 })())
+const ruled = (x, z, tree) => stands.some((h) => {
+  if (x < h.lo[0] || x > h.hi[0] || z < h.lo[1] || z > h.hi[1]) return false
+  const dx = x - h.at[0], dz = z - h.at[1]
+  const u = (dx * h.cos + dz * h.sin) * 0.1, w = (dz * h.cos - dx * h.sin) * 0.1
+  return core.hero_owns(h.sort, u, w) || (tree && core.hero_owns_tree(h.sort, u, w))
+})
 /** The tiles a landmark's box reaches: packed again when the rules change. */
 const ruledTiles = new Set(stands.flatMap((h) => { const t = []; for (let x = Math.floor(h.lo[0] / SIZE); x <= Math.floor(h.hi[0] / SIZE); x++) for (let z = Math.floor(h.lo[1] / SIZE); z <= Math.floor(h.hi[1] / SIZE); z++) t.push(`${x}_${z}`); return t }))
 
@@ -170,12 +182,17 @@ for (let at = 0; at < todo.length; at += BATCH) {
       // Where the place and the squares share a tile, a face whose middle is in the wedge is the place's, else the squares'
       // (the place's land past the lidar is out of the wedge).
       if (owner.get(key) === 'both' && b.owner !== 'hero' && (b.owner === 'place') !== inWedge(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
-      // Under a landmark whose rule owns its place, the lidar's columns of it are not drawn (its ground is), nor is
-      // anything else but a rule's own faces (the wedge's landmarks are layer 'hero' too).
-      if (b.owner !== 'hero' && b.layer !== 'hero' && !b.layer.startsWith('ground') && ruledTiles.has(key) && ruled(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
+      // Keep the ground and each hero's own faces. A palm replaces only surveyed tree faces in its footprint.
+      if (b.owner !== 'hero' && b.layer !== 'hero' && !b.layer.startsWith('ground') && ruledTiles.has(key)) {
+        // bake.py puts the crown in far-crown0 and the trunk in far (bark RGB 84,66,48, no building ID).
+        const tree = b.layer === 'far-crown0' || (b.layer === 'far' && !w[f * 5 + 4] && (w[f * 5 + 3] & 0xffffff) === 0x544230)
+        const x = pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2
+        const z = pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2
+        if (ruled(x, z, tree)) continue
+      }
       // The sea is the march's to draw: bare ground no higher than a metre over it is where the lidar had a return off
       // the water (matte.py and bake.py take that for land), and it drew grey bands across the Bay.
-      if (b.layer.startsWith('ground') && pos[1] + e.y1 <= 10) continue
+      if (b.layer.startsWith('ground') && b.layer !== 'ground-inland' && pos[1] + e.y1 <= 10) continue
       // A landmark's faces are drawn as far as its tile is: a lattice tower 300 m tall is made of thin bars, each one
       // under a pixel from across the city, that together are what one sees of it.
       const size = b.owner === 'hero' ? LODS[0] : sizeOf(e, cell), band = BANDS.findIndex((least) => size >= least)
@@ -245,6 +262,19 @@ listing.credit = [...new Set(meta.credits.flatMap((c) => c.split('; ')))].join('
 // The light the place's colours were fitted under (#423's light.json), for page/far.ts to draw every face in.
 if (meta.light) listing.light = meta.light
 if (blocks.some((b) => b.owner === 'place')) listing.wedge = { at: [Math.round((we - E0) * 10), Math.round((N0 - wn) * 10)], from: wfrom, to: wto, far: wfar }
+// The tiles that hold only landmarks' faces (no square's nor the place's): page/far.ts draws them over the cells and
+// leaves their ground to the cells (#60: the Golden Gate's Marin end is past the survey).
+const landmarks = Object.keys(listing.tiles).filter((key) => owner.get(key) === 'hero').sort()
+if (landmarks.length) listing.landmarks = landmarks
+// Check the union of all source squares, including tiles split across a square seam. The wedge or a
+// single face in a tile supplies no such guarantee. A partial tile keeps its coarse cells.
+listing.ground = Object.keys(listing.tiles).filter((key) => {
+  const [x, z] = key.split('_').map((n) => Number(n) * SIZE)
+  const footprints = [...new Set(by.get(key).map((i) => blocks[i].footprint).filter(Boolean))]
+  // Coverage can change only at a square edge. Check each resulting rectangle's low (inclusive) corner.
+  const cuts = (low, axis) => [low, ...footprints.flatMap((r) => [r[axis], r[axis + 2]]).filter((v) => v > low && v < low + SIZE)]
+  return cuts(x, 0).every((u) => cuts(z, 1).every((v) => footprints.some(([x0, z0, x1, z1]) => x0 <= u && u < x1 && z0 <= v && v < z1)))
+}).sort()
 mkdirSync(out, { recursive: true })
 writeFileSync(join(out, 'far.state.json'), JSON.stringify(sources))
 writeFileSync(join(out, 'far.json.part'), JSON.stringify(listing))

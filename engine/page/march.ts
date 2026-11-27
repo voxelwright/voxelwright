@@ -45,6 +45,11 @@ const EDITS_AT = 256 * 16 + 16 * 32 + 16 + 512 + 64 + (2 + 2 * LIT_LETTERS) * 16
  * pixel covers there. The answer is light to add, before the weather's share of the dark is taken.
  */
 export const LANDMARK_LIGHT = /* wgsl */ `
+// Radius of the illuminated envelope at a fraction of its height. The corners
+// of its square plan and projecting skin also receive light.
+fn beaconRadius(h: Beacon, t: f32) -> f32 {
+  return mix(h.at.w, h.span.z, t) * 1.45 + 3.0;
+}
 fn landmarkLight(p: vec3f, wide: f32) -> vec3f {
   var out = vec3f(0.0);
   for (var i = 0u; i < 8u; i++) {
@@ -53,8 +58,7 @@ fn landmarkLight(p: vec3f, wide: f32) -> vec3f {
     let q = (p - h.at.xyz) * 0.1;
     if (q.y < h.span.x - 0.5 || q.y > h.span.y + 1.0) { continue; }
     let t = clamp((q.y - h.span.x) / max(h.span.y - h.span.x, 1.0), 0.0, 1.0);
-    // (Round its middle: a square's corner is 1.42 of its half width out, and its skin some metres proud.)
-    if (length(q.xz) > mix(h.at.w, h.span.z, t) * 1.45 + 3.0) { continue; }
+    if (length(q.xz) > beaconRadius(h, t)) { continue; }
     var light = h.colour.a;
     if (h.span.w > 0.0) {
       // A screen of lamps behind a grid: dark rings across it while they are wider than a pixel, and a slow tide of
@@ -872,6 +876,57 @@ fn meet(lo: vec3f, hi: vec3f, q0: vec3f, k: vec3f) -> Met {
   return Met(min(a, b), min(far.x, min(far.y, far.z)));
 }
 
+${HANDOVER}
+${EDITED('looks.edits')}
+// Whether the far model holds the tile a point is in (far.ts).
+fn farHeld(p: vec3f) -> bool {
+  let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
+  if (any(t < vec2i(0)) || any(t >= vec2i(64))) { return false; }
+  let bit = u32(t.y * 64 + t.x);
+  let word = bit >> 5u;
+  return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
+}
+
+// Entering a protected box ends a run through far-owned land, even if the coarse node spans the box.
+fn beforeBox(next: f32, lo: vec4f, hi: vec4f, ro: vec3f, inv: vec3f, t: f32) -> f32 {
+  if (hi.w <= 0.0) { return next; }
+  let m = meet(lo.xyz, hi.xyz, ro, inv);
+  let enter = max(m.near.x, max(m.near.y, m.near.z));
+  return select(next, enter, enter > t && enter < min(next, m.leave));
+}
+
+// A held tile can precede an unheld ridge on the same look. Skip to the next ownership boundary.
+fn farExit(ro: vec3f, rd: vec3f, inv: vec3f, p: vec3f, t: f32) -> f32 {
+  let tile = floor((p.xz - looks.far.xy) / looks.far.z);
+  let sides = looks.far.xy + (tile + vec2f(rd.xz > vec2f(0.0))) * looks.far.z;
+  let ends = (sides - ro.xz) * inv.xz;
+  var next = min(ends.x, ends.y);
+  for (var i = 0u; i < ${EDITS}u; i++) {
+    if (looks.edits[2u * i + 1u].w <= 0.0) { break; }
+    next = beforeBox(next, looks.edits[2u * i], looks.edits[2u * i + 1u], ro, inv, t);
+  }
+  // Before the ordinary reach the ray is inside the wedge. Its ownership can end at either
+  // bearing, at the circle, or at the box kept for cells. Test them before skipping the tile.
+  if (t < looks.far.w) {
+    let d = ro.xz - looks.wedge.xy;
+    for (var i = 0u; i < 2u; i++) {
+      let normal = vec2f(cos(looks.bear[i]), sin(looks.bear[i]));
+      let along = dot(rd.xz, normal);
+      if (abs(along) > 1e-8) {
+        let cross = -dot(d, normal) / along;
+        if (cross > t) { next = min(next, cross); }
+      }
+    }
+    let a = dot(rd.xz, rd.xz);
+    let b = dot(d, rd.xz);
+    let c = dot(d, d) - looks.wedge.z * looks.wedge.z;
+    let leave = (-b + sqrt(max(0.0, b * b - a * c))) / a;
+    next = min(next, max(t, leave));
+    next = beforeBox(next, looks.keep0, looks.keep1, ro, inv, t);
+  }
+  return next;
+}
+
 // A ray from ro along rd (both in the finest cells from the anchor), starting t0 along it in box level0.
 // It need not see anything smaller than its own width, which is wide at its start and grows by spread a cell:
 // a node narrower than the ray is taken whole, as the kind most of it is. A rough ray (one towards the sun)
@@ -1113,6 +1168,16 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       if (kind == 0u) { t += eps; continue; }
     }
     if (kind != 0u && !through) {
+      if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
+        let p = ro + rd * (t + 0.25 * eps);
+        let reach = select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u);
+        if (t > reach && farHeld(p) && !edited(p)) {
+          t = min(max(t, farExit(ro, rd, inv, p, t)), leaveAt) + eps;
+          // A leaf traversal may have advanced cell past the saved c.
+          have = 0u;
+          continue;
+        }
+      }
       hit.t = t;
       hit.kind = kind & 0xffffu;
       hit.n = n;
@@ -1133,16 +1198,6 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   return hit;
 }
 ${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
-${HANDOVER}
-${EDITED('looks.edits')}
-// Whether the far model holds the tile a point is in (far.ts).
-fn farHeld(p: vec3f) -> bool {
-  let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
-  if (any(t < vec2i(0)) || any(t >= vec2i(64))) { return false; }
-  let bit = u32(t.y * 64 + t.x);
-  let word = bit >> 5u;
-  return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
-}
 // What a ray meets: what is in the world's cells (march), or the sea. The still sea is not cells: it is all that
 // lies under its top with nothing else in it. A look that comes down from over it meets the top where it crosses
 // that level, if it has met nothing before, or has gone out through the far side of the last box by then. Past the
@@ -1152,15 +1207,6 @@ fn farHeld(p: vec3f) -> bool {
 // dearer, sea in it or not.
 fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
   ${MARCHED(world.options.bricks && !INLOOP)}
-  // Past the far model's reach, where it holds the tile, what the cells met there is its to draw (far.ts): the coarse
-  // boxes stand far wider than the buildings they hold. The look goes on to meet the sea, as though it had left the boxes.
-  // Only a look from the eye (through a pane too): the water's look at what it mirrors starts at the water, and the far
-  // model is not drawn into what is mirrored. A tool's aim (CELLS) is handed over only past the reach, not the wedge's:
-  // what it edits nearer is in the cells.
-  if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
-    let p = ro + rd * hit.t;
-    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p) && !edited(p)) { hit.t = -1.0; hit.left = true; }
-  }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }
@@ -2047,9 +2093,11 @@ export const CELLS = 256
 const FOG_THICK = 1 / 2400, FOG_TOP = 1400
 export const PANES_FORMAT: GPUTextureFormat = 'rgba16float'
 /** Tiles of the sun's maps drawn each frame. */
-const SUN_TILES_A_FRAME = 8
+export const SUN_TILES_A_FRAME = 8
 
 export interface Marcher {
+  /** The last draw used the requested glass pipeline, including any reflections. */
+  readonly glassReady: boolean
   /** Draws the world into `to`, and how far off each pixel's thing is into its depth. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number]): void
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
@@ -2072,8 +2120,13 @@ export interface Marcher {
    * What it does to a frame's cost is not known until it is measured: `node test/bench.mjs` before and after.
    */
   reshade(change: (wgsl: string) => string): Promise<{ compiled: number; ms: number }>
-  /** Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands. `ready` is whether the world is made enough to draw them from. */
-  tend(encoder: GPUCommandEncoder, view: View, ready: boolean): void
+  /**
+   * Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands.
+   * `ready` is whether the world is made enough to draw them from, or the finest box from which it is (sun.ts `plan`).
+   * `most` is how many tiles this frame has room for (#73: SUN_TILES_A_FRAME at most, and where it is not said), and
+   * `timing` two places in a query set for when the first of them began and the last ended. Returns how many it drew.
+   */
+  tend(encoder: GPUCommandEncoder, view: View, ready: boolean | number, most?: number, timing?: { querySet: GPUQuerySet; begin: number; end: number }): number
   /** The sun's maps: an edit must spoil the tiles it touches. */
   readonly sun: SunMaps
   /** The colours and materials as the GPU holds them, for whatever else is drawn into the picture. */
@@ -2140,8 +2193,8 @@ export interface Beacon { at: readonly [number, number, number]; night: readonly
 /** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
 export interface Air { haze: number; clouds: number; sky?: { zenith: readonly [number, number, number]; horizon: readonly [number, number, number] } }
 
-/** `behind`: a marcher for a world seen through a window, whose looks may begin at a plane (`draw`'s `starts`). */
-export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false): Promise<Marcher> {
+/** `behind` allows a look to begin at a window plane. A released city's first view can draw while Metal compiles its mirrors. */
+export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false, deferMirrors = false): Promise<Marcher> {
   const grid = world.options.grid
   const module = await shader(device, 'march', code(world, behind))
   // The sun stands in the south-west, two fifths of the way up.
@@ -2152,9 +2205,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const F = GPUShaderStage.FRAGMENT
   const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }] })] })
   const marchingAs = (module: GPUShaderModule, mirrors: boolean, foggy = false) => device.createRenderPipelineAsync({ label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}`, layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
-  const marching = (module: GPUShaderModule) => Promise.all([marchingAs(module, true), marchingAs(module, false)])
+  const marching = (module: GPUShaderModule, defer = false) => Promise.all([defer ? null : marchingAs(module, true), marchingAs(module, false)])
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
-  let [pipeline, plainPipeline] = await marching(module)
+  let [pipeline, plainPipeline] = await marching(module, deferMirrors)
+  let mirrorsStarted = !deferMirrors
   // The same in fog (FOGGY), made the first time there is fog, and made again with the shader: until they are made a
   // look is drawn as without it, which is the fog's first moment as it comes in (it comes in over seconds).
   let shaderNow = module, foggy: GPURenderPipeline[] | null = null, makingFoggy: Promise<unknown> | null = null
@@ -2178,6 +2232,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   }
   const panesViews = new WeakMap<GPUTexture, GPUTextureView>()
   // Those a march with mirrors has written: one without them (which writes none) clears them first.
+  let glassReady = true
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512 + 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
@@ -2190,7 +2245,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The road's marks (marks.ts), empty until `marks` is told them.
   let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   const binding = () => device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
+    layout: plainPipeline.getBindGroupLayout(0),
     entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }],
   })
   let bind = binding()
@@ -2378,20 +2433,23 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       picking = next.catch(() => {})
       return next
     },
+    get glassReady() { return glassReady },
     get sun() { return sunMaps },
     get looks() { return looks },
     get globals() { return globals },
     panes: panesView,
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
-    tend(encoder, view, ready) {
-      const anchor = tell(view, [1, 1], 0, 0)
-      sunMaps.plan(view.eye, SUN_TILES_A_FRAME, ready).forEach((tile, i) => {
+    tend(encoder, view, ready, most = SUN_TILES_A_FRAME, timing) {
+      const anchor = tell(view, [1, 1], 0, 0), tiles = sunMaps.plan(view.eye, Math.min(SUN_TILES_A_FRAME, most), ready)
+      tiles.forEach((tile, i) => {
         const { buffer, bind: tileBind } = sunTiles[i], corner = sunMaps.corner(tile, anchor), block = new ArrayBuffer(32)
         new Float32Array(block).set([corner[0], corner[1], 1 << tile.level, 0, tile.slotX * SUN_TILE, tile.slotY * SUN_TILE])
         new Uint32Array(block)[3] = tile.level
         device.queue.writeBuffer(buffer, 0, block)
-        const pass = encoder.beginRenderPass({ colorAttachments: [{ view: sunMaps.layers[tile.level], loadOp: 'load', storeOp: 'store' }] })
+        // (The GPU's clock, where it is asked: read as the first tile's pass begins and as the last one's ends.)
+        const first = timing && i === 0, last = timing && i === tiles.length - 1
+        const pass = encoder.beginRenderPass({ colorAttachments: [{ view: sunMaps.layers[tile.level], loadOp: 'load', storeOp: 'store' }], ...(first || last ? { timestampWrites: { querySet: timing!.querySet, ...(first ? { beginningOfPassWriteIndex: timing!.begin } : {}), ...(last ? { endOfPassWriteIndex: timing!.end } : {}) } } : {}) })
         pass.setPipeline(sunPipeline)
         pass.setBindGroup(0, sunBind)
         pass.setBindGroup(1, tileBind)
@@ -2400,6 +2458,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         pass.draw(3)
         pass.end()
       })
+      return tiles.length
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
     marks(bytes) {
@@ -2432,7 +2491,18 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     draw(encoder, to, view, flags, time, timing, only, starts) {
       tell(view, to.size, flags, time, starts)
       // With mirrors off no pane is looked through, and the march writes no panes (writing them was 1 to 2% of its time with mirrors off).
-      const mirrors = (flags & MIRRORS) !== 0, panes = panesFor(to.size)
+      const wantsMirrors = (flags & MIRRORS) !== 0
+      if (wantsMirrors && !mirrorsStarted && !pipeline) {
+        mirrorsStarted = true
+        // A reshade can finish first. Keep its pipeline if it did.
+        void marchingAs(module, true).then((ready) => { pipeline ??= ready }, (error: unknown) => {
+          console.error('The march with mirrors could not be compiled', error)
+        })
+      }
+      const inFog = fog > 0 ? fogPipelines() : null
+      const reflected = wantsMirrors ? inFog?.[0] ?? pipeline : null
+      const mirrors = !!reflected, panes = panesFor(to.size)
+      glassReady = !wantsMirrors || mirrors
       if (mirrors) panesWritten.add(panes)
       else if (panesWritten.has(panes)) { encoder.beginRenderPass({ colorAttachments: [{ view: panesView(to.size), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end(); panesWritten.delete(panes) }
       const pass = encoder.beginRenderPass({
@@ -2441,8 +2511,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         ...(timing ? { timestampWrites: timing } : {}),
       })
       // With mirrors off, the pipeline that has none of their text (MIRRORS): its bindings are the same.
-      const inFog = fog > 0 ? fogPipelines() : null
-      pass.setPipeline(inFog ? inFog[mirrors ? 0 : 1] : mirrors ? pipeline : plainPipeline)
+      pass.setPipeline(reflected ?? inFog?.[1] ?? plainPipeline)
       pass.setBindGroup(0, bind)
       if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
       pass.draw(3)

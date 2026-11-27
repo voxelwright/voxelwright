@@ -81,6 +81,7 @@ export function hud(input: Input): Hud {
   const IC_SPARK = '<svg class="ask-ic" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M10 1.8l2 5.2 5.2 2-5.2 2-2 5.2-2-5.2-5.2-2 5.2-2 2-5.2z"/><circle cx="15.8" cy="4.2" r="1.2"/></svg>'
   const IC_PHOTO = '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><circle cx="7" cy="8" r="1.3" fill="currentColor" stroke="none"/><path d="M3.5 14l4.2-4.2a1 1 0 0 1 1.4 0L12.5 13l1.8-1.8a1 1 0 0 1 1.4 0L17.5 13"/></svg>'
   const IC_CAM = '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h1.6l1.2-1.6h4.4L13.4 5H15a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><circle cx="10" cy="10.8" r="2.7"/></svg>'
+  const IC_CLOSE = '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5.5 5.5l9 9M14.5 5.5l-9 9"/></svg>'
   const IC_SEND = '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15.5V4.5"/><path d="M5.5 9L10 4.5 14.5 9"/></svg>'
   const spark = document.createElement('span')
   spark.className = 'ask-trigger-ic'
@@ -93,6 +94,8 @@ export function hud(input: Input): Hud {
   const library = button('ask-picture', 'Add a picture', '', IC_PHOTO)
   const camera = button('ask-camera', 'Take a picture', '', IC_CAM)
   const send = button('ask-send', 'Send', '', IC_SEND)
+  // The way out of the open bar by touch, where there is no Escape (#75): the bar is put away and the game's own keys come back.
+  const close = button('ask-close', 'Close (Esc)', '', IC_CLOSE)
   // Two ways to a picture on a phone: one asks for any (its sheet offers the library), one for the camera itself.
   const picked = document.createElement('input'), taken = document.createElement('input')
   for (const f of [picked, taken]) { f.type = 'file'; f.accept = 'image/*'; f.hidden = true }
@@ -107,9 +110,9 @@ export function hud(input: Input): Hud {
   keycap.className = 'ask-kbd'
   keycap.setAttribute('aria-hidden', 'true')
   keycap.textContent = '\u21b5'
-  row.append(voxelBg, spark, which, line, keycap, library, camera, send)
+  row.append(voxelBg, spark, close, which, line, keycap, library, camera, send)
   // Tapping anywhere on the collapsed trigger pill opens the composer in the same gesture (so iOS opens the keyboard).
-  row.addEventListener('click', (e) => { if (!leave && e.target !== library && e.target !== camera && e.target !== which) self.show() })
+  row.addEventListener('click', (e) => { if (!leave && !(e.target as Element).closest?.('#ask-picture, #ask-camera, #ask-which, #ask-close')) self.show() })
   ask.append(starters, given, row, picked, taken)
   card.hidden = said.hidden = starters.hidden = true
   layer.append(cues, said, notices, card, ask)
@@ -233,6 +236,15 @@ export function hud(input: Input): Hud {
   line.addEventListener('input', () => { draw(); void hear(); if (!isSaying() && !picture && !link) tell(line.value) })
   line.addEventListener('focus', () => self.show())
   send.addEventListener('click', () => submit())
+  // (Its click must not reach the row, which opens a closed bar.)
+  close.addEventListener('click', (e) => { e.stopPropagation(); self.hide() })
+  // Escape puts the open bar away wherever the focus is (the line hears its own, below: a starter or a picture key focused does not).
+  addEventListener('keydown', (e) => { if (leave && e.key === 'Escape' && e.target !== line && choice.hidden) self.hide() })
+  // A press anywhere off the open bar puts it away (#75): on a phone the picture is the way back to play. That press is
+  // only the putting away: its click is not also a click on the picture or on a key under it.
+  let dismissedAt = 0
+  addEventListener('pointerdown', (e) => { if (!leave || ask.contains(e.target as Node)) return; dismissedAt = performance.now(); self.hide() }, true)
+  addEventListener('click', (e) => { if (performance.now() - dismissedAt < 400) { e.preventDefault(); e.stopImmediatePropagation(); dismissedAt = 0 } }, true)
   which.addEventListener('click', () => { turn(); self.show(); void hear() })
   library.addEventListener('click', () => picked.click())
   camera.addEventListener('click', () => taken.click())

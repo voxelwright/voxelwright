@@ -28,7 +28,7 @@ flowchart LR
 1. Work is tracked in a GitHub issue. The branch is `feature/<issue>-<name>`. Commit subjects are `[#<issue>] <change>`.
 2. Run the flow you changed, then its own tests. Each part has its own: `npm run check` in `engine/` (core tests, types and page checks in Chrome), `npm test` in `site/`, the Python tests in `engine/bay`. [CONTRIBUTING.md](https://github.com/voxelwright/voxelwright/blob/main/CONTRIBUTING.md) lists the command for every part.
 3. Merge current main into the branch and run the root gate from the repository root: `npm run check -- --ci --webgl --timeout 240`. Put its result line in the pull request.
-4. GitHub runs the check workflow on pull requests and pushes to main. Include the local Mac result in the pull request.
+4. GitHub runs the check workflow on pull requests and pushes to main: the root gate, then the tests of `deploy/` and `site/`, the core's `cargo test` and the engine's TypeScript check, none of which needs a GPU or the city's data. The master workflow tests `master/` on pull requests and pushes that touch it. Include the local Mac result in the pull request.
 5. Reviews are a tool, not a gate. Run `.agents/skills/adversarial-review` when you expect it to find something: a change you cannot fully test, a format others will build on, anything that touches real people's data.
 
 A mocked provider or a saved model reply proves the pipeline, never a model integration. Say which one you ran.

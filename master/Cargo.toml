@@ -12,6 +12,9 @@ name = "village-master"
 path = "src/main.rs"
 
 [dependencies]
+ipnet = "2"
+sha2 = "0.10"
+subtle = "2"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "ws", "json"] }
 tokio = { version = "1.54.1", features = ["rt", "net", "time", "macros", "sync", "signal"] }
 tower-http = { version = "0.7.1", default-features = false, features = ["cors", "timeout"] }

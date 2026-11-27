@@ -12,6 +12,8 @@ import { arg, chrome, here } from './kit.mjs'
 import { until, wait, world } from './plugkit.mjs'
 
 const dir = mkdtempSync(join(tmpdir(), 'engine-plugins-'))
+// Acquire the browser before opening the stream used to observe plugin state.
+const browser = await chrome()
 const w = await world(['--plugins', dir]), { check } = w
 // A plugin made for this check: something a rule can count with, shown on the page. `by` is how much a count adds.
 const WORLD = (by) => `export default ({ pages, was }) => {
@@ -37,7 +39,6 @@ on('said', (world, e) => {
 })
 on('seen', (world, e) => { world.actor('teller', { say: 'I see ' + e.material + '.' })
 })`
-const browser = await chrome()
 const open = async () => { const p = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage(); p.on('pageerror', (e) => w.failures.push(`page error: ${e.message}`)); p.on('console', (m) => { if (m.type() === 'warning' || m.type() === 'error') console.log(`  page ${m.type()}: ${m.text().slice(0, 300)}`) }); await p.goto(`${w.url}/city?shared=1&fly=0&x=70&z=406`); await p.waitForFunction(() => globalThis.engine?.plugins, null, { timeout: 90_000 }); return p }
 const times = {}
 try {

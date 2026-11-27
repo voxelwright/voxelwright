@@ -144,7 +144,8 @@ function checkOutput(label, out, { posts, site }) {
   if (sitemapValid !== true) fail(label, `sitemap.xml: ${JSON.stringify(sitemapValid.err)}`);
   else {
     const urls = (parser.parse(sitemapXml).urlset?.url ?? []).map((u) => u.loc);
-    const sitemapRoutes = pageRoutes.filter((r) => !(front && r === HOME));
+    // the personal front page at "/" is listed too (generator/build.mjs, #81)
+    const sitemapRoutes = pageRoutes;
     for (const route of sitemapRoutes) if (!urls.includes(site.origin + route)) fail(label, `sitemap.xml: missing ${route}`);
     if (urls.length !== sitemapRoutes.length) fail(label, `sitemap.xml: ${urls.length} URLs for ${sitemapRoutes.length} pages`);
   }

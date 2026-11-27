@@ -38,7 +38,7 @@ The master closes a server's socket with a code and a short reason:
 | 4403 | Taken off by the operator, or the address is banned |
 | 4408 | No hello in time, or silent too long |
 
-Before the upgrade, `GET /host` can answer **429** (over the sockets opened a minute, or the lobbies an address or IPv6 /48 may hold), **403** (the address is banned), **503** (the master is full) or **400** (behind a proxy, no caller address).
+The hello must arrive within the first 16 messages, including Ping and Pong. Ordinary HTTP responses close the connection. Before the upgrade, `GET /host` can answer **429** (over the sockets opened a minute, or the lobbies an address or IPv6 /48 may hold), **403** (the address is banned), **503** (the master is full) or **400** (behind a proxy, no caller address).
 
 ### A page's requests
 
@@ -66,7 +66,7 @@ With `--admin-token-file` (a file holding a token of at least 16 characters), a 
 | `POST /bans` with `{"lobby": "<id or code>", "minutes": 60}` | Bans the address behind that lobby without showing it, and takes off its lobbies. Answers `{"until", "lobbies_taken_off"}`. |
 | `POST /bans` with `{"addr": "<ip>", "minutes": 60}` | Bans an address. `"minutes": 0` lifts the ban and answers `{"until": null}`. A ban lasts at most a year. |
 
-Without the flag, these routes answer 404. A wrong token answers 401 and counts as a lookup, so guessing it is as slow as guessing a code. The operator is held to no limit or ban. There are no accounts.
+Without the flag, these routes answer 404. A wrong token answers 401. Five failed attempts in a minute ban that address for one minute. During that minute, operator requests from the same address are refused before token verification. A valid token otherwise bypasses lookup limits and operator-issued bans. There are no accounts.
 
 ## Limits
 
@@ -90,17 +90,19 @@ Each limit has a flag (below). These are the defaults.
 
 Minutes are fixed windows. A client has 10 s to send a request's headers, a request has 15 s in all, and a connection whose writes make no progress for 10 s (a client that stopped reading) is dropped. A connection over a connection limit is closed at once.
 
-**How addresses are counted** ([master/src/text.rs](https://github.com/voxelwright/voxelwright/blob/main/master/src/text.rs) `addr_key`): an IPv4 address is itself, an IPv4-mapped IPv6 address is its IPv4, and any other IPv6 address is its **/56**, since a home is usually given a /56 or a /48. A whole **/48** may also hold at most 16 lobbies and 64 connections at once. The dedicated server's door counts addresses the same way.
+**How addresses are counted** ([master/src/text.rs](https://github.com/voxelwright/voxelwright/blob/main/master/src/text.rs) `addr_key`): an IPv4 address is itself, an IPv4-mapped IPv6 address is its IPv4, and any other IPv6 address is its **/64**. A whole **/48** may also hold at most 16 lobbies and 64 connections at once. The dedicated server's door retains its /56 buckets for saved bans.
 
 **Guessing a code.** A code is 20 characters of a 32-letter alphabet (100 bits) from the operating system's randomness. One address gets at most 150 guesses a minute (lookups and joins together). With 5,000 lobbies live, one guess hits with odds of 5,000 in 2^100, about 3.9 × 10^-27. Ids (60 bits) find only listed lobbies, so guessing them gains nothing.
 
-**Behind a proxy.** Without `--behind-proxy`, the caller is the socket's peer and any forwarding header is ignored. Behind a proxy that makes every player the proxy's address, so the per-address limits fill for everyone at once: always pass the flag there. With `--behind-proxy <header>`, the caller is the rightmost value of that header's last instance (what the nearest proxy wrote), a request without it gets 400, and the per-peer connection limits are off. The master warns at start when the flag is set on a non-loopback address, where anyone who reaches the port directly could write the header.
+Forwarded addresses are accepted only from a trusted TCP peer. With `--behind-proxy`, the default trusted networks are `127.0.0.0/8` and `::1/128`. Repeat `--trusted-proxy IP-OR-CIDR` to replace those defaults. Other peers use their socket address and the normal connection limits. A trusted peer must supply the configured header or the request gets 400.
+
+Use `cf-connecting-ip` with a trusted Cloudflare Tunnel connector that supplies Cloudflare's client address. For `x-forwarded-for`, the master reads the rightmost value of the last header. In a multi-hop chain that value can identify another proxy. Configure the final trusted proxy to verify its upstream and rewrite the header with the client address.
 
 ## STUN
 
 `GET /ice` hands out the URLs given with `--stun stun:host:port` (repeatable). There is no default. With none, the list is empty, the master says so at start, and players reach each other only on one network.
 
-`--stun-port 3478` makes the master answer STUN Binding requests itself ([master/src/stun.rs](https://github.com/voxelwright/voxelwright/blob/main/master/src/stun.rs), RFC 8489), so no third party sees a player's address. It answers Binding requests only, with 32 bytes (IPv4) or 44 (IPv6), at most 300 a minute for an address. It drops everything else and doesn't answer banned addresses. STUN is UDP and doesn't pass through an HTTP proxy: bind it with `--stun-ip` on an address players can reach, and list its public name with `--stun`. It counts addresses in a table of its own, so a flood of forged UDP sources can stop STUN answering new addresses for a minute but never touches HTTP.
+`--stun-port 3478` makes the master answer STUN Binding requests itself ([master/src/stun.rs](https://github.com/voxelwright/voxelwright/blob/main/master/src/stun.rs), RFC 8489), so no third party sees a player's address. It answers Binding requests only, with 32 bytes (IPv4) or 44 (IPv6), at most 300 a minute for an address. It drops everything else and doesn't answer banned addresses. STUN is UDP and doesn't pass through an HTTP proxy: bind it with `--stun-ip` on an address players can reach, and list its public name with `--stun`. When full, it tries to reclaim expired entries at most once a second. It counts addresses in a table of its own, so a flood of forged UDP sources can stop STUN answering new addresses for a minute but never touches HTTP.
 
 There is no TURN relay. A player whose network maps each destination to a new port (common on mobile carriers) may not reach a server at all.
 
@@ -111,24 +113,25 @@ Every flag, from [master/src/config.rs](https://github.com/voxelwright/voxelwrig
 | Flag | Default | What |
 | --- | --- | --- |
 | `--listen` | `127.0.0.1:8790` | Address and port for plain HTTP |
+| `--trusted-proxy` | loopback | TCP peer IP or CIDR trusted to supply the configured forwarding header (repeatable) |
 | `--behind-proxy` | none | Header that names the caller, such as `x-forwarded-for` or `cf-connecting-ip` |
 | `--stun` | none | A STUN URL for `GET /ice`. Repeatable. |
 | `--stun-port` | none | Answer STUN Binding requests on this UDP port |
 | `--stun-ip` | `--listen`'s address | Address the STUN port is bound on |
 | `--stun-per-minute` | 300 | STUN requests answered a minute for one address |
 | `--admin-token-file` | none | The operator's token. Turns on `DELETE /lobbies/<x>` and `POST /bans`. |
-| `--max-lobbies` | 5000 | Lobbies at once, in all (sockets waiting for their hello count) |
+| `--max-lobbies` | 2000 | Lobbies at once, in all (sockets waiting for their hello count) |
 | `--max-lobbies-per-addr` | 4 | Lobbies at once from one address |
 | `--max-lobbies-per-48` | 16 | Lobbies at once from one IPv6 /48 |
 | `--registrations-per-minute` | 10 | Server sockets opened a minute by one address |
 | `--joins-per-minute` | 30 | Joins a minute by one address |
-| `--lookups-per-minute` | 120 | Lookups a minute by one address |
+| `--lookups-per-minute` | 120 | Public reads a minute by one address, including status and ICE |
 | `--host-messages-per-second` | 50 | Messages a second a server may send before its socket is closed |
 | `--max-pending-joins` | 8 | Joins waiting on one server at once |
 | `--max-connections` | 4096 | Open TCP connections in all |
-| `--max-connections-per-addr` | 8 | Open TCP connections from one address (off with `--behind-proxy`) |
-| `--max-connections-per-48` | 64 | Open TCP connections from one IPv6 /48 (off with `--behind-proxy`) |
-| `--max-tracked-addrs` | 100000 | Addresses tracked at once. A new one past this is refused. |
+| `--max-connections-per-addr` | 8 | Open TCP connections from one address (trusted proxies exempt) |
+| `--max-connections-per-48` | 64 | Open TCP connections from one IPv6 /48 (trusted proxies exempt) |
+| `--max-tracked-addrs` | 100000 | Addresses tracked at once. At capacity, a sweep may reclaim idle entries or the oldest closed entry once per second. |
 | `--max-bans` | 10000 | Bans held at once |
 | `--page-size` | 200 | Lobbies in one page of `GET /lobbies`, and the most `?limit=` may ask |
 | `--max-sdp` | 16384 | Bytes in one SDP |

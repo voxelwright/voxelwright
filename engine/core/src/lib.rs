@@ -344,6 +344,12 @@ pub extern "C" fn hero_owns(sort: u32, u: f32, w: f32) -> i32 {
     heroes::owns(sort, u, 0.0, w) as i32
 }
 
+/// Only tree faces inside a measured Conservatory palm crown are replaced by its fronds.
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_owns_tree(sort: u32, u: f32, w: f32) -> i32 {
+    (sort == heroes::CONSERVATORY && heroes::valley_palm_return(u, w)) as i32
+}
+
 /// How high the ground is at a column of the finest cells.
 #[unsafe(no_mangle)]
 pub extern "C" fn ground_at(x: i32, z: i32) -> i32 {

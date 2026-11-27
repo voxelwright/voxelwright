@@ -9,7 +9,7 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
-import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, WHOLE_MOON, marcher, materials, palette, type Moon, type View } from './march.ts'
+import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, marcher, materials, palette, type Moon, type View } from './march.ts'
 import type { Heavens } from './almanac.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
@@ -22,7 +22,7 @@ import { car, fineCar, living, type Making } from './living.ts'
 import { stunts } from './stunts.ts'
 import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
-import { puffs } from './puffs.ts'
+import { engineVent, puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { street as streetOf, type Street } from './street.ts'
@@ -74,6 +74,11 @@ import { createCarSummon } from './summon.ts'
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
 const canvas = document.querySelector('canvas')!
+// The canvas's size on the page (CSS pixels), kept as the page lays it out (#73). Asked of the canvas in the middle of
+// every frame, after the HUD had written to the page, it had the page laid out there and then: the largest single
+// self time on the page's thread in San Francisco (0.6 to 1.1 s of a 20 to 28 s drive, in Chrome's samples).
+const laid = { w: canvas.clientWidth, h: canvas.clientHeight }
+new ResizeObserver(() => { laid.w = canvas.clientWidth; laid.h = canvas.clientHeight }).observe(canvas)
 // One device class for the whole page (bay.ts `DEVICE`): what it draws and what it holds.
 const phone = DEVICE === 'phone'
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
@@ -179,7 +184,7 @@ async function main() {
     // Each maker holds its own core and the tiles round what it makes (bay.ts `HOLD`): a phone has two (#450).
     workers: Number(query.get('workers') ?? (phone ? 2 : Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)))),
   })
-  const march = await marcher(device, gpu.format, world)
+  const march = await marcher(device, gpu.format, world, false, !!LOCAL?.release)
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
   world.onFine = () => { core.fine_cells(1); void march.reshade((wgsl) => wgsl) }
   // In a world whose process holds a release (#526), this page's core holds finer cells from the start, as that process
@@ -200,8 +205,7 @@ async function main() {
   // The far model: a realm's pinned release holds it where it has one (bay.ts `where`), else beside the page.
   const released = LOCAL?.release ? await where().catch(() => null) : null
   const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
-  // Boxes covering the cells up to the far model's handover: on a full city with a far model, coarser boxes beyond
-  // reach stream after the place is shown so cold load never waits on citywide coarse tiles hidden behind far faces.
+  // Show the place once its near boxes and skyline are ready. Coarser fallback cells have lower fetch priority.
   const nearLevels = farModel.listing && farModel.reach > 0
     ? world.levels.filter((l) => l.index === 0 || ((l.grid[0] * SIDE) << (l.index - 1)) / 2 < farModel.reach * M)
     : world.levels
@@ -259,7 +263,7 @@ async function main() {
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
-  const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
+  const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (Math.max(-90, Math.min(90, look[1])) * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
   // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
@@ -333,7 +337,10 @@ async function main() {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
     const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
-    const curRoll = roll + driveRoll, curFov = Math.min(115, Math.max(40, fov + driveFov))
+    const curRoll = roll + driveRoll
+    // A photographic lens can be narrower than the driving camera's range.
+    const curFov = driveFov === 0 && fov > 0 && fov < 180 ? fov
+      : Math.min(115, Math.max(40, (Number.isFinite(fov) ? fov : 70) + driveFov))
     const cr = Math.cos(curRoll), sr = Math.sin(curRoll)
     const right = curRoll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
     const up = curRoll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
@@ -348,7 +355,7 @@ async function main() {
     const v = view(), d = [at[0] - v.eye[0], at[1] - v.eye[1], at[2] - v.eye[2]], dot = (a: readonly number[]) => a[0] * d[0] + a[1] * d[1] + a[2] * d[2]
     const z = dot(v.forward)
     if (z <= 1) return null
-    const w = canvas.clientWidth, h = canvas.clientHeight
+    const w = laid.w, h = laid.h
     return [w / 2 + (dot(v.right) / z / v.tanHalf) * (h / 2), h / 2 - (dot(v.up) / z / v.tanHalf) * (h / 2)]
   }
   const walk = (dt: number) => {
@@ -356,7 +363,8 @@ async function main() {
     if (!controls.live('moving')) return
     const [right, up] = controls.turn(), held = controls.held, stick = controls.stick
     pose.yaw += right
-    pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
+    // Keep a registered overhead view vertical until the player tilts it.
+    if (up) pose.pitch = Math.max(-1.5, Math.min(1.5, pose.pitch + up))
     const v = view(), fast = held('ShiftLeft') || held('ShiftRight') ? 5 : 1
     const ahead = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0) - stick[1] * 2, side = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0) + stick[0] * 2
     const rise = (held('Space') ? 1 : 0) - (held('KeyC') || held('ControlLeft') ? 1 : 0)
@@ -412,7 +420,7 @@ async function main() {
   let target: Offscreen | null = null
   const fit = () => {
     const dpr = devicePixelRatio || 1
-    const w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr))
+    const w = Math.max(1, Math.round(laid.w * dpr)), h = Math.max(1, Math.round(laid.h * dpr))
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; target?.destroy(); target = null }
     const size: [number, number] = [Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))]
     if (!target || target.size[0] !== size[0] || target.size[1] !== size[1]) { target?.destroy(); target = offscreen(gpu, size) }
@@ -602,11 +610,34 @@ async function main() {
   // seen through an open window (#367). The picture's size is steered by their sum: by the page's own alone, a window
   // open cost a second march the steer knew nothing of, and the page ran at 30 frames a second beside it.
   const clock = gpu.canTime ? {
-    set: device.createQuerySet({ type: 'timestamp', count: 4 }),
-    resolved: device.createBuffer({ size: 32, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
-    read: device.createBuffer({ size: 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+    set: device.createQuerySet({ type: 'timestamp', count: 6 }),
+    resolved: device.createBuffer({ size: 48, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
+    read: device.createBuffer({ size: 48, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
     busy: false,
   } : null
+  // ── The sun's maps and the frame (#73) ──
+  // A tile of the sun's maps is 4,096 rays through everything up-sun of them (sun.ts). Eight were drawn in any frame
+  // that had eight to draw, and whenever the eye moves there are. What a tile takes of the GPU depends on the place and
+  // the hour: 0.4 ms in San Francisco at midday, 3.5 ms there with the sun low, 2.5 to 3 ms in the town, whose far
+  // boxes hold land. In the town, on a GPU other work was drawing on, eight a frame made one frame in twelve late at any
+  // speed from 60 km/h, and none with the tiles held back, in the same session (test/drive-smooth.mjs `--curve
+  // --sun-most 8,own`); in San Francisco at midday neither way was a frame more late. So while the eye moves the tiles
+  // have a share of the frame's time on the GPU, a twelfth of it, counted in what a tile was last measured to take there.
+  // What a frame does not use is kept, up to one tile's worth: a tile dearer than the share is drawn every few frames.
+  // The picture is right meanwhile: a place whose tile is not drawn is answered from the next coarser box's map.
+  // An eye that stands has eight a frame as before: nothing passes for a late frame to be seen in, and the first
+  // picture's shadows are traced ray by ray until its tiles are drawn.
+  const sunRoom = { tileMs: 1, share: 0, owed: 0, most: 0, drew: 0, moving: false, /** `?suntiles=n`: so many tiles a frame whatever they cost (8: as it was before #73), for measuring what the share is worth. */ fixed: query.has('suntiles') ? Number(query.get('suntiles')) : null as number | null }
+  const SUN_SHARE = 1 / 12
+  /** How many tiles this frame has room for: `budget` is the frame's time (ms), `moving` whether the eye moved. */
+  const sunMost = (budget: number, moving: boolean): number => {
+    if (sunRoom.fixed !== null) return sunRoom.fixed
+    if (!moving) { sunRoom.owed = 0; return SUN_TILES_A_FRAME }
+    const share = sunRoom.share = SUN_SHARE * budget
+    sunRoom.owed = Math.min(sunRoom.owed + share, Math.max(share, sunRoom.tileMs))
+    return Math.min(SUN_TILES_A_FRAME, Math.floor(sunRoom.owed / sunRoom.tileMs))
+  }
+  let eyeWas: readonly [number, number, number] | null = null
   let gpuMs = 0, marchMs = 0, windowMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, started = last
   // The screen's own rate: the shortest gap between frames seen lately; and the shortest it has been seen to keep up,
   // two counts running agreeing (a lone short gap is not a screen), which a frame rate of 'the screen's own' aims at.
@@ -680,8 +711,14 @@ async function main() {
     }
     return true
   }
-  const roomedBy = (dt: number) => {
-    const to = pose.y < SPACE && inRoom() ? 1 : 0
+  // Not asked of an eye going faster than anyone runs (#73): each cell asked about is asked of the page's own core,
+  // which makes the whole sector round it the first time, on this thread. With the eye alone at 180 km/h down Geary
+  // Boulevard that was 570 ms of a 12 s pass, 17 to 19 ms in single frames (test/drive-smooth.mjs --sf --profile), to
+  // learn that nobody at that speed is in a room: a room has walls on three sides within 8 m. (A car's tracks, wheels
+  // and camera ask the core about the ground under it all the same, `groundUnder`: those sectors are still made here.)
+  const ROOM_SPEED = 15
+  const roomedBy = (dt: number, speed: number) => {
+    const to = pose.y < SPACE && speed < ROOM_SPEED && inRoom() ? 1 : 0
     roomed += (to - roomed) * Math.min(1, dt * 4)
     if (Math.abs(to - roomed) < 0.01) roomed = to
     return roomed
@@ -708,12 +745,17 @@ async function main() {
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
     controls.poll?.(dt)
     shot?.before?.()
+    drawAhead(now)
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     stuntHud.frame(dt)
     shot?.after(dt)
-    steer(rate ? Math.max(1000 / rate, screenMs) : fastestMs, gap, resting)
+    const budget = rate ? Math.max(1000 / rate, screenMs) : fastestMs
+    steer(budget, gap, resting)
     const v = view(), to = fit()
-    march.roofed = roomedBy(dt)
+    // How fast the eye goes, metres a second.
+    const eyeSpeed = eyeWas ? Math.hypot(v.eye[0] - eyeWas[0], v.eye[1] - eyeWas[1], v.eye[2] - eyeWas[2]) / (M * FINE) / Math.max(dt, 1e-3) : 0
+    eyeWas = v.eye
+    march.roofed = roomedBy(dt, eyeSpeed)
     staff.frame(v)
     ears?.frame(v.eye, pose.yaw, dt)
     magic.step(dt)
@@ -740,7 +782,12 @@ async function main() {
     if (!off.has('wheels')) carWheels.step(dt * tempo.rate, wheelVehicles(), groundUnder)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
-    march.tend(encoder, v, world.nearlyWhole())
+    // (Moving: more than a metre a second.)
+    const moving = eyeSpeed > 1
+    sunRoom.moving = moving
+    sunRoom.most = sunMost(budget, moving)
+    const sunDrew = sunRoom.drew = march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
+    if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
     if (pose.y > SPACE) {
       // Where the page starts is the land's middle (land.rs HOME), 70 m east and 407 m south of the world's corner.
@@ -764,16 +811,20 @@ async function main() {
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
-    if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
+    if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
     device.queue.submit([encoder.finish()])
     lap('draw')
     over.frame(project)
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
-        const [a, b, c, d] = new BigUint64Array(clock.read.getMappedRange().slice(0))
+        const [a, b, c, d, e, f] = new BigUint64Array(clock.read.getMappedRange().slice(0))
         clock.read.unmap()
         clock.busy = false
+        // What a tile of the sun's maps took, from the first of this frame's beginning to the last one's end (a query
+        // nothing wrote keeps what it last read: counted only where tiles were drawn). Held to what a tile can be, so
+        // one wild reading (a phone's clock gives them, raw-webgpu) neither stops the maps nor floods the frame.
+        if (sunDrew > 0 && f > e) sunRoom.tileMs += (Math.max(0.05, Math.min(8, Number(f - e) / 1e6 / sunDrew)) - sunRoom.tileMs) * 0.2
         const through = windowed && d > c ? Number(d - c) / 1e6 : 0
         windowMs += (through - windowMs) * 0.1
         // (The last one as it was is kept beside the smoothed: late frames are answered by what the march took just now.)
@@ -854,6 +905,37 @@ async function main() {
   // The Bay in tiles (#373): this page's core and the one that moves things hold what is round the eye, asked again as it moves.
   if (STREAM) { const tell = () => { const x = Math.round(ahead ? ahead[0] : pose.x * M), z = Math.round(ahead ? ahead[2] : pose.z * M); void near(inner, x, z); mover.postMessage({ bay: [x, z] } as never) }; tell(); setInterval(tell, 500) }
   const moving = new Map<number, Piece>()
+  // ── Where a moving thing is drawn (#73) ──
+  // The mover is asked once a frame to move things on by the time the last frame took, and what it answers is what the
+  // next frame draws: a thing is drawn where it was a frame ago. With every frame on time nobody can tell. But a frame
+  // that comes late shows it going half as fast and then twice as fast, and an answer that comes after the next frame
+  // has begun shows it standing still for a frame and then jumping (0.9 m at 200 km/h), with the eye that rides it:
+  // the faster it goes, the further. So a thing the last step moved is drawn on from where that step left it, the way
+  // it went in that step, to the time of the frame being drawn (a tenth of a second at most; not a thing that went
+  // faster than anything goes, which was set down somewhere else). A thing the last step did not move lies where it
+  // was said to. `?ahead=0`, or `engine.ahead = false`, draws things as they are said: for measuring.
+  type Placed = { pos: [number, number, number]; rot: [number, number, number, number] }
+  /** A moving thing's last two places as the mover said them, the frame the last was asked in and the seconds asked for, and which step it was. */
+  const went = new WeakMap<Piece, { from: Placed | null; to: Placed; at: number; took: number; step: number }>()
+  let aheadOn = query.get('ahead') !== '0', frameAt = 0, tickAt = 0, tickTook = 0, stepped = 0
+  const AHEAD_MOST = 0.1, AHEAD_SPEED = 2000
+  /** Draws each thing the last step moved on to the time of this frame. */
+  const drawAhead = (now: number) => {
+    frameAt = now
+    if (!aheadOn) return
+    for (const piece of moving.values()) {
+      const w = went.get(piece)
+      if (!w || w.step !== stepped || !w.from || w.took < 1e-3) continue
+      const a = w.from, b = w.to, k = Math.min(AHEAD_MOST, Math.max(0, (now - w.at) / 1000)) / w.took
+      if (Math.hypot(b.pos[0] - a.pos[0], b.pos[1] - a.pos[1], b.pos[2] - a.pos[2]) > AHEAD_SPEED * w.took) continue
+      // Its turn goes on the same way: along the short way from the one turn to the other, and as far again.
+      const near = a.rot[0] * b.rot[0] + a.rot[1] * b.rot[1] + a.rot[2] * b.rot[2] + a.rot[3] * b.rot[3] < 0 ? -1 : 1
+      const q = [0, 1, 2, 3].map((i) => b.rot[i] + (b.rot[i] - near * a.rot[i]) * k), length = Math.hypot(q[0], q[1], q[2], q[3]) || 1
+      // (A place of its own each frame, as each answer's is: whoever kept the last one still has the last one.)
+      piece.pos = [b.pos[0] + (b.pos[0] - a.pos[0]) * k, b.pos[1] + (b.pos[1] - a.pos[1]) * k, b.pos[2] + (b.pos[2] - a.pos[2]) * k]
+      piece.rot = [q[0] / length, q[1] / length, q[2] / length, q[3] / length]
+    }
+  }
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
   let heard = 0, waiting = 0, ticking = false, owed = 0, bodies = 0, burning = 0
@@ -894,6 +976,8 @@ async function main() {
     // An answer about the world as it was before it was put back: a blast's cells must not come down in the new one.
     if (!far && answer.age !== moverAge) { stale.answers++; return }
     queueMicrotask(() => { spent.heard += performance.now() - t0 })
+    // (A step's answer: what was asked once a frame, `fallOn`.)
+    const step = !far && ticking && !answer.released && answer.spawned === undefined
     if (far) { if (answer.released && asked.shift()) waiting-- }
     else if (answer.released) waiting--
     else if (answer.spawned === undefined) ticking = false
@@ -917,9 +1001,21 @@ async function main() {
     for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
     // Something went up of itself: the cells it emptied came as edits, and this is its fire, smoke and shock.
     if (!far || far.live) for (const b of told.bursts) { smoke.blast(b.at, b.radius); shocks.push({ at: b.at, radius: b.radius, t: folkClock.now() }); fell.bursts++ }
+    // What the last step moved and this one did not lies where that step left it, not where it was drawn on to.
+    if (step) { stepped++; for (const piece of moving.values()) { const w = went.get(piece); if (w && w.step === stepped - 1) { piece.pos = [...w.to.pos]; piece.rot = [...w.to.rot] } } }
     for (const at of [...told.moves, ...told.gone]) {
       const piece = moving.get(at.id)
       if (piece) { piece.pos = at.pos; piece.rot = at.rot }
+    }
+    // Where each thing a step moved was before it and is now, for drawing it on (`drawAhead`). Moved by anything else
+    // (set down, a blast), it has no way it went, and is drawn as said until two steps have moved it again.
+    for (const at of told.moves) {
+      const piece = moving.get(at.id)
+      if (!piece) continue
+      const w = went.get(piece), to: Placed = { pos: [at.pos[0], at.pos[1], at.pos[2]], rot: [at.rot[0], at.rot[1], at.rot[2], at.rot[3]] }
+      if (!step) went.delete(piece)
+      else if (w) Object.assign(w, { from: w.step === stepped - 1 ? w.to : null, to, at: tickAt, took: tickTook, step: stepped })
+      else went.set(piece, { from: null, to, at: tickAt, took: tickTook, step: stepped })
     }
     for (const { id } of told.gone) {
       const piece = moving.get(id)
@@ -935,7 +1031,7 @@ async function main() {
         debris.burst(piece.pos, (size[0] + size[2]) / 4, Math.min(10, 1 + Math.round(piece.born.cells / 70)), [c[0], c[1], c[2]], 0.9, 40, 0.45)
       }
     }
-    if (!far || far.live) for (const d of told.dust) { const c = hue(d.kind); debris.burst(d.at, 2, d.amount * 3, [c[0], c[1], c[2]], 0.8); fell.dust += d.amount }
+    if (!far || far.live) for (const d of told.dust) { const c = hue(d.kind); debris.dust(d.at, d.kind, d.amount, [c[0], c[1], c[2]]); fell.dust += d.amount }
     bodies = answer.bodies
     burning = answer.burning
     running = answer.flowing || answer.released
@@ -998,6 +1094,7 @@ async function main() {
       let born = by.get(size.join())
       if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
       const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
+      piece.skin = kinds
       smoothing.get(born)?.push(piece)
       return piece
     },
@@ -1013,15 +1110,16 @@ async function main() {
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
-      sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
-      // A hard crash (#37): road dust, chips of the paint struck, and shards of a window that cracked.
+      sparks: (at, strength) => { debris.burst(at, 1.5, Math.round(3 + strength * 6), [1.0, 0.57, 0.12], 0.13, 0.34, 0.5 + strength * 0.4, true); smoke.glint(at, 4 + strength * 5) },
+      // A hard crash (#37, #62): road dust, tight wreck cluster of painted body chips, dark bumper trim pieces, and glinting glass shards near the impact.
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)
         smoke.crash(at, strength)
-        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.3, 8, 0.9 + strength * 0.4)
-        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.5, 0.58, 0.62], 0.16, 3, 1.1)
+        debris.burst(at, 1.1, Math.round(2 + strength * 2), [c[0] * 0.92, c[1] * 0.92, c[2] * 0.92], 0.26, 15, 0.08 + strength * 0.06, true)
+        debris.burst(at, 1.1, Math.round(1 + strength * 2), [0.06, 0.06, 0.07], 0.30, 15, 0.07 + strength * 0.05, true)
+        if (glass) debris.burst([at[0], at[1] + 0.8, at[2]], 1.0, Math.round(2 + strength * 3), [0.48, 0.55, 0.60], 0.20, 14, 0.09 + strength * 0.06, true)
       },
-      engine: (at, level, dt) => smoke.engine(at, level, dt),
+      engine: (at, level, dt, source) => smoke.engine(engineVent(source, at), level, dt),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,
@@ -1080,7 +1178,7 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
+    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
     if (!far && silent(moverWorker) > moverPatience) loseMover(moverWorker)
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
@@ -2022,8 +2120,7 @@ async function main() {
     if (joined || directLL) realmUi.fold(true)
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
-    const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
-    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, back: { go: () => void explored()?.back(), can: () => explored()?.state === 'in' }, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
+    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, vehicle: () => alive.riding ? (alive.inside ? [] : alive.corners(alive.riding) ?? []) : null })
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
@@ -2074,7 +2171,7 @@ async function main() {
           // (In the first view its plane is kept in the picture whatever an egg says: what starts and ends them is tapped there, eggs-first.ts.)
           callPlane: (on) => { const plane = signboards?.plane; if (plane) { plane.call(on || !!(first && !first.engaged)); plane.loud = on } }, planeSeen: () => { const plane = signboards?.plane; return plane ? plane.readable && (!plane.loud || plane.come >= 1) : true },
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
-          notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
+          notice: (text, ms) => over.notice(text, ms), aspect: () => laid.w / Math.max(1, laid.h),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
           canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), darkBoards: (on) => { if (signboards) signboards.dark = on }, still: firstStill,
           pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)), far: farModel,
@@ -2090,7 +2187,7 @@ async function main() {
     }
     watchers.add(hatch)
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   const carSummon = createCarSummon({

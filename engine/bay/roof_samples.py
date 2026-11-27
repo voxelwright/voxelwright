@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import subprocess
 import zipfile
 
 import numpy as np
@@ -47,16 +48,46 @@ if __name__ == "__main__":
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("square", type=Path)
     cli.add_argument("landmark")
-    cli.add_argument("--u", type=int, nargs=2, required=True, metavar=("FIRST", "LAST"))
-    cli.add_argument("--w", type=int, nargs=2, required=True, metavar=("FIRST", "LAST"))
-    cli.add_argument("--spacing", type=int, required=True)
+    cli.add_argument("--u", type=float, nargs=2, required=True, metavar=("FIRST", "LAST"))
+    cli.add_argument("--w", type=float, nargs=2, required=True, metavar=("FIRST", "LAST"))
+    cli.add_argument("--spacing", type=float, required=True)
+    cli.add_argument("--compare-core", type=Path, help="compare a compiled landmark's roof to this survey grid")
+    cli.add_argument("--max-p90", type=float, help="fail if the 90th percentile absolute error exceeds these metres")
     args = cli.parse_args()
-    if args.spacing <= 0 or any(b < a or (b - a) % args.spacing for a, b in (args.u, args.w)):
-        cli.error("grid bounds must span whole positive steps")
+    if not math.isfinite(args.spacing) or args.spacing <= 0:
+        cli.error("grid spacing must be finite and positive")
+    if args.max_p90 is not None and (not args.compare_core or not math.isfinite(args.max_p90) or args.max_p90 < 0):
+        cli.error("--max-p90 requires a compiled core and a finite, non-negative tolerance")
+    def axis(a, b):
+        count = (b - a) / args.spacing
+        if not math.isfinite(count) or count < 0 or not math.isclose(count, round(count), abs_tol=1e-8):
+            cli.error("grid bounds must span whole positive steps")
+        return [a + i * args.spacing for i in range(round(count) + 1)]
+
     registry = Path(__file__).resolve().parents[1] / "sf" / "heroes.json"
     landmark = next((h for h in json.loads(registry.read_text()) if h["name"] == args.landmark), None)
     if landmark is None:
         cli.error(f"unknown landmark: {args.landmark}")
-    us, ws = (range(a, b + 1, args.spacing) for a, b in (args.u, args.w))
+    us, ws = (axis(a, b) for a, b in (args.u, args.w))
+    if args.compare_core:
+        step = landmark.get("step", 8)
+        cell = step / 10
+        # Probe the same cell centre in the survey and the model.
+        us, ws = ([(math.floor(v / cell) + 0.5) * cell for v in coords] for coords in (us, ws))
+        query = dict(wasm=str(args.compare_core), sort=landmark["sort"], step=step, us=us, ws=ws)
+        result = subprocess.run(["node", registry.with_name("roof-profile.mjs")], input=json.dumps(query),
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise SystemExit(result.stderr)
+        model = np.asarray(json.loads(result.stdout), dtype=float)
+        # A missing face is a defect in a selected solid roof patch. Count it even when every other point agrees.
+        missing = np.argwhere(~np.isfinite(model))
+        if len(missing):
+            j, i = missing[0]
+            raise SystemExit(f"{len(missing)} of {model.size} roof samples have no upward face, first at {us[i]:g}, {ws[j]:g}")
+        measured = np.asarray(list(sample(args.square, landmark, us, ws))) * 0.1
+        median, p90 = np.percentile(abs(model - measured), [50, 90])
+        print(f"{landmark['name']}, {model.size} surveyed roof samples, median error {median:.2f} m, p90 {p90:.2f} m")
+        raise SystemExit(int(args.max_p90 is not None and p90 > args.max_p90))
     for row in sample(args.square, landmark, us, ws):
         print("    [" + ", ".join(map(str, row)) + "],")

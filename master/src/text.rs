@@ -80,14 +80,12 @@ pub fn key(s: &str) -> Option<String> {
     ok.then_some(k)
 }
 
-pub fn same(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+pub fn digest(token: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(token).into()
 }
 
-/// Who a caller is for limits and bans: an IPv4 address, or an IPv6 /56 (a home
+/// Who a caller is for limits and bans: an IPv4 address, or an IPv6 /64 (a home
 /// is usually given a /56 or a /48, so counting single v6 addresses would let one
 /// machine look like billions). A /48 is also capped as a whole; see state.rs.
 pub fn addr_key(ip: IpAddr) -> IpAddr {
@@ -97,7 +95,7 @@ pub fn addr_key(ip: IpAddr) -> IpAddr {
             Some(v4) => IpAddr::V4(v4),
             None => {
                 let s = v6.segments();
-                IpAddr::V6(Ipv6Addr::new(s[0], s[1], s[2], s[3] & 0xff00, 0, 0, 0, 0))
+                IpAddr::V6(Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
             }
         },
     }
@@ -124,9 +122,9 @@ mod tests {
     }
 
     #[test]
-    fn v6_by_56() {
+    fn v6_by_64() {
         let a: IpAddr = "2001:db8:1:2:aaaa::1".parse().unwrap();
-        let b: IpAddr = "2001:db8:1:ff:bbbb::9".parse().unwrap();
+        let b: IpAddr = "2001:db8:1:2:bbbb::9".parse().unwrap();
         let c: IpAddr = "2001:db8:1:100::1".parse().unwrap();
         assert_eq!(addr_key(a), addr_key(b));
         assert_ne!(addr_key(a), addr_key(c));

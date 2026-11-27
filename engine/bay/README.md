@@ -76,6 +76,8 @@ Beside each ZIP are gzip JSON sidecars, each naming its `square`:
 - **Trees.** Trunks are aligned to the DataSF tree inventory, crown heights reject isolated returns, and the leaf colour comes from NAIP colour and near-infrared.
 - **Fixtures.** Lamps, poles, signs and wires go in each pack's `SFST` trailer. Heights of masts, signs and hydrants are typical values, not measured. A utility span inferred from lidar needs narrow raised returns along it and photo-supported poles at both ends.
 
+For the two measured pitches on 36th Avenue, run `node engine/sf/check-roof-fronts.mjs /path/to/packs/tiles/0` from the repository root after building the core. It samples the compiled heights across each pitch and checks the Mission flat and three low porch sites.
+
 For a fixed-camera comparison of two built releases, run `node engine/sf/landmark-shots.mjs --dist /path/to/dist-sf --out /path/to/shots` from the repository root for each build. Each image has a sibling JSON file with the requested camera, the rendered eye and forward vector, and the release and renderer digests. The [city pipeline](../../guide/city-pipeline.md#place-and-check-a-landmark) shows how to reproduce a surveyed roof surface and use the neighbourhood poses.
 
 ## The recognition panel
@@ -103,7 +105,7 @@ engine/bay/run-paint.sh status
 
 It works under `~/.village/engine/bay/450-city-paint/`. Workers survey street windows from Mapillary panoramas within a shared request budget, and each batch is judged on the panel before it is accepted. While a `hold-acceptance` file exists there, no panel or publication runs. Accept a pending batch with `city_panel.py accept --batch HASH [--scores FILE]`. An accepted batch enters a release through `release.py --paint`, and `paint_publication.py` stages the combined city release.
 
-`facade_evidence.py` reads photographs as evidence for a building's wall colour, material, windows and awning, instead of painting pixels. Its models and environment are in the `facade-evidence` skill. A tile cut with `VILLAGE_FACADE_EVIDENCE=<records folder>` carries the records; without it the tiles are unchanged. Leave it unset for releases: the measured wall lightness is too dark to trust yet.
+`facade_evidence.py` measures facade parameters in street photographs. The experimental tile cutter can read the full model output with `VILLAGE_FACADE_EVIDENCE=<records folder>`. Leave that unset for releases. Normal SF staging applies the smaller [reviewed source](evidence-reviewed-sf.json) after accepted street paint. It holds two colours and one material confirmed on separate street photographs. Supply another survey with `release.py ROOT OUT --facades FILE`. The [facade-evidence skill](../../.agents/skills/facade-evidence/SKILL.md) describes how to review a field and check the emitted tiles.
 
 ## Files
 
@@ -131,4 +133,4 @@ It works under `~/.village/engine/bay/450-city-paint/`. Workers survey street wi
 
 A change to `bake.py` or `tiles.py` changes tile bytes, so it needs a new release and a panel pass before the pin moves.
 
-Both terrain bakes read inland water from the street-detail survey. An OSM multipolygon retains its outer shore and any islands. Seven mapped water features in the Golden Gate Park gardens are retained in `sf-garden-water.json` for older archives of the two survey squares. Each polygon uses the same projected cells as the building footprints.
+Both terrain bakes read inland water from the street-detail survey. An OSM multipolygon retains its outer shore and any islands. Eight mapped water features in Golden Gate Park and at the Palace of Fine Arts are retained in `sf-garden-water.json` for older archives of the three survey squares. Each polygon uses the same projected cells as the building footprints. Six still ponds also have measured levels in metres NAVD88. Run `python mapped_water.py <inputs-dir>` to reproduce them from retained lidar. Near and distant ground both read these levels.

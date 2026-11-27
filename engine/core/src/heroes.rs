@@ -46,19 +46,19 @@ pub const REALM_MOST: i32 = 16;
 pub fn reach(sort: u32) -> Option<[f32; 6]> {
     match sort {
         SALESFORCE => Some([-34.0, 0.0, -34.0, 34.0, 327.0, 34.0]),
-        GOLDEN_GATE => Some([GG_SOUTH - 10.0, -30.0, -54.0, GG_NORTH + 140.0, GG_TOP + 1.0, 54.0]),
+        GOLDEN_GATE => Some([GG_SOUTH - 10.0, -30.0, -100.0, GG_NORTH + 1.0, GG_TOP + 1.0, 54.0]),
         TRANSAMERICA => Some([-29.0, 0.0, -29.0, 29.0, TA_TOP + 1.0, 29.0]),
         BAY_BRIDGE => Some([BB_WEST - 16.0, -30.0, -30.0, BB_EAST + 16.0, 162.0, 30.0]),
-        FERRY_BUILDING => Some([-FB_HALF - 1.0, 0.0, -FB_DEEP - 1.0, FB_HALF + 1.0, FB_TOP + 1.0, FB_DEEP + 1.0]),
+        FERRY_BUILDING => Some([-104.0, 0.0, -29.0, 103.0, FB_TOP + 1.0, 33.0]),
         SUTRO_TOWER => Some([-40.0, 0.0, -40.0, 40.0, ST_TOP + 1.0, 40.0]),
         CITY_HALL => Some([-CH_LONG - 2.0, -2.0, -CH_WIDE - 8.0, CH_LONG + 2.0, CH_TOP + 1.0, CH_WIDE + 8.0]),
-        FINE_ARTS => Some([-PF_ARC - 8.0, -2.0, -86.0, 98.0, PF_TOP + 2.0, 86.0]),
+        FINE_ARTS => Some([-38.0, -2.0, -114.0, 54.0, PF_TOP + 2.0, 109.0]),
         FORT_POINT => Some([-54.0, -5.0, -34.0, 54.0, 25.0, 34.0]),
         ACADEMY_SCIENCES => Some([-81.0, -7.0, -66.5, 81.0, 24.0, 36.5]),
         JAPANESE_TEA_GARDEN => Some([-66.0, -10.0, -66.0, 66.0, 26.0, 66.0]),
         BOTANICAL_GARDEN => Some([-80.0, -10.0, -60.0, 80.0, 26.0, 60.0]),
-        CONSERVATORY => Some([-50.0, -10.0, -22.0, 50.0, 24.0, 94.0]),
-        PAINTED_LADIES => Some([-28.5, -5.0, -11.0, 27.0, 21.0, 13.0]),
+        CONSERVATORY => Some([-50.0, -10.0, -22.0, 61.0, 24.0, 96.0]),
+        PAINTED_LADIES => Some([-28.5, -5.0, -11.5, 27.0, 21.0, 13.0]),
         DE_YOUNG => Some([-80.0, -8.0, -40.0, 78.0, 47.0, 44.0]),
         _ => None,
     }
@@ -68,43 +68,37 @@ pub fn reach(sort: u32) -> Option<[f32; 6]> {
 /// say an arch or a lattice, are not), or only adds to what the map has there (a bridge over the water).
 pub fn owns(sort: u32, u: f32, y: f32, w: f32) -> bool {
     match sort {
-        SALESFORCE | TRANSAMERICA | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FORT_POINT
+        SALESFORCE | TRANSAMERICA | SUTRO_TOWER | FORT_POINT
         | PAINTED_LADIES | DE_YOUNG => true,
+        // Include the 1.5 m of trim that a generic tile facade may project outside its outline.
+        FERRY_BUILDING => ferry_depth(u, w) >= -1.5,
+        CITY_HALL => city_hall_footprint(u, w),
         ACADEMY_SCIENCES => academy_canopy(u, w),
         // Suspension spans over land or shore carry lidar cable/deck returns that otherwise extrude to ground as solid
         // curtains; below 22 m under the arch, Fort Point stays. Also claim the south anchorage block (eliminating the
         // embedded DataSF building at u=-1149 m), the south tower pier fender ring (eliminating the lidar spike beside
-        // the pier), and the north Marin Headlands abutment (#60).
+        // the pier), and the measured width of the northern approach deck (#60).
         GOLDEN_GATE => {
             ((-1095.0..=1095.0).contains(&u) && w.abs() <= 30.0 && (y <= 0.0 || y >= 22.0))
                 || ((u + GG_TOWER).abs() <= 42.0 && w.abs() <= 52.0 && y >= 0.0)
                 || ((-1265.0..-1090.0).contains(&u) && w.abs() <= 34.0 && y >= 0.0)
-                || ((1050.0..=GG_NORTH + 135.0).contains(&u) && w.abs() <= 52.0 && y >= 0.0)
+                || ((1050.0..GG_NORTH).contains(&u) && gg_offset(u, w).abs() <= 17.0 && y >= 0.0)
         }
         BAY_BRIDGE => (BB_WEST..=BB_EAST).contains(&u) && w.abs() <= 26.0 && (y <= 0.0 || y >= 24.0),
-        // The rotunda, the colonnade's arc, and the open lagoon basin east of the rotunda (not the exhibition hall behind).
-        FINE_ARTS => {
-            let r = (u * u + w * w).sqrt();
-            r < PF_ROTUNDA + 23.0
-                || ((r - PF_ARC).abs() < 12.0 && pf_on_arc(u, w))
-                || (u >= 20.0 && u <= 94.0 && w.abs() <= 78.0)
-        }
+        FINE_ARTS => pf_owns(u, w),
         // Inside the mapped fence, less the mapped buildings each leaves to the map (heroes.rs `TEA_KEPT`, `BOTANICAL_KEPT`).
         JAPANESE_TEA_GARDEN => tea_garden_place(u, w),
         BOTANICAL_GARDEN => botanical_place(u, w),
-        CONSERVATORY => {
-            (u.abs() <= 42.0 && (-20.0..=21.0).contains(&w))
-                || (u.abs() <= 48.0 && (21.0..=90.0).contains(&w))
-        }
+        CONSERVATORY => conservatory_public(u, w),
         _ => false,
     }
 }
 
 /// Optional ground-surface override at `(u, w)` where a landmark turns dry/concrete tile cells into reflective ponds,
 /// lagoons, raked Zen gravel, garden walkways, or Conservatory Valley's floral carpet parterres (#60).
-pub fn surface_at(sort: u32, u: f32, w: f32, ground_m: f32, s: f32) -> Option<Kind> {
+pub fn surface_at(sort: u32, u: f32, w: f32, _ground_m: f32, s: f32) -> Option<Kind> {
     match sort {
-        FINE_ARTS => fine_arts_surface(u, w, ground_m),
+        FINE_ARTS => fine_arts_surface(u, w),
         JAPANESE_TEA_GARDEN => tea_garden_surface(u, w, s),
         BOTANICAL_GARDEN => botanical_surface(u, w, s),
         CONSERVATORY => conservatory_surface(u, w, s),
@@ -116,9 +110,12 @@ pub fn surface_at(sort: u32, u: f32, w: f32, ground_m: f32, s: f32) -> Option<Ki
 /// ground `c.g`), allowing gardens and sloped valley parterres to hug hills while buildings stay level (#60).
 pub fn kind_at_world(sort: u32, u: f32, up: f32, over_g: f32, w: f32, s: f32) -> Kind {
     match sort {
+        GOLDEN_GATE if u > GG_ANCHOR_N && up - over_g >= gg_road(u) => 0,
         JAPANESE_TEA_GARDEN => japanese_tea_garden(u, over_g, w, s),
         BOTANICAL_GARDEN => botanical_garden(u, over_g, w, s),
-        CONSERVATORY => conservatory(u, up, over_g, w, s),
+        CONSERVATORY if w > 33.0 && over_g > 0.0 => {
+            valley_planting(u, over_g, w, s).unwrap_or_else(|| conservatory(u, up, w, s))
+        }
         _ => kind_at(sort, u, up, w, s),
     }
 }
@@ -127,14 +124,7 @@ pub fn kind_at_world(sort: u32, u: f32, up: f32, over_g: f32, w: f32, s: f32) ->
 pub fn owns_world(sort: u32, u: f32, up: f32, over_g: f32, w: f32) -> bool {
     match sort {
         JAPANESE_TEA_GARDEN | BOTANICAL_GARDEN => over_g >= 0.0 && owns(sort, u, over_g, w),
-        CONSERVATORY => {
-            if w > 21.0 {
-                over_g >= 0.0 && owns(sort, u, over_g, w)
-            } else {
-                up >= -2.5 && owns(sort, u, up, w)
-            }
-        }
-        ACADEMY_SCIENCES | DE_YOUNG | PAINTED_LADIES | FORT_POINT => over_g >= 0.0 && owns(sort, u, up, w),
+        ACADEMY_SCIENCES | DE_YOUNG | PAINTED_LADIES | FORT_POINT | CONSERVATORY => over_g >= 0.0 && owns(sort, u, up, w),
         _ => up >= 0.0 && owns(sort, u, up, w),
     }
 }
@@ -154,7 +144,7 @@ pub fn kind_at(sort: u32, u: f32, y: f32, w: f32, s: f32) -> Kind {
         ACADEMY_SCIENCES => academy_sciences(u, y, w, s),
         JAPANESE_TEA_GARDEN => japanese_tea_garden(u, y, w, s),
         BOTANICAL_GARDEN => botanical_garden(u, y, w, s),
-        CONSERVATORY => conservatory(u, y, y, w, s),
+        CONSERVATORY => conservatory(u, y, w, s),
         PAINTED_LADIES => painted_ladies(u, y, w, s),
         DE_YOUNG => de_young(u, y, w, s),
         _ => 0,
@@ -231,9 +221,9 @@ fn line(at: f32, every: f32, first: f32, wide: f32, s: f32) -> bool {
 // high, with a screen of lamps inside it.
 //
 // Its foot is the map's outline (Overture: 53.8 by 54.2 m across the flats, 64 m corner to corner, so the corners
-// are rounded at 0.55 of the half width). How it draws in was measured off a photograph from 3.3 km (Commons,
-// "San Francisco skyline from Potrero Hill, February 2020", Pi.1415926535, CC BY-SA 3.0; 0.46 m a pixel): the right
-// edge of its outline against the sky every 5.5 m from 193 m up. Below that the photograph's skyline hides it.
+// are rounded at 0.55 of the half width). Above 193 m the outline clears the Potrero Hill skyline (Pi.1415926535,
+// February 2020, CC BY-SA 3.0, 0.46 m/pixel). Use both edges: the crown's apparent centre drifts left in that
+// photograph. Its widths are also checked from Ina Coolbrith Park in the solved camera and against 3DEP returns.
 const SF_TOP: f32 = 326.0;
 const SF_CROWN: f32 = 280.0;
 const SF_FLOOR: f32 = 4.42;
@@ -241,7 +231,7 @@ const SF_HALF: f32 = 26.9;
 const SF_ROUND: f32 = 0.55;
 const SF_TAPER: [(f32, f32); 19] = [
     (0.0, 1.0), (60.0, 1.0), (120.0, 0.985), (160.0, 0.968), (193.0, 0.944), (215.0, 0.912), (235.0, 0.872), (248.0, 0.835), (260.0, 0.79),
-    (271.0, 0.75), (282.0, 0.70), (293.0, 0.64), (304.0, 0.572), (310.0, 0.535), (315.0, 0.497), (320.0, 0.452), (323.0, 0.415), (325.0, 0.37), (326.0, 0.33),
+    (271.0, 0.77), (282.0, 0.737), (293.0, 0.69), (304.0, 0.632), (310.0, 0.608), (315.0, 0.578), (320.0, 0.545), (323.0, 0.522), (325.0, 0.50), (326.0, 0.48),
 ];
 
 fn salesforce(u: f32, y: f32, w: f32, s: f32) -> Kind {
@@ -310,13 +300,22 @@ fn salesforce(u: f32, y: f32, w: f32, s: f32) -> Kind {
 }
 
 
-// ── The Ferry Building (A. Page Brown, 1898). Its frame: u along the building towards the south-east, w across it
-// towards the city (Market Street), y up from the plaza. Overture Maps 2026-10-21.0 (© OpenStreetMap contributors,
-// Overture Maps Foundation): the building 202 by 56 m, 15 to 16 m high, along bearing 143 degrees; the clock tower in
-// seven stages over a 12 m square, 17.5 m out from the building's middle line towards the city: 43.5, 50.5, 54.2,
-// 60.5, 64.5, 68.2 and a dome to 70 m. The arcade, the clock's faces and the belfry's arches are by eye.
-const FB_HALF: f32 = 101.0;
-const FB_DEEP: f32 = 28.0;
+// ── The Ferry Building (A. Page Brown, 1898). u runs southeast along the quay, w towards Market Street.
+// DataSF footprint 201006.0000058 in square 552.7_4182.5 gives two nearly rectangular wings and a forward entrance.
+// Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) gives the seven tower stages
+// on a 12 m square. The operator's front elevation shows the arcade, four dials and belfry (source in sf/heroes.json).
+const FB_NORTH: f32 = -101.8;
+const FB_SOUTH: f32 = 100.7;
+const FB_BACK: f32 = -27.0;
+const FB_FRONT: f32 = 21.8;
+const FB_PORTICO: f32 = 30.7;
+
+fn ferry_depth(u: f32, w: f32) -> f32 {
+    let hall = (u - FB_NORTH).min(FB_SOUTH - u).min(w - FB_BACK).min(FB_FRONT - w);
+    let portico = (u + 23.0).min(22.0 - u).min(w).min(FB_PORTICO - w);
+    hall.max(portico)
+}
+
 const FB_TOWER_W: f32 = 17.5;
 const FB_TOP: f32 = 70.0;
 /// The tower's stages: up to this height, half its side.
@@ -326,7 +325,7 @@ fn ferry_building(u: f32, y: f32, w: f32, s: f32) -> Kind {
     if y < 0.0 || y >= FB_TOP {
         return 0;
     }
-    let stone = kind(PLASTER, colour(3, 0));
+    let stone = kind(PLASTER, colour(2, 7));
     let trim = kind(PLASTER, WHITE);
     let dark = kind(GLASS, colour(14, 9));
     let roof = kind(ROOFING, grey(10));
@@ -340,7 +339,15 @@ fn ferry_building(u: f32, y: f32, w: f32, s: f32) -> Kind {
             if (35.0..42.5).contains(&y) && face < 0.6f32.max(s) {
                 let r = (along * along + (y - 39.0) * (y - 39.0)).sqrt();
                 if r < 3.0 {
-                    return if r > 2.4 && s <= 0.8 { kind(STEEL, grey(13)) } else { trim };
+                    // Screen-right follows the outside of each dial. The long
+                    // hand points to twelve, the short hand to two (14:00).
+                    let right = if tu > tw { -along * u.signum() } else { along * (w - FB_TOWER_W).signum() };
+                    let dy = y - 39.0;
+                    // A rotated wall can skip a thin vertical mark between voxel columns.
+                    let width = 0.26f32.max(s);
+                    let minute = right.abs() <= width && (-0.2..=2.15).contains(&dy);
+                    let hour = from_segment([right, dy, 0.0], [0.0; 3], [1.43, 0.83, 0.0]) <= width;
+                    return if s <= 0.8 && (r > 2.55 || minute || hour) { kind(STEEL, grey(13)) } else { trim };
                 }
             }
             // The belfry over it: three arches a side, open, with the dark of the stair behind.
@@ -361,24 +368,48 @@ fn ferry_building(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     }
     // The building: two long storeys under a cornice, a roof that pitches gently to a ridge with a skylight down the nave.
-    if u.abs() > FB_HALF || w.abs() > FB_DEEP {
+    let face = ferry_depth(u, w);
+    if face < 0.0 {
         return 0;
     }
-    let ridge = 16.1 - 2.4 * (w.abs() / FB_DEEP);
+    let entrance = (-23.0..=22.0).contains(&u) && w > FB_FRONT;
+    if entrance {
+        // Three tall arched bays beneath the clock, flanked by smaller
+        // openings. Their glazing is recessed behind the street colonnade.
+        if y >= 16.0 { return 0; }
+        if y > 14.7 { return trim; }
+        let a = (u + 0.5 + 4.5).rem_euclid(9.0) - 4.5;
+        let outer = (u + 0.5).abs() > 13.5;
+        let radius = if outer { 2.2 } else { 3.55 };
+        let crown = if outer { 6.0 } else { 9.4 };
+        if a.abs() < radius && y > 0.5 && y < crown + (radius * radius - a * a).sqrt() {
+            if face < 1.6 { return 0; }
+            // The gallery floor and glazing bars are on the recessed plane.
+            if !outer && (5.1..5.9).contains(&y) { return trim; }
+            if a.abs() < 0.16f32.max(s * 0.55) || (9.1..9.5).contains(&y) {
+                return kind(STEEL, grey(8));
+            }
+            return dark;
+        }
+        if outer && a.abs() < 1.8 && (8.8..11.6).contains(&y) {
+            return if face < 0.6 { 0 } else { dark };
+        }
+        return stone;
+    }
+    let ridge = (16.1 - 2.4 * (w.abs() / 27.0)).max(14.4);
     if y >= 14.0 {
         if y >= ridge {
             return 0;
         }
         return if w.abs() < 3.0 && s <= 1.6 { kind(GLASS, colour(14, 6)) } else { roof };
     }
-    let face = (FB_HALF - u.abs()).min(FB_DEEP - w.abs());
     if face > 1.0f32.max(s) {
         return kind(CONCRETE, grey(9));
     }
     if y >= 12.6 || y < 0.8 {
         return trim;
     }
-    let along = if FB_HALF - u.abs() < FB_DEEP - w.abs() { w } else { u };
+    let along = if (u - FB_NORTH).min(FB_SOUTH - u) < (w - FB_BACK).min(FB_FRONT - w) { w } else { u };
     if s <= 0.8 {
         if y < 7.0 {
             // The arcade: an arch every 6 m, its opening 4 m wide and 5.6 m to the crown, the glass set back.
@@ -387,10 +418,11 @@ fn ferry_building(u: f32, y: f32, w: f32, s: f32) -> Kind {
             if a.abs() < 2.0 && y < crown {
                 return if face < 0.5 { 0 } else { dark };
             }
-        } else if (8.2..11.6).contains(&y) {
-            // Upstairs a pair of windows in each bay.
+        } else if (8.2..12.6).contains(&y) {
+            // The upper arcade has a round head over two lower panes.
             let a = (along + 3.0).rem_euclid(6.0) - 3.0;
-            if (0.5..1.7).contains(&a.abs()) {
+            let rounded = a * a + (y - 10.6).max(0.0).powi(2) < 1.85 * 1.85;
+            if rounded && (a.abs() > 0.21 || y > 10.6) {
                 return dark;
             }
         }
@@ -490,301 +522,415 @@ fn sutro_tower(u: f32, y: f32, w: f32, s: f32) -> Kind {
     0
 }
 
-// ── City Hall (Bakewell & Brown, 1915). Its frame: u along the building (towards the south, a little east), w across
-// it, y up from the ground. Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation): the
-// building 127 by 98 m and 30 m high; a wing across it 28 m wide to 35 m, its roof pitched to 38; the rotunda's base
-// 41 by 39 m to 32 m, then 40 m to 40, 34 to 46, 31 to 56, 29 to 60, and the dome to 75 m with its lantern over.
-// The dome's top at 93.6 m (307.5 feet) as published; the colonnades, light courts, ribs and gilding by eye.
-const CH_LONG: f32 = 63.5;
-const CH_WIDE: f32 = 49.0;
+// ── City Hall (Bakewell & Brown, 1915). u towards the south end, w west, y above its 17.6 m foot.
+// DataSF footprint in the hero frame, simplified to 0.65 m. The two porticos extend past the long facades.
+// The 0.25 m lidar in 550.7_4180.5 and 550.7_4181.5 locates the roofs, courts and drum in this same frame.
+const CH_LONG: f32 = 64.0;
+const CH_WIDE: f32 = 49.3;
 const CH_TOP: f32 = 93.6;
+const CH_OUTLINE: &[(f32, f32)] = &[
+    (-59.9, -45.0), (-15.0, -44.8), (-15.0, -46.4), (-12.0, -46.4), (-12.0, -49.0),
+    (12.6, -48.9), (12.6, -46.1), (15.9, -46.1), (15.8, -44.6), (60.5, -44.3),
+    (60.5, -42.9), (63.8, -41.1), (63.7, -22.6), (62.1, -22.5), (62.1, 20.7),
+    (63.6, 20.8), (63.5, 38.8), (62.1, 38.8), (60.1, 40.7), (60.1, 42.2),
+    (58.3, 42.2), (58.3, 42.9), (15.4, 41.9), (15.4, 43.5), (12.7, 44.8),
+    (12.2, 49.2), (-12.3, 49.1), (-12.3, 46.1), (-14.5, 43.5), (-15.6, 43.5),
+    (-15.6, 41.8), (-48.1, 41.6), (-48.1, 42.5), (-58.4, 42.4), (-58.4, 41.5),
+    (-60.3, 41.5), (-60.3, 39.2), (-63.7, 37.9), (-63.7, 19.8), (-61.9, 19.7),
+    (-61.5, -23.6), (-63.4, -23.8), (-63.2, -41.4), (-60.2, -43.1),
+];
+
+fn city_hall_footprint(u: f32, w: f32) -> bool {
+    // Most cell queries are well inside the envelope. Only trace the polygon near its edges.
+    (u.abs() < 59.0 && (w + 1.5).abs() < 42.0)
+        || (u.abs() <= CH_LONG && w.abs() <= CH_WIDE && inside(CH_OUTLINE, u, w))
+}
+
+const CH_STONE: Kind = kind(CONCRETE, grey(2));
+const CH_TRIM: Kind = kind(PLASTER, grey(1));
+const CH_GLASS: Kind = kind(GLASS, colour(15, 9));
+const CH_LEAD: Kind = kind(ROOFING, grey(5));
+const CH_GOLD: Kind = kind(STEEL, colour(3, 3));
+
+// u and w here are relative to the surveyed dome axis (0.5, -1.5). Below it the square roof of the
+// rotunda has a clipped octagonal parapet. Above it sixteen window bays alternate with paired stonework.
+fn city_hall_drum(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    let side = u.abs().max(w.abs());
+    if side > 20.5 || y >= CH_TOP {
+        return 0;
+    }
+    if y < 35.0 {
+        if side <= 20.0 && y <= 30.3 {
+            return CH_STONE;
+        }
+        let inset = (20.0 - side).min((28.9 - u.abs() - w.abs()) * std::f32::consts::FRAC_1_SQRT_2);
+        return if inset < 0.0 || (y > 33.0 && inset > 1.2 && u * u + w * w > 17.4 * 17.4) { 0 } else { CH_TRIM };
+    }
+    let r = u.hypot(w);
+    let theta = w.atan2(u);
+    if y < 55.4 {
+        // The pilasters and entablature project past the glazed wall. Each bay faces radially.
+        let round = 16.0 * theta;
+        let bay = std::f32::consts::TAU; // pitch at 16 m radius, for sixteen bays
+        let across_window = ((round + bay * 0.5).rem_euclid(bay) - bay * 0.5).abs();
+        let pier = line(round, bay, bay * 0.5, 1.6, s);
+        if y < 40.0 {
+            return if r > 17.4 { 0 } else if y > 38.5 { CH_TRIM } else { CH_STONE };
+        }
+        if y < 50.2 {
+            let pediment_top = 49.3 - across_window * 0.45;
+            let pediment = (47.9..=pediment_top).contains(&y);
+            let radius = if pier { 17.5 } else if pediment || y > 49.5 { 16.3 } else { 15.5 };
+            if r > radius {
+                return 0;
+            }
+            if pediment || (pier && (y < 41.0 || y > 47.6)) {
+                return CH_TRIM;
+            }
+            let window = across_window < 1.55 && (41.3..47.8).contains(&y);
+            return if window && r > 14.7 { CH_GLASS } else { CH_STONE };
+        }
+        if y < 51.2 && r <= 15.7 {
+            return CH_TRIM;
+        }
+        if pier && (r - 16.2).abs() < 0.6 && y < 54.5 {
+            return if y > 53.8 { CH_GOLD } else { CH_TRIM };
+        }
+        return if r <= 14.4 { CH_STONE } else { 0 };
+    }
+    if y < 71.6 {
+        // Survey sections through the lead roof (height above foot, outer radius).
+        let radius = between(&[(55.4, 13.8), (59.0, 13.2), (62.0, 12.35), (65.0, 10.9),
+            (67.0, 9.1), (69.0, 6.45), (70.3, 4.85), (71.6, 3.65)], y);
+        if r > radius {
+            return 0;
+        }
+        let rib = s <= 1.6 && line(13.5 * theta, 13.5 * std::f32::consts::TAU / 16.0, 0.0, 0.35, s);
+        return if rib || y < 56.1 { CH_GOLD } else { CH_LEAD };
+    }
+    // Lantern sill, open ring of eight shafts, gilded cornice, then the narrowing cupola and spire.
+    if y < 74.6 {
+        let sill = between(&[(71.6, 3.65), (73.9, 4.0), (74.6, 3.25)], y);
+        return if r > sill { 0 } else if y > 73.9 { CH_GOLD } else { CH_LEAD };
+    }
+    if y < 78.5 {
+        let on_shaft = (r - 2.6).abs() <= 0.42f32.max(s * 0.5)
+            && line(2.6 * theta, 2.6 * std::f32::consts::TAU / 8.0, 0.0, 0.72, s);
+        return if on_shaft { CH_GOLD } else { 0 };
+    }
+    let radius = between(&[(78.5, 3.45), (79.3, 3.45), (80.6, 2.05), (81.4, 1.5),
+        (82.0, 1.75), (84.5, 1.05), (85.1, 1.15), (86.2, 0.7), (89.0, 0.55), (CH_TOP, 0.15)], y);
+    if r <= radius.max(s * std::f32::consts::FRAC_1_SQRT_2) { CH_GOLD } else { 0 }
+}
 
 fn city_hall(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if y < -2.0 || y >= CH_TOP {
+    let a = (u - 0.5).abs();
+    let b = (w + 1.5).abs();
+    if y >= 30.9 || (y >= 25.0 && a <= 20.0 && b <= 20.0) {
+        return city_hall_drum(u - 0.5, y, w + 1.5, s);
+    }
+    if y < -2.0 || !city_hall_footprint(u, w) {
         return 0;
     }
-    let granite = kind(CONCRETE, grey(2));
-    let granite_trim = kind(PLASTER, WHITE);
-    let dark = kind(GLASS, colour(14, 9));
-    let lead = kind(ROOFING, colour(13, 8));
-    let gold = kind(STEEL, colour(3, 3));
-    if y < 0.0 {
-        return if u.abs() <= CH_LONG + 1.0 && w.abs() <= CH_WIDE + 6.0 { granite } else { 0 };
+    // The light courts are 16.5 m wide, inset between the transept and end wings. Each contains
+    // a low glazed skylight above the court roof, visible from the dome.
+    if a > 20.0 && a < 36.5 && b < 18.5 {
+        let ridge = (a - 28.0).abs();
+        let rise = ((6.0 - ridge).min(16.0 - b) * 0.55).clamp(0.0, 2.25);
+        if y > 10.8 + rise {
+            return 0;
+        }
+        if y > 10.8 && y >= 10.8 + rise - s && !line(w, 3.1, 0.0, 0.25, s) {
+            return kind(GLASS, colour(15, 7));
+        }
+        return CH_STONE;
     }
-    let r = (u * u + w * w).sqrt();
-    // The dome over the drum: a little taller than round, ribbed in gold, under a lantern of columns and a cupola.
-    if y >= 32.0 {
-        let half = if y < 40.0 { 20.0 } else if y < 46.0 { 17.0 } else if y < 56.0 { 15.5 } else { 14.5 };
-        if y < 60.0 {
-            if y < 40.0 {
-                // The square base of the drum, cut at its corners, with gold frieze accents.
-                if u.abs().max(w.abs()) <= half && u.abs() + w.abs() <= half * 1.4 {
-                    return if y > 38.8 || (32.0..33.0).contains(&y) { gold } else { granite };
-                }
-                return 0;
-            }
-            if r > half {
-                return 0;
-            }
-            // The drum's colonnade: fluted Corinthian columns every 2.4 m round it, tall arched windows between.
-            if (46.0..55.5).contains(&y) && r > half - 1.6f32.max(s) && s <= 1.2 {
-                let round = r * w.atan2(u);
-                if y > 54.6 || y < 47.0 {
-                    return granite_trim;
-                }
-                return if line(round, 2.4, 0.0, 0.85, s) { granite } else if r > half - 0.8 { 0 } else { dark };
-            }
-            if (58.8..60.0).contains(&y) && r > half - 1.2 {
-                return gold;
-            }
-            return granite;
+    // The longitudinal ridge of each entrance roof runs out to its pediment. Its six columns
+    // stand free of the portal wall above the landing.
+    let wing_edge = 43.3 - b;
+    if a < 15.6 {
+        let ridge = 30.9 - 0.35 * a.min(13.0);
+        if y > ridge {
+            return 0;
         }
-        if y < 75.0 {
-            let h = (y - 60.0) / 15.0;
-            let rd = 13.5 * (1.0 - h * h).max(0.0).sqrt();
-            if r > rd.max(s * 0.5) {
-                return 0;
+        let front = 49.0 - w.abs();
+        if wing_edge < 0.0 {
+            let stair = 1.0 + 0.3 * (front.max(0.0) / 0.35).floor();
+            if y <= stair.min(2.8) {
+                return CH_STONE;
             }
-            let round = 13.5 * w.atan2(u);
-            let rib = line(round, 13.5 * std::f32::consts::PI / 12.0, 0.0, 0.55, s) && s <= 1.6;
-            let band = (y - 60.5).abs() < 0.6 || (y - 74.2).abs() < 0.6;
-            return if rib || band { gold } else { lead };
-        }
-        // The lantern, its cupola and the finial.
-        if y < 84.0 {
-            if r > 4.5 {
-                return 0;
+            if y >= 23.8 {
+                return if y > ridge - 0.65 || y < 24.6 { CH_TRIM } else { CH_STONE };
             }
-            return if r > 3.4 && s <= 0.6 && !line(4.0 * w.atan2(u), 1.6, 0.0, 0.5, s) { 0 } else { gold };
+            let cap = y > 22.7 || y < 3.6;
+            let radius: f32 = if cap { 1.05 } else { 0.78 };
+            let along = (u.rem_euclid(4.4) - 2.2).abs();
+            return if along.hypot(front - 1.3) <= radius.max(s * 0.6) { CH_STONE } else { 0 };
         }
-        if y < 89.0 {
-            let rd = 4.5 * (1.0 - ((y - 84.0) / 5.0).powi(2)).max(0.0).sqrt();
-            return if r <= rd.max(s * 0.5) { gold } else { 0 };
+        if y >= 24.0 {
+            return if y > ridge - 0.6 { CH_LEAD } else { CH_STONE };
         }
-        return if r <= 0.6f32.max(s * 0.55) { gold } else { 0 };
+        if b > 40.0 && y < 7.8 && round_arch((u + 4.4).rem_euclid(8.8) - 4.4, y, 2.2, 4.8, 2.0) && y > 1.2 {
+            return CH_GLASS;
+        }
     }
-    // Monumental Beaux-Arts East & West entrance porticos (grand triangular pediment, Corinthian columns, entry stairs).
-    if u.abs() <= 17.5 && w.abs() > CH_WIDE && w.abs() <= CH_WIDE + 6.5 {
-        let out = w.abs() - CH_WIDE;
-        // Grand granite steps climbing to the main portal (0..3.6 m).
-        if y < 3.6 && out <= 6.5 - y * 1.1 {
-            return granite;
-        }
-        // Projecting colonnade pediment portico (out <= 4.0 m).
-        if out <= 4.0 {
-            if (26.5..33.0).contains(&y) {
-                let slope = 32.8 - u.abs() * 0.36;
-                if y <= slope {
-                    let edge = (slope - y) < 0.7 || y < 27.4;
-                    return if edge { granite_trim } else { granite };
-                }
-                return 0;
-            }
-            if (24.5..26.5).contains(&y) {
-                return if y > 25.9 { granite_trim } else { granite };
-            }
-            if (3.6..24.5).contains(&y) && out > 2.2 {
-                return if line(u, 4.4, 0.0, 1.15, s) { granite } else { 0 };
+    let end_edge = 63.5 - u.abs();
+    let face = wing_edge.min(end_edge);
+    if y >= 20.7 && a >= 15.6 {
+        // Steep outer mansard returns to a shallow inner pitch beyond the ridges.
+        // Both long facades have small triangular end pediments in front of a recessed attic.
+        if wing_edge < 2.4 {
+            let pediment = 23.1 - 0.41 * (a - 53.0).abs();
+            if y <= pediment {
+                return if y >= pediment - 0.4 { CH_TRIM } else { CH_STONE };
             }
         }
-        return 0;
-    }
-    if u.abs() > CH_LONG || w.abs() > CH_WIDE {
-        return 0;
-    }
-    // Two light courts either side of the rotunda, open from the second floor up.
-    let court = (u.abs() - 37.0).abs() < 14.0 && w.abs() < 22.0;
-    if court && y > 9.0 {
-        return 0;
-    }
-    // Mansard slate roof over the perimeter wings and pitched cross wing.
-    if y >= 28.5 {
-        if u.abs() <= 15.0 && y < 35.0 + 3.2 * (1.0 - w.abs() / CH_WIDE) {
-            return if y >= 34.5 { lead } else { granite };
+        let roof = between(&[(0.0, 20.9), (1.3, 22.1), (2.4, 24.9), (4.5, 25.0),
+            (10.5, 26.8), (15.0, 25.3)], face);
+        if y > roof {
+            return 0;
         }
-        let inset = (y - 28.5) * 0.85;
-        if y < 32.5 && u.abs() <= CH_LONG - inset && w.abs() <= CH_WIDE - inset {
-            return if s <= 0.8 && (CH_LONG - inset - u.abs()).min(CH_WIDE - inset - w.abs()) < 0.6 && line(u + w, 6.0, 0.0, 1.4, s) && y < 31.0 {
-                granite_trim
-            } else {
-                lead
-            };
-        }
-        return 0;
-    }
-    let face = (CH_LONG - u.abs()).min(CH_WIDE - w.abs());
-    if face > 3.0f32.max(s) {
-        return granite;
-    }
-    let along = if CH_LONG - u.abs() < CH_WIDE - w.abs() { w } else { u };
-    // A rusticated base, a colonnade two storeys tall over it with the wall 2.5 m behind, and an attic cornice.
-    if y >= 26.8 || y < 1.2 {
-        return if y >= 27.6 { granite_trim } else { granite };
-    }
-    if (9.0..25.0).contains(&y) && s <= 1.6 {
         if face < 2.5 {
-            // In the colonnade: paired/rhythmic columns every 4.6 m, with deeply shadowed recessed portico behind.
-            return if line(along, 4.6, 0.0, 1.15, s) { granite } else { 0 };
-        }
-        return if (along + 2.3).rem_euclid(4.6) < 2.2 && (y - 10.5).rem_euclid(7.5) < 4.5 { dark } else { granite };
-    }
-    if y < 9.0 && s <= 0.8 {
-        // Grand arched Beaux-Arts portals on the East & West central pavilions behind the portico columns.
-        if CH_WIDE - w.abs() < 3.0 && u.abs() < 14.0 {
-            let portal = (u + 4.4).rem_euclid(8.8) - 4.4;
-            if round_arch(portal, y, 2.2, 5.2, 2.1) && y >= 1.2 {
-                return if face < 1.2 { 0 } else { dark };
+            if (22.0..23.3).contains(&y) && line(u, 4.6, 2.3, 1.3, s) {
+                return CH_GLASS;
             }
+            return if y > roof - 0.5 { CH_TRIM } else { CH_STONE };
         }
-        if (along + 2.3).rem_euclid(4.6) < 1.8 && (2.0..6.8).contains(&y) {
-            return dark;
+        return CH_LEAD;
+    }
+    let along = if end_edge < wing_edge { w } else { u };
+    // Rusticated base, two-storey colonnade with recessed windows, and a projecting attic cornice.
+    if face < 3.2 && (6.6..20.0).contains(&y) {
+        let cap = y > 19.1 || y < 7.4;
+        if face < 2.35 {
+            return if line(along, 4.6, 0.0, if cap { 1.65 } else { 1.15 }, s) { CH_STONE } else { 0 };
+        }
+        if line(along, 4.6, 2.3, 2.0, s) && (y - 7.5).rem_euclid(6.0) < 4.25 {
+            return CH_GLASS;
         }
     }
-    granite
+    if face < 3.0 && (1.8..5.5).contains(&y) && line(along, 4.6, 2.3, 1.85, s) {
+        return CH_GLASS;
+    }
+    if (5.9..6.6).contains(&y) || (20.0..20.7).contains(&y) { CH_TRIM } else { CH_STONE }
 }
 
-// ── The Palace of Fine Arts (Maybeck, 1915, rebuilt 1965). Its frame: u towards the east (the lagoon), w towards the
-// south, y up from the ground. A rotunda of eight arches on piers with a dome, 49 m (162 feet) to its top, round it
-// to the west a colonnade on an arc, and directly east its reflective swan lagoon (#60).
-const PF_ROTUNDA: f32 = 17.0;
+// ── The Palace of Fine Arts (Maybeck, 1915, rebuilt 1965) (#60). Its frame: u east (towards the lagoon), w south, y up
+// from its foot. Where each part stands is OpenStreetMap's (© OpenStreetMap contributors, ODbL, read 2026-11-26),
+// projected into this frame; the way ids are beside the outlines. How high each part is comes from the lidar under
+// the landmark's own grid (raw tops less the foot of 1.7 m), which agrees with the NPS listing (a rotunda 160 feet
+// across on eight piers, 162 feet to its top, its two arcades running north and south). Rotunda: the dome is 49.0 m
+// at its middle and falls to the drum's 40.0 m at 17 m out; the deck between drum and piers is 36.8 m and its outer
+// step to 25.4 m out 28.5 m, and past that the piers' feet 5.3 m; under the deck (OSM min_height 25 m) the arches open between the piers.
+// Arcades: each is its mapped outline, the entablature at the lidar's 17.7 m over columns, and where the lidar has a
+// block to 21.7 m over the arcade's turns, a planter box. The grid ends 85.5 m north and south: past it the arcades
+// keep their entablature and have no boxes, and the gateways are their outlines to OSM's 21 m. The column spacing
+// (4.5 m), the arch rise (5 m) and the dome's thickness are by eye. The exhibition hall behind (way 288371302), the
+// small buildings round the rotunda, the lagoon, its islands and trees are the map's: the rule owns only its outlines.
+const PF_MID: (f32, f32) = (0.6, 0.8);
 const PF_TOP: f32 = 49.0;
-const PF_ARC: f32 = 62.0;
+/// The dome's top at each distance from the middle, from the lidar's median over all bearings.
+const PF_DOME_RISE: [(f32, f32); 9] = [(0.0, 49.0), (3.0, 48.8), (6.0, 48.3), (9.0, 47.2), (12.0, 45.4), (14.0, 43.6), (16.0, 41.1), (16.3, 40.6), (17.0, 40.0)];
+const PF_DOME: f32 = 16.3; // way 456820271's mean radius
+const PF_DRUM: f32 = 17.9; // way 456820274's mean radius
+const PF_DRUM_TOP: f32 = 40.0;
+const PF_HOLLOW: f32 = 15.5; // inside this the rotunda is open from its floor up to the dome's underside
+const PF_UNDER: f32 = 25.0; // the deck's and drum's min_height (ways 1549377350, 456820274)
+const PF_DECK: f32 = 36.8;
+const PF_INNER: f32 = 22.5; // past this the deck and piers stop at their outer step
+const PF_OUTER: f32 = 25.4; // past this a pier is only its 5.3 m foot (the lidar's 160 feet across)
+const PF_PIER_FOOT: f32 = 5.3;
+const PF_STEP: f32 = 28.5;
+const PF_ARCH: f32 = 5.0;
+const PF_ARCADE: f32 = 17.7;
+const PF_ARCADE_BEAM: f32 = 14.9;
+const PF_BOX: f32 = 21.7;
+const PF_GATE: f32 = 21.0;
+/// The lidar's blocks to 21.7 m over the arcades' turns: their middles and half widths.
+const PF_BOXES: [(f32, f32, f32); 10] = [
+    (-22.7, 36.2, 2.8), (-10.4, 53.9, 3.1), (5.4, 68.8, 3.1), (29.0, 75.0, 4.7), (43.0, 72.9, 4.0),
+    (17.9, -81.1, 4.0), (2.5, -78.6, 4.1), (-15.9, -65.5, 3.0), (-26.8, -46.5, 3.0), (-32.5, -25.6, 2.9),
+];
+/// OSM way 288371295 (137 points).
+const PF_TEMPLE: &[(f32, f32)] = &[(11.8, -25.9), (12.2, -24.0), (12.6, -24.5), (14.1, -23.4), (13.3, -22.2), (12.5, -22.7), (10.2, -19.4), (17.1, -14.7), (16.6, -15.7), (19.2, -17.8), (19.0, -18.0), (19.8, -19.1), (21.1, -17.8), (23.6, -18.2), (24.9, -19.2), (25.8, -21.6), (27.1, -21.3), (26.3, -19.1), (29.6, -14.5), (27.9, -13.4), (26.1, -10.8), (26.4, -7.0), (22.1, -6.1), (23.4, 1.0), (27.8, 1.0), (27.8, 2.2), (28.9, 4.9), (30.2, 6.0), (32.9, 7.0), (31.8, 12.4), (32.9, 13.8), (31.7, 14.3), (30.1, 12.7), (28.5, 12.0), (26.9, 12.0), (25.8, 12.3), (26.2, 12.7), (25.2, 14.2), (23.9, 13.3), (24.4, 12.6), (21.3, 10.8), (16.8, 17.3), (19.2, 19.9), (20.1, 19.0), (21.2, 20.0), (19.9, 21.4), (19.4, 21.0), (19.4, 22.3), (20.4, 24.1), (21.7, 25.4), (23.2, 26.0), (22.3, 31.9), (17.5, 29.8), (15.0, 26.8), (14.3, 24.6), (9.3, 26.4), (8.5, 22.3), (0.4, 23.7), (0.8, 28.1), (-4.6, 27.4), (-4.6, 29.7), (-5.8, 32.6), (-6.9, 34.5), (-9.7, 36.9), (-12.4, 31.6), (-10.6, 29.5), (-10.3, 26.1), (-10.5, 25.6), (-10.9, 26.3), (-12.3, 25.3), (-11.5, 23.9), (-10.7, 24.5), (-8.8, 21.5), (-15.5, 16.6), (-17.8, 19.7), (-17.3, 20.0), (-18.1, 21.1), (-20.2, 19.5), (-19.6, 18.6), (-20.1, 17.9), (-20.9, 18.5), (-23.3, 17.7), (-24.8, 15.3), (-24.8, 12.6), (-23.8, 11.8), (-24.1, 11.2), (-25.3, 11.4), (-25.6, 8.8), (-24.4, 8.6), (-24.3, 9.2), (-20.4, 8.5), (-21.0, 4.0), (-21.6, 0.4), (-25.5, 0.9), (-25.4, 1.7), (-26.8, 1.9), (-27.3, -0.8), (-25.9, -0.9), (-25.8, -1.8), (-27.3, -2.5), (-27.8, -3.7), (-27.7, -6.3), (-26.5, -8.4), (-25.4, -8.9), (-24.2, -8.9), (-24.0, -9.4), (-25.2, -10.1), (-23.5, -12.3), (-22.5, -11.5), (-22.8, -11.0), (-19.3, -8.7), (-14.6, -15.4), (-17.6, -17.9), (-18.2, -17.0), (-19.4, -17.9), (-18.4, -19.5), (-17.5, -18.8), (-17.4, -19.4), (-17.8, -21.2), (-18.8, -22.7), (-21.5, -24.2), (-20.5, -29.9), (-16.6, -28.2), (-14.6, -26.3), (-13.2, -24.2), (-12.7, -22.6), (-7.6, -24.7), (-6.7, -20.1), (1.5, -21.5), (0.8, -26.3), (6.4, -25.5), (6.3, -27.0), (7.1, -30.1), (8.5, -32.2), (11.5, -34.9), (13.9, -29.7), (12.3, -27.9)];
+/// OSM way 1549377350 (52 points).
+const PF_DECK_OUTLINE: &[(f32, f32)] = &[(21.3, 10.8), (24.4, 12.6), (23.9, 13.3), (25.2, 14.2), (26.2, 12.7), (25.8, 12.3), (28.2, 3.6), (27.8, 1.0), (23.4, 1.0), (22.1, -6.1), (26.4, -7.0), (26.1, -10.8), (21.2, -18.0), (19.8, -19.1), (19.0, -18.0), (19.2, -17.8), (16.6, -15.7), (17.1, -14.7), (10.2, -19.4), (12.5, -22.7), (12.2, -24.0), (6.4, -25.5), (0.8, -26.3), (1.5, -21.5), (-6.7, -20.1), (-7.6, -24.7), (-12.7, -22.6), (-17.5, -18.8), (-17.6, -17.9), (-14.6, -15.4), (-19.3, -8.7), (-22.8, -11.0), (-25.0, -5.7), (-25.5, 0.9), (-21.6, 0.4), (-20.4, 8.5), (-24.3, 9.2), (-21.9, 15.3), (-17.8, 19.7), (-15.5, 16.6), (-8.8, 21.5), (-10.7, 24.5), (-10.5, 25.6), (-3.3, 27.7), (0.8, 28.1), (0.4, 23.7), (8.5, 22.3), (9.3, 26.4), (14.3, 24.6), (19.4, 21.0), (19.3, 19.9), (16.8, 17.3)];
+/// OSM way 288371310 (71 points).
+const PF_NORTH: &[(f32, f32)] = &[(14.4, -109.9), (18.6, -110.3), (19.3, -105.0), (16.4, -104.6), (19.0, -85.0), (21.6, -85.4), (22.4, -80.1), (19.4, -79.7), (20.0, -76.2), (15.2, -75.5), (14.7, -78.8), (6.8, -77.5), (7.3, -74.4), (2.8, -73.7), (2.1, -76.2), (0.0, -75.2), (-0.7, -76.7), (-7.1, -72.5), (-12.3, -67.4), (-13.3, -66.0), (-11.5, -64.5), (-14.6, -60.6), (-16.2, -62.0), (-18.2, -59.3), (-24.1, -47.6), (-22.2, -46.7), (-24.1, -42.5), (-25.9, -43.3), (-26.7, -41.3), (-29.5, -32.3), (-30.6, -27.2), (-28.7, -26.9), (-29.5, -22.1), (-30.6, -22.3), (-31.0, -20.2), (-32.5, -19.1), (-33.7, -19.0), (-34.9, -19.5), (-35.9, -21.1), (-35.6, -23.1), (-36.2, -23.2), (-35.4, -28.0), (-33.7, -27.8), (-30.7, -39.5), (-28.7, -44.6), (-30.3, -45.3), (-28.4, -49.5), (-27.0, -48.9), (-24.5, -54.3), (-20.7, -60.8), (-18.5, -63.8), (-19.9, -64.9), (-16.8, -68.8), (-15.6, -67.8), (-11.7, -72.5), (-2.1, -79.5), (-2.8, -80.7), (0.8, -82.1), (0.3, -85.2), (3.1, -85.7), (3.7, -82.5), (4.3, -82.6), (4.6, -80.4), (15.7, -82.1), (15.5, -84.4), (16.0, -84.5), (13.2, -104.1), (12.5, -107.3), (10.4, -107.0), (9.2, -112.4), (13.7, -112.9)];
+/// OSM way 288371306 (75 points).
+const PF_SOUTH: &[(f32, f32)] = &[(-21.7, 33.3), (-20.8, 33.0), (-18.6, 37.2), (-20.1, 38.0), (-17.0, 43.1), (-10.6, 51.5), (-9.4, 50.4), (-6.3, 53.9), (-7.5, 55.0), (-4.8, 58.0), (0.1, 62.7), (4.8, 66.3), (5.8, 65.0), (9.6, 67.8), (8.7, 69.0), (13.7, 71.9), (20.5, 74.3), (23.7, 75.0), (23.8, 73.7), (26.4, 74.0), (25.9, 71.5), (30.5, 71.0), (31.0, 73.5), (39.0, 72.3), (38.5, 69.6), (43.1, 68.9), (43.6, 71.7), (46.8, 71.1), (47.8, 76.5), (44.9, 77.1), (48.5, 96.6), (51.6, 96.0), (52.7, 101.2), (48.3, 102.1), (49.0, 105.4), (44.2, 106.2), (43.5, 100.9), (45.8, 100.4), (45.3, 97.3), (45.6, 97.2), (41.1, 75.5), (39.6, 75.7), (39.5, 75.3), (31.6, 76.5), (31.7, 77.3), (30.0, 77.3), (30.5, 79.8), (30.0, 79.8), (30.2, 82.6), (27.2, 82.8), (26.9, 79.8), (23.1, 79.8), (23.3, 77.9), (15.5, 75.9), (10.7, 73.8), (6.9, 71.6), (5.8, 73.0), (2.0, 70.3), (3.0, 68.8), (-2.6, 64.2), (-9.8, 57.0), (-11.1, 58.2), (-14.2, 54.7), (-12.9, 53.5), (-19.2, 45.2), (-22.8, 39.4), (-24.4, 40.2), (-26.5, 35.9), (-25.5, 35.4), (-26.9, 34.2), (-27.2, 32.9), (-26.9, 31.7), (-25.5, 30.4), (-23.7, 30.3), (-22.2, 31.4)];
+/// OSM way 288371313 (12 points).
+const PF_NORTH_GATE: &[(f32, f32)] = &[(0.0, -102.0), (0.5, -99.3), (-2.4, -98.7), (-2.9, -101.4), (-5.8, -100.8), (-6.9, -106.2), (-3.4, -106.9), (-4.0, -110.0), (1.3, -111.0), (2.4, -105.4), (-0.0, -105.0), (0.6, -102.1)];
+/// OSM way 288371314 (10 points).
+const PF_SOUTH_GATE: &[(f32, f32)] = &[(32.0, 96.3), (33.2, 102.3), (35.5, 102.0), (36.2, 107.3), (31.8, 108.0), (31.3, 104.8), (27.1, 105.4), (26.3, 100.0), (29.4, 99.6), (29.0, 96.7)];
+/// The eight piers, OSM ways 1549377328, 1549377331, 1549377334, 1549377335, 1549377338, 1549377341, 1549377344, 1549377345 (building:part, 36 m).
+const PF_PIERS: [&[(f32, f32)]; 8] = [
+    &[(6.4, -25.5), (12.2, -24.0), (12.5, -22.7), (10.3, -19.4), (1.5, -21.5), (0.8, -26.3)], // 1549377328
+    &[(-7.6, -24.7), (-12.7, -22.6), (-17.5, -18.8), (-17.6, -17.9), (-14.6, -15.4), (-6.7, -20.1)], // 1549377331
+    &[(-19.3, -8.7), (-21.6, 0.4), (-25.5, 0.9), (-25.0, -5.7), (-22.8, -11.0)], // 1549377334
+    &[(-20.4, 8.5), (-15.5, 16.6), (-17.8, 19.7), (-21.9, 15.3), (-24.3, 9.2)], // 1549377335
+    &[(-8.8, 21.5), (0.4, 23.7), (0.8, 28.1), (-3.3, 27.7), (-10.5, 25.6), (-10.7, 24.5)], // 1549377338
+    &[(8.5, 22.3), (16.8, 17.3), (19.3, 19.9), (19.4, 21.0), (14.3, 24.6), (12.0, 25.6), (9.3, 26.4)], // 1549377341
+    &[(19.2, -17.8), (19.0, -18.0), (19.8, -19.1), (21.2, -18.0), (21.1, -17.8), (26.1, -10.8), (26.4, -7.0), (22.1, -6.1), (16.6, -15.7)], // 1549377344
+    &[(23.4, 1.0), (21.3, 10.8), (24.4, 12.6), (23.9, 13.3), (25.2, 14.2), (26.2, 12.7), (25.8, 12.3), (28.2, 3.6), (27.8, 2.2), (27.8, 1.0)], // 1549377345
+];
+/// The low parts round the piers' feet and their mapped heights, OSM ways 1549377329 to 1549377349.
+const PF_STEPS: [(&[(f32, f32)], f32); 14] = [
+    (&[(11.5, -34.9), (9.7, -33.5), (8.5, -32.2), (7.1, -30.1), (6.3, -27.0), (6.4, -25.5), (12.2, -24.0), (11.9, -24.4), (11.8, -25.9), (12.3, -27.9), (13.9, -29.7)], 5.0), // 1549377329
+    (&[(12.2, -24.0), (12.5, -22.7), (13.3, -22.2), (14.1, -23.4), (12.6, -24.5)], 2.0), // 1549377330
+    (&[(-17.5, -18.8), (-12.7, -22.6), (-13.2, -24.2), (-14.6, -26.3), (-16.6, -28.2), (-18.5, -29.3), (-20.5, -29.9), (-21.5, -24.2), (-20.2, -23.7), (-18.8, -22.7), (-17.8, -21.2), (-17.4, -19.4)], 5.0), // 1549377332
+    (&[(-17.5, -18.8), (-17.6, -17.9), (-18.2, -17.0), (-19.4, -17.9), (-18.4, -19.5)], 3.0), // 1549377333
+    (&[(-25.0, -5.7), (-22.5, -11.5), (-23.5, -12.3), (-25.2, -10.1), (-24.0, -9.4), (-24.2, -8.9), (-25.4, -8.9), (-26.5, -8.4), (-27.7, -6.3), (-27.8, -3.7), (-27.3, -2.5), (-26.6, -2.0), (-25.8, -1.8), (-25.9, -0.9), (-27.3, -0.8), (-26.8, 1.9), (-25.4, 1.7)], 4.0), // 1549377336
+    (&[(-21.9, 15.3), (-17.3, 20.0), (-18.1, 21.1), (-20.2, 19.5), (-19.6, 18.6), (-20.1, 17.9), (-20.9, 18.5), (-21.8, 18.4), (-23.3, 17.7), (-24.2, 16.6), (-24.8, 15.3), (-25.0, 13.6), (-24.8, 12.6), (-23.8, 11.8), (-24.1, 11.2), (-25.3, 11.4), (-25.6, 8.8), (-24.4, 8.6)], 4.0), // 1549377337
+    (&[(-10.7, 24.5), (-10.5, 25.6), (-10.9, 26.3), (-12.3, 25.3), (-11.5, 23.9)], 3.0), // 1549377339
+    (&[(-10.5, 25.6), (-4.6, 27.4), (-4.6, 29.7), (-5.8, 32.6), (-6.9, 34.5), (-9.7, 36.9), (-12.4, 31.6), (-11.5, 30.8), (-10.6, 29.5), (-10.2, 27.6)], 5.0), // 1549377340
+    (&[(19.4, 21.0), (19.9, 21.4), (21.2, 20.0), (20.1, 19.0), (19.3, 19.9)], 5.0), // 1549377342
+    (&[(14.3, 24.6), (15.0, 26.8), (16.1, 28.4), (17.5, 29.8), (20.6, 31.4), (22.3, 31.9), (23.2, 26.0), (21.7, 25.4), (20.4, 24.1), (19.4, 22.3), (19.4, 21.0)], 5.0), // 1549377343
+    (&[(31.8, 12.4), (31.1, 13.5), (30.1, 12.7), (28.5, 12.0), (26.9, 12.0), (25.8, 12.3), (28.2, 3.6), (28.9, 4.9), (30.2, 6.0), (32.9, 7.0)], 5.0), // 1549377346
+    (&[(26.1, -10.8), (21.1, -17.8), (22.1, -17.8), (23.6, -18.2), (24.9, -19.2), (25.5, -20.3), (29.6, -14.5), (27.9, -13.4), (26.8, -12.1)], 5.0), // 1549377347
+    (&[(25.5, -20.3), (26.3, -19.1), (27.1, -21.3), (25.8, -21.6)], 2.0), // 1549377348
+    (&[(31.8, 12.4), (31.1, 13.5), (31.7, 14.3), (32.9, 13.8)], 5.0), // 1549377349
+];
+/// Bounding boxes (u, w low, then high) of the outlines above, to turn most cells away before a polygon test.
+const PF_TEMPLE_BOX: [f32; 4] = [-27.9, -35.0, 33.0, 37.0];
+const PF_NORTH_BOX: [f32; 4] = [-36.3, -113.0, 22.5, -18.9];
+const PF_SOUTH_BOX: [f32; 4] = [-27.3, 30.1, 52.8, 106.3];
+const PF_NORTH_GATE_BOX: [f32; 4] = [-7.0, -111.1, 2.5, -98.6];
+const PF_SOUTH_GATE_BOX: [f32; 4] = [26.2, 96.2, 36.3, 108.1];
+/// The arcades' columns, one every 4.5 m or more along the middle of each mapped outline (63).
+const PF_COLUMNS: [(f32, f32); 63] = [(-34.7, -24.1), (-30.3, -25.5), (-31.4, -29.8), (-30.1, -34.7), (-28.8, -39.0), (-27.1, -43.7), (-25.4, -47.9), (-23.4, -52.5), (-21.0, -56.9), (-18.4, -61.2), (-14.1, -63.2), (-13.4, -68.1), (-9.9, -71.6), (-6.0, -74.8), (-1.9, -77.5), (2.9, -77.3), (7.3, -78.9), (11.7, -79.6), (16.1, -78.4), (19.8, -81.1), (17.7, -85.1), (17.0, -90.0), (16.4, -95.0), (15.7, -99.9), (15.1, -104.4), (17.5, -108.4), (13.1, -109.8), (2.5, -81.9), (-0.9, -102.9), (0.7, -107.4), (-4.8, -105.3), (-24.8, 36.5), (-21.2, 39.5), (-18.8, 43.3), (-16.0, 47.4), (-13.0, 51.4), (-11.5, 55.8), (-7.3, 57.8), (-3.7, 61.3), (0.0, 64.7), (3.5, 67.5), (7.1, 70.3), (11.5, 72.7), (15.6, 74.5), (20.4, 76.0), (24.6, 77.9), (28.3, 80.8), (29.2, 76.3), (33.8, 74.8), (38.3, 74.2), (42.6, 76.0), (43.7, 80.8), (44.6, 85.3), (45.6, 90.2), (46.4, 94.6), (47.0, 99.5), (45.2, 104.0), (45.8, 72.8), (41.8, 70.4), (-23.3, 32.2), (30.9, 97.8), (27.8, 101.2), (31.9, 103.6)];
 
-/// Whether a point lies on the colonnade's arc: round the west, from north-north-east to south-south-east.
-fn pf_on_arc(u: f32, w: f32) -> bool {
-    // The angle from the east, positive towards the south: the arc covers all but 110 degrees facing the lagoon.
-    w.atan2(u).abs() > 55f32.to_radians()
+fn in_box(b: [f32; 4], u: f32, w: f32) -> bool {
+    u >= b[0] && u <= b[2] && w >= b[1] && w <= b[3]
 }
 
-/// Reflective Palace of Fine Arts swan lagoon directly east of the rotunda (strictly on the flat <= 0.95 m basin
-/// so shoreline banks never stair-step into water, framed by warm travertine walkways and lakeside lawn).
-fn fine_arts_surface(u: f32, w: f32, ground_m: f32) -> Option<Kind> {
-    if u > 20.0 && u <= 94.0 && w.abs() <= 78.0 && ground_m <= 0.95 {
-        return Some(kind(WATER, colour(13, 5)));
+/// What part of the Palace stands at (u, w), if any: its rotunda, an arcade or a gateway.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum PfPart {
+    Rotunda,
+    Arcade,
+    Gate,
+}
+
+fn pf_part(u: f32, w: f32) -> Option<PfPart> {
+    if in_box(PF_TEMPLE_BOX, u, w) && inside(PF_TEMPLE, u, w) {
+        Some(PfPart::Rotunda)
+    } else if (in_box(PF_NORTH_BOX, u, w) && inside(PF_NORTH, u, w)) || (in_box(PF_SOUTH_BOX, u, w) && inside(PF_SOUTH, u, w)) {
+        Some(PfPart::Arcade)
+    } else if (in_box(PF_NORTH_GATE_BOX, u, w) && inside(PF_NORTH_GATE, u, w)) || (in_box(PF_SOUTH_GATE_BOX, u, w) && inside(PF_SOUTH_GATE, u, w)) {
+        Some(PfPart::Gate)
+    } else {
+        None
     }
-    let r = (u * u + w * w).sqrt();
-    if r <= PF_ROTUNDA + 5.5 || ((r - PF_ARC).abs() <= 5.0 && pf_on_arc(u, w)) {
-        return Some(kind(CONCRETE, colour(2, 0)));
+}
+
+/// The ordinary footprints in BAY1 tile 194_263 sit 1.2 m west and 0.6 m north
+/// of these same OSM buildings. The distant walls are rasterized at 1 m.
+fn pf_owns(u: f32, w: f32) -> bool {
+    if pf_part(u, w).is_some() || pf_part(u + 1.2, w + 0.6).is_some() {
+        return true;
     }
-    if u > 18.0 && u <= 94.0 && w.abs() <= 78.0 && ground_m <= 1.35 {
-        return Some(kind(CONCRETE, colour(3, 0))); // crisp lakeside promenade coping
-    }
-    None
+    // One-metre far wall faces are binned by their midpoints. Include the
+    // registration difference plus half a cell around the elevated openings.
+    // Past the rotunda deck the steps share space with separate mapped plinths.
+    let margin = 2.0;
+    let borders = |[x0, z0, x1, z1]: [f32; 4], polygon: &[(f32, f32)]| {
+        in_box([x0 - margin, z0 - margin, x1 + margin, z1 + margin], u, w)
+            && edge_distance(polygon, u, w) <= margin
+    };
+    ((u - PF_MID.0).powi(2) + (w - PF_MID.1).powi(2) <= (PF_OUTER + margin).powi(2)
+        && borders(PF_TEMPLE_BOX, PF_TEMPLE))
+        || borders(PF_NORTH_BOX, PF_NORTH) || borders(PF_SOUTH_BOX, PF_SOUTH)
+        || borders(PF_NORTH_GATE_BOX, PF_NORTH_GATE) || borders(PF_SOUTH_GATE_BOX, PF_SOUTH_GATE)
+}
+
+/// The Palace's floors are stone inside its outlines; outside them the ground is the map's (the lagoon is the terrain's).
+fn fine_arts_surface(u: f32, w: f32) -> Option<Kind> {
+    pf_part(u, w).map(|_| kind(CONCRETE, colour(2, 0)))
 }
 
 fn fine_arts(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if y < -1.5 || y >= PF_TOP + 1.0 {
+    if !(-1.5..PF_TOP + 1.0).contains(&y) {
         return 0;
     }
-    let stone = kind(PLASTER, colour(2, 1));
-    let stone_light = kind(PLASTER, colour(2, 0));
-    let frieze = kind(PLASTER, colour(1, 3));
-    let dome = kind(PLASTER, colour(1, 2));
-    let r = (u * u + w * w).sqrt();
-    let round = w.atan2(u);
+    let Some(part) = pf_part(u, w) else { return 0 };
+    // The reconstructed travertine finish and friezes are buff, with russet
+    // shafts on the rotunda's outer piers (NPS registration, section 7).
+    let stone = kind(CONCRETE, colour(3, 1));
+    let stone_light = kind(CONCRETE, colour(3, 0));
+    let frieze = kind(CONCRETE, colour(2, 1));
+    let dome = kind(CONCRETE, colour(3, 0));
     if y < 0.0 {
-        return if r < PF_ROTUNDA + 3.0 || ((r - PF_ARC).abs() <= 3.2 && pf_on_arc(u, w)) { stone } else { 0 };
+        return stone;
     }
-    // ── The rotunda: stepped podium, octagon of paired piers carrying arches, sculpted frieze, drum & ribbed dome.
-    let oct = {
-        let a = (round.rem_euclid(std::f32::consts::FRAC_PI_4)) - std::f32::consts::FRAC_PI_8;
-        r * a.cos()
-    };
-    if r < PF_ROTUNDA + 3.2 {
-        if y < 1.2 && oct <= PF_ROTUNDA + 2.2 - y * 0.8 {
+    if part != PfPart::Rotunda {
+        let top = if part == PfPart::Gate { PF_GATE } else { PF_ARCADE };
+        if y < 0.8 {
             return stone_light;
         }
-        if y < 25.0 {
-            if oct > PF_ROTUNDA || oct < PF_ROTUNDA - 3.6f32.max(s) {
-                return 0;
-            }
-            // Between two piers an arch: open below its crown, with classical impost mouldings & archivolt trim.
-            let a = (round + std::f32::consts::FRAC_PI_8).rem_euclid(std::f32::consts::FRAC_PI_4) - std::f32::consts::FRAC_PI_8;
-            let half = PF_ROTUNDA * (std::f32::consts::FRAC_PI_8).tan();
-            let x = (a.tan() * oct).abs();
-            let pier = 2.6;
-            if x < half - pier {
-                let span = half - pier;
-                let crown = 13.2 + span * (1.0 - (x / span).powi(2)).max(0.0).sqrt();
-                if y < crown {
-                    return 0;
-                }
-                if y < crown + 0.7 && s <= 0.6 {
-                    return stone_light;
-                }
-            }
-            if (12.8..13.5).contains(&y) || y < 2.2 {
-                return stone_light;
-            }
-            return stone;
+        if y >= top {
+            let boxed = part == PfPart::Arcade && y < PF_BOX && PF_BOXES.iter().any(|&(bu, bw, h)| (u - bu).abs() <= h && (w - bw).abs() <= h);
+            return if boxed { if y < PF_BOX - 0.8 { frieze } else { stone_light } } else { 0 };
         }
-        if y < 29.2 {
-            // Classical entablature & terracotta-toned carved attic frieze.
-            let out = if y > 28.2 || y < 25.7 { PF_ROTUNDA + 1.3 } else { PF_ROTUNDA + 0.6 };
-            return if oct <= out {
-                if (26.2..27.8).contains(&y) { frieze } else { stone_light }
-            } else {
-                0
-            };
+        if y >= PF_ARCADE_BEAM {
+            return if (15.6..16.6).contains(&y) { frieze } else { stone_light };
         }
-        if y < 31.4 {
-            return if r <= PF_ROTUNDA - 1.8 { stone } else { 0 };
-        }
-        if y < 45.5 {
-            let h = (y - 31.4) / 14.1;
-            let rd = (PF_ROTUNDA - 2.8) * (1.0 - h * h).max(0.0).sqrt();
-            if r > rd.max(s * 0.5) {
-                return 0;
-            }
-            // 16 classical raised ribs converging on the cupola.
-            let rib = s <= 1.2 && line(round * (PF_ROTUNDA - 2.8), (PF_ROTUNDA - 2.8) * std::f32::consts::PI / 8.0, 0.0, 0.55, s);
-            return if rib || y < 32.3 { stone_light } else { dome };
-        }
-        // Classical open cupola crown and finial urn.
-        if y < 48.2 {
-            return if r <= 2.1f32.max(s * 0.55) { stone_light } else { 0 };
-        }
-        return if r <= 0.9f32.max(s * 0.55) { frieze } else { 0 };
+        // Corinthian columns, each with a wider base and capital, on the middle of the band.
+        let rad = if y < 1.8 || y > PF_ARCADE_BEAM - 1.4 { 0.95f32 } else { 0.75 };
+        let near = PF_COLUMNS.iter().any(|&(cu, cw)| (u - cu).powi(2) + (w - cw).powi(2) <= rad.max(s * 0.55).powi(2));
+        return if near { stone } else { 0 };
     }
-    // ── The colonnade: paired Corinthian columns every 7 m along the arc, 15 m tall, entablature & weeping planter boxes.
-    let off = r - PF_ARC;
-    if off.abs() > 5.2 || !pf_on_arc(u, w) || y > 24.5 {
+    // ── The rotunda.
+    let r = ((u - PF_MID.0).powi(2) + (w - PF_MID.1).powi(2)).sqrt();
+    if y >= PF_DRUM_TOP {
+        if r >= PF_DOME {
+            return 0;
+        }
+        let top = between(&PF_DOME_RISE, r);
+        return if y < top && (y >= top - 1.2f32.max(s) || r >= PF_HOLLOW) { dome } else { 0 };
+    }
+    if y >= PF_UNDER && r < PF_DRUM {
+        // The drum, and inside it the open rotunda up to the dome's underside.
+        return if r >= PF_HOLLOW { if y < PF_UNDER + 1.0 { stone_light } else { stone } } else { 0 };
+    }
+    let pier = PF_PIERS.iter().any(|p| inside(p, u, w));
+    if pier {
+        let outer = if r <= PF_INNER { PF_DECK } else if r <= PF_OUTER { PF_STEP } else { PF_PIER_FOOT };
+        if y >= outer { return 0; }
+        if (PF_PIER_FOOT..PF_UNDER).contains(&y) {
+            // Each mapped pier faces out, the eastern one at 13 degrees. On the
+            // NPS lagoon photograph its two shafts span about a quarter of the
+            // pier's width each, with their axes a little over two diameters apart.
+            let bearing = (w - PF_MID.1).atan2(u - PF_MID.0) - 13.0_f32.to_radians();
+            let angle = (bearing + std::f32::consts::FRAC_PI_8).rem_euclid(std::f32::consts::FRAC_PI_4)
+                - std::f32::consts::FRAC_PI_8;
+            let depth = r * angle.cos();
+            let across = (r * angle.sin()).abs();
+            let moulding = y < PF_PIER_FOOT + 1.0 || y >= PF_UNDER - 1.8;
+            let radius: f32 = if moulding { 1.6 } else { 1.3 };
+            if (depth - 23.9).powi(2) + (across - 3.1).powi(2) <= radius.powi(2) {
+                return if moulding { stone_light } else { kind(CONCRETE, colour(1, 2)) };
+            }
+            if depth > 23.8 { return 0; }
+        }
+        return if y < 2.2 || (PF_UNDER - 0.7..PF_UNDER).contains(&y) { stone_light } else { stone };
+    }
+    for (outline, h) in PF_STEPS {
+        if inside(outline, u, w) {
+            return if y < h { stone_light } else { 0 };
+        }
+    }
+    let outer = if r <= PF_INNER { PF_DECK } else { PF_STEP };
+    if r < PF_HOLLOW || !inside(PF_DECK_OUTLINE, u, w) || y >= outer {
         return 0;
     }
-    let along = PF_ARC * round;
-    let pair = (along + 3.5).rem_euclid(7.0) - 3.5;
-    let box_at = (along + 17.5).rem_euclid(35.0) - 17.5;
-    if box_at.abs() < 2.7 && off.abs() < 2.7 {
-        if y <= 20.5 {
-            return if y > 19.3 || (14.8..15.8).contains(&y) { frieze } else { stone };
-        }
-        // Lush weeping evergreens spilling from Maybeck's famous weeping-woman planter boxes!
-        if y < 23.6 && box_at.abs() < 2.2 && off.abs() < 2.2 {
-            let h = hash3((u * 2.0) as i32, (y * 2.0) as i32, (w * 2.0) as i32, 19);
-            if h % 5 != 0 {
-                return kind(LEAVES, if h % 3 == 0 { colour(8, 5) } else { colour(7, 6) });
-            }
-        }
-        return 0;
+    if y >= PF_UNDER {
+        return if (PF_UNDER + 2.0..PF_UNDER + 3.4).contains(&y) { frieze } else { stone_light };
     }
-    if y >= 15.0 {
-        if y < 18.0 && off.abs() <= if y > 17.2 { 2.6 } else { 2.0 } {
-            return if (15.8..17.0).contains(&y) { frieze } else { stone_light };
-        }
-        return 0;
-    }
-    // Two columns side by side across the arc with stepped bases and flaring Corinthian capitals.
-    for c in [-1.4f32, 1.4] {
-        let (dx, dy) = (pair, off - c);
-        let rad: f32 = if y < 1.8 || y > 13.6 { 1.05 } else { 0.78 };
-        if dx * dx + dy * dy <= rad.max(s * 0.55).powi(2) {
-            return if y > 13.6 || y < 1.8 { stone_light } else { stone };
-        }
-    }
-    if y < 1.1 && off.abs() <= 2.7 {
-        return stone_light;
-    }
-    0
+    // Under the deck an arch springs from each pier: its underside rises with the distance from the nearest pier.
+    let d = PF_PIERS.iter().map(|p| edge_distance(p, u, w)).fold(f32::MAX, f32::min).min(PF_ARCH);
+    let under = PF_UNDER - PF_ARCH + (PF_ARCH * PF_ARCH - (PF_ARCH - d).powi(2)).sqrt();
+    if y >= under { stone } else { 0 }
 }
 
 // ── The Golden Gate Bridge (Strauss, Ellis, Morrow, Moisseiff; 1937). Its frame: u from the middle of the main span
@@ -798,16 +944,59 @@ fn fine_arts(u: f32, y: f32, w: f32, s: f32) -> Kind {
 const GG_TOWER: f32 = 640.0;
 const GG_PYLON: f32 = 983.0;
 const GG_SOUTH: f32 = -1340.0;
-const GG_NORTH: f32 = 1330.0;
+/// Road contact in tile 0/182_250 on the mapped midpoint of the two US 101 carriageways.
+const GG_NORTH: f32 = 1413.0;
 const GG_TOP: f32 = 227.0;
 /// The cables, the trusses and the legs' middles: this far either side of the centre line.
 const GG_PLANE: f32 = 13.7;
 const GG_PANEL: f32 = 7.62;
 
+/// The north anchorage's far face: past it the roadway is the north approach, carrying US 101 onto Marin.
+const GG_ANCHOR_N: f32 = 1110.0;
+/// Where the north approach lands, and how high: the deck meets tile 0/182_250's ground (USGS CA_SanFrancisco_B23
+/// 1 m bare earth, NAVD88 metres, taken as the foot's datum) on 101's line at u 1413 m, 73.0 m up. The district
+/// publishes no length for either approach (abutment to abutment 2,737 m, the suspended spans 1,966 m).
+const GG_LANDING_Y: f32 = 73.0;
+/// US 101's middle line over the north approach, (u, w): halfway between Overture's two carriageways (2026-10-21.0,
+/// segments 1b5877f0 and 82e8434e), which leave the bridge's axis at u 1220 m and bend towards the ocean.
+const GG_101: [(f32, f32); 9] =
+    [(1220.0, 0.0), (1253.0, -3.5), (1282.0, -8.5), (1311.0, -16.5), (1325.0, -21.5), (1354.0, -34.5), (1380.0, -48.5), (1405.0, -66.0), (1425.0, -81.0)];
+
+/// Where 101's middle line is across the frame (w) at `u`, and how it turns there (dw/du): the axis south of the bend.
+fn gg_line(u: f32) -> (f32, f32) {
+    if u <= GG_101[0].0 {
+        return (0.0, 0.0);
+    }
+    let i = GG_101.iter().position(|p| p.0 >= u).unwrap_or(GG_101.len() - 1).max(1);
+    let ((u0, w0), (u1, w1)) = (GG_101[i - 1], GG_101[i]);
+    let turn = (w1 - w0) / (u1 - u0);
+    (w0 + turn * (u - u0), turn)
+}
+
+/// Perpendicular distance from the carriageway centre, measured in metres.
+fn gg_offset(u: f32, w: f32) -> f32 {
+    if u <= GG_101[0].0 { return w; }
+    let (centre, slope) = gg_line(u);
+    (w - centre) / (1.0 + slope * slope).sqrt()
+}
+
+/// The ground road class doubled an elevated US 101 carriageway in this part of the gully.
+pub fn draped_north_highway(u: f32, w: f32, ground: f32) -> bool {
+    (GG_ANCHOR_N..GG_NORTH).contains(&u) && gg_offset(u, w).abs() <= 15.0 && ground < gg_road(u) - 3.0
+}
+
 /// How high the roadway is: highest in the middle of the main span, falling away past the towers.
+/// Past the north anchorage it climbs evenly to where the approach lands.
 fn gg_road(u: f32) -> f32 {
     let a = u.abs();
-    if a <= GG_TOWER { 75.0 + 3.0 * (1.0 - (a / GG_TOWER) * (a / GG_TOWER)) } else { 75.0 - 0.012 * (a - GG_TOWER) }
+    if a <= GG_TOWER {
+        75.0 + 3.0 * (1.0 - (a / GG_TOWER) * (a / GG_TOWER))
+    } else if u > GG_ANCHOR_N {
+        let from = 75.0 - 0.012 * (GG_ANCHOR_N - GG_TOWER);
+        from + (GG_LANDING_Y - from) * ((u - GG_ANCHOR_N) / (GG_NORTH - GG_ANCHOR_N)).min(1.0)
+    } else {
+        75.0 - 0.012 * (a - GG_TOWER)
+    }
 }
 
 /// How high a cable's middle is, and how steep it is there: a parabola between the towers, another down each side
@@ -830,35 +1019,11 @@ fn member(off: f32, half: f32, s: f32) -> bool {
 fn golden_gate(u: f32, y: f32, w: f32, s: f32) -> Kind {
     let orange = kind(STEEL, colour(0, 4));
     let concrete = kind(CONCRETE, grey(5));
+    if !(-30.0..GG_TOP).contains(&y) || !(GG_SOUTH - 6.0..GG_NORTH).contains(&u) {
+        return 0;
+    }
+    let w = gg_offset(u, w);
     let (a, aw) = (u.abs(), w.abs());
-    if !(-30.0..GG_TOP).contains(&y) || !(GG_SOUTH - 6.0..GG_NORTH + 135.0).contains(&u) {
-        return 0;
-    }
-    // ── Marin Headlands coastal bluff & abutment at the north end (u > 1065 m) so the bridge anchors into Marin
-    // terrain rather than ending over empty ocean even when Marin county tiles are absent (#60).
-    if u > 1065.0 {
-        let road = gg_road(u.min(GG_NORTH));
-        let t = ((u - 1065.0) / 160.0).clamp(0.0, 1.0);
-        // Coastal rocky headland rising steeply out of the strait on both sides of the highway cut.
-        let side_lift = ((aw - 15.0).max(0.0) * 0.52).min(24.0) * t;
-        let roll = 3.2 * (u * 0.045).sin() + 2.4 * (w * 0.07).cos();
-        let bluff = (-2.0 + (road - 1.5) * t.powf(0.65) + side_lift + roll).min(road + 22.0);
-        // Carve clean highway cut along the roadway grade above the abutment.
-        let cut = if aw <= 14.5 { road - 0.8 } else { bluff };
-        if y <= cut && aw <= 52.0 && u <= GG_NORTH + 132.0 {
-            if aw <= 13.8 && y > road - 1.2 && y <= road {
-                return if aw > 10.4 { concrete } else if aw <= 0.35 && y > road - 0.3 { kind(PLASTER, colour(3, 4)) } else { kind(ASPHALT, OWN) };
-            }
-            if y > cut - 2.0 && side_lift > 1.5 && aw > 15.5 {
-                let h = hash3((u * 0.5) as i32, (y * 0.5) as i32, (w * 0.5) as i32, 11);
-                return kind(GRASS, if h % 3 == 0 { colour(5, 5) } else { colour(6, 8) });
-            }
-            return kind(ROCK, if (y as i32) % 3 == 0 { grey(9) } else { colour(2, 9) });
-        }
-    }
-    if u >= GG_NORTH {
-        return 0;
-    }
     // ── A tower: its pier, its two legs, the struts between them.
     let du = a - GG_TOWER;
     if du.abs() < 30.0 {
@@ -938,7 +1103,7 @@ fn golden_gate(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     }
     // Art Deco light standards along both sidewalks every 45.72 m (3 hanger bays).
-    if s <= 0.8 && dy > 0.0 && dy <= 8.6 && a < GG_NORTH - 12.0 && du.abs() > 10.0 && line(u, 45.72, 22.86, 0.45, s) {
+    if s <= 0.8 && dy > 0.0 && dy <= 8.6 && u > GG_SOUTH + 22.0 && u < GG_NORTH - 12.0 && du.abs() > 10.0 && line(u, 45.72, 22.86, 0.45, s) {
         if (aw - (GG_PLANE - 0.3)).abs() <= 0.25f32.max(s * 0.5) && dy <= 8.2 {
             return orange;
         }
@@ -1696,6 +1861,20 @@ pub(crate) const TEA_OUTLINE: [(f32, f32); 10] = [
     (86.7, -35.2), (30.2, 53.9), (-9.5, 57.1), (-25.4, 56.6), (-30.0, 54.0),
     (-56.8, 17.6), (-61.0, 4.4), (-55.5, -26.4), (6.5, -75.5), (26.3, -90.2),
 ];
+/// Gravel stipple and the two unhatched islands in Rec & Park's Project Location plan (p. 4, no. 59).
+/// Registered on the Pagoda, Temple Gate, Tea House, Main Gate and the two bridges. At a page width of
+/// 1440 px, (u,w) = (-95.906,-5.202) + x*(0.10608,-0.08409) + y*(0.08409,0.10608); RMS 0.63 m.
+const TEA_DRY_GRAVEL: [(f32, f32); 18] = [
+    (-51.3, -0.1), (-51.7, -2.3), (-50.6, -4.8), (-45.4, -10.8), (-43.9, -13.4), (-42.5, -14.2),
+    (-41.3, -13.5), (-41.0, -12.5), (-41.6, -10.7), (-42.3, -8.9), (-43.7, -3.7), (-44.5, -2.2),
+    (-45.9, -0.1), (-46.6, 0.5), (-47.4, 1.0), (-48.6, 1.2), (-49.7, 1.0), (-50.8, 0.4),
+];
+const TEA_DRY_ISLAND: [(f32, f32); 7] = [
+    (-45.4, -5.9), (-45.2, -7.3), (-44.7, -7.8), (-44.3, -7.7), (-44.1, -7.4), (-44.2, -7.0), (-45.0, -5.7),
+];
+const TEA_DRY_STONE: [(f32, f32); 6] = [
+    (-45.2, -9.7), (-45.2, -10.0), (-45.0, -10.2), (-44.6, -10.1), (-44.5, -9.7), (-44.7, -9.6),
+];
 /// The pond, way 409163924 (natural=water), south of the middle.
 pub(crate) const TEA_POND: [(f32, f32); 24] = [
     (10.1, 17.2), (14.2, 9.3), (16.4, 12.2), (19.8, 18.0), (20.6, 21.6), (23.4, 24.9), (27.5, 27.8), (30.8, 31.1),
@@ -1737,7 +1916,7 @@ fn tea_bridge_water(u: f32, w: f32) -> bool {
     drum || ((0.17..=0.83).contains(&t) && segment_distance(a, b, u, w) < 2.5)
 }
 
-fn tea_garden_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
+fn tea_garden_surface(u: f32, w: f32, s: f32) -> Option<Kind> {
     if !tea_garden_place(u, w) {
         return None;
     }
@@ -1755,11 +1934,10 @@ fn tea_garden_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
     if edge_distance(&TEA_POND, u, w) < 0.9 {
         return Some(kind(ROCK, grey(8))); // natural moss-stone pond rim
     }
-    // Zen Dry Rock Garden (Karesansui): pale raked concentric gravel ripples. Not in OSM: its place is unchecked.
-    if (-44.0..=-18.0).contains(&u) && (18.0..=40.0).contains(&w) {
-        let r = ((u + 31.0).powi(2) + (w - 29.0).powi(2)).sqrt();
-        let ripple = ((r * 2.2) as i32) % 2 == 0;
-        return Some(kind(SAND, if ripple { grey(2) } else { grey(4) }));
+    if (-52.0..=-41.0).contains(&u) && inside(&TEA_DRY_GRAVEL, u, w) {
+        // Rake grooves in the operator's photo are finer than the cells. Average the gravel at distance.
+        let grain = s <= 0.2 && hash3((u * 10.0).floor() as i32, 0, (w * 10.0).floor() as i32, 53) % 4 == 0;
+        return Some(kind(SAND, grey(if grain { 5 } else { 4 })));
     }
     // Winding warm gravel & flagstone paths from the Main Gate west past the Drum Bridge and Pagoda.
     let main_path = (w + 2.0 + 7.0 * (u * 0.055).sin()).abs() < 2.2 && (-36.0..=56.0).contains(&u);
@@ -1883,11 +2061,13 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     }
 
-    // 5. Sculpted Zen Rock Garden boulders in the southwest terrace (-44..-18, +18..+40). Place unchecked (not in OSM).
-    for &(bu, bw, br, bh) in &[(-31.0f32, 29.0f32, 2.6f32, 2.2f32), (-25.0, 34.0, 1.7, 1.3), (-37.0, 24.0, 1.9, 1.5)] {
-        let d = ((u - bu) / br).powi(2) + ((w - bw) / (br * 0.85)).powi(2) + (y / bh).powi(2);
-        if d <= 1.0 {
-            return if y < 0.45 { kind(GRASS, colour(8, 6)) } else { stone };
+    // The photo guides the low moss and exposed stone. The plan fixes their footprints only.
+    if y < 0.4 && (-45.4..=-44.1).contains(&u) {
+        if inside(&TEA_DRY_ISLAND, u, w) && y < (edge_distance(&TEA_DRY_ISLAND, u, w) * 0.8).min(0.32) {
+            return kind(GRASS, colour(5, 9));
+        }
+        if inside(&TEA_DRY_STONE, u, w) && y < (edge_distance(&TEA_DRY_STONE, u, w) * 1.4).min(0.38) {
+            return kind(ROCK, grey(8));
         }
     }
 
@@ -1924,7 +2104,7 @@ fn japanese_tea_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
         (10.0, -42.0, 5.0, 6.2, 6.2, 71, 2),
         (-22.0, -44.0, 4.5, 5.5, 5.5, 73, 0),
         (24.0, 44.0, 4.2, 5.2, 5.0, 79, 1),
-        (-48.0, -4.0, 4.5, 5.4, 5.4, 83, 2),
+        (-52.5, -4.0, 4.5, 5.4, 5.4, 83, 2), // Trunk on the planted margin; NAIP shows canopy over the bed.
     ];
     for &(tu, tw, th, cr, ch, seed, sp) in &trees {
         let (ca, cb) = match sp {
@@ -2092,244 +2272,364 @@ fn botanical_garden(u: f32, y: f32, w: f32, s: f32) -> Kind {
 // ── Conservatory of Flowers (1879) + Conservatory Valley Floral Parterres (Golden Gate Park).
 // Frame: u along the glasshouse east-west axis (76 m), w south down Conservatory Valley (+w toward JFK Dr),
 // y up from terrace foot 74.4 m (glasshouse) and over_g for the sloping Valley carpet parterres (#60).
-fn conservatory_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
-    if u.abs() > 48.0 || !(-20.0..=90.0).contains(&w) {
-        return None;
-    }
-    // Crisp white-gravel promenade terrace directly around the Conservatory.
-    if (-18.0..=27.0).contains(&w) && u.abs() <= 44.0 {
-        return Some(kind(SAND, grey(2)));
-    }
-    // Conservatory Valley (w = 27..90): manicured Victorian botanical parterres with natural floral stippling!
-    if w > 27.0 && w <= 88.0 && u.abs() <= 46.0 {
-        if (u.abs() < 3.0 && w < 42.0) || w > 83.0 || u.abs() > 43.0 {
-            return Some(kind(SAND, colour(3, 0)));
-        }
-        let h = hash3((u * 3.0) as i32, 5, (w * 3.0) as i32, 83);
-        let dapple = |bloom: u8, alt: u8| -> Kind {
-            match h % 5 {
-                0 | 1 => kind(LEAVES, bloom),
-                2 => kind(LEAVES, alt),
-                _ => kind(LEAVES, colour(8, 5)),
-            }
-        };
-        // Central Victorian circular dahlia & floral medallion at (0, 56), radius 14 m.
-        let cr = (u * u + (w - 56.0).powi(2)).sqrt();
-        if cr < 16.0 {
-            if cr > 14.0 {
-                return Some(kind(SAND, grey(2)));
-            }
-            if cr > 12.6 {
-                return Some(kind(LEAVES, colour(8, 6))); // manicured dark boxwood rim
-            }
-            let ang = (w - 56.0).atan2(u);
-            let lobe = ((ang * 6.0).sin() > 0.0) as u8;
-            return Some(if cr < 3.4 {
-                dapple(colour(3, 3), colour(4, 2)) // golden marigold center
-            } else if cr < 7.2 {
-                dapple(if lobe == 1 { colour(0, 3) } else { WHITE }, colour(22, 1)) // rose-crimson & white petals
-            } else {
-                dapple(if lobe == 1 { colour(22, 2) } else { colour(19, 2) }, colour(3, 1)) // blush-pink & soft lavender
-            });
-        }
-        // Symmetrical East & West curved floral crescent parterres (u = ±19..±40, w = 33..78).
-        let au = u.abs();
-        if (19.5..=39.5).contains(&au) && (33.0..=78.0).contains(&w) {
-            let lu = (au - 29.5) / 10.0;
-            let lw = (w - 55.5) / 22.5;
-            let ov = lu * lu + lw * lw;
-            if ov < 1.0 {
-                if ov > 0.82 {
-                    return Some(kind(LEAVES, colour(8, 6))); // curved boxwood hedge outline
-                }
-                if ov < 0.25 {
-                    return Some(dapple(colour(3, 3), WHITE)); // warm cream & gold floral heart
-                }
-                if ov < 0.56 {
-                    return Some(dapple(colour(0, 3), colour(22, 2))); // crimson & rose floral band
-                }
-                return Some(dapple(colour(18, 2), colour(19, 1))); // soft lavender & lilac outer bloom
-            }
-        }
-        return Some(kind(GRASS, if h % 3 == 0 { colour(7, 5) } else { colour(8, 5) }));
-    }
-    None
+// Street-facing public galleries of OSM way 30675038. The service ranges behind them
+// stay in the lidar. The three narrow south projections face Conservatory Valley.
+const CONSERVATORY_PUBLIC: &[(f32, f32)] = &[
+    (-36.6, -3.7), (-8.4, -3.9), (-5.5, -6.9), (6.5, -6.9), (9.5, -3.9),
+    (35.1, -3.9), (36.2, -4.9), (38.5, -2.7), (37.6, -1.3), (37.3, 15.0),
+    (35.8, 16.7), (33.4, 16.6), (33.4, 17.6), (30.3, 17.6), (30.3, 16.7),
+    (27.9, 16.6), (26.4, 15.0), (26.5, 7.1), (9.3, 7.0), (9.3, 7.5),
+    (6.2, 10.4), (4.5, 10.4), (4.5, 17.4), (2.2, 17.3), (2.1, 18.9),
+    (-1.3, 18.8), (-1.2, 17.5), (-3.4, 17.3), (-3.3, 10.4), (-5.4, 10.5),
+    (-8.4, 7.5), (-25.2, 7.0), (-25.1, 14.4), (-26.9, 16.4), (-29.2, 16.5),
+    (-29.2, 17.5), (-32.4, 17.4), (-32.4, 16.5), (-34.8, 16.3), (-36.6, 14.5),
+];
+
+// Mapped circular beds and borders in Conservatory Valley. Each entry gives the centre,
+// half-widths, and whether the bed is round. Bounds are rounded to 0.1 m from the OSM ways.
+const VALLEY_BEDS: &[(f32, f32, f32, f32, bool)] = &[
+    (32.0, 39.6, 3.9, 5.8, false), // 1168983830
+    (-40.7, 58.8, 1.9, 1.9, true), // 1168986284
+    (-21.2, 59.0, 1.9, 1.9, true), // 1168986285
+    (-31.3, 58.9, 3.5, 2.0, false), // 1168986286
+    (-10.9, 59.0, 3.5, 2.0, false), // 1168986287
+    (-10.7, 83.7, 3.5, 1.9, false), // 1168986288
+    (-40.5, 83.5, 1.9, 1.9, true), // 1168986289
+    (-31.0, 83.7, 3.5, 2.0, false), // 1168986290
+    (-21.0, 83.7, 1.9, 1.9, true), // 1168986291
+    (-19.6, 74.2, 12.3, 2.0, false), // 1168986292
+    (-19.5, 68.5, 12.3, 2.0, false), // 1168986293
+    (-43.0, 71.2, 4.9, 4.9, true), // 1168986294
+    (44.6, 71.3, 4.9, 4.9, true), // 1168986295
+    (21.2, 68.3, 12.3, 2.1, false), // 1168986296
+    (21.1, 74.1, 12.3, 2.1, false), // 1168986297
+    (32.7, 59.0, 3.5, 1.9, false), // 1168986298
+    (42.5, 58.8, 1.9, 1.9, true), // 1168986299
+    (42.5, 83.5, 1.9, 1.9, true), // 1168986300
+    (32.9, 83.5, 3.5, 1.9, false), // 1168986301
+    (22.8, 83.5, 1.9, 1.9, true), // 1168986302
+    (12.5, 83.6, 3.5, 1.9, false), // 1168986303
+    (12.3, 58.9, 3.5, 1.9, false), // 1168986304
+    (22.5, 58.8, 1.9, 1.9, true), // 1168986305
+    (0.8, 76.4, 2.1, 19.3, false), // 1168986307
+];
+
+// The crescent follows the curved east edge of the valley, OSM way 1168986306.
+const VALLEY_CRESCENT: &[(f32, f32)] = &[
+    (49.6, 83.3), (50.4, 85.4), (54.3, 83.5), (56.0, 81.9),
+    (58.5, 78.2), (60.2, 71.9), (59.5, 67.7), (57.8, 63.9),
+    (54.9, 60.2), (51.2, 57.4), (50.2, 59.3), (55.8, 64.7),
+    (57.2, 68.2), (57.5, 72.1), (56.7, 75.9), (54.9, 79.1),
+    (52.5, 81.5),
+];
+
+fn conservatory_public(u: f32, w: f32) -> bool {
+    (-36.6..=38.5).contains(&u) && (-6.9..=18.9).contains(&w) && inside(CONSERVATORY_PUBLIC, u, w)
 }
 
-fn conservatory(u: f32, y: f32, over_g: f32, w: f32, s: f32) -> Kind {
-    let white = kind(PLASTER, WHITE);
-    let steel_white = kind(STEEL, WHITE);
-    let glass = kind(GLASS, colour(13, 0));
-    let glass_pale = kind(GLASS, colour(14, 1));
-    let palm_green = kind(LEAVES, colour(8, 5));
+/// Walking surface of the Conservatory's 18 stone treads, measured over the landmark datum.
+/// OSM way 867911035 joins the paths at w=41.8 and 49.7. The lidar records a level upper
+/// landing, then a 2.8 m descent between the flanking cheek walls.
+pub(crate) fn conservatory_stairs(u: f32, w: f32) -> Option<f32> {
+    if !(41.8..=49.85).contains(&w) || (u - 0.6).abs() > 6.9 {
+        return None;
+    }
+    let tread = ((49.85 - w) * (18.0 / 7.0)).ceil().min(18.0);
+    Some(-3.5 + tread * (2.8 / 18.0))
+}
 
-    // Low raised manicured boxwood & floral mounds on the Conservatory Valley slope (w > 27 m).
-    if w > 27.0 && w <= 88.0 && u.abs() <= 46.0 {
-        if over_g > 0.0 && over_g < 0.7 {
-            let cr = (u * u + (w - 56.0).powi(2)).sqrt();
-            if cr < 14.0 {
-                let h = if cr > 12.6 { 0.52 } else { 0.34 };
-                if over_g < h {
-                    return conservatory_surface(u, w, s).unwrap_or(palm_green);
-                }
-            }
-            let au = u.abs();
-            if (19.5..=39.5).contains(&au) && (33.0..=78.0).contains(&w) {
-                let lu = (au - 29.5) / 10.0;
-                let lw = (w - 55.5) / 22.5;
-                let ov = lu * lu + lw * lw;
-                if ov < 1.0 && over_g < if ov > 0.82 { 0.52 } else { 0.30 } {
-                    return conservatory_surface(u, w, s).unwrap_or(palm_green);
-                }
-            }
-        }
-        return 0;
+fn valley_bed(u: f32, w: f32) -> bool {
+    if !(33.7..=95.8).contains(&w) || !(-48.0..=60.3).contains(&u) {
+        return false;
     }
+    VALLEY_BEDS.iter().any(|&(cu, cw, hu, hw, round)| {
+        let dx = (u - cu).abs();
+        let dz = (w - cw).abs();
+        dx <= hu && dz <= hw && (!round || (dx / hu).powi(2) + (dz / hw).powi(2) <= 1.0)
+    }) || (u >= 49.5 && w <= 85.5 && inside(VALLEY_CRESCENT, u, w))
+}
 
-    // ── Victorian White-Framed Glazed Glasshouse (76 x 34 m) at w = -18..+20 m.
-    if !(-3.5..22.5).contains(&y) || u.abs() > 40.5 || !(-18.0..=20.0).contains(&w) {
-        return 0;
-    }
-    let (au, aw) = (u.abs(), w.abs());
-    // Solid white masonry terrace plinth down to -3.5 m.
-    if y < 0.0 {
-        return if au <= 39.5 && (-13.0..=16.5).contains(&w) { white } else { 0 };
-    }
-    // 1. Ornate Victorian South Entry Vestibule & Stairs (u = -7..+7, w = +9.5..+18).
-    if au <= 7.2 && w > 9.2 && w <= 18.0 {
-        // Broad white stone entry stairs climbing to floor level.
-        if w > 14.8 && y < (18.0 - w) * 0.45 {
-            return kind(CONCRETE, grey(2));
-        }
-        if w <= 15.0 {
-            if y < 6.4 {
-                let on_shell = au > 6.4 || w > 14.2;
-                if !on_shell {
-                    return 0;
-                }
-                if w > 14.2 && round_arch(u, y, 2.6, 3.2, 2.2) {
-                    return if y < 3.4 { kind(GLASS, colour(14, 7)) } else { glass };
-                }
-                return if y < 1.6 || y > 5.8 || line(u, 2.2, 0.0, 0.32, s) { white } else { glass };
-            }
-            // Triangular Victorian pediment gable over the entry portico.
-            let gable = 9.8 - au * 0.48;
-            if y <= gable && w <= 15.2 {
-                return if (gable - y) < 0.55 || y < 6.8 || w > 14.6 { white } else { glass_pale };
-            }
-        }
-        return 0;
-    }
+/// A bed's soil is hidden by the leaf rosettes the flower spikes rise from.
+fn conservatory_surface(u: f32, w: f32, _s: f32) -> Option<Kind> {
+    valley_bed(u, w).then_some(kind(LEAVES, colour(8, 6)))
+}
 
-    // 2. Central Iconic Tiered White-Ribbed Glass Palm Dome (r <= 12.6 m, rising to 21.8 m!).
-    let r = (u * u + w * w).sqrt();
-    if r <= 12.8 {
-        if y < 2.2 {
-            return if r >= 11.4 { white } else { 0 };
-        }
-        // Lower glazed drum & ornate white Victorian cornice (2.2..9.0 m).
-        if y < 9.0 {
-            if r >= 11.4 && r <= 12.4 {
-                if y > 8.2 || y < 2.6 || line(r * w.atan2(u), 2.1, 0.0, 0.28, s) {
-                    return white;
-                }
-                return glass;
-            }
-            // Lush interior tropical palms glimpsed inside the glass dome!
-            if r < 7.0 && y < 7.5 && hash3((u * 1.2) as i32, (y * 1.2) as i32, (w * 1.2) as i32, 31) % 5 == 0 {
-                return palm_green;
-            }
-            return 0;
-        }
-        // Clerestory lantern ring (9.0..11.4 m) stepped inward.
-        if y < 11.4 {
-            if r <= 11.8 && r >= 10.2 {
-                return if y > 10.8 || y < 9.4 || line(r * w.atan2(u), 1.8, 0.0, 0.28, s) { white } else { glass_pale };
-            }
-            return 0;
-        }
-        // Sweeping Victorian curved ribbed glass Palm Dome (11.4..18.8 m).
-        if y < 18.8 {
-            let h = (y - 11.4) / 7.4;
-            let rd = 10.6 * (1.0 - h * h * 0.94).max(0.0).sqrt();
-            if r <= rd.max(s * 0.5) && r >= (rd - 0.85f32.max(s)).max(0.0) {
-                let theta = w.atan2(u);
-                let rib = line(theta * 10.6, 10.6 * std::f32::consts::PI / 8.0, 0.0, 0.34, s);
-                let ring = line(y, 1.85, 11.4, 0.24, s);
-                return if rib || ring { steel_white } else { glass_pale };
-            }
-            return 0;
-        }
-        // Delicate white Victorian cupola & spire finial (18.8..22.0 m).
-        if y < 20.6 && r <= 2.4 {
-            return if r > 1.8 && !line(w.atan2(u) * 2.0, 1.0, 0.0, 0.28, s) { glass } else { white };
-        }
-        return if y < 22.0 && r <= (1.6 - (y - 20.6) * 1.0).max(0.22).max(s * 0.5) { steel_white } else { 0 };
-    }
+// OSM 10725865300..303. In order: u, w, ground relative to the 74.4 m
+// terrace, height above ground, and approximate crown radius (metres).
+const VALLEY_PALMS: [(f32, f32, f32, f32, f32); 4] = [
+    (-12.0, 33.3, -0.1, 21.6, 3.9), (-10.5, 36.5, -0.1, 21.5, 3.6),
+    (11.4, 42.6, -0.9, 17.6, 4.2), (11.2, 33.7, 0.3, 16.3, 3.8),
+];
 
-    // 3. Symmetrical Curved Glass Barrel-Vault Wings (au = 12..30 m) & Wider Victorian End Pavilions (au = 30..39.5 m).
-    if au <= 39.5 {
-        let end_pav = au >= 30.0;
-        let half_w = if end_pav { 12.2 } else { 9.2 };
-        if aw > half_w {
-            return 0;
+/// The near tile inferred a single stem under the overlapping western crowns,
+/// and three under the two eastern crowns. Match its stem, so every return it
+/// supports goes away together, even when well outside the new palm's crown.
+pub fn valley_palm_stem(u: f32, w: f32) -> bool {
+    VALLEY_PALMS.iter().any(|&(x, z, _, _, _)| (u - x).powi(2) + (w - z).powi(2) < 3.0 * 3.0)
+}
+
+/// Distant survey faces carry no trunk ID. The centres and crown radii of the
+/// four inferred stems in near tile 190_277 delimit these tree-only returns.
+pub fn valley_palm_return(u: f32, w: f32) -> bool {
+    if !(25.0..51.0).contains(&w) || u.abs() > 21.0 { return false; }
+    [(-12.4, 34.7, 6.4), (12.0, 32.5, 5.8), (12.7, 35.6, 5.2), (13.2, 44.2, 4.2)]
+        .iter().any(|&(x, z, radius)| (u - x).powi(2) + (w - z).powi(2) <= (radius + 0.5_f32).powi(2))
+}
+
+fn valley_palms(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    if !(27.0..49.0).contains(&w) || u.abs() > 18.0 { return 0; }
+    for (i, &(x, z, foot, height, radius)) in VALLEY_PALMS.iter().enumerate() {
+        let dx = u - x;
+        let dz = w - z;
+        let h = y - foot;
+        if dx.abs() > radius || dz.abs() > radius || h < -0.8 || h > height { continue; }
+        let r = dx.hypot(dz);
+        let head = height - 1.9;
+        if r < (0.34 + 0.08 * (1.0 - h / height)).max(s * 0.55) && h < head {
+            let tone = if (h * 3.5 + dx * 0.7).fract() < 0.18 { 8 } else { 9 };
+            return kind(WOOD, colour(2, tone));
         }
-        let wall_h = if end_pav { 6.6 } else { 5.4 };
-        let top_h = if end_pav { 12.6 } else { 10.4 };
-        if y < wall_h {
-            let shell = (half_w - aw).min(39.5 - au);
-            if shell <= 0.75f32.max(s) {
-                if y < 2.0 || y > wall_h - 0.55 {
-                    return white;
-                }
-                let rib = line(u, 2.2, 0.0, 0.24, s) || line(w, 2.2, 0.0, 0.24, s) || line(y, 1.8, 2.0, 0.16, s);
-                return if rib { steel_white } else { glass };
+        if h < head - 3.8 || r > radius { continue; }
+        // Three whorls of offset arching fronds. The upper spears rise from the
+        // same bud as the long outer fronds that bend back toward the trunk.
+        let angle = dz.atan2(dx) + i as f32 * 2.4;
+        for (tier, &(count, reach, lift, drop)) in
+            [(9, 0.64, 3.1, 1.6), (12, 1.0, 3.3, 4.0), (13, 0.89, 1.3, 4.6)].iter().enumerate() {
+            let spacing = std::f32::consts::TAU / count as f32;
+            let a = angle + tier as f32 * 1.71 + r * 0.07;
+            let spoke = (a / spacing).round();
+            let phase = (spoke * spacing * 3.0 + i as f32).sin();
+            let t = r / (radius * reach * (0.96 + 0.04 * phase));
+            if t > 1.0 { continue; }
+            let across = (a - spoke * spacing).abs() * r;
+            let midrib = head + lift * (2.0 * t - t * t) - (drop + 0.35 * phase) * t * t;
+            let blade = 0.06 + 0.32 * (std::f32::consts::PI * t).sin();
+            let leaflet = (r * 3.8 - across * 3.3 + phase).rem_euclid(1.0);
+            let width = if s <= 0.2 && leaflet < 0.32 { blade * 0.46 } else { blade };
+            if across <= width.max(s * 0.45) && (h - midrib + 0.8 * across).abs() < 0.12 + 0.55 * s {
+                let hue = if tier == 2 { 5 } else { 6 };
+                return kind(LEAVES, colour(hue, if across < 0.1 && tier != 2 { 8 } else { 6 }));
             }
-            // Tropical ferns visible faintly behind the clear glass.
-            if y < 3.6 && shell > 2.2 && hash3((u * 1.4) as i32, (y * 1.4) as i32, (w * 1.4) as i32, 43) % 7 == 0 {
-                return palm_green;
-            }
-            return 0;
-        }
-        // Curved barrel-vault roof (wings) or hipped glass roof (end pavilions) with crisp white structural ribs!
-        let roof_y = if end_pav {
-            let du = (au - 34.75).abs() / 4.75;
-            let dw = aw / half_w;
-            wall_h + (top_h - wall_h) * (1.0 - du.max(dw)).max(0.0)
-        } else {
-            wall_h + (top_h - wall_h) * (1.0 - (aw / half_w).powi(2)).max(0.0).sqrt()
-        };
-        if y <= roof_y && y >= roof_y - 0.75f32.max(s) {
-            let rib = line(u, 2.2, 0.0, 0.28, s) || line(y, 1.6, wall_h, 0.18, s) || (roof_y - y < 0.3 && aw < 0.5);
-            return if rib { steel_white } else { glass_pale };
         }
     }
     0
 }
 
+/// Low leaves carry the mass of the border. A 10 cm cell already represents a
+/// whole cluster of bells, so apply flower colour sparingly to the spike itself.
+fn valley_planting(u: f32, y: f32, w: f32, s: f32) -> Option<Kind> {
+    if y > 1.30 || !valley_bed(u, w) { return None; }
+    const STEP: f32 = 0.48;
+    let (pu, pw) = ((u / STEP).floor() as i32, (w / STEP).floor() as i32);
+    let rnd = |seed: i32| hash3(pu, seed, pw, 83) as f32 / 4_294_967_296.0;
+    let dx = u - (pu as f32 + 0.20 + 0.60 * rnd(1)) * STEP;
+    let dz = w - (pw as f32 + 0.20 + 0.60 * rnd(2)) * STEP;
+    let radius = dx.hypot(dz);
+    let leaf = kind(LEAVES, colour(6, 8));
+    // The central display grades from a low edging to taller flowering drifts.
+    let margin = if w > 56.0 && (u - 0.8).abs() < 2.2 {
+        ((95.7 - w) * 0.11).clamp(0.0, 1.0) * (2.1 - (u - 0.8).abs()).clamp(0.15, 1.0)
+    } else { 1.0 };
+    // Plant leaves overlap into a bank with an uneven top. Small rosettes
+    // emerge above it, giving the sparse spikes a leafy silhouette at the foot.
+    let ground_cover = crate::hash::noise((u * 10.0).floor() as i32, (w * 10.0).floor() as i32, 5, 41);
+    let bank = 0.09 + 0.15 * ground_cover + (0.11 + 0.10 * margin) * (1.0 - radius / 0.28).max(0.0);
+    if y < bank {
+        let hue = if ground_cover > 0.63 { 6 } else { 7 };
+        return Some(kind(LEAVES, colour(hue, if y < bank - 0.10 { 6 } else { 5 })));
+    }
+    let height = 0.14 + margin * (0.47 + 0.69 * rnd(3));
+    if y > height { return None; }
+    let t = y / height;
+    let drift = hash3((u / 1.5).floor() as i32, 4, (w / 1.5).floor() as i32, 83);
+    // A slightly leaning spike ends in a green bud. Each coloured band is at
+    // most one fine cell high; occasional paired cells stay part of the spike.
+    let stem = (dx - (rnd(4) - 0.5) * 0.20 * t).hypot(dz - (rnd(5) - 0.5) * 0.14 * t);
+    if y < bank + 0.16 * margin && (dx + 0.65 * (y - bank)).abs() + dz.abs() < 0.14 {
+        return Some(kind(LEAVES, colour(6, 6)));
+    }
+    let bells = margin > 0.25 && t > 0.47 && t < 0.95 && (height - y).rem_euclid(0.21) < 0.095;
+    if bells && stem < 0.085 {
+        let bloom = [colour(21, 2), colour(22, 8), grey(2), colour(17, 8), WHITE][(drift % 5) as usize];
+        return Some(kind(LEAVES, bloom));
+    }
+    (stem < (0.044 + 0.032 * (1.0 - t)).max((s * 0.45).min(0.06))).then_some(leaf)
+}
+
+fn conservatory(u: f32, y: f32, w: f32, s: f32) -> Kind {
+    let palm = valley_palms(u, y, w, s);
+    if palm != 0 { return palm; }
+    if let Some(tread) = conservatory_stairs(u, w) {
+        if y <= tread && y > tread - 0.45 {
+            return kind(CONCRETE, colour(2, 7));
+        }
+        let side = (u - 0.6).abs();
+        if s <= 0.4 && side.min((side - 6.5).abs()) <= 0.05f32.max(s * 0.5) {
+            let rail = -2.6 + ((49.85 - w) * (2.8 / 7.0)).min(2.8);
+            if member(y - rail, 0.045, s) || (y >= tread && y < rail && line(w, 1.8, 42.0, 0.08, s)) {
+                return kind(STEEL, grey(8));
+            }
+        }
+        return 0;
+    }
+    if !(-2.5..=19.0).contains(&y) || !conservatory_public(u, w) {
+        return 0;
+    }
+    let timber = kind(WOOD, WHITE);
+    let clear = kind(GLASS, colour(14, 7));
+    // The park's daylight exterior photograph shows the opaque whitewash on the large panes.
+    // Clear entrance lights and muntins remain individually visible in front of that coating.
+    let wash = kind(PLASTER, WHITE);
+    // The glazing bars are a few centimetres: a cell coarser than a quarter metre shows the whitewashed glass.
+    let bar = kind(WOOD, grey(3));
+    let fine = s <= 0.25;
+    let du = u - 1.1;
+    let dw = w - 2.1;
+    let (x, z) = (du.abs(), dw.abs());
+    let octagon = x.max(z).max((x + z) * std::f32::consts::FRAC_1_SQRT_2);
+    // Every vertical stack of coarse cells must intersect the roof, including at the crest.
+    let skin = s.max(0.35);
+    if y < 0.0 {
+        return kind(CONCRETE, grey(2));
+    }
+
+    // The octagonal Palm House has two distinct roofs. The upper dome springs out of a
+    // narrow drum at 85.8 m; the lower roof sweeps down to the wider gallery at 79.8 m.
+    if octagon <= 9.7 {
+        let upper = octagon <= 5.05;
+        let ridge = if upper {
+            11.4 + 5.4 * (1.0 - (octagon / 5.05).powi(2)).max(0.0).sqrt()
+        } else {
+            5.4 + 4.0 * (1.0 - ((octagon - 5.05) / 4.65).powi(2)).max(0.0).sqrt()
+        };
+        let finial_radius = ((18.6 - y) * 0.85 + 0.18).clamp(0.12, 0.8).max(s * 0.5);
+        if y > 16.4 && y <= 18.6 && x.hypot(z) <= finial_radius {
+            return timber;
+        }
+        let drum = (upper && octagon > 5.05 - skin && y >= 9.1) || octagon > 9.7 - skin;
+        let roof = y >= ridge - skin;
+        if y <= ridge && (drum || roof) {
+            let corner = line(dw.atan2(du) * 8.0, std::f32::consts::PI, 0.0, 0.10, s);
+            let rail = (y - 9.25).abs() < 0.28 || (y - 11.3).abs() < 0.3;
+            // The forward arch on the lowest tier is glazed; the rest of the drum is white.
+            if dw > 7.0 && x < 1.25 && (3.4..6.6).contains(&y) && !line(du, 0.65, 0.0, 0.09, s) {
+                return clear;
+            }
+            if rail || y < 0.65 {
+                return timber;
+            }
+            return if fine && (corner || line(y, 1.25, 0.0, 0.10, s)) { bar } else { wash };
+        }
+        return 0;
+    }
+
+    let entry = u > -3.4 && u < 4.5 && w >= 10.3;
+    let end_axis = if u < 0.0 { -30.9 } else { 32.0 };
+    let side = (u - end_axis).abs();
+    let half = 5.65;
+    // Horizontal galleries run east-west. The end houses run towards the visitor,
+    // with a barrel vault at right angles to the long gallery.
+    let end = side <= half && w >= -3.7;
+    let radial = if entry { (u - 0.6).abs() / 3.95 } else if end && w >= 2.0 {
+        (side / half).max(((w - 11.8) / 5.15).max(0.0))
+    } else { (w - 1.8).abs() / half };
+    let ridge = if entry { 5.4 - 0.45 * (u - 0.6).abs() } else {
+        // Survey cross section: 79.7 m at the ridge, 77.0 m 4.3 m from it.
+        1.25 + 4.15 * (1.0 - radial.min(1.0).powf(1.45))
+    };
+    let cupola = end && side.max(z) < 0.95;
+    if cupola && y > ridge && y <= 7.6 - 1.2 * side.max(z) {
+        return timber;
+    }
+    if y > ridge {
+        return 0;
+    }
+    let boundary = if entry {
+        w >= 17.2 - skin || (u - 0.6).abs() > 3.9 - skin
+    } else {
+        (end && (side >= half - skin || w >= 16.5 - skin))
+            || (!end && (radial >= 1.0 - skin / half)) || u < -36.6 + skin || u > 37.5 - skin
+    };
+    if !boundary && y < ridge - skin {
+        return 0;
+    }
+    if entry && w > 17.0 && x < 1.55 && y < 3.9 && !line(du, 0.8, 0.0, 0.1, s) {
+        return clear;
+    }
+    // Over the doors, the portico's arched window under its gable.
+    if entry && w > 17.0 && y >= 4.1 && y < 4.1 + 0.75 * (1.25f32.powi(2) - x * x).max(0.0).sqrt() {
+        return if line(du, 0.6, 0.0, 0.08, s) && s <= 0.25 { timber } else { clear };
+    }
+    let along = if end && w >= 2.0 { w } else { u };
+    if y < 0.6 { timber } else if fine && line(along, 1.4, 0.0, 0.11, s) { bar } else { wash }
+}
+
 // ── The Painted Ladies — 710–722 Steiner Street (Matthew Kavanaugh, 1892–1896).
 // Seven stepped Queen Anne Victorian rowhouses climbing the Steiner St hill across from Alamo Square.
-// Frame: u runs north-to-south along Steiner St (from 722 at -22.2 m to 710 at +22.3 m), +w faces west toward
+// Frame: u runs north-to-south along Steiner St (from 722 at -21.15 m to 710 at +23.25 m), +w faces west toward
 // Alamo Square, y up from 722's base datum (60.6 m). Verified against Painted Ladies.jpg (#60): the corner house, 722,
 // is hipped and flat-crowned; the six to its south are front-gabled. OSM footprints (261412887 and the six beside it)
-// give 9.1 m and 6.9-7.1 m frontages; the rule keeps its 9.4 m and 7.0-7.2 m lots, about 1 m north of OSM's.
+// give the seven lot positions and the two different bays at the corner.
 /// 722's hipped roof: metres it rises per metre in from its eaves, and the height of its flat crown above 722's base.
-/// From Painted Ladies.jpg: its roof rises 1.1 times 720's gable and its crown is about 44% of its eave's width.
+/// The lidar eaves on both sides are at 71 m above the Bay. Its central roof reaches 74.8 to 75.3 m.
 const CORNER_PITCH: f32 = 1.7;
-const CORNER_CROWN: f32 = 13.8;
+const CORNER_CROWN: f32 = 14.4;
+
+// The street front of 722 has a square bay on the north, an entrance between the bays,
+// and an angled bay on the south. OSM way 261412887, projected with the registry's frame.
+const STEINER_CORNER: &[(f32, f32)] = &[
+    (-16.6, 1.1), (-17.4, 1.2), (-17.4, 6.0), (-18.6, 7.4), (-20.4, 7.4),
+    (-21.5, 6.3), (-22.8, 6.3), (-22.8, 7.8), (-24.8, 7.8), (-24.8, 6.3),
+    (-25.6, 6.3), (-25.7, -10.1), (-24.3, -10.2), (-24.3, -11.1), (-21.4, -11.0),
+    (-21.4, -10.2), (-19.9, -10.2), (-19.9, -8.7), (-16.6, -8.6),
+];
+
+fn steiner_corner(u: f32, y: f32, w: f32, s: f32, body: Kind, trim: Kind) -> Kind {
+    if !inside(STEINER_CORNER, u, w) {
+        return 0;
+    }
+    // The squared bay ends a storey below the angled one. Behind it the main front stands at w=6.3.
+    let square = (-24.8..=-22.8).contains(&u);
+    if square && w > 6.3 {
+        if y > 7.0 { return 0; }
+        if y > 6.7 { return kind(ROOFING, grey(12)); }
+    }
+    if y < 0.0 { return kind(CONCRETE, grey(6)); }
+    // The setback and bay faces are measured. Sash positions are illustrative.
+    let front = if square && y < 7.0 { 7.8 } else if (-21.5..-20.4).contains(&u) { 6.3 + u + 21.5 }
+        else if (-20.4..=-18.6).contains(&u) { 7.4 }
+        else if (-18.6..-17.4).contains(&u) { 7.4 - (u + 18.6) * 1.4 / 1.2 }
+        else { 6.3 };
+    let face = front - w < s.max(0.4);
+    let side = u < -25.05;
+    if face || side {
+        if (y - 2.1).abs() < 0.16 || (y - 5.6).abs() < 0.18 || y > 9.95 { return trim; }
+        if face && (-22.65..-21.65).contains(&u) && (2.15..4.85).contains(&y) {
+            return if y > 4.35 { kind(GLASS, colour(14, 9)) } else { kind(WOOD, colour(1, 8)) };
+        }
+        let openings = if side { line(w, 3.0, 0.0, 1.2, s) } else {
+            [-24.25, -23.35, -20.83, -19.5, -18.2].iter().any(|mid| (u - mid).abs() < 0.38)
+        };
+        if openings && ((2.7..5.05).contains(&y) || (6.25..9.25).contains(&y)) {
+            return if (y - 3.9).abs() < 0.1 || (y - 7.8).abs() < 0.1 { trim } else { kind(GLASS, colour(14, 9)) };
+        }
+    }
+    body
+}
+
 fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
-    if !(-4.5..20.5).contains(&y) || u < -28.0 || u > 26.8 || w < -10.5 || w > 12.6 {
+    if !(-4.5..20.5).contains(&y) || u < -28.0 || u > 26.8 || w < -11.2 || w > 12.6 {
         return 0;
     }
     // Exact surveyed (u_mid, half_width, base_rel_m, body_colour, accent_colour, trim_colour) from north (722) to south (710):
     let houses: [(f32, f32, f32, u8, u8, u8); 7] = [
-        (-22.2, 4.7, 0.0, colour(15, 9), colour(14, 8), WHITE),          // 722 Steiner: deep charcoal-navy & crisp white
-        (-13.2, 3.6, 0.8, colour(6, 8), colour(4, 2), colour(4, 0)),    // 720 Steiner: warm olive-sage & cream trim
-        (-6.1, 3.45, 1.4, colour(10, 8), colour(11, 2), WHITE),         // 718 Steiner: muted slate-teal & crisp white
-        (1.0, 3.45, 2.2, colour(3, 1), colour(1, 2), WHITE),            // 716 Steiner: warm butter-cream & coral accent
-        (8.1, 3.45, 2.8, colour(21, 7), colour(20, 8), WHITE),          // 714 Steiner: soft lavender-taupe & dusty rose
-        (15.2, 3.45, 3.4, colour(12, 1), colour(13, 2), WHITE),         // 712 Steiner: pale robins-egg aqua & crisp white
-        (22.3, 3.55, 4.0, colour(4, 7), colour(3, 0), WHITE),           // 710 Steiner: pale cream & white trim (May 2022 photo)
+        (-21.15, 4.55, 0.0, colour(15, 9), colour(14, 8), WHITE),          // 722 Steiner: deep charcoal-navy & crisp white
+        (-12.25, 3.55, 0.8, colour(6, 8), colour(4, 2), colour(4, 0)),    // 720 Steiner: warm olive-sage & cream trim
+        (-5.2, 3.6, 1.4, colour(10, 8), colour(11, 2), WHITE),         // 718 Steiner: muted slate-teal & crisp white
+        (1.85, 3.45, 2.2, colour(3, 1), colour(1, 2), WHITE),            // 716 Steiner: warm butter-cream & coral accent
+        (8.8, 3.5, 2.8, colour(21, 7), colour(20, 8), WHITE),          // 714 Steiner: soft lavender-taupe & dusty rose
+        (16.05, 3.45, 3.4, colour(12, 1), colour(13, 2), WHITE),         // 712 Steiner: pale robins-egg aqua & crisp white
+        (23.25, 3.45, 4.0, colour(4, 7), colour(3, 0), WHITE),           // 710 Steiner: pale cream & white trim (May 2022 photo)
     ];
     let slate = kind(ROOFING, grey(12));
     let brick = kind(BRICK, colour(0, 6));
@@ -2350,6 +2650,9 @@ fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
         // Main house box: w from -9.0 (rear) to +7.8 (main front plane).
         // Foundation skirt down to -4.2 m embeds cleanly into Steiner St's hillside.
+        if idx == 0 && hy < 10.4 {
+            return steiner_corner(u, hy, w, s, body, trim);
+        }
         if hy < 0.0 {
             return if w >= -9.0 && w <= 9.6 { kind(CONCRETE, grey(6)) } else { 0 };
         }
@@ -2358,24 +2661,26 @@ fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
             return brick;
         }
         // Steep Queen Anne pitched front gable roof (hy = 9.4..13.5 m) running front-to-back!
-        let roof_eave = 9.4;
+        let roof_eave = if idx == 0 { 10.4 } else { 9.4 };
         let gable_peak = 13.4;
         let slope_y = gable_peak - (lu.abs() / hw) * (gable_peak - roof_eave);
         if hy >= roof_eave {
             // Front bay-window decorative hipped turret cap & gable overhang.
-            let front_w = if idx == 0 { 8.4 } else { 8.6 };
+            let front_w = if idx == 0 { 7.6 } else { 8.6 };
             if w > front_w || w < -9.2 {
                 return 0;
             }
             // 722, the dark corner house, has no front gable: its roof is hipped on all sides, steep, and flat on top,
             // a broad crown whose ridge runs along the street (Painted Ladies.jpg and the panorama it is cut from).
             if idx == 0 {
-                let inset = (hw - lu.abs()).min(front_w - w).min(w + 9.2);
-                let roof_top = roof_eave + (inset * CORNER_PITCH).min(CORNER_CROWN - roof_eave);
+                let across = hw - lu.abs();
+                let depth = (front_w - w).min(w + 9.2);
+                // The lidar sections toward the front and rear rise about 0.83 m per metre.
+                let roof_top = (roof_eave + (across * CORNER_PITCH).min(depth * 0.83)).min(CORNER_CROWN);
                 if hy > roof_top {
                     return 0;
                 }
-                if inset < 0.6 && hy - roof_eave < 0.45 {
+                if across.min(depth) < 0.6 && hy - roof_eave < 0.45 {
                     return trim;
                 }
                 return if roof_top - hy < 0.55f32.max(s) { slate } else { body };
@@ -2498,7 +2803,7 @@ fn painted_ladies(u: f32, y: f32, w: f32, s: f32) -> Kind {
 // ── de Young Museum (Herzog & de Meuron, 2005, Golden Gate Park).
 // Frame: u along the main gallery axis (150 m), w across (74 m, -w facing Music Concourse), y up from 74.5 m.
 // Signature oxidized perforated copper cladding, deeply recessed glass ground floor beneath a sweeping cantilevered
-// copper roof overhang, and the iconic 44 m twisting copper Hamon Observation Tower at (u = -66.4 m, w = +29.2 m) (#60).
+// copper roof overhang and the Hamon Observation Tower, northeast of the main galleries (#60).
 fn de_young(u: f32, y: f32, w: f32, s: f32) -> Kind {
     if !(-7.5..46.0).contains(&y) || u.abs() > 78.0 || w.abs() > 42.0 {
         return 0;
@@ -2522,22 +2827,26 @@ fn de_young(u: f32, y: f32, w: f32, s: f32) -> Kind {
         }
     };
 
-    // 1. Iconic 44 m Twisting Copper Hamon Observation Tower centered at exact surveyed (-66.4, +29.2)!
-    let (tu, tw) = (u + 66.4, w - 29.2);
-    if tu.abs() <= 16.5 && tw.abs() <= 16.5 && y >= -7.0 && y <= 44.5 {
-        // Smooth horizontal twist of ~38 degrees as the tower rises from gallery grid to neighborhood street grid!
-        let twist = 0.66 * (y.max(0.0) / 44.0);
-        let (ct, st) = (twist.cos(), twist.sin());
-        let ru = tu * ct + tw * st;
-        let rw = -tu * st + tw * ct;
-        // Slight architectural taper with height.
-        let hu = 10.6 - 0.8 * (y.max(0.0) / 44.0);
-        let hw = 7.8 - 0.6 * (y.max(0.0) / 44.0);
-        if ru.abs() <= hu && rw.abs() <= hw {
-            if y < 0.0 {
-                return concrete;
+    // Hamon Tower's floors are parallelograms. The short ends remain parallel to the gallery
+    // grid as their centres slide in opposite directions. OSM ways 1418750068–73 show the
+    // intervening floors. The 0.25 m lidar gives the four corners of the top deck in this frame.
+    if (-78.0..=-48.0).contains(&u) && (8.6..=37.6).contains(&w) && (-7.0..=44.5).contains(&y) {
+        let rise = ((y - 13.0) / 26.0).clamp(0.0, 1.0);
+        let front_w = 9.6 - rise;
+        let back_w = 37.6;
+        let front_mid = -64.15 + 9.15 * rise;
+        let back_mid = -63.65 - 7.5 * rise;
+        let depth = (w - front_w) / (back_w - front_w);
+        let ru = u - (front_mid + depth * (back_mid - front_mid));
+        let rw = w - front_w;
+        let half_width = 4.55 + 1.7 * rise;
+        let face = (half_width - ru.abs()).min(rw).min(back_w - w);
+        if face >= 0.0 {
+            if y < 0.0 { return concrete; }
+            // Most of the deck is at 117.65 m above the Bay. The thin rim reaches 118.9 m.
+            if y > 43.2 {
+                return if face < 0.45f32.max(s * 0.5) { dark_steel } else { 0 };
             }
-            let face = (hu - ru.abs()).min(hw - rw.abs());
             // Panoramic 360-degree glazed observation floor near the top (37.5..41.2 m).
             if (37.5..41.2).contains(&y) {
                 if face < 0.8f32.max(s) {
@@ -2545,9 +2854,6 @@ fn de_young(u: f32, y: f32, w: f32, s: f32) -> Kind {
                     return if post { dark_steel } else { glass };
                 }
                 return if y < 38.0 { concrete } else { 0 };
-            }
-            if y > 44.0 {
-                return dark_steel;
             }
             // Perforated oxidized copper tower skin with narrow vertical slit windows.
             if face < 0.7f32.max(s) && s <= 0.6 && (8.0..35.0).contains(&y) && line(ru + rw, 4.6, 0.0, 0.35, s) && (y as i32) % 7 < 3 {
@@ -2693,6 +2999,44 @@ pub fn faces_at() -> *const u32 {
 mod tests {
     use super::*;
 
+    #[test]
+    fn ferry_front_follows_the_surveyed_portico_and_wings() {
+        // DataSF footprint 201006.0000058. The two wings stop at w=21.8,
+        // the entrance projects to w=30.7. The plaza and pier stay mapped.
+        let reach = reach(FERRY_BUILDING).unwrap();
+        assert!(reach[5] >= 31.0, "central entrance lies outside the registered landmark");
+        for u in [-15.0, 0.0, 15.0] {
+            assert!(owns(FERRY_BUILDING, u, 8.0, 30.6));
+            assert_ne!(ferry_building(u, 14.0, 30.4, 0.4), 0);
+        }
+        // Three two-storey openings with their glass behind the piers.
+        for u in [-9.5, -0.5, 8.5] {
+            assert_eq!(ferry_building(u, 8.0, 30.4, 0.4), 0);
+            assert_eq!(material(ferry_building(u + 1.0, 8.0, 28.6, 0.4)), GLASS);
+            assert_eq!(material(ferry_building(u + 4.2, 8.0, 30.4, 0.4)), PLASTER);
+        }
+        for u in [-72.0, 72.0] {
+            assert!(!owns(FERRY_BUILDING, u, 5.0, 27.0));
+            assert_eq!(ferry_building(u, 5.0, 27.0, 0.4), 0);
+            assert_eq!(material(ferry_building(u, 3.0, 21.0, 0.4)), GLASS);
+            assert_eq!(material(ferry_building(u + 3.0, 3.0, 21.6, 0.4)), PLASTER);
+        }
+        assert!(!owns(FERRY_BUILDING, 38.0, 1.0, -42.0));
+    }
+
+    #[test]
+    fn ferry_clock_shows_two_oclock_on_all_four_faces() {
+        for (nu, nw) in [(0.0, 1.0), (0.0, -1.0), (1.0, 0.0), (-1.0, 0.0)] {
+            let dial = |right: f32, up: f32| material(ferry_building(
+                nu * 5.9 + nw * right, 39.0 + up, FB_TOWER_W + nw * 5.9 - nu * right, 0.4,
+            ));
+            assert_eq!(dial(0.0, 1.9), STEEL, "minute hand");
+            assert_eq!(dial(0.3, 1.2), STEEL, "minute hand survives an offset column");
+            assert_eq!(dial(1.1, 0.65), STEEL, "hour hand");
+            assert_eq!(dial(-1.1, 0.65), PLASTER, "unmarked dial");
+        }
+    }
+
     /// A landmark seen square on from one side, as a picture (PPM), for looking at a rule without a page:
     ///   HEROES_OUT=/some/dir cargo test --release heroes::tests::pictures -- --ignored
     /// `across` is the axis looked along: 2 from the bay side (u across the picture), 0 from the end (w across).
@@ -2756,19 +3100,53 @@ mod tests {
         save("pyramid-end-0.4", picture(TRANSAMERICA, 0.4, 0, [-30.0, 0.0, 30.0, 262.0]));
         save("pyramid-1.6", picture(TRANSAMERICA, 1.6, 2, [-30.0, 0.0, 30.0, 262.0]));
         save("pyramid-foot-0.1", picture(TRANSAMERICA, 0.1, 2, [-30.0, 0.0, 30.0, 40.0]));
-        save("ferry-front-0.2", picture(FERRY_BUILDING, 0.2, 2, [-FB_HALF - 2.0, 0.0, FB_HALF + 2.0, 72.0]));
+        save("ferry-front-0.2", picture(FERRY_BUILDING, 0.2, 2, [FB_NORTH - 2.0, 0.0, FB_SOUTH + 2.0, 72.0]));
         save("ferry-tower-0.1", picture(FERRY_BUILDING, 0.1, 2, [-10.0, 30.0, 10.0, 71.0]));
-        save("ferry-front-1.6", picture(FERRY_BUILDING, 1.6, 2, [-FB_HALF - 2.0, 0.0, FB_HALF + 2.0, 72.0]));
+        save("ferry-front-1.6", picture(FERRY_BUILDING, 1.6, 2, [FB_NORTH - 2.0, 0.0, FB_SOUTH + 2.0, 72.0]));
         save("sutro-0.8", picture(SUTRO_TOWER, 0.8, 2, [-40.0, 0.0, 40.0, 300.0]));
         save("sutro-end-0.8", picture(SUTRO_TOWER, 0.8, 0, [-40.0, 0.0, 40.0, 300.0]));
         save("sutro-3.2", picture(SUTRO_TOWER, 3.2, 2, [-40.0, 0.0, 40.0, 300.0]));
         save("cityhall-0.2", picture(CITY_HALL, 0.2, 0, [-CH_WIDE - 2.0, 0.0, CH_WIDE + 2.0, 95.0]));
         save("cityhall-1.6", picture(CITY_HALL, 1.6, 0, [-CH_WIDE - 2.0, 0.0, CH_WIDE + 2.0, 95.0]));
-        save("finearts-0.2", picture(FINE_ARTS, 0.2, 0, [-PF_ARC - 8.0, 0.0, PF_ARC + 8.0, 50.0]));
-        save("finearts-1.6", picture(FINE_ARTS, 1.6, 0, [-PF_ARC - 8.0, 0.0, PF_ARC + 8.0, 50.0]));
+        save("finearts-0.2", picture(FINE_ARTS, 0.2, 0, [-36.0, 0.0, 54.0, 50.0]));
+        save("finearts-1.6", picture(FINE_ARTS, 1.6, 0, [-36.0, 0.0, 54.0, 50.0]));
         for s in [0.8, 1.6, 3.2, 6.4, 12.8] {
             save(&format!("gate-side-{s}"), picture(GOLDEN_GATE, s, 2, [GG_SOUTH, -10.0, -600.0, 235.0]));
         }
+    }
+
+    #[test]
+    fn city_hall_roof_matches_the_survey_sections() {
+        // Heights above the 17.6 m BAY1 foot at centres of 1 m samples in both City Hall squares.
+        for (u, w, measured) in [
+            (44.5, -0.5, 25.2), (22.5, -6.5, 11.1), (28.5, -8.5, 13.1),
+            (53.5, 42.5, 23.0), (28.5, 23.5, 25.1), (5.5, -39.5, 29.3), (19.5, -1.5, 34.6),
+            (8.5, -0.5, 67.5), (-4.5, -1.5, 69.8), (1.5, -1.5, 84.4),
+        ] {
+            let top = (0..95).rev().find(|&y| city_hall(u, y as f32 + 0.5, w, 1.0) != 0)
+                .map_or(0.0, |y| (y + 1) as f32);
+            assert!((top - measured).abs() <= 1.2, "at ({u}, {w}): roof {top} m, lidar {measured} m");
+        }
+    }
+
+    #[test]
+    fn city_hall_lantern_opens_below_its_finial() {
+        let (u, w) = (0.5, -1.5);
+        assert_eq!(city_hall(u, 76.0, w, 0.2), 0, "sky between the lantern columns");
+        assert_ne!(city_hall(u + 2.6, 76.0, w, 0.2), 0, "lantern shaft");
+        assert_eq!(city_hall(u + 4.0, 84.0, w, 0.2), 0, "narrow spire");
+        assert_ne!(city_hall(u, 93.5, w, 0.2), 0, "published finial height");
+        assert_eq!(city_hall(u, 93.7, w, 0.2), 0);
+    }
+
+    #[test]
+    fn city_hall_owns_the_courts_and_leaves_the_sidewalk_to_the_map() {
+        for (u, w) in [(43.0, 47.0), (63.3, 3.0), (38.0, -48.0), (0.0, 52.0)] {
+            assert!(!owns(CITY_HALL, u, 2.0, w));
+            assert_eq!(city_hall(u, -1.0, w, 0.4), 0, "foundation at ({u}, {w})");
+        }
+        assert!(owns(CITY_HALL, 28.0, 20.0, -9.0));
+        assert!(owns(CITY_HALL, 3.0, 6.0, 48.0));
     }
 
     /// How wide the tower's outline is at a height, seen square on, in cells of `s`.
@@ -2783,7 +3161,13 @@ mod tests {
             let (foot, mid, high) = (width(40.0 + s / 2.0, s), width(240.0 + s / 2.0, s), width(318.0 + s / 2.0, s));
             assert!((foot - 53.8).abs() <= 2.0 * s + 1.0, "{s} m cells: {foot} m wide at its foot");
             assert!((mid / foot - 0.86).abs() < 0.05 + s / 50.0, "{s} m cells: {mid} of {foot} at 240 m");
-            assert!((high / foot - 0.47).abs() < 0.06 + s / 25.0, "{s} m cells: {high} of {foot} at 318 m");
+            assert!((high / foot - 0.56).abs() < 0.06 + s / 25.0, "{s} m cells: {high} of {foot} at 318 m");
+        }
+        // Clear sky on both sides at Ina and Potrero. Across the flats (in 0.8 m far cells),
+        // the silhouette at world heights 290, 315 and 325 m includes the outer screen.
+        for (world, metres) in [(290.0, 39.0), (315.0, 32.5), (325.0, 29.0)] {
+            let measured = width(world - 4.1, 0.8);
+            assert!((measured - metres).abs() <= 1.2, "at {world} m: {measured} m across the crown");
         }
         assert_eq!(salesforce(0.0, 326.5, 0.0, 0.1), 0);
         assert_eq!(salesforce(40.0, 100.0, 0.0, 0.1), 0);
@@ -2879,6 +3263,45 @@ mod tests {
     }
 
     #[test]
+    fn golden_gate_north_approach_follows_highway_101_down_to_its_measured_landing() {
+        // Overture's two US 101 carriageways (2026-10-21.0, transportation segments 1b5877f0, 82e8434e) leave the
+        // bridge's axis at u 1220 m and land 70 m to the ocean side at u 1413 m, where tile 0/182_250 has its ground
+        // at 73.0 m. A deck straight on to u 1360 would stand in the Vista Point car park.
+        let deck = |u: f32, w: f32, ground: f32| {
+            let road = gg_road(u);
+            material(kind_at_world(GOLDEN_GATE, u, road - 0.05, road - 0.05 - ground, w, 0.1))
+        };
+        assert_eq!(deck(1360.0, -37.7, 47.9), ASPHALT, "the approach deck over the gully, on 101's line");
+        assert_eq!(deck(1360.0, 0.0, 57.0), 0, "no deck off 101's line");
+        assert_eq!(deck(1410.0, -69.8, 72.0), ASPHALT, "the deck reaches the abutment");
+        assert_eq!(deck(1411.25, -65.7, 72.5), ASPHALT, "the last half metre of clearance stays bridged");
+        assert!((gg_road(1413.0) - 73.0).abs() < 0.3, "and meets the ground there: {}", gg_road(1413.0));
+        assert_eq!(deck(1430.0, -81.0, 73.7), 0, "past the landing the road is the ground's");
+        // Under the deck the draped copy of the same carriageways is ground, not a second road; the gully's own
+        // service roads and trails to either side keep their class.
+        assert!(draped_north_highway(1250.0, -3.0, 20.0));
+        assert!(draped_north_highway(1360.0, -37.7, 47.9));
+        assert!(!draped_north_highway(1250.0, -36.0, 23.0));
+        assert!(!draped_north_highway(1420.0, -77.0, 73.3));
+        assert!(!owns(GOLDEN_GATE, 1360.0, 0.0, 0.0));
+        assert!(owns(GOLDEN_GATE, 1360.0, 0.0, -37.7));
+        assert_ne!(kind_at(GOLDEN_GATE, 1360.0, gg_road(1360.0) - 0.05, -37.7, 0.1), 0);
+    }
+
+    #[test]
+    fn golden_gate_leaves_the_marin_gully_open_in_near_and_distant_views() {
+        // Marin tile 0/183_250 (#60): 636 m north of the main span's middle, 40 m to the bay side, the ground is 17 m
+        // over the water and the deck 67 m. The stand-in bluff made a black wall of rock between them.
+        let world = |y: f32, ground: f32| kind_at_world(GOLDEN_GATE, 1276.0, y, y - ground, 40.0, 0.4);
+        assert_eq!(world(40.0, 17.0), 0, "rock bluff over Marin's own hillside");
+        assert_eq!(world(40.0, -3.0), 0, "water cells do not generate a projecting cliff");
+        assert_eq!(kind_at(GOLDEN_GATE, 1276.0, 40.0, 40.0, 0.4), 0, "far bridge faces must leave room for the measured gully");
+        assert!(!owns(GOLDEN_GATE, 1276.0, 40.0, 40.0));
+        // The north anchorage block still stands on the real ground under the deck.
+        assert_eq!(material(kind_at_world(GOLDEN_GATE, 1080.0, 50.0, 50.0 - 26.0, 0.0, 0.4)), CONCRETE);
+    }
+
+    #[test]
     fn suspension_bridges_own_their_spans_in_far_and_high_cells_while_keeping_shore_below() {
         assert!(owns(GOLDEN_GATE, -800.0, 0.0, 0.0));
         assert!(owns(GOLDEN_GATE, -800.0, 60.0, 14.0));
@@ -2915,23 +3338,165 @@ mod tests {
         assert_eq!(material(surface(0.0, -19.0)), GLASS);
         assert_eq!(material(surface(19.0, -19.0)), GRASS);
         assert_eq!(material(academy_sciences(1.3, 6.0, -55.8, 0.2)), GLASS);
-        // Conservatory of Flowers: glazed white-ribbed dome (r ~= 8.45 m at y=16) + floral Valley parterres.
-        assert_ne!(conservatory(0.0, 16.0, 16.0, 8.2, 0.2), 0);
-        assert_eq!(surface_at(CONSERVATORY, 0.0, 56.0, 71.0, 0.2).map(material), Some(LEAVES));
+        // Conservatory Valley has planted parterres downhill of the public galleries.
+        assert_eq!(surface_at(CONSERVATORY, 0.0, 72.0, 71.0, 0.2).map(material), Some(LEAVES));
         // Painted Ladies: all 7 distinct houses rise sequentially up Steiner St with pitched slate roofs.
-        for (idx, &(um, base)) in [(-22.2f32, 0.0f32), (-13.2, 0.8), (-6.1, 1.4), (1.0, 2.2), (8.1, 2.8), (15.2, 3.4), (22.3, 4.0)].iter().enumerate() {
-            assert_ne!(painted_ladies(um, base + 4.0, 7.5, 0.2), 0, "house at u={um}");
+        for (idx, &(um, base)) in [(-21.15f32, 0.0f32), (-12.25, 0.8), (-5.2, 1.4), (1.85, 2.2), (8.8, 2.8), (16.05, 3.4), (23.25, 4.0)].iter().enumerate() {
+            assert_ne!(painted_ladies(um, base + 4.0, 6.0, 0.2), 0, "house at u={um}");
             let peak = if idx == 0 { CORNER_CROWN - 0.15 } else { 13.25 };
             assert_eq!(material(painted_ladies(um, base + peak, 0.0, 0.2)), ROOFING, "gable roof at u={um}");
         }
         // de Young Museum: copper cladding and twisting 44 m Hamon Observation Tower.
         assert_eq!(material(de_young(0.0, 10.0, 33.2, 0.2)), STEEL);
-        let tw39 = 0.66_f32 * (39.0 / 44.0);
-        assert_eq!(material(de_young(-66.4 - 6.9 * tw39.sin(), 39.0, 29.2 + 6.9 * tw39.cos(), 0.2)), GLASS);
-        assert_ne!(de_young(-66.4, 42.5, 29.2, 0.2), 0);
-        // Palace of Fine Arts lagoon turns concrete-coded basin east of rotunda into real WATER.
-        assert_eq!(surface_at(FINE_ARTS, 55.0, 0.0, 0.6, 0.2).map(material), Some(WATER));
+        assert_eq!(material(de_young(-53.0, 39.0, 8.9, 0.2)), GLASS);
+        assert_ne!(de_young(-63.0, 42.5, 23.0, 0.2), 0);
+        // Palace of Fine Arts: its lagoon is the terrain's water, not the rule's (#60).
+        assert_eq!(surface_at(FINE_ARTS, 55.0, 0.0, 0.6, 0.2), None);
     }
+    /// The Palace of Fine Arts stands on what is surveyed (#60): OSM's parts (ways named at `PF_TEMPLE` and below)
+    /// for where, the lidar in square 9's grid and the NPS listing for how high. From the rotunda's middle (0.6, 0.8)
+    /// the median top over 32 bearings at each radius is the lidar's within a metre and a half: a dome 49 m up and no
+    /// finial over it, the drum at 40, the deck at 36.8 and its outer step at 28.5 m.
+    #[test]
+    fn palace_rotunda_and_arcades_stand_on_their_surveyed_parts() {
+        let top = |u: f32, w: f32| (0..270).map(|i| 53.9 - i as f32 * 0.2).find(|&y| kind_at(FINE_ARTS, u, y, w, 0.2) != 0);
+        for (r, want) in [(0.0f32, 49.0f32), (5.0, 48.4), (10.0, 46.5), (15.0, 41.6), (17.0, 39.9), (19.0, 36.8), (23.0, 28.4)] {
+            let mut tops: Vec<f32> = (0..32)
+                .map(|i| {
+                    let a = i as f32 * std::f32::consts::TAU / 32.0;
+                    top(0.6 + r * a.cos(), 0.8 + r * a.sin()).unwrap_or(0.0)
+                })
+                .collect();
+            tops.sort_by(f32::total_cmp);
+            let median = (tops[15] + tops[16]) / 2.0;
+            assert!((median - want).abs() <= 1.5, "at {r} m the median top is {median}, the lidar's {want}");
+        }
+        assert_eq!(kind_at(FINE_ARTS, 0.6, 50.5, 0.8, 0.2), 0, "no finial over the dome");
+        // The piers are where OSM maps them (way 1549377334 at the west), 23 m out, and under the deck the arches open.
+        assert_ne!(kind_at(FINE_ARTS, -22.5, 20.0, -4.5, 0.2), 0);
+        assert_eq!(kind_at(FINE_ARTS, -24.8, 10.0, -4.5, 0.2), 0, "past 25.4 m out a pier is only its foot");
+        assert_ne!(kind_at(FINE_ARTS, -24.8, 4.0, -4.5, 0.2), 0);
+        assert_eq!(kind_at(FINE_ARTS, -21.5, 8.0, 4.5, 0.2), 0, "the west arch between ways 1549377334 and 1549377335");
+        // No colonnade on a ring round the west: that is the exhibition hall (way 288371302), the map's.
+        assert_eq!(kind_at(FINE_ARTS, -62.0, 16.4, 0.0, 0.2), 0);
+        assert!(!owns(FINE_ARTS, -62.0, 5.0, 0.0));
+        assert!(!owns(FINE_ARTS, -45.0, 5.0, 40.0));
+        // The two arcades are the mapped ways 288371306 (south) and 288371310 (north), with their gateways.
+        assert_ne!(kind_at(FINE_ARTS, 12.0, 16.5, 72.6, 0.2), 0, "the south arcade's entablature");
+        assert_ne!(kind_at(FINE_ARTS, -23.4, 16.5, -52.5, 0.2), 0, "the north arcade's entablature");
+        assert!(owns(FINE_ARTS, -2.3, 10.0, -104.0), "the north gateway, way 288371313");
+        assert!(owns(FINE_ARTS, 31.2, 10.0, 102.0), "the south gateway, way 288371314");
+        let r = reach(FINE_ARTS).unwrap();
+        assert!(r[2] <= -113.0 && r[5] >= 108.0 && r[0] <= -36.5 && r[3] >= 52.8, "{r:?}");
+        // Columns stand apart along the arcade: at 8 m up some of its middle line is air.
+        let air = (0..40).filter(|i| kind_at(FINE_ARTS, 31.0 + *i as f32 * 0.25, 8.0, 74.0, 0.2) == 0).count();
+        assert!(air > 8 && air < 36, "{air} of 40 cells along the arcade at 8 m are air");
+        // Edges of three small, independent DataSF plinths close to the rotunda steps.
+        for (u, w) in [(14.5, -29.0), (23.4, 24.3), (29.0, 15.7)] {
+            assert!(!owns(FINE_ARTS, u, 10.0, w), "took adjacent plinth at {u}, {w}");
+        }
+        // The lagoon and its islands are the terrain's: no water or coping by a height threshold, no box owned.
+        for (u, w) in [(55.0, 0.0), (40.0, -50.0), (80.0, 60.0)] {
+            assert_eq!(surface_at(FINE_ARTS, u, w, 0.6, 0.2), None);
+            assert!(!owns(FINE_ARTS, u, 1.0, w));
+        }
+        // What else is mapped round the rotunda stays the map's: way 288371317 (16 m) and the low ways beside it.
+        assert!(!owns(FINE_ARTS, 16.6, 10.0, -29.0));
+        assert!(!owns(FINE_ARTS, 25.0, 1.0, 24.2));
+        assert!(!owns(FINE_ARTS, 24.0, 1.0, -23.4));
+    }
+
+    #[test]
+    fn palace_archways_clear_the_streamed_building_walls() {
+        // Wall cells sampled at 10 m up in near tile 194_263: the west arch of the
+        // rotunda, its east approach, then the north and south colonnades.
+        for (u, w) in [(-21.9, 3.5), (-21.0, 6.3), (26.0, 0.8), (-27.0, -51.0), (-12.5, 57.0),
+                          // Midpoints of 1 m distant wall faces in 97_131 on two lagoon-side openings.
+                          (23.2, -2.9), (20.1, 12.6)] {
+            assert!(owns(FINE_ARTS, u, 10.0, w), "ordinary wall at {u}, {w}");
+            assert_eq!(kind_at(FINE_ARTS, u, 10.0, w, 0.1), 0, "blocked opening at {u}, {w}");
+        }
+    }
+
+    #[test]
+    fn palace_piers_have_two_engaged_shafts_on_each_outer_face() {
+        for pier in 0..8 {
+            let a = (13.0 + 45.0 * pier as f32).to_radians();
+            let at = |out: f32, across: f32| fine_arts(
+                PF_MID.0 + out * a.cos() - across * a.sin(), 12.0,
+                PF_MID.1 + out * a.sin() + across * a.cos(), 0.2);
+            for side in [-3.1, 3.1] {
+                assert_eq!(at(24.5, side), kind(CONCRETE, colour(1, 2)), "pier {pier}, shaft {side}");
+            }
+            assert_eq!(at(24.5, 0.0), 0, "recess between the shafts on pier {pier}");
+            assert_ne!(at(23.6, 0.0), 0, "pier backing below the deck");
+        }
+    }
+
+    #[test]
+    fn conservatory_walk_climbs_eighteen_level_stone_treads() {
+        let mut last = -3.5;
+        for i in 0..18 {
+            let w = 49.85 - (i as f32 + 0.5) * (7.0 / 18.0);
+            let top = conservatory_stairs(0.6, w).unwrap();
+            assert!((top - last - 2.8 / 18.0).abs() < 0.001);
+            for u in [-5.0, 3.0, 7.0] {
+                assert_eq!(conservatory_stairs(u, w - 0.1), Some(top));
+                assert_eq!(material(kind_at(CONSERVATORY, u, top - 0.05, w, 0.1)), CONCRETE);
+                assert_eq!(kind_at(CONSERVATORY, u, top + 0.3, w, 0.1), 0);
+            }
+            last = top;
+        }
+        assert!(conservatory_stairs(-7.5, 46.0).is_none());
+        assert!(conservatory_stairs(0.6, 54.0).is_none());
+    }
+
+    #[test]
+    fn conservatory_roof_follows_the_survey_across_the_public_galleries() {
+        // Independent lidar columns in 546.7_4180.5, metres over the 74.4 m terrace.
+        for (u, w, height) in [
+            (-15.5, 2.5, 5.2), (16.5, -2.5, 2.6), (32.5, 10.5, 5.3),
+            (1.5, 2.5, 18.3), (1.5, 6.5, 13.4), (1.5, 9.5, 8.9), (1.5, 15.5, 5.1),
+        ] {
+            let top = (0..240).rev().map(|n| n as f32 * 0.1)
+                .find(|&y| conservatory(u, y, w, 0.2) != 0).unwrap_or_default();
+            assert!((top - height).abs() < 0.9, "at {u}, {w} expected {height} m, drew {top}");
+        }
+        for size in [0.4_f32, 0.8, 1.0, 1.6] {
+            for (u, w) in [(-15.5, 1.5), (16.5, 1.5), (2.5, 3.5)] {
+                let hits = (0..64).map(|i| (i as f32 + 0.5) * size)
+                    .any(|y| y > 3.5 && conservatory(u, y, w, size) != 0);
+                assert!(hits, "roof missing at {u}, {w} with {size} m cells");
+            }
+        }
+        // The long central border is flanked by walks, then four beds. The original medallion
+        // covered those walks and erased the palms standing above them.
+        for (u, w, flowers) in [(0.7, 91.0, true), (-21.2, 59.0, true), (32.0, 39.6, true),
+                                (4.5, 60.0, false), (-21.2, 63.0, false), (0.0, 45.0, false)] {
+            assert_eq!(conservatory_surface(u, w, 0.2).is_some(), flowers);
+            assert!(!owns(CONSERVATORY, u, 4.0, w));
+            assert_eq!(kind_at(CONSERVATORY, u, 0.2, w, 0.2), 0, "far foliage must follow terrain");
+        }
+        // The separated rear growing houses and both projection kiosks keep their surveyed cells.
+        for (u, w) in [(16.0, -10.0), (-9.8, 28.0), (10.5, 28.0)] {
+            assert!(!owns(CONSERVATORY, u, 4.0, w));
+            assert_eq!(conservatory(u, 4.0, w, 0.2), 0);
+            assert_eq!(conservatory_surface(u, w, 0.2), None);
+        }
+    }
+
+    #[test]
+    fn hamon_observation_deck_follows_the_surveyed_parallelogram() {
+        // Local 0.25 m lidar reads 117.5–117.7 m at the first two points, and 75–80 m at the last two.
+        // The deck spans the front and back of the long parallelogram, with the gallery or park beside it.
+        for (u, w) in [(-53.0, 12.0), (-75.0, 36.0)] {
+            assert_ne!(de_young(u, 42.0, w, 0.4), 0, "missing observation deck at {u}, {w}");
+        }
+        for (u, w) in [(-72.0, 20.0), (-74.0, 22.0)] {
+            assert_eq!(de_young(u, 42.0, w, 0.4), 0, "tower over the park at {u}, {w}");
+        }
+    }
+
     #[test]
     fn academy_roof_matches_the_surveyed_domes_and_south_canopy_edge() {
         // In the raw lidar both summits are about 22.3 m above the registry datum. At w=52 m
@@ -2942,6 +3507,32 @@ mod tests {
         assert_eq!(kind_at(ACADEMY_SCIENCES, 40.0, 12.0, 52.0, 0.4), 0);
     }
 
+
+    #[test]
+    fn dry_landscape_follows_the_project_location_plan() {
+        let surface = |u, w| surface_at(JAPANESE_TEA_GARDEN, u, w, 75.0, 0.2).map(material);
+        // Across the broad southwest end, along the narrow northeast end, and into its planted margins.
+        for (u, w) in [(-49.0, -1.0), (-48.0, -4.0), (-42.5, -12.0)] {
+            assert_eq!(surface(u, w), Some(SAND), "gravel at {u}, {w}");
+        }
+        for (u, w) in [(-52.0, -5.0), (-41.0, -5.0), (-47.0, 3.0)] {
+            assert_eq!(surface(u, w), Some(GRASS), "planting at {u}, {w}");
+        }
+        // The two plan symbols and the open gravel between them.
+        let above = |u, w, y| kind_at_world(JAPANESE_TEA_GARDEN, u, y, y, w, 0.1);
+        assert_eq!(material(above(-44.8, -6.9, 0.12)), GRASS);
+        assert_eq!(material(above(-44.85, -9.86, 0.12)), ROCK);
+        assert_eq!(above(-44.85, -8.6, 0.12), 0);
+        assert_eq!(above(-48.0, -4.0, 0.7), 0, "no trunk in the gravel");
+    }
+
+    #[test]
+    fn tea_garden_has_no_gravel_or_boulders_at_the_old_target() {
+        for (u, w) in [(-31.0, 29.0), (-25.0, 34.0), (-37.0, 24.0)] {
+            assert_eq!(surface_at(JAPANESE_TEA_GARDEN, u, w, 75.0, 0.2).map(material), Some(GRASS));
+            assert_eq!(kind_at_world(JAPANESE_TEA_GARDEN, u, 0.8, 0.8, w, 0.2), 0);
+        }
+    }
 
     /// The gardens' parts stand where OpenStreetMap maps them (#60). Each place is an OSM way's middle in the
     /// landmark's frame (u east, w south of its `at`); the ways are named at the constants in this file.
@@ -3011,25 +3602,47 @@ mod tests {
         }
     }
 
+    #[test]
+    fn steiner_corner_has_two_bays_and_a_recessed_entrance() {
+        // Cross-sections of way 261412887 at 722 Steiner. The upper limit on the square bay is
+        // independently visible at 67.5 m above the Bay in the 0.25 m lidar (base 60.6 m).
+        let front = |u: f32, y: f32| {
+            (50..=115).rev().map(|i| i as f32 * 0.1)
+                .find(|&w| painted_ladies(u, y, w, 0.1) != 0).unwrap_or(0.0)
+        };
+        for (u, w) in [(-23.8, 7.8), (-22.1, 6.3), (-19.5, 7.4), (-18.0, 6.7)] {
+            assert!((front(u, 4.0) - w).abs() < 0.25, "at {u} got {} expected {w}", front(u, 4.0));
+        }
+        assert!(front(-23.8, 8.0) < 6.5);
+        assert!(front(-19.5, 8.0) > 7.0);
+    }
+
     /// The owner saw seven like gables (#60). In the photo the dark corner house, 722, has a flat-crowned hipped
     /// roof, and only the six to its south have front gables. Sampled at the cells of every size the rule is baked
     /// at (0.2 m to the realm's 1.6 m) across each house's frontage 3 m above its eave, halfway back: 722's crown is
     /// roof over most of it, a gable only near its middle. On 722's front above the eave is roof or air, never a wall.
     #[test]
     fn painted_ladies_corner_house_is_hipped_and_the_six_are_gabled() {
-        let houses = [(-22.2f32, 4.7f32, 0.0f32), (-13.2, 3.6, 0.8), (-6.1, 3.45, 1.4), (1.0, 3.45, 2.2), (8.1, 3.45, 2.8), (15.2, 3.45, 3.4), (22.3, 3.55, 4.0)];
+        let houses = [(-21.15f32, 4.55f32, 0.0f32), (-12.25, 3.55, 0.8), (-5.2, 3.6, 1.4), (1.85, 3.45, 2.2), (8.8, 3.5, 2.8), (16.05, 3.45, 3.4), (23.25, 3.45, 4.0)];
         for (idx, &(um, hw, base)) in houses.iter().enumerate() {
             for s in [0.2f32, 0.4, 0.8, 1.6] {
-                let y = ((base + 9.4 + 3.0) / s).floor() * s + s / 2.0;
+                let eave = base + if idx == 0 { 10.4 } else { 9.4 };
+                let y = ((eave + 3.0) / s).floor() * s + s / 2.0;
                 let cells: Vec<f32> = (0..(2.0 * hw / s) as i32 + 2)
                     .map(|i| ((um - hw) / s).floor() * s + s / 2.0 + i as f32 * s)
                     .filter(|u| (u - um).abs() < hw - 0.1)
                     .collect();
                 let share = cells.iter().filter(|&&u| painted_ladies(u, y, 0.0, s) != 0).count() as f32 / cells.len() as f32;
                 if idx == 0 {
-                    assert!(share > 0.5, "722's crown spans {share:.2} of its frontage at {s} m cells");
+                    let width = share * cells.len() as f32 * s;
+                    assert!(width > hw, "722's crown spans {width:.2} m of its {:.2} m frontage at {s} m cells", 2.0 * hw);
                 } else {
-                    assert!(share < 0.35, "house {idx}'s gable spans {share:.2} of its frontage at {s} m cells");
+                    // A 7 m frontage is only four or five columns at 1.6 m. Its measured lot position
+                    // can put a narrow gable equally across two columns. Bound its width in metres.
+                    let expected = (2.0 * hw) * (1.0 - (y - eave) / 4.0).max(0.0);
+                    let width = share * cells.len() as f32 * s;
+                    assert!((width - expected).abs() <= s + 0.01, "house {idx}: {width} m, expected {expected} at {s}");
+                    if s <= 0.4 { assert!(share < 0.35); }
                 }
             }
             if idx == 0 {
@@ -3044,4 +3657,134 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn conservatory_far_faces_include_four_open_palm_crowns() {
+        // Read the actual packed face runs consumed by the far baker, in its 0.4 m cells.
+        for (u, w, top) in [(-12.0_f32, 33.3_f32, 21.5_f32), (-10.5, 36.5, 21.4),
+                             (11.4, 42.6, 16.7), (11.2, 33.7, 16.6)] {
+            let from = [(u / 0.4).floor() as i32 - 12, 0, (w / 0.4).floor() as i32 - 12];
+            faces(CONSERVATORY, 4, from, [25, 58, 25]);
+            FACES.with_borrow(|words| {
+                let mut trunk = false;
+                let mut crown = std::collections::BTreeSet::new();
+                let mut highest = 0.0_f32;
+                for pair in words.chunks_exact(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    let axis = (b >> 8) & 3;
+                    let x = ((a & 1023) as i32 + from[0]) as f32 * 0.4 + 0.2;
+                    let y = ((a >> 10) & 1023) as f32 * 0.4 + 0.2;
+                    let z = ((a >> 20) as i32 + from[2]) as f32 * 0.4 + 0.2;
+                    let mat = material((b >> 16) as Kind);
+                    if mat == WOOD && y > 3.0 && y < 6.0 && (x-u).hypot(z-w) < 0.8 {
+                        trunk = true;
+                    }
+                    if axis == 1 && mat == LEAVES {
+                        for n in 0..(b & 255) {
+                            let dx = x + n as f32 * 0.4 - u;
+                            let dz = z - w;
+                            if dx.hypot(dz) < 1.0 { highest = highest.max(y); }
+                            if dx.hypot(dz) > 3.0 && dx.hypot(dz) < 4.3 {
+                                crown.insert((dz.atan2(dx).to_degrees() / 30.0).floor() as i32);
+                            }
+                        }
+                    }
+                }
+                assert!(trunk && (highest - top).abs() < 1.0 && crown.len() >= 8,
+                    "palm at {u}, {w}: trunk {trunk}, top {highest}, outer crown sectors {crown:?}");
+            });
+        }
+    }
+
+    #[test]
+    fn conservatory_border_tapers_at_the_end_of_the_central_walk() {
+        // Put the end of the mapped bed inside one 6.4 m sector of level terrain.
+        // Count its emitted cells after the same Bay column pass the renderer uses.
+        use crate::{bay, scratch::Scratch, tree::at};
+        let ground = bay::ground(0, 0);
+        bay::hero(CONSERVATORY, 20, -920, ground + 30, 0);
+        let mut sector = Scratch::new();
+        sector.start(0, ground.div_euclid(64), 0, 0);
+        bay::make(&mut sector);
+        let mut upper = 0;
+        let mut lower = 0;
+        for x in 8..48 {
+            for z in 5..35 {
+                for h in 1..14 {
+                    let y = (ground - sector.low[1]) as usize + h;
+                    if sector.cells[at(x, y, z)] != 0 {
+                        if h >= 5 { upper += 1; } else { lower += 1; }
+                    }
+                }
+            }
+        }
+        assert!(lower > 100 && upper * 24 < lower, "front border: {upper} upper cells, {lower} lower cells");
+    }
+
+    #[test]
+    fn conservatory_blossoms_leave_gaps_along_the_stalk() {
+        // At the engine's ten-centimetre resolution a bell or a pair of bells fits in two cells.
+        // A solid half-metre column of petals made the foreground border look like masonry.
+        let mut coloured_cells = 0;
+        for i in 0..40 {
+            for j in 0..40 {
+                let (u, w) = (-1.2 + i as f32 * 0.1, 70.0 + j as f32 * 0.1);
+                let mut run = 0;
+                for k in 3..16 {
+                    let y = k as f32 * 0.1 + 0.05;
+                    let hue = valley_planting(u, y, w, 0.1).map(|kind| (kind >> 8) as u8);
+                    if hue.is_some_and(|c| c == WHITE || c >= colour(16, 0)) {
+                        run += 1;
+                        coloured_cells += 1;
+                        assert!(run <= 2, "solid blossom column at ({u}, {w}) through {y} m");
+                    } else {
+                        run = 0;
+                    }
+                }
+            }
+        }
+        assert!(coloured_cells > 100, "the border must still have flowers");
+    }
+
+    #[test]
+    fn conservatory_valley_flowers_stand_on_stems_inside_their_beds() {
+        let cell = |u: f32, y: f32, w: f32, s: f32| kind_at_world(CONSERVATORY, u, y - 2.0, y, w, s);
+        // The paths either side of the central border stay clear from the ground to over a head's height.
+        for w in [60.0, 76.4, 90.0] {
+            for y in [0.05, 0.6, 1.2, 1.9] {
+                assert_eq!(cell(-2.2, y, w, 0.1), 0, "west path at w={w}, y={y}");
+                assert_eq!(cell(3.8, y, w, 0.1), 0, "east path at w={w}, y={y}");
+            }
+        }
+        // In the border, fine cells hold thin stems with grouped blooms above them, not a flat mat.
+        let (mut stems, mut blooms, mut air) = (0, 0, 0);
+        for i in 0..40 {
+            for j in 0..40 {
+                let (u, w) = (-1.2 + i as f32 * 0.1, 70.0 + j as f32 * 0.1);
+                let low = cell(u, 0.35, w, 0.1);
+                let high = cell(u, 0.8, w, 0.1);
+                let leaf = kind(LEAVES, colour(6, 8));
+                if low == leaf { stems += 1 } else if low == 0 { air += 1 }
+                if high != 0 && high != leaf { blooms += 1 }
+            }
+        }
+        assert!(stems > 0 && air > stems * 5, "stems {stems}, air {air}");
+        assert!(blooms > 30, "expected distinct blooms across this four-metre patch, found {blooms}");
+        // Nothing grows over a metre and a half, so the photograph's view down the border is open.
+        assert_eq!(cell(0.8, 1.65, 76.4, 0.1), 0);
+    }
+
+    #[test]
+    fn conservatory_glass_is_whitewashed_with_only_fine_glazing_bars() {
+        // The gallery roof near its south eaves: at a coarse cell every sample is the whitewash, with no stripes.
+        let (y, w) = (2.0, 6.6);
+        let coarse: std::collections::BTreeSet<Kind> = (0..120).map(|i| conservatory(-25.0 + i as f32 * 0.4, y, w, 0.4)).filter(|&k| k != 0).collect();
+        assert_eq!(coarse.len(), 1, "{coarse:?}");
+        assert_eq!((|k: Kind| (k >> 8) as u8)(*coarse.iter().next().unwrap()), WHITE);
+        // A fine cell still finds the bars.
+        let fine: Vec<Kind> = (0..200).map(|i| conservatory(-25.0 + i as f32 * 0.05, y, w, 0.1)).collect();
+        assert!(fine.iter().any(|&k| material(k) == WOOD), "{fine:?}");
+        // The portico's arched window over the doors.
+        assert_eq!(material(conservatory(1.5, 4.4, 17.1, 0.1)), GLASS);
+    }
+
 }

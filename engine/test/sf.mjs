@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet, timed, turn } from './kit.mjs'
+import { arg, REALM_CHROME, has, here, quiet, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'runtime')), seconds = Number(arg('seconds', '10')), mbit = Number(arg('mbit', '25'))
@@ -69,7 +69,7 @@ const alone = async (name, minutes, measure) => {
     return rest ? r : { ...r, sharedGPU: drawing() }
   } finally { rest?.() }
 }
-const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
+const browser = await chromium.launch({ ...REALM_CHROME, headless: !has('headed') })
 // The helper a visitor might be offered (a link, or something kept from another page): it must never be asked.
 const HELPER = 'http://127.0.0.1:5762'
 const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
@@ -137,7 +137,7 @@ try {
     // Measured again (kit.mjs `timed`): a cold visit as the first, in a browser of its own (nothing of the page's
     // shaders kept) on a host of its own (what this one was asked stays this visit's), with this page resting.
     const cold = async () => {
-      const other = await plain(dist, '127.0.0.1', 0, {}), fresh = await chromium.launch({ ...CHROME, headless: !has('headed') })
+      const other = await plain(dist, '127.0.0.1', 0, {}), fresh = await chromium.launch({ ...REALM_CHROME, headless: !has('headed') })
       const ctx = await fresh.newContext({ viewport: { width: 1280, height: 720 } })
       await page.evaluate(() => { globalThis.engine.resting = true })
       try {

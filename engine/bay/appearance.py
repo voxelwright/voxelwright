@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw
 from shapely.geometry import Point, shape
 from shapely.strtree import STRtree
 
-from bake import palette, grow
+from bake import CONCRETE, PYRAMID_CITY_ID, palette, grow
 from frontage import rotation
 from street_graph import cells
 
@@ -330,7 +330,15 @@ def enhance(pack, archive, observations, graph):
             if recess and np.mean(recess) >= 0.65:
                 row[4] = (int(row[4]) & ~(7 << 20)) | 5 << 20
                 stats["arcade"] += 1
-            if samples:
+            fid = footprint_ids[building]
+            if footprints[fid - 1]["properties"].get("sf16_bldgid") == PYRAMID_CITY_ID:
+                # The Pyramid's sloping envelope is quartz concrete; its top 65 m
+                # is aluminium. Roof samples in the aerial otherwise carry its shadow.
+                row[2] = CONCRETE | (1 << 8)
+                row[3] |= 1 << 16  # use this known wall colour ahead of sampled street paint
+                skin = ids == fid
+                tint[skin] = np.where(top[skin] >= 1985, 2, 1)
+            elif samples:
                 rgb = np.median([c for _, c in samples], axis=0)
                 agrees = (
                     len({i for i, c in samples if np.linalg.norm(c - rgb) < 40}) >= 2

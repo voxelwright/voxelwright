@@ -8,13 +8,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { landmarkTiles } from './landmark-tiles.mjs'
+import { roofAt } from './roof-profile.mjs'
 import { place } from '../page/bay.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ENGINE = dirname(HERE)
-const { values: { manifest } } = parseArgs({ options: { manifest: { type: 'string' } } })
+const { values: { manifest, core: corePath } } = parseArgs({ options: { manifest: { type: 'string' }, core: { type: 'string' } } })
 
-const wasm = readFileSync(join(ENGINE, 'page', 'core.wasm'))
+const wasm = readFileSync(corePath ?? join(ENGINE, 'page', 'core.wasm'))
 const core = (await WebAssembly.instantiate(wasm, {})).instance.exports
 const heroes = JSON.parse(readFileSync(join(HERE, 'heroes.json'), 'utf8'))
 const cameras = JSON.parse(readFileSync(join(HERE, 'landmark-views.json'), 'utf8'))
@@ -26,7 +27,8 @@ const seenSorts = new Set()
 for (const h of heroes) {
   ok(typeof h.name === 'string' && h.name.length > 0, `landmark missing name: ${JSON.stringify(h)}`)
   const views = Object.values(cameras[h.name] ?? {})
-  ok(views.length > 0 && views.every((v) => Array.isArray(v) && v.length === 5 && v.every(Number.isFinite)),
+  ok(views.length > 0 && views.every((v) => Array.isArray(v) && [5, 6].includes(v.length) && v.every(Number.isFinite) &&
+    (v.length === 5 || (v[5] > 0 && v[5] < 180))),
     `${h.name}: missing a fixed review camera in landmark-views.json`)
   ok(Number.isInteger(h.sort) && !seenSorts.has(h.sort), `duplicate or invalid sort ${h.sort} (${h.name})`)
   seenSorts.add(h.sort)
@@ -51,6 +53,22 @@ for (const h of heroes) {
   const size = [spanU, spanY, spanW].map((v) => Math.max(2, Math.min(512, Math.ceil(v / s))))
   const words = core.hero_faces(h.sort, step, ...from, ...size)
   ok(words >= 40, `${h.name} (sort ${h.sort}): emitted only ${words / 2} faces at step ${step}`)
+}
+
+// Independent lidar returns at the exact centres of emitted cells. Local metres above each registry foot.
+const surveys = JSON.parse(readFileSync(join(HERE, 'landmark-roof-surveys.json'), 'utf8'))
+let measured = 0
+for (const { landmark, square, tolerance, points } of surveys) {
+  const h = heroes.find(entry => entry.name === landmark)
+  if (!h || !Number.isFinite(tolerance) || tolerance <= 0 || !points?.length) throw Error(`Invalid roof survey for ${landmark}`)
+  for (const point of points) {
+    if (point.length !== 3 || !point.every(Number.isFinite)) throw Error(`Invalid roof point for ${landmark}`)
+    const [u, w, height] = point
+    const drawn = roofAt(core, h.sort, h.step ?? 8, u, w)
+    ok(drawn !== null && Math.abs(drawn - height) <= tolerance,
+      `${landmark} at (${u}, ${w}): ${square} measured ${height} m, drew ${drawn ?? 'no face'} (tolerance ${tolerance} m)`)
+    measured++
+  }
 }
 
 // Golden Gate Bridge structural ownership checks (#60):
@@ -80,4 +98,4 @@ if (failures.length) {
   console.error(`landmark-audit FAILED (${failures.length}):\n  - ${failures.join('\n  - ')}`)
   process.exit(1)
 }
-console.log(`landmark-audit OK: ${heroes.length} landmark rules, ${tileKeys.size} terrain tiles ${manifest ? 'checked against release' : 'planned'}`)
+console.log(`landmark-audit OK: ${heroes.length} landmark rules, ${measured} measured roof heights, ${tileKeys.size} terrain tiles ${manifest ? 'checked against release' : 'planned'}`)

@@ -158,8 +158,9 @@ export function rowsOf(parts, [ox, base, oz], feet) {
       const foot = (keep) => { if (y0 !== 0 || !kind) return; for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) { worked(); const g = feetAt(ox + x, oz + z); if (g < base && base - g <= FOOT && keep(x, z)) for (let y = g; y < base; y++) paint(ox + x, ox + x + 1, y, oz + z, kind) } }
       if (shape === 'room') {
         // A hollow box to walk into: walls, a roof, a level floor, and a doorway in one side. Laid whole and then emptied, so the ground that stood inside goes too.
-        const [door, wall = 3] = more, [dx, dz] = FALLS[door] ?? [0, 0]
+        const [door, wall = 3] = more
         if (more.length > 2 || (door !== 'none' && !Object.hasOwn(FALLS, door)) || !whole(wall, 1, 20) || !kind) bad('a room ends with the side its doorway is in ("+x", "-x", "+z", "-z", or "none"), and if you like how thick its walls and roof are in cells (3 unless said); it is not made of air')
+        const [dx, dz] = door === 'none' ? [0, 0] : FALLS[door]
         if (x1 - x0 < wall * 2 + DOOR[0] || z1 - z0 < wall * 2 + DOOR[0] || y1 - y0 < wall + 12) bad(`a room is at least ${wall * 2 + DOOR[0]} cells across each way and ${wall + 12} high, to have room inside for a door and a person`)
         foot(() => true)
         for (let y = y0 - 1; y < y1; y++) for (let z = z0; z < z1; z++) paint(ox + x0, ox + x1, base + y, oz + z, kind)

@@ -12,6 +12,12 @@ export const arg = (name, fallback) => { const at = process.argv.indexOf(`--${na
 export const has = (name) => process.argv.includes(`--${name}`)
 export const CHROME = { channel: 'chrome', headless: !has('headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] }
 
+// The static realm runs on Metal on the Mac and on the Ally's AMD GPU through headless Vulkan.
+export const REALM_CHROME = process.platform === 'linux' ? {
+  ...CHROME, channel: 'chromium',
+  args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-angle=vulkan', '--disable-vulkan-surface'],
+} : CHROME
+
 /** The browsers a check may draw with, by name. Take a turn first (`turn`, `quiet`). */
 export const browsers = { chrome: () => chromium.launch(CHROME), webkit: () => webkit.launch({ headless: CHROME.headless }) }
 

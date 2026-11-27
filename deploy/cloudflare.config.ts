@@ -15,7 +15,8 @@ export default defineConfig(({ mode }) => {
       name: world ? "voxelwright" : "zahynailo",
       compatibilityDate: "2026-11-13",
       observability: { enabled: true },
-      workersDev: !world,
+      // Each Worker answers only at its own domains: no *.workers.dev copy without the zones' rules in front.
+      workersDev: false,
       // Each target binds apex and www. Both zones redirect www to the apex; zahynailo.dev also redirects old realm query links.
       domains: world ? ["voxelwright.world", "www.voxelwright.world"] : ["zahynailo.dev", "www.zahynailo.dev"],
       assets: {

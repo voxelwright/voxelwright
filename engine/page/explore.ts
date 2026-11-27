@@ -111,10 +111,11 @@ const BACK = { up: 1.1, fly: 2.6 }
 
 const STYLE = /* css */ `
 /* The line under the board: there in a sixth of a second, out of the board it hangs under (it grows a little from its top), and gone quicker than it came. Asked by a key, it is simply there. */
-#explore-hint { position: fixed; left: 0; top: 0; z-index: 7; margin: 0; padding: 5px 11px 6px; border-radius: 999px; font: 500 13px/1.25 var(--vx-font, system-ui, sans-serif); letter-spacing: 0.01em; white-space: nowrap; color: #fff; background: rgb(14 16 20 / 0.62); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); pointer-events: none; opacity: 0; scale: 0.97; transform-origin: 50% 0; transition: opacity 0.12s cubic-bezier(0.23, 1, 0.32, 1), scale 0.12s cubic-bezier(0.23, 1, 0.32, 1); will-change: transform, opacity; }
+/* (A slim smoked plate with the HUD's cobalt edge, as the first view's keys are slim, #75.) */
+#explore-hint { position: fixed; left: 0; top: 0; z-index: 7; margin: 0; padding: 6px 12px 7px 13px; border-radius: 3px; font: 600 12.5px/1.25 "IBM Plex Sans", var(--vx-font, system-ui, sans-serif); letter-spacing: 0.015em; white-space: nowrap; color: #f0f4fa; text-shadow: 0 1px 2px rgb(0 0 0 / 0.45); background: rgb(17 22 33 / 0.84); border: 1px solid rgb(94 114 146 / 0.5); box-shadow: inset 2px 0 0 #4e9aff, 0 6px 18px rgb(0 0 0 / 0.32); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); pointer-events: none; opacity: 0; scale: 0.97; transform-origin: 50% 0; transition: opacity 0.12s cubic-bezier(0.23, 1, 0.32, 1), scale 0.12s cubic-bezier(0.23, 1, 0.32, 1); will-change: transform, opacity; }
 #explore-hint.on { opacity: 1; scale: 1; transition-duration: 0.16s; }
 #explore-hint.keys { transition: none; }
-#explore-hint i { font-style: normal; opacity: 0.62; }
+#explore-hint i { font-style: normal; color: #9eb0ca; }
 @media (prefers-reduced-transparency: reduce) { #explore-hint { background: rgb(14 16 20 / 0.94); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 #explore-still { position: fixed; inset: 0; z-index: 4; inline-size: 100%; block-size: 100%; pointer-events: none; opacity: 1; transition: opacity 0.45s ease-out; }
 /* The card of what this roof is for: top right, under the key the hour's panel is folded behind; out of the way while that panel is open. */

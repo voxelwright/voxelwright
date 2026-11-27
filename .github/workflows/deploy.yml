@@ -4,13 +4,17 @@ name: deploy
 on:
   push:
     branches: [main]
-    # What the deployed folder is made from; a merge that changes none of it leaves the site as it is.
-    paths: [engine/**, site/**, deploy/**, .github/workflows/deploy.yml]
+    # What the deployed folder is made from; a merge that changes none of it leaves the site as it is. Markdown
+    # outside the blog's posts is documentation, so a docs-only merge does not redeploy either Worker.
+    paths: [engine/**, site/**, deploy/**, .github/workflows/deploy.yml, '!**/*.md', site/posts/**]
   workflow_dispatch:
 
+# Read-only by default. Only the release job, after both Workers pass, may write (a tag and a GitHub Release).
 permissions:
-  contents: write
-  pull-requests: read
+  contents: read
+
+env:
+  RUST: '1.96'
 
 concurrency:
   group: deploy
@@ -55,7 +59,7 @@ jobs:
             exit 1
           fi
           mkdir "$overlay/media"
-          tar -xf "$overlay/egg-media.tar" -C "$overlay/media"
+          tar --no-same-owner -xf "$overlay/egg-media.tar" -C "$overlay/media"
           printf 'VOXELWRIGHT_EGG_MEDIA=%s\n' "$overlay/media" >> "$GITHUB_ENV"
 
       # The site (personal front page at / and blog under /blog/).
@@ -67,7 +71,7 @@ jobs:
         working-directory: site
 
       # The realm: its core, then the page with the pinned release, from the data bundle (deploy/data.mjs) the pin names.
-      - run: rustup target add wasm32-unknown-unknown
+      - run: rustup toolchain install "$RUST" --profile minimal -t wasm32-unknown-unknown && rustup default "$RUST"
       - run: node deploy/data.mjs fetch
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,6 +93,22 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  # Runs only after both Workers passed their live checks, with the only write access in this workflow.
+  release:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
       - name: record GitHub release
         run: node release.mjs
         working-directory: deploy

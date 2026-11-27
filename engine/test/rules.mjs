@@ -223,6 +223,8 @@ on('refused', (world, e) => world.actor('usher', { say: 'Refused ' + e.what.leng
   await rule('greeter', GREETER.replaceAll("'#c9a23a'", "'#a8452f', tall: 1.15"))
   const seen = await page.waitForFunction(() => { const e = globalThis.engine; return e.folk.from.flatMap((f) => f(e.view(), 0)).find((p) => p.name === 'Odile' && p.look?.coat === '#a8452f') }, null, { timeout: 20_000 }).then((h) => h.jsonValue())
   check(seen.look.tall === 1.15, 'a page draws the actor in the coat and the build its rule chose, changed while the page watches')
+  // A shared GPU turn can take longer than the observer seat's three-minute lifetime.
+  await post('join', { by: 'wren', at: [700, 4060] })
   await page.evaluate(() => globalThis.engine.hud.line.onsubmit?.('Odile, come here'))
   await until('the actor answers a page', async () => (await get('around?by=wren&within=1200')).heard.some((h) => h.text === 'Coming, iris.'))
   check(true, 'what is typed on a page\'s ask bar is heard by the rule')

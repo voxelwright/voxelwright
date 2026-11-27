@@ -17,12 +17,12 @@
 // pages it serves are told the release before anything else and take the same tiles from it (`/release/`).
 //
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { gzip } from 'node:zlib'
 import { promisify } from 'node:util'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, statSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { Worker } from 'node:worker_threads'
 import { stripTypeScriptTypes } from 'node:module'
@@ -33,7 +33,7 @@ import { CHANNELS, KEYS_MOST, NAMED as MOVES } from './page/moves.ts'
 import { CARRIED, WORN } from './page/wear.ts'
 import { OWN } from './page/keys.ts'
 import { found as pluginsFound } from './plugins.mjs'
-import { foreign, named } from './guard.mjs'
+import { foreign, named, tailnet } from './guard.mjs'
 import { RULES_MOST, SOURCE_MOST } from './rules/run.mjs'
 import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
@@ -65,7 +65,21 @@ async function file(res, path, host = '') {
   // A page talks to this server and to a helper on this machine or on the host it came from, and to nothing else:
   // a wish and a picture cannot be sent anywhere a made-up address says.
   if (extname(rel) === '.html' && rel === join('page', 'index.html') && realms.size) body = pageWith(body)
-  if (extname(rel) === '.html') { res.writeHead(200, { ...HEADERS, 'Content-Type': TYPES['.html'], 'Content-Security-Policy': `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*${host.endsWith('.ts.net') ? ` https://${host}:*` : ''}` }); return res.end(body) }
+  if (extname(rel) === '.html') {
+    const local = tailnet(host) ? ` https://${host}:*` : ''
+    // The loading template contains one bundled inline script. Allow its exact bytes.
+    const loading = rel === join('page', 'loading.html') && /<script>([\s\S]*?)<\/script>/.exec(body.toString())
+    const hash = loading ? ` 'sha256-${createHash('sha256').update(loading[1]).digest('base64')}'` : ''
+    const policy = [
+      "default-src 'self'", "frame-ancestors 'self'", "base-uri 'none'", "object-src 'none'",
+      `script-src 'self' 'wasm-unsafe-eval'${hash} https://www.youtube.com https://s.ytimg.com https://sdk.scdn.co https://js-cdn.music.apple.com`,
+      "style-src 'self' 'unsafe-inline'", "img-src 'self' data: blob:", "worker-src 'self' blob:",
+      "frame-src 'self' https://www.youtube.com https://sdk.scdn.co",
+      `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*${local}`,
+    ]
+    res.writeHead(200, { ...HEADERS, 'Content-Type': TYPES['.html'], 'Content-Security-Policy': policy.join('; ') })
+    return res.end(body)
+  }
   send(res, 200, body, TYPES[extname(rel)])
 }
 
@@ -298,6 +312,7 @@ let coreIs = ''
 // The maker of tiles of the Earth (#373): one child of the bake's Python, asked a tile a line, answering a line of JSON.
 let earthMaker = null
 const earthAsks = new Map()
+let earthSince = Date.now(), earthRequests = 0
 function earth(ask) {
   if (!earthMaker) {
     earthMaker = spawn(join(homedir(), '.village', 'engine', 'bay', 'venv', 'bin', 'python'), [join(root, 'bay', 'earth.py'), 'serve'], { stdio: ['pipe', 'pipe', 'ignore'] })
@@ -579,6 +594,9 @@ function strangerControls(c, body) {
  * maker sends; a change to one is held to the same. (Whose it is, and how many they have, are asked in `ask`.)
  */
 function stranger(ask, as, was) {
+  if (ask.edit && !ask.thing) return 'a stranger builds with a recorded thing'
+  const target = ask.blast ?? ask.ignite ?? ask.ball?.from ?? ask.release
+  if (target && !(Array.isArray(as.at) && as.at.length === 3 && as.at.every(Number.isFinite) && Math.hypot(...target.map((v, i) => v - as.at[i])) <= as.reach)) return 'that is beyond your reach'
   // Put down where they say: within reach, as a thing they make is.
   if (ask.put !== undefined && ask.at && !(Array.isArray(as.at) && as.at.length === 3 && as.at.every(Number.isFinite) && Math.hypot(ask.at[0] - as.at[0], ask.at[2] - as.at[2]) <= as.reach && Math.abs(ask.at[1] - as.at[1]) <= as.reach)) return `a thing is put down within ${Math.round(as.reach / 10)} m of where you are`
   // A thing taken out goes with its cells: its record alone would leave them standing, counted against nobody.
@@ -654,9 +672,9 @@ function open(of) {
     else if (ask.realm) { realm = of.record = changed(realm, ask.realm); called() }
     // Picked up, a thing's record says who holds it; put down, where it now stands, and its cells are the rows of that ask.
     else if (ask.hold !== undefined) { const t = things.get(ask.hold); if (t) t.record.held = ask.by; going.delete(ask.hold) }
-    else if (ask.put !== undefined) { const t = things.get(ask.put); if (t) { delete t.record.held; if (ask.thing?.at) t.record.at = ask.thing.at; t.at = at; if (ask.edit?.[0] === 3 || ask.edit?.[0] === 4) t.record.grain = ask.edit[0] === 3 ? 4 : 8; else delete t.record.grain } }
+    else if (ask.put !== undefined) { const t = things.get(ask.put); if (t) { delete t.record.held; if (ask.thing?.at) t.record.at = ask.thing.at; if (ask.box) t.box = ask.box; t.at = at; if (ask.edit?.[0] === 3 || ask.edit?.[0] === 4) t.record.grain = ask.edit[0] === 3 ? 4 : 8; else delete t.record.grain } }
     else if (ask.gone) { things.delete(ask.gone); going.delete(ask.gone) }
-    else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, at }); coming.delete(ask.thing.id) }
+    else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, box: ask.box, at }); coming.delete(ask.thing.id) }
     else if (ask.thing && things.has(ask.thing.id)) Object.assign(things.get(ask.thing.id).record, ask.thing)
   }
   if (existsSync(worldFile)) {
@@ -732,7 +750,10 @@ function open(of) {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
     // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
     if (m.think) return minds.think(m.think)
-    if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
+    if (m.echo) {
+      const parts = m.echo.thing?.controls?.fine
+      if (Array.isArray(parts)) for (const part of parts) forgetStage(part?.kept, true)
+      note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
     // A rule gives someone a thing or takes it from them: the cells are here, so the ask starts here.
     if (m.want) { const t = m.want.hold && things.get(m.want.hold.id); if (t && !t.record.held && !t.record.controls?.motor && !going.has(m.want.hold.id)) going.add(m.want.hold.id), thread.postMessage({ ask: { by: m.want.hold.by, hold: m.want.hold.id, name: t.record.name, grain: t.record.grain }, rows: rowsOf(t) }); else if (m.want.put) thread.postMessage({ ask: { by: m.want.put.by, put: true } }); return }
     // A hold the world's process would not do: the thing is nobody's to wait for any more.
@@ -972,6 +993,20 @@ function open(of) {
         if (t && t.record.by !== ask.by) return send(res, 403, `that ${t.record.name || 'thing'} is someone else's: only whoever made it, or an admin, may ${ask.hold !== undefined ? 'pick it up' : replaced ? 'make it again' : ask.gone ? 'take it out' : ask.thing.controls !== undefined ? 'bring it to life' : 'change it'}`)
       }
       if (as) { const why = stranger(ask, as, ask.thing && !ask.edit ? things.get(ask.thing.id)?.record : null); if (why) return send(res, 403, why) }
+      if (as && ask.thing?.controls?.fine?.some(part => !staged.has(part.kept) && !existsSync(join(fineDir, `${part.kept}.gz`)))) return send(res, 409, 'upload the fine cells before using them')
+      if (as && (ask.edit || ask.blast || ask.ignite || ask.ball)) {
+        const center = ask.blast
+        const radius = Math.ceil((ask.radius ?? 0) * 44 / 16) + 1
+        const area = ask.box ?? (center && [...center.map(v => v - radius), ...center.map(v => v + radius + 1)])
+        // Fire spreads, and a moving body or projectile can leave its starting box.
+        const protectedThing = (t, box) => {
+          if (t.by === ask.by) return false
+          if (!area || !box || ask.spark || (!ask.edit && t.controls?.motor)) return true
+          return area.slice(0, 3).every((lo, a) => lo < box[a + 3] && box[a] < area[a + 3])
+        }
+        for (const {record, box} of things.values()) if (protectedThing(record, box)) return send(res, 403, "that could damage someone else's thing")
+        for (const t of coming.values()) if (protectedThing(t, t.box)) return send(res, 403, "someone is building there")
+      }
       if (as && ask.thing && ask.edit) {
         let n = 1, cells = cellsIn(ask.edit)
         for (const t of things.values()) if (t.record.by === ask.by && t.record.id !== replaced?.gone) { n++; cells += cellsOf(t) }
@@ -979,7 +1014,7 @@ function open(of) {
         if (n > as.things) return send(res, 403, `you have ${n - 1} things standing here, the most one person may: take one out first`)
         if (cells > as.cells) return send(res, 403, `that would be ${cells} cells of yours standing here, and the most one person may have is ${as.cells}: take something out first`)
       }
-      if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.set(ask.thing.id, { by: ask.by, cells: cellsIn(ask.edit) }); if (replaced) going.add(replaced.gone) }
+      if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.set(ask.thing.id, { by: ask.by, box: ask.box, cells: cellsIn(ask.edit) }); if (replaced) going.add(replaced.gone) }
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
       // (Said apart from a thing that is not there: whoever takes a thing out by its id falls back to its cells alone when it has no record, and must not while another ask has it.)
       else if (ask.gone && going.has(ask.gone)) return send(res, 409, 'that thing is on its way out already: ask again in a moment')
@@ -1011,6 +1046,12 @@ function open(of) {
       if (ask.thing && !ask.edit && ask.thing.controls !== undefined && things.get(ask.thing.id).record.grain) return send(res, 409, 'a thing of finer cells cannot be given controls yet')
       // `wait: true` with cells: answered once the world has laid them, with how many bodies they left loose (0: it all stands). Else at once.
       // A thing that comes with its controls is answered too, with whether it lives (`alive`); and a living thing taken out, once it is.
+      if (Array.isArray(ask.thing?.controls?.fine)) {
+        for (const part of ask.thing.controls.fine) {
+          const stage = staged.get(part?.kept)
+          if (stage) stage.until = Date.now() + STAGE_TTL
+        }
+      }
       if (ask.gone) going.add(ask.gone)
       // A blast, a fire or a ball waited for is answered once done, or with why it was not (#526: where its ground has not come).
       if (body.wait === true && (ask.blast || ask.ignite || ask.ball) && !replaced) {
@@ -1088,6 +1129,26 @@ const fineDir = worldFile ? join(dirname(worldFile), `${basename(worldFile).repl
 // squeezed and written off the server's own thread of work, so a big one does not hold every realm up.
 const FINE_MOST = 16 << 20, FINE_A_MINUTE = 24, FINE_ALL = 512 << 20
 const squeeze = promisify(gzip)
+// Uploads from the door have ten minutes to acquire a reference from a world's echo.
+const staged = new Map(), STAGE_BYTES = 64 << 20, STAGE_COUNT = 256, STAGE_TTL = 600_000
+let stageBytes = 0
+function forgetStage(key, commit) {
+  const part = staged.get(key)
+  if (!part) return
+  if (commit && !existsSync(part.path)) {
+    renameSync(part.path + '.stage', part.path)
+    fineHeld += part.bytes
+  } else unlinkSync(part.path + '.stage')
+  staged.delete(key)
+  stageBytes -= part.bytes
+}
+if (fineDir && existsSync(fineDir)) {
+  for (const name of readdirSync(fineDir)) if (/^[a-f0-9]{64}\.gz\.stage$|^upload-[0-9a-f-]{36}\.tmp$/.test(name)) unlinkSync(join(fineDir, name))
+}
+setInterval(() => {
+  for (const [key, part] of staged) if (part.until <= Date.now()) forgetStage(key, false)
+}, 60_000).unref()
+
 let fineTold = 0, fineSince = Date.now(), fineHeld = -1
 const fineSize = () => { if (fineHeld < 0) { fineHeld = 0; try { for (const name of readdirSync(fineDir)) if (name.endsWith('.gz')) fineHeld += statSync(join(fineDir, name)).size } catch { /* no folder yet */ } } return fineHeld }
 async function fineKeep(req, res) {
@@ -1101,20 +1162,34 @@ async function fineKeep(req, res) {
   const bytes = Buffer.concat(parts)
   if (!bytes.length || bytes.length % 2) return send(res, 400, 'a look\'s cells are 16-bit kinds')
   const kept = createHash('sha256').update(bytes).digest('hex'), path = join(fineDir, `${kept}.gz`)
-  if (!existsSync(path)) {
+  const stranger = !!req.headers['x-world-stranger']
+  if (!existsSync(path) && !staged.has(kept)) {
     const small = await squeeze(bytes)
-    if (fineSize() + small.length > FINE_ALL) return send(res, 507, 'no room: this server keeps no more looks')
     await mkdir(fineDir, { recursive: true })
-    await writeFile(`${path}.part`, small)
-    if (!existsSync(path)) { renameSync(`${path}.part`, path); fineHeld += small.length }
+    const tmp = join(fineDir, `upload-${randomUUID()}.tmp`)
+    try {
+      await writeFile(tmp, small, { flag: 'wx' })
+      // Check and reserve after the last await. Concurrent uploads can finish in either order.
+      if (!existsSync(path) && !staged.has(kept)) {
+        if (fineSize() + stageBytes + small.length > FINE_ALL) return send(res, 507, 'no room for more looks')
+        if (stranger && (staged.size >= STAGE_COUNT || stageBytes + small.length > STAGE_BYTES)) return send(res, 507, 'the room for unplaced looks is full')
+        renameSync(tmp, stranger ? path + '.stage' : path)
+        if (stranger) {
+          staged.set(kept, { path, bytes: small.length, until: Date.now() + STAGE_TTL })
+          stageBytes += small.length
+        } else fineHeld += small.length
+      }
+    } finally { if (existsSync(tmp)) unlinkSync(tmp) }
   }
+  if (!stranger) forgetStage(kept, true)
   send(res, 200, JSON.stringify({ kept }), TYPES['.json'])
 }
 function fineSend(kept, res, head = false) {
   // HEAD: whether it is kept, so that a maker sends the cells of a look the world has already never again.
-  if (head) { res.writeHead(existsSync(join(fineDir, `${kept}.gz`)) ? 200 : 404, HEADERS); return res.end() }
+  const path = staged.has(kept) ? staged.get(kept).path + '.stage' : join(fineDir, `${kept}.gz`)
+  if (head) { res.writeHead(existsSync(path) ? 200 : 404, HEADERS); return res.end() }
   let bytes
-  try { bytes = readFileSync(join(fineDir, `${kept}.gz`)) } catch { return send(res, 404, 'no look of that is kept here') }
+  try { bytes = readFileSync(path) } catch { return send(res, 404, 'no look of that is kept here') }
   res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'Content-Encoding': 'gzip', 'Cache-Control': 'max-age=31536000, immutable' })
   res.end(bytes)
 }
@@ -1287,6 +1362,9 @@ const server = createServer((req, res) => {
   // process of the bake's Python that this server keeps; kept on disk after. An empty tile (all sea) answers 204.
   const earthly = /^\/bay\/earth\/([0-9]{1,2}[ns][0-9]{1,5})\/([0-2])\/(-?[0-9]{1,7})_(-?[0-9]{1,7})\.bay$/.exec(url.pathname)
   if (earthly) {
+    if (foreign(req)) return send(res, 403, 'not from another site')
+    if (Date.now() - earthSince >= 60_000) { earthSince = Date.now(); earthRequests = 0 }
+    if (++earthRequests > 240) return send(res, 429, 'too many Earth tiles requested this minute')
     const [, frame, level, tx, tz] = earthly, path = join(homedir(), '.village', 'engine', 'bay', 'earth', 'tiles', frame, level, `${tx}_${tz}.bay`)
     const answer = () => { const bytes = readFileSync(path); return bytes.length ? send(res, 200, bytes, 'application/octet-stream') : send(res, 204, '') }
     const none = (e) => send(res, 503, `no tile: ${String(e?.message ?? e).slice(0, 200)}`)

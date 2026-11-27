@@ -17,11 +17,11 @@ From the repository root on macOS or Linux, run:
 
 It runs three steps and prints the time of each:
 
-1. **Core build.** Builds the Rust core to WebAssembly.
-2. **Data fetch and verification.** Downloads the city data bundle named by the pin, checks it is for that pin and that every file is the one packed.
+1. **Core build.** Builds the Rust core to WebAssembly. A later run with the same committed core and compiler reuses that build from `~/.village/engine/core-cache`.
+2. **Data fetch and verification.** Downloads the city data bundle named by the pin (about 800 MB), printing MB received, checks it is for that pin and that every file is the one packed, and records that in a stamp in the checkout's own data folder. A later run whose stamp, manifest and files still match skips the download. Run `HOME=.voxelwright node deploy/data.mjs fetch --force` to download it again.
 3. **Realm build.** Builds the static realm into `engine/dist-sf`.
 
-Then it serves the realm on port 5760 and prints the address to open, ending in `/sf/index.html`. Keep the terminal open while you play and press Ctrl-C there to stop.
+Then it serves the realm on port 5760 and prints the address to open, ending in `/sf/index.html`. Set `PORT` for another port, as in `PORT=8080 ./world`. If the port is taken, `./world` says so before it builds anything. Keep the terminal open while you play and press Ctrl-C there to stop.
 
 The first view looks across the city from Ina Coolbrith Park. Choose the **EXPLORE** board twice to enter the city: the first click arms it, and a second at least 300 ms later goes in.
 
@@ -46,4 +46,4 @@ To fetch it from a mirror instead, set `VOXELWRIGHT_DATA_URL`. [The data bundle]
 
 ## In a Dev Container
 
-The repository's Dev Container forwards port 5760. Run `./world` in its terminal and open the forwarded port at `/sf/index.html`.
+The repository's Dev Container has Node.js with npm and npx, and Rust with the Wasm target. It forwards port 5760. Run `./world` in its terminal and open the forwarded port at `/sf/index.html`. `npm ci` and each part's `npm test` work there too.

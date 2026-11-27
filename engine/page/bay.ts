@@ -258,9 +258,11 @@ export async function listed(path: string): Promise<ArrayBuffer | null> {
 
 /** A tile's bytes, fetched once however many cores want it. Null for water. Throws where a tile that should come does not. */
 export async function tile(level: number, key: string): Promise<ArrayBuffer | null> {
+  const source = await where()
+  // Publish the in-flight request in the same turn as the lookup, even when several workers arrive together.
   const name = `${level}/${key}`, had = bytesHeld.get(name)
   if (had) { had.used = ++heldClock; tally.shared++; return had.body }
-  const found = (await where()).find(level, key)
+  const found = source.find(level, key)
   if (!found) { tally.water++; return null }
   const entry = { body: fetchTile(found), size: 0, used: ++heldClock }
   bytesHeld.set(name, entry)
