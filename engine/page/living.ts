@@ -338,7 +338,7 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { rise: 0, boost: false, horn: false }
+  const held = { go: 0, brake: 0, rise: 0, boost: false, horn: false }
   const buttons = o.hud.panel('living')
   const cabin = cockpit(o.hud)
   // Sleek speed, gear, RPM bar, subtle boost bar, camera-mode toast and DRIFT indicator shown while driving a car.
@@ -389,7 +389,7 @@ export function living(o: {
     telemetryNow = null
     wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
-    held.horn = false
+    held.go = 0; held.brake = 0; held.rise = 0; held.boost = false; held.horn = false
     cabin.reset()
     o.lens?.(0, 0, 0)
     o.audio?.drive(null)
@@ -400,50 +400,100 @@ export function living(o: {
   const button = (act: string, words: string, press: () => void, release?: () => void) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button', textContent: words })
     b.dataset.act = act
-    b.addEventListener('pointerdown', (e) => { e.preventDefault(); press() })
-    if (release) for (const up of ['pointerup', 'pointercancel', 'pointerleave'] as const) b.addEventListener(up, release)
+    if (release) {
+      const pointers = new Set<number>()
+      b.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        try { b.setPointerCapture(e.pointerId) } catch {}
+        pointers.add(e.pointerId)
+        b.setAttribute('aria-pressed', 'true')
+        press()
+      })
+      const up = (e: PointerEvent) => {
+        if (!pointers.delete(e.pointerId)) return
+        if (pointers.size === 0) { b.setAttribute('aria-pressed', 'false'); release() }
+      }
+      for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) b.addEventListener(ev, up)
+    } else {
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); press() })
+    }
     return b
   }
   let seat: HTMLButtonElement | null = null
+  let repairBtn: HTMLButtonElement | null = null
+  const isDamaged = (thing: Thing | null) => {
+    if (!thing) return false
+    if (pendingDents.has(thing)) return true
+    const worn = looks.get(thing)
+    if (!worn) return false
+    for (let i = 0; i < worn.length; i++) {
+      const d = dents.get(dentId(thing, i))
+      if (d && (d.dentCount > 0 || d.scuff > 0.05 || d.hoodDamage > 0.05 || d.glassCrack.some((c) => c > 0.05))) return true
+    }
+    return false
+  }
+  const syncRepairBtn = () => {
+    if (!repairBtn) return
+    repairBtn.hidden = !isDamaged(riding)
+  }
   const showButtons = (scheme: Scheme | null) => {
-    held.rise = 0; held.boost = false; held.horn = false
+    held.go = 0; held.brake = 0; held.rise = 0; held.boost = false; held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
-    if (!scheme) { buttons.replaceChildren(); seat = null; return }
-    // From the bottom up (the column stands on the corner under the right thumb): drift, boost, horn (or down/up),
-    // what is done once, seat, camera & radio, and getting off at the top, farthest from the thumb.
-    const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
-    driftBtn.dataset.vxKind = 'main'
-    const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
-    boostBtn.setAttribute('aria-label', 'Nitrous boost')
-    const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
-    hornBtn.setAttribute('aria-label', 'Honk horn')
-    const rises = scheme.name === 'drive'
-      ? [driftBtn, boostBtn, hornBtn]
-      : scheme.lines.some((l) => l.rise)
-        ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
-        : []
+    if (!scheme) { buttons.replaceChildren(); seat = null; repairBtn = null; return }
+    if (scheme.name === 'drive') {
+      // Ergonomic two-zone touch driving layout (GTA Definitive Edition & CarX Street):
+      // bottom-right holds only the 4 driving action controls (Gas, Brake/Rev, Drift, Boost);
+      // top-right holds quiet icon-only utility keys (Horn, Radio, Cam, Exit, and contextual Repair when damaged).
+      seat = null
+      const pedals = Object.assign(document.createElement('div'), { className: 'drive-pedals' })
+      const util = Object.assign(document.createElement('div'), { className: 'drive-util' })
+      const gasBtn = button('gas', 'Gas', () => { held.go = 1 }, () => { held.go = 0 })
+      gasBtn.setAttribute('aria-label', 'Accelerate')
+      const brakeBtn = button('brake', 'Brake', () => { held.brake = 1 }, () => { held.brake = 0 })
+      brakeBtn.setAttribute('aria-label', 'Brake or reverse')
+      const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
+      driftBtn.dataset.vxKind = 'main'
+      driftBtn.setAttribute('aria-label', 'Handbrake drift')
+      const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
+      boostBtn.setAttribute('aria-label', 'Nitrous boost')
+      pedals.append(boostBtn, driftBtn, brakeBtn, gasBtn)
+
+      const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
+      hornBtn.setAttribute('aria-label', 'Honk horn')
+      util.append(hornBtn)
+      if (o.audio?.radio) {
+        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('open') })
+        radioBtn.setAttribute('aria-haspopup', 'dialog')
+        radioBtn.setAttribute('aria-label', 'Open car radio and playlists')
+        util.append(radioBtn)
+      }
+      const camBtn = button('cam', 'Cam', nextView)
+      camBtn.setAttribute('aria-label', 'Next camera view, the seat among them')
+      util.append(camBtn)
+      const leaveBtn = button('leave', 'Get off', () => { once = 'leave' })
+      leaveBtn.setAttribute('aria-label', 'Exit vehicle')
+      util.append(leaveBtn)
+      repairBtn = button('repair', 'Repair', () => { if (riding) repairCar(riding) })
+      repairBtn.dataset.vxKind = 'danger'
+      repairBtn.setAttribute('aria-label', 'Repair vehicle')
+      syncRepairBtn()
+      util.append(repairBtn)
+
+      buttons.replaceChildren(util, pedals)
+      return
+    }
+    repairBtn = null
+    // Non-driving riding schemes (hover, fly, ride): compact column at bottom-right.
+    const rises = scheme.lines.some((l) => l.rise)
+      ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
+      : []
     const onces = scheme.lines.filter((l) => l.once && l.once !== 'leave').map((l) => button(l.once!, l.does[0].toUpperCase() + l.does.slice(1), () => { once = l.once }))
     const leaves = scheme.lines.filter((l) => l.once === 'leave').map((l) => button('leave', 'Get off', () => { once = l.once }))
     seat = button('seat', 'Seat', () => view(!inside))
     seat.setAttribute('aria-label', 'Look from the seat')
     seat.setAttribute('aria-pressed', String(inside))
-    const driveExtras: HTMLButtonElement[] = []
-    if (scheme.name === 'drive') {
-      const camBtn = button('cam', 'Cam', nextView)
-      camBtn.setAttribute('aria-label', 'Next camera view, the seat among them')
-      driveExtras.push(camBtn)
-      if (o.audio?.radio) {
-        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('open') })
-        radioBtn.setAttribute('aria-haspopup', 'dialog')
-        radioBtn.setAttribute('aria-label', 'Open car radio and playlists')
-        driveExtras.push(radioBtn)
-      }
-      const repairBtn = button('repair', 'Repair', () => { if (riding) repairCar(riding) })
-      repairBtn.setAttribute('aria-label', 'Repair vehicle')
-      driveExtras.push(repairBtn)
-    }
-    buttons.replaceChildren(...rises, ...onces, seat, ...driveExtras, ...leaves)
+    buttons.replaceChildren(...rises, ...onces, seat, ...leaves)
   }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
@@ -484,6 +534,7 @@ export function living(o: {
   const repairCar = (thing: Thing) => {
     pendingDents.delete(thing)
     looks.get(thing)?.forEach((w, i) => { dents.repairVehicle(dentId(thing, i)); w.piece.cracks = undefined })
+    if (thing === riding) syncRepairBtn()
   }
   const wear = (thing: Thing, parts: { kinds: Uint16Array; size: [number, number, number]; per: number; low: [number, number, number] }[]) => {
     if (!o.look || !thing.alive || !things.includes(thing) || looks.has(thing) || !parts.length) return
@@ -533,6 +584,7 @@ export function living(o: {
       if (!worn && (thing.fine?.length || thing.kept?.length)) {
         const list = pendingDents.get(thing) ?? []
         if (list.length < 6) { list.push({ at: [hitAt[0], hitAt[1], hitAt[2]], normal: worldNormal ? [worldNormal[0], worldNormal[1], worldNormal[2]] : undefined, speed, push, pose }); pendingDents.set(thing, list) }
+        if (thing === riding) syncRepairBtn()
       }
       return
     }
@@ -576,6 +628,7 @@ export function living(o: {
         }
       }
     })
+    if (thing === riding) syncRepairBtn()
   }
   const dent = (thing: Thing, s: Struck, pose: Placed | undefined) => applyDent(thing, s.at, undefined, s.speed, s.push, pose)
   const setLamps = (thing: Thing | null, lamps?: [number, number, number, number]) => {
@@ -911,17 +964,22 @@ export function living(o: {
         const way = (o.input.held(line.keys[0]) ? 1 : 0) - (o.input.held(line.keys[1]) ? 1 : 0)
         for (const axis of ['go', 'turn', 'rise'] as const) if (line[axis]) axes[axis] += way * line[axis]
       }
-      // Gamepad full analog driving axes (triggers + curved left stick) and smooth-curved touch thumbstick.
+      // Gamepad full analog driving axes (triggers + curved left stick) and smooth-curved touch thumbstick + ergonomic pedals.
       const gp = o.input.driveAxes ?? null
       const stick = o.input.stick
       const hasTouch = o.input.thumb !== null
-      if (isDrive && gp && !hasTouch) {
+      const pedalActive = isDrive && (held.go > 0 || held.brake > 0)
+      const pedalGo = isDrive ? held.go - held.brake : 0
+      if (isDrive && gp && !hasTouch && !pedalActive) {
         axes.go = Math.max(-1, Math.min(1, axes.go + gp.go))
         axes.turn = Math.max(-1, Math.min(1, axes.turn + gp.turn))
         axes.rise = Math.max(-1, Math.min(1, axes.rise + gp.handbrake + held.rise))
       } else {
         const turnStick = isDrive ? touchSteerCurve(stick[0], 0) : stick[0]
-        axes.go = Math.max(-1, Math.min(1, axes.go - stick[1] + (isDrive && gp ? gp.go : 0)))
+        // Dedicate the left thumb strictly to horizontal steering whenever right-thumb Gas/Brake pedals are pressed;
+        // keep left-stick vertical throttle/reverse as a graceful one-handed fallback when neither pedal is held.
+        const stickGo = pedalActive ? 0 : -stick[1]
+        axes.go = Math.max(-1, Math.min(1, axes.go + pedalGo + stickGo + (isDrive && gp ? gp.go : 0)))
         axes.turn = Math.max(-1, Math.min(1, axes.turn + turnStick + (isDrive && gp ? gp.turn : 0)))
         axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise + (isDrive && gp ? gp.handbrake : 0)))
       }

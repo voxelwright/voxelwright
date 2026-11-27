@@ -43,20 +43,20 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Set what is ahead alight | F | - | - |
 | Take the wand | Q | Wand on the wheel | - |
 | **Driving** | | | |
-| Throttle, brake and reverse | W, S | Left half (forward and back) | RT, LT (analog) |
-| Steer | A, D | Left half (side to side) | Left stick |
-| Drift (handbrake) | Hold Space | Hold Drift | A / Cross (analog) |
-| Boost | Hold Shift | Hold Boost | B / Circle |
-| Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Drift and the left half forward, then let go of Drift | RT and A, then let go of A |
-| Next camera (the seat among them) | C | Cam | RB or D-pad down |
+| Throttle, brake and reverse | W, S | Gas & Brake pedals (bottom-right), or left half forward/back one-handed | RT, LT (analog) |
+| Steer | A, D | Left half (side to side; pure steering while pedals are held) | Left stick |
+| Drift (handbrake) | Hold Space | Hold Drift (above Gas) | A / Cross (analog) |
+| Boost | Hold Shift | Hold Boost (above Brake) | B / Circle |
+| Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Gas and Drift at a standstill, then let go of Drift | RT and A, then let go of A |
+| Next camera (the seat among them) | C | Cam (top-right utility rail) | RB or D-pad down |
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
-| Horn | Hold H | Hold Horn | L3 |
+| Horn | Hold H | Hold Horn (top-right utility rail) | L3 |
 | Next FM station | N | Choose a station in Radio | - |
-| Open the radio picker | R | Radio, or tap the station name while it shows | - |
-| Repair car | F | Repair | D-pad right |
+| Open the radio picker | R | Radio (top-right rail), or tap the station name while it shows | - |
+| Repair car | F | Repair (appears in top-right rail when damaged) | D-pad right |
 | Straight into the seat, and back | V | Seat (hover things); while driving, Cam goes round to the seat | R3 or D-pad up |
-| Get out | E | Get off | Y / Triangle |
+| Get out | E | Exit (top-right utility rail) | Y / Triangle |
 | **Map** | | | |
 | Open and close | M (once in the city), Esc closes | Tap the minimap | View / Share |
 | Route to a place | Click it, a pin or a chip | Tap it | - |
@@ -229,7 +229,7 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
-**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While riding, the foot keys step aside for the vehicle's own: Drift, Boost, Horn, Cam, Radio and Get off for a car (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for a two-zone icon-only layout: four pointer-captured driving controls sit under the right thumb (tall Gas pedal, Brake/Reverse pedal, Drift and Boost — dedicating the left stick to smooth horizontal steering while pedals are pressed), while quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 
