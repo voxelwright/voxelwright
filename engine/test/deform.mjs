@@ -6,6 +6,8 @@ import { writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
+import { sculptCoupe } from '../page/car-sculpt.ts'
+import { fenderOpening } from '../page/crash-opening.ts'
 import { VehicleDeformation, MAX_DENTS, DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, deformPointCpu, recordImpact, repairVehicle, clearVehicle, getVehicleDamage } from '../page/deform.ts'
 
 const near = (a, b, tolerance = 1e-5) => assert.ok(Math.abs(a - b) <= tolerance, `${a} != ${b} (+/- ${tolerance})`)
@@ -170,10 +172,26 @@ function position(p, s) {
   for (let i = 0; i < s.dentCount; i++) {
     const d = s.dents[i], r = Math.hypot(...q.map((v, a) => v - d.center[a]))
     if (d.radius <= 0.0001 || r >= d.radius || d.depth <= 0) continue
-    const t = r / d.radius, h = (1 - t) ** 2 * (1 + 2 * t)
-    const phase = 36 * t + q.reduce((v, x, a) => v + (x - d.center[a]) * [7,3,11][a] / d.radius, 0)
-    const amount = d.depth * h * h * (1 + 0.18 * t * t * Math.sin(phase))
-    for (let a = 0; a < 3; a++) q[a] += d.dir[a] * amount
+    const [dx, dy, dz] = d.dir
+    const envelope = (r) => Math.max(0, 1 - (r / d.radius) ** 2) ** 2
+    const side = [dz, 0, -dx], up = [-dy*dx, 1-dy*dy, -dy*dz]
+    const relative = () => q.map((v,i) => (v-d.center[i])/d.radius)
+    const project = (v, axis) => v.reduce((sum, x, i) => sum + x*axis[i], 0)
+    const smooth = x => { const t = Math.max(0, Math.min(1, x)); return t*t*(3-2*t) }
+    let v = relative()
+    const ridge = 1 - smooth(Math.abs(3.7*project(v, side) + 1.85*project(v, up) - 0.89) / 0.89)
+    const shoulder = 1 - smooth(Math.abs(6.8*project(v, up) - 1.9*project(v, side) - 3.0))
+    const lateral = s.front >= 2 ? dx : dz
+    const pressed = (1 - lateral*lateral)*envelope(r) + lateral*lateral*(1 - (r / d.radius)**4)**2
+    const inward = d.depth * (1-0.1*up[1]) * pressed * (1-0.66*up[1]*ridge) * (1-0.63*up[1]*shoulder)
+    for (let i = 0; i < 3; i++) q[i] += d.dir[i]*inward
+    v = relative()
+    const curl = 1 - smooth(Math.abs(3.4*project(v, d.dir) - 1.60))
+    const seam = 1 - smooth(Math.abs(3.4*project(v, side) + 2.25*project(v, d.dir) - 0.65)) - 0.80*curl
+    const top = smooth((project(v, up) + 0.45)/0.72)
+    const drop = 0.42 * d.depth * Math.max(0, 1-project(v,v))**2 * seam * top
+    for (let i = 0; i < 3; i++) q[i] -= up[i]*drop
+
   }
   return q
 }
@@ -190,20 +208,103 @@ function numericalNormal(p, s) {
 for (let i = 0; i < 6; i++) tracker.recordImpact(700, body, [57 + (i%3)*8, 15, 14 + Math.floor(i/3)*12], normal, 55, 8000, cabin)
 const multi = tracker.get(700)
 assert.equal(multi.dentCount, 6); safe(multi)
-const states = [undefined, state, multi, protectedState, windshield]
+// A side strike must gather metal into a ridge. Measure the volume change as well as
+// the travel and normals. A positive determinant means neighbours stay in order.
+const side = tracker.recordImpact(705, body, hood, [1, 0, 0], 150, 10000, cabin)
+let lowest = 0, highest = 0, minVolume = Infinity
+const dent = side.dents[0]
+for (let x = -6; x <= 6; x++) for (let y = -6; y <= 6; y++) for (let z = -6; z <= 6; z++) {
+  const p = [x,y,z].map((v,i) => dent.center[i] + v * dent.radius / 6)
+  const q = deformPointCpu(p, [0,1,0], side).pos
+  lowest = Math.min(lowest, q[1]-p[1]); highest = Math.max(highest, q[1]-p[1])
+  assert.ok(Math.hypot(...q.map((v,i) => v-p[i])) <= dent.depth + 1e-6)
+  const [a,b,c] = [0,1,2].map(axis => {
+    const ahead = [...p]; ahead[axis] += 0.0001
+    return deformPointCpu(ahead, [0,1,0], side).pos.map((v,i) => (v-q[i]) / 0.0001)
+  })
+  minVolume = Math.min(minVolume, a[0]*(b[1]*c[2]-b[2]*c[1]) + a[1]*(b[2]*c[0]-b[0]*c[2]) + a[2]*(b[0]*c[1]-b[1]*c[0]))
+}
+assert.ok(lowest < -0.32 * dent.depth && highest > 0.07 * dent.depth && highest < 0.25 * dent.depth && minVolume > 0, 'a folded hood has a low return lip behind the tuck and the skin stays in order')
+// The grille used to stretch downward and open wider under a horizontal blow.
+const gapAt = (y) => {
+  const p = [dent.center[0], dent.center[1] + y*dent.radius, dent.center[2]]
+  return deformPointCpu(p, [1,0,0], side).pos[1] - p[1]
+}
+assert.ok(gapAt(0.16) < gapAt(-0.28) - 0.12*dent.depth, 'a struck grille pinches closed across its upper and lower edges')
+// Read the normals across a door at the height of a side impact. A smoothly
+// bowed panel changes its reflection gradually; folded metal has a distinct edge.
+const doorBody = { ...body, cell: 0.25, born: { com: [0,0,0], size: [168,52,72] } }
+const door = tracker.recordImpact(706, doorBody, [8,4,0], [0,0,-1], 130, 10000, { min: [72,25,31], max: [93,45,51] })
+const doorHit = door.dents[0]
+let lastNormal, sharpest = 0
+for (let k = -20; k <= 20; k++) {
+  const point = [...doorHit.center]
+  point[0] += k * doorHit.radius / 24
+  const { norm } = deformPointCpu(point, [0,0,-1], door)
+  if (lastNormal) {
+    const dot = norm.reduce((sum, v, i) => sum + v * lastNormal[i], 0)
+    sharpest = Math.max(sharpest, Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI)
+  }
+  lastNormal = norm
+}
+assert.ok(sharpest > 16, `a struck door bends its reflection across a crease (${sharpest.toFixed(1)} degrees)`)
+// In the street capture the bumper struck at hub height. Sample the surviving
+// painted metal above the wheel rather than the empty centre of its arch.
+const quarter = { center: [23,10,-3], radius: 38.3, depth: 7.65, dir: [0,0,1] }
+let previous, quarterBend = 0
+for (let k = 8; k <= 18; k++) {
+  const point = [quarter.center[0] + 0.16*quarter.radius, quarter.center[1] + k*quarter.radius/25, 1]
+  const { norm } = deformPointCpu(point, [0,0,-1], { dentCount: 1, dents: [quarter] })
+  if (previous) {
+    const cos = norm.reduce((sum, v, i) => sum + v*previous[i], 0)
+    quarterBend = Math.max(quarterBend, Math.acos(Math.max(-1,Math.min(1,cos))) * 180 / Math.PI)
+  }
+  previous = norm
+}
+assert.ok(quarterBend > 14, `the shoulder over the struck wheel interrupts the reflection (${quarterBend.toFixed(1)} degrees)`)
+// The bumper loads a face of sheet metal, including the door skin either side
+// of the strike. At half a radius inward travel must remain clearly visible.
+const middle = [quarter.center[0] - 0.52*quarter.radius, quarter.center[1], quarter.center[2]]
+const doorTravel = deformPointCpu(middle, [0,0,-1], {dentCount:1, dents:[quarter], front:0}).pos[2] - middle[2]
+assert.ok(doorTravel > 0.68*quarter.depth, 'a side hit presses in the door between the folds')
+const coupe = sculptCoupe({L:4.2,H:1.3,W:1.8,per:4,wheels:[0.7,3.5],wheelY:0.3,wheelR:0.3,tyreW:0.22,eye:[1.9,1,0.55],paint:5132|128})
+for (const sign of [-1,1]) {
+  const contact = {...quarter, center:[23,10,sign < 0 ? -3 : 75], dir:[0,0,-sign]}
+  const hit = {dentCount:1,front:0,dents:[contact],cabin:new Float64Array([72,25,31,93,45,51])}
+  const slit = fenderOpening(coupe.cells, coupe.size, 0.25, hit)
+  assert.ok(slit && slit.removed.size >= 8 && slit.walls.length >= 16, 'the struck painted fender exposes its lining')
+  hit.cabin = new Float64Array([0,0,0,...coupe.size])
+  assert.equal(fenderOpening(coupe.cells, coupe.size, 0.25, hit)?.removed.size, 0, 'the split never cuts into the cabin')
+}
+const rotatedDoor = tracker.recordImpact(707, {...doorBody,front:2}, [8,4,0], [-1,0,0], 130, 10000, { min:[72,25,31], max:[93,45,51] })
+const states = [undefined, state, multi, protectedState, windshield, side, door, rotatedDoor]
 const uniforms = new Float32Array(52 * 64)
 for (let i = 0; i < 64; i++) packDeformUniforms(states[i % states.length], uniforms, i * 52)
 const vertices = [], expected = []
-for (let vehicle = 0; vehicle < 4; vehicle++) {
+for (const vehicle of [0,1,2,3,5]) {
   for (let z = 0; z <= 32; z++) for (let x = 0; x <= 32; x++) {
     const p = [48 + x, 15, 4 + z]
     vertices.push(...p, vehicle); expected.push({ p, s: states[vehicle] })
+  }
+}
+for (const vehicle of [6, 7]) {
+  const dent = states[vehicle].dents[0]
+  for (let y = -4; y <= 4; y++) for (let x = -6; x <= 6; x++) {
+    const p = [dent.center[0]+x*2, dent.center[1]+y*2, dent.center[2]+2]
+    vertices.push(...p, vehicle); expected.push({p, s:states[vehicle]})
   }
 }
 // Points inside and just outside all six faces of the survival box.
 for (let y = 8; y <= 32; y += 2) for (let z = 8; z <= 32; z += 2) for (const x of [19.999, 20, 30, 45, 45.001]) {
   const p = [x, y, z]; vertices.push(...p, 3); expected.push({ p, s: protectedState })
 }
+// Sample a 1.2 m painted patch across a single hit, finely enough to resolve its gouges.
+const swatchStart = expected.length
+for (let j = -10; j <= 10; j++) for (let i = -30; i <= 30; i++) {
+  const p = [hood[0]+i*0.2, hood[1], hood[2]+j*0.15]
+  vertices.push(...p, 1); expected.push({p,s:state})
+}
+const swatchEnd = expected.length
 const benchStates = new Float32Array(64 * 52)
 for (let i = 0; i < 64; i++) packDeformUniforms(multi, benchStates, i * 52)
 vertices.push(108,35,36,4); expected.push({ p: [108,35,36], s: windshield })
@@ -253,9 +354,9 @@ struct Answer { pos: vec4f, norm: vec4f, damage: vec4f, paint: vec4f }
 @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x; if (i >= arrayLength(&points)) { return; }
   let p = points[i]; let def = fleet.cars[u32(p.w)];
-  let d = deformPoint(p.xyz, vec3f(0.0, 1.0, 0.0), def);
-  let paint = deformPaint(vec3f(0.7, 0.12, 0.04), d.scuff, d.crease, p.xyz);
-  answers[i] = Answer(vec4f(d.pos, 1.0), vec4f(d.norm, 0.0), vec4f(d.scuff, d.crease, paint.roughBoost, paint.clearcoatKeep), vec4f(paint.albedo, deformGlass(def.status.w, d.scuff, p.xyz - def.posR[0].xyz)));
+  let d = deformPoint(p.xyz, vec3f(0.0, 1.0, 0.0), def, u32(p.w) == 7u);
+  let paint = deformPaint(vec3f(0.7, 0.12, 0.04), d.scuff, d.crease, (p.xyz-def.posR[0].xyz).xzy);
+  answers[i] = Answer(vec4f(d.pos, 1.0), vec4f(d.norm, deformLamp(d.scuff)), vec4f(d.scuff, d.crease, paint.roughBoost, paint.clearcoatKeep), vec4f(paint.albedo, deformGlass(def.status.w, d.scuff, p.xyz - def.posR[0].xyz)));
 }
 @compute @workgroup_size(64) fn base(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x; if (i >= arrayLength(&points)) { return; }
@@ -266,7 +367,7 @@ struct ViewOut { @builtin(position) clip: vec4f, @location(0) p: vec3f, @locatio
   let corners = array<vec2f, 6>(vec2f(0,0),vec2f(1,0),vec2f(0,1),vec2f(0,1),vec2f(1,0),vec2f(1,1));
   let tile = i / 6u; let uv = (vec2f(f32(tile % 64u), f32(tile / 64u)) + corners[i % 6u]) / 64.0;
   let p = vec3f(48.0 + uv.x * 32.0, 15.0, 4.0 + uv.y * 32.0);
-  let d = deformPoint(p, vec3f(0,1,0), fleet.cars[car]);
+  let d = deformPoint(p, vec3f(0,1,0), fleet.cars[car], false);
   let clip = vec4f((uv.x - 0.5)*0.84 + select(-0.5,0.5,car == 1u), (uv.y-0.5)*1.5 + (d.pos.y-15.0)*0.025, 0.0, 1.0);
   return ViewOut(clip, p, d.norm, vec2f(d.scuff,d.crease));
 }
@@ -348,14 +449,27 @@ struct ViewOut { @builtin(position) clip: vec4f, @location(0) p: vec3f, @locatio
     const affected = s && s.dents.slice(0,s.dentCount).some(d => d.radius > 0.0001 && Math.hypot(...p.map((v,a) => v-d.center[a])) < d.radius)
     if (!affected) { vector(row.slice(0,3), p.map(Math.fround), 0); near(row[8], 0); near(row[9], 0); near(row[10], 0); near(row[11], 1); near(row[15], 0) }
     else {
-      changed++; if (s !== protectedState && s !== windshield && distance > 1e-5) assert.ok(row[1] < p[1]); assert.ok(distance <= s.maxCrushCells + 1e-5)
+      changed++; if ((s === state || s === multi) && distance > 1e-5) assert.ok(row[1] < p[1]); assert.ok(distance <= s.maxCrushCells + 1e-5)
       if (Math.abs(row[4]) + Math.abs(row[6]) > 0.03) tilted++
       assert.ok(row[8] > 0 && row[9] > 0 && row[10] > 0 && row[11] <= 1); scuffed++
       if (row[15] > 0) cracked++
+      if (row[8] > 0.35 && row[8] < 0.55) assert.equal(row[7], 0, 'a lamp beside the impact keeps its light')
+      if (row[8] > 0.78 && row[9] > 0.60) assert.ok(row[11] < 0.42, 'heavily creased paint loses its factory clear coat')
+      if (row[8] > 0.92) assert.equal(row[7], 1, 'a directly crushed lamp goes dark')
       if (distance > 0) assert.ok(distBox(want, s.cabin) > 0, 'deformed metal stays outside cabin')
     }
     for (const j of [8,9,10,11,15]) assert.ok(row[j] >= 0 && row[j] <= 1)
   }
+  let marked = 0, outsideContact = 0
+  for (let i = swatchStart; i < swatchEnd; i++) {
+    if (Math.abs(gpu.values[i*16+12]-0.7) < 0.05) continue
+    marked++
+    const p = expected[i].p
+    if (Math.abs(p[0]-hood[0]) > 4.0 || Math.abs(p[2]-hood[2]) > 1) outsideContact++
+  }
+  const coverage = marked / (swatchEnd-swatchStart)
+  console.log(`Paint swatch: ${(coverage*100).toFixed(1)}% marked, ${outsideContact} marks outside the contact strip`)
+  assert.ok(coverage > 0.015 && coverage < 0.25 && outsideContact === 0, 'a scrape has a visible core and finite tips')
   const windowRow = gpu.values.slice(-16)
   vector(windowRow.slice(0,3), [108,35,36], 0); assert.ok(windowRow[8] > 0 && windowRow[15] > 0, 'protected windshield still scuffs/cracks')
   assert.ok(changed > 300 && tilted > 100 && scuffed > 300 && cracked > 100)
