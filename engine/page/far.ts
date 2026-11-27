@@ -450,14 +450,39 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const cover = new Uint32Array(128)
   let covered = ''
 
+  // SPIKE PROTOTYPE (#82, probes/network-82): `?farpacks=<index.json>` names packs that hold some of the listing's
+  // objects (probes/network-82/pack-release.mjs: the landing's cut in one, band 0 by squares of tiles). An object in
+  // a pack is read out of it, the pack fetched once; any other is fetched alone as before. Not for main as it is: the
+  // packs would be the release's own (release.md, sf/release.py), named in its manifest.
+  const packsAt = query.get('farpacks')
+  const packOf: Record<string, string> | null = packsAt ? await fetch(packsAt).then((r) => (r.ok ? (r.json() as Promise<Record<string, string>>) : null)).catch(() => null) : null
+  const packs = new Map<string, Promise<Map<string, Uint8Array<ArrayBuffer>>>>()
+  const packed = (path: string): Promise<Uint8Array<ArrayBuffer> | null> | null => {
+    const at = packOf?.[path]
+    if (!at) return null
+    let pack = packs.get(at)
+    if (!pack) {
+      pack = fetch(new URL(at, new URL(packsAt!, location.href))).then(async (r) => {
+        if (!r.ok) throw new Error(`${r.status}`)
+        const all = new Uint8Array(await r.arrayBuffer()), n = new DataView(all.buffer).getUint32(4, true), from = 8 + n
+        return new Map(Object.entries(JSON.parse(new TextDecoder().decode(all.subarray(8, from))) as Record<string, [number, number]>).map(([name, [o, l]]) => [name, all.subarray(from + o, from + o + l)]))
+      })
+      packs.set(at, pack)
+      pack.catch(() => packs.delete(at))
+      // A few packs' bytes are kept: one let go is in the browser's cache (a release never changes) if it is asked again.
+      if (packs.size > 12) packs.delete(packs.keys().next().value!)
+    }
+    return pack.then((m) => m.get(path)?.slice() ?? null)
+  }
   const load = async (t: Tile, band: number) => {
     const rec = t.recs[band]!
     t.held[band] = 'coming'
     stats.coming++
     try {
-      const answer = await fetch(new URL(rec.path, new URL(base, location.href)))
-      if (!answer.ok) throw new Error(`${answer.status}`)
-      const bytes = new Uint8Array(await answer.arrayBuffer())
+      const inPack = await packed(band === C ? landing!.tiles[t.key].path : rec.path)
+      const answer = inPack ? null : await fetch(new URL(rec.path, new URL(base, location.href)))
+      if (answer && !answer.ok) throw new Error(`${answer.status}`)
+      const bytes = inPack ?? new Uint8Array(await answer!.arrayBuffer())
       const length = new DataView(bytes.buffer).getUint32(4, true)
       const head = JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + length))) as Head
       let faces = bytes.subarray(8 + length)
