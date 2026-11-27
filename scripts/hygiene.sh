@@ -7,7 +7,8 @@
 #   scripts/hygiene.sh --install  copy this script to ~/.village/bin and load
 #                                 the hourly launchd agent
 #
-# A worktree under $WORKTREES is removed only when all of these hold:
+# A worktree under $WORKTREES is removed only when all of these hold (a file time
+# that cannot be checked counts as a recent change):
 #   - no modified files, and no untracked files apart from node_modules, dist,
 #     target, .venv and __pycache__;
 #   - its HEAD is merged into origin/main, or its branch is gone on the remote,
@@ -20,7 +21,7 @@
 set -uo pipefail
 
 REPO="${VILLAGE_REPO:-$HOME/Developer/voxelwright}"
-WORKTREES="${VILLAGE_WORKTREES:-$HOME/.t3/worktrees/Voxelwright}"
+WORKTREES="${VILLAGE_WORKTREES:-$HOME/.t3/worktrees/voxelwright}"
 LOG="$HOME/.village/hygiene.log"
 LABEL="village.hygiene"
 STALE_DAYS=3
@@ -82,14 +83,30 @@ check_disk() {
 git -C "$REPO" fetch --quiet --prune origin || log "fetch failed; using last known remote refs"
 git -C "$REPO" rev-parse --verify --quiet origin/main >/dev/null || { log "no origin/main in $REPO"; exit 1; }
 
-# Every path any running process has open or uses as its working directory.
-OPEN=$(mktemp)
-trap 'rm -f "$OPEN"' EXIT
-lsof -n -P -w -Fn 2>/dev/null | sed -n "s|^n\($WORKTREES/[^/]*\).*|\1|p" | sort -u >"$OPEN"
+# git and lsof report physical paths, so resolve any symlink in the root.
+if [[ -d $WORKTREES ]]; then WORKTREES=$(cd "$WORKTREES" && pwd -P) || exit 1; fi
+# macOS filesystems ignore case by default, and git keeps a worktree path as it was
+# typed while lsof reports the name on disk, so paths are compared in lower case there.
+DARWIN=0
+[[ $(uname -s) == Darwin ]] && DARWIN=1
+fold_case() { if ((DARWIN)); then LC_ALL=C tr '[:upper:]' '[:lower:]'; else cat; fi; }
+ROOT=$(fold_case <<<"$WORKTREES")
 
-touched_since() { # $1 worktree, $2 seconds; true if a file outside the junk dirs changed that recently
-  [[ -n $(find "$1" \( -name node_modules -o -name dist -o -name target -o -name .venv -o -name __pycache__ -o -name .git \) -prune \
-    -o -newermt "@$(( $(date +%s) - $2 ))" -print -quit 2>/dev/null) ]]
+OPEN="" REF=""
+trap 'rm -f "$OPEN" "$REF"' EXIT
+OPEN=$(mktemp) && REF=$(mktemp) || { log "cannot create temporary files"; exit 1; }
+# Every path any running process has open or uses as its working directory.
+lsof -n -P -w -Fn 2>/dev/null | fold_case | LC_ALL=C sed -n "s|^n\($ROOT/[^/]*\).*|\1|p" | sort -u >"$OPEN"
+
+touched_since() { # $1 worktree, $2 seconds; true if a file outside the junk dirs changed that
+  # recently, and also if that cannot be checked, so that the worktree is kept.
+  local at=$(($(date +%s) - $2)) found
+  # GNU touch reads @epoch. BSD touch needs a calendar stamp, here in UTC on both sides.
+  { touch -d "@$at" "$REF" 2>/dev/null || TZ=UTC0 touch -t "$(TZ=UTC0 date -r "$at" +%Y%m%d%H%M.%S)" "$REF"; } &&
+    found=$(find "$1" \( -name node_modules -o -name dist -o -name target -o -name .venv -o -name __pycache__ -o -name .git \) -prune \
+      -o -newer "$REF" -print -quit) ||
+    { log "cannot check file times in $1; treating it as changed"; return 0; }
+  [[ -n $found ]]
 }
 
 removed=0 kept=0
@@ -97,7 +114,7 @@ while read -r wt branch locked; do
   name=$(basename "$wt")
   [[ $name == feature-450-* ]] && { kept=$((kept + 1)); continue; }
   [[ $locked == locked ]] && { echo "keep $name: locked"; kept=$((kept + 1)); continue; }
-  grep -qxF "$wt" "$OPEN" && { echo "keep $name: open in a running process"; kept=$((kept + 1)); continue; }
+  grep -qxF -- "$(fold_case <<<"$wt")" "$OPEN" && { echo "keep $name: open in a running process"; kept=$((kept + 1)); continue; }
   [[ -d $wt ]] || continue # missing dirs are handled by prune
 
   status=$(git -C "$wt" status --porcelain 2>&1) || { echo "keep $name: git status failed"; kept=$((kept + 1)); continue; }
@@ -133,12 +150,13 @@ while read -r wt branch locked; do
     fi
   fi
   removed=$((removed + 1))
-done < <(git -C "$REPO" worktree list --porcelain | awk -v root="$WORKTREES/" '
+done < <(git -C "$REPO" worktree list --porcelain | LC_ALL=C awk -v root="$ROOT/" -v darwin="$DARWIN" '
+  function under_root() { return index(darwin ? tolower(wt) : wt, root) == 1 }
   /^worktree / { wt = substr($0, 10); br = ""; lk = "" }
   /^branch /   { br = substr($0, 8); sub("^refs/heads/", "", br) }
   /^locked/    { lk = "locked" }
-  /^$/         { if (index(wt, root) == 1) print wt "\t" br "\t" lk }
-  END          { if (index(wt, root) == 1) print wt "\t" br "\t" lk }' | sort -u | tr '\t' ' ')
+  /^$/         { if (under_root()) print wt "\t" br "\t" lk }
+  END          { if (under_root()) print wt "\t" br "\t" lk }' | sort -u | tr '\t' ' ')
 
 if ((DRY)); then
   echo "dry run: would remove $removed, keep $kept"
