@@ -13,6 +13,10 @@ cargo build --release
 ./target/release/village-master --listen 127.0.0.1:8790        # plain HTTP on this machine only
 ```
 
+Forwarded addresses are accepted only from a trusted TCP peer. With `--behind-proxy`, the default trusted networks are `127.0.0.0/8` and `::1/128`. Repeat `--trusted-proxy IP-OR-CIDR` to replace those defaults. Other peers use their socket address and the normal connection limits. A trusted peer must supply the configured header or the request gets 400.
+
+Use `cf-connecting-ip` with a trusted Cloudflare Tunnel connector that supplies Cloudflare's client address. For `x-forwarded-for`, the master reads the rightmost value of the last header. In a multi-hop chain that value can identify another proxy. Configure the final trusted proxy to verify its upstream and rewrite the header with the client address.
+
 It speaks plain HTTP and belongs behind a proxy that ends TLS. Where it runs, and whether it is reachable from the internet, is the operator's decision: nothing here exposes it.
 
 ## Where things are

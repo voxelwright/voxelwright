@@ -120,7 +120,12 @@ async fn bye(st: &Shared, sock: &mut WebSocket, code: u16, why: &str) {
 async fn run(st: Shared, mut sock: WebSocket, slot: SlotGuard) {
     // The hello, within its time.
     let hello_by = Instant::now() + secs(st.cfg.hello_wait);
+    let mut frames = 0;
     let hello = loop {
+        if frames == 16 {
+            return bye(&st, &mut sock, 4408, "hello frame budget exceeded").await;
+        }
+        frames += 1;
         let got = tokio::select! {
             m = sock.recv() => m,
             _ = sleep_until(hello_by) => return bye(&st, &mut sock, 4408, "no hello in time").await,
@@ -168,6 +173,7 @@ async fn run(st: Shared, mut sock: WebSocket, slot: SlotGuard) {
                 locked: hello.locked,
                 since: unix_now(),
             };
+            g.listed += usize::from(hello.listed);
             g.codes.insert(code.clone(), id.clone());
             g.lobbies.insert(
                 id.clone(),
@@ -298,7 +304,9 @@ fn take(st: &Shared, id: &str, msg: FromHost) -> Result<(), String> {
                 r.locked = v
             }
             if let Some(v) = now.listed {
-                l.listed = v
+                let was = l.listed;
+                l.listed = v;
+                g.listed = g.listed - usize::from(was) + usize::from(v);
             }
         }
         FromHost::Answer { n, sdp } => {

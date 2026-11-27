@@ -62,7 +62,12 @@ impl From<Refused> for ApiError {
 /// header must be there (rightmost value of its last instance); without it the
 /// header is ignored, whatever a caller writes.
 pub fn caller(st: &Shared, headers: &HeaderMap, peer: SocketAddr) -> Result<IpAddr, ApiError> {
-    let Some(name) = &st.cfg.behind_proxy else {
+    let Some(name) = st
+        .cfg
+        .behind_proxy
+        .as_ref()
+        .filter(|_| st.cfg.trusts_proxy(peer.ip()))
+    else {
         return Ok(text::addr_key(peer.ip()));
     };
     let ip = headers
@@ -107,24 +112,34 @@ async fn body<T: for<'de> Deserialize<'de>>(b: Body, limit: usize) -> Result<T, 
     })
 }
 
-pub async fn root(State(st): State<Shared>) -> Json<Value> {
-    let listed = st.lock().lobbies.values().filter(|l| l.listed).count();
-    Json(json!({
+pub async fn root(
+    State(st): State<Shared>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    st.charge(caller(&st, &headers, peer)?, Kind::Lookup)?;
+    let listed = st.lock().listed;
+    Ok(Json(json!({
         "name": "village-master",
         "version": env!("CARGO_PKG_VERSION"),
         "proto": 1,
         "about": "Lists Village lobbies and passes one WebRTC offer and one answer for each join. It carries no game traffic and keeps nothing on disk.",
         "lobbies": listed,
-    }))
+    })))
 }
 
-pub async fn ice(State(st): State<Shared>) -> Json<Value> {
+pub async fn ice(
+    State(st): State<Shared>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    st.charge(caller(&st, &headers, peer)?, Kind::Lookup)?;
     let servers: Vec<Value> = if st.cfg.stun.is_empty() {
         vec![]
     } else {
         vec![json!({ "urls": st.cfg.stun })]
     };
-    Json(json!({ "iceServers": servers }))
+    Ok(Json(json!({ "iceServers": servers })))
 }
 
 /// One page of the listed lobbies, in id order: `?after=<id>` continues from a
@@ -295,18 +310,21 @@ fn operator(st: &Shared, headers: &HeaderMap, peer: SocketAddr) -> Result<(), Ap
     let Some(token) = &st.admin_token else {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not found"));
     };
+    let addr = caller(st, headers, peer)?;
+    if st.operator_locked(addr) {
+        return Err(Refused::Banned.into());
+    }
     let given = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
-    if text::same(given.as_bytes(), token.as_bytes()) {
+    use subtle::ConstantTimeEq;
+    if bool::from(text::digest(given.as_bytes()).ct_eq(token)) {
         // The operator is never held to limits or bans (one may ban their own address).
         return Ok(());
     }
-    // A wrong token costs a lookup, so guessing it is as slow as guessing a code.
-    let addr = caller(st, headers, peer)?;
-    st.charge(addr, Kind::Lookup)?;
+    st.charge(addr, Kind::AdminFail)?;
     Err(ApiError::new(
         StatusCode::UNAUTHORIZED,
         "not the operator's token",

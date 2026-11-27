@@ -198,7 +198,10 @@ try {
   check(blasted[0] < before && blasted.every((h) => h === blasted[0]), `Ada's blast breaks the ground for Bram and the world alike (${before} before, ${blasted.join(', ')} after)`)
   const brick = [arrive[0] - 40, 0, arrive[2] + 20]
   brick[1] = (await worldSolid(brick[0], brick[2], top)) + 1
-  await bram.page.evaluate(([x, y, z]) => globalThis.engine.set([x, y + 2, z], 2, 8), brick)
+  await bram.page.evaluate(([x, y, z]) => globalThis.engine.lobby.fetch('/world/ask', { method: 'POST', body: JSON.stringify({
+    thing: { id: 'brams-brick', name: 'Brick', at: [x, y, z], size: [1, 2, 1], facing: 'north' },
+    edit: [1, 2, x, x + 1, y, z, 8, x, x + 1, y + 1, z, 8], release: [x, y, z]
+  }) }).then(r => r.status), brick)
   await wait(3000)
   for (const p of [ada, bram]) await still(p.page, { limit: 120_000 })
   const cell = [brick[0], brick[1] + 1, brick[2]]

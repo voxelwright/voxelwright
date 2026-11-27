@@ -49,7 +49,7 @@ cd voxelwright-master-<version>-<platform>
 
 It prints `village-master 0.1.0 on http://127.0.0.1:8790` and runs until you press Ctrl-C. `./village-master --help` lists every flag. A server that loses its master says hello again once the master is back.
 
-On `127.0.0.1`, only this machine can reach the master. To serve it to other machines, put a proxy that ends TLS in front of it and pass `--behind-proxy <header>`. The master guide has two recipes, the protocol and every limit: https://github.com/voxelwright/voxelwright/blob/main/guide/master.md
+On `127.0.0.1`, only this machine can reach the master. To serve it to other machines, put a proxy that ends TLS in front of it and pass `--behind-proxy <header>`. Loopback peers are trusted by default. If the proxy connects from another address, specify its IP or network with `--trusted-proxy`. The master guide has two recipes, the protocol and every limit: https://github.com/voxelwright/voxelwright/blob/main/guide/master.md
 
 ## 2. Run a dedicated server
 
