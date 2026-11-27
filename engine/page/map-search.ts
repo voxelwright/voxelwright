@@ -193,8 +193,11 @@ export const SEARCH_CATEGORIES: readonly SearchCategory[] = [
     color: '#e64757',
     icon: 'cross',
     pill: true,
-    aliases: ['hospital', 'hospitals', 'medical', 'medical center', 'clinic', 'clinics', 'urgent care', 'emergency', 'er', 'doctor', 'health'],
-    match: (p) => p.source === 'hospital' || (p.source === 'shop' && HOSPITAL_RE.test(p.nameNorm) && !/\bhospitality\b/i.test(p.nameNorm)),
+    aliases: ['hospital', 'hospitals', 'medical', 'medical center', 'clinic', 'clinics', 'urgent care', 'emergency', 'er', 'doctor', 'health', 'walk in'],
+    match: (p) =>
+      p.source === 'hospital' ||
+      p.rawCategory === 'urgent_care' ||
+      (p.source === 'shop' && HOSPITAL_RE.test(p.nameNorm) && !/\bhospitality\b/i.test(p.nameNorm)),
   },
   {
     id: 'gas',
@@ -324,6 +327,10 @@ function classifyShop(rawCat: string, nameNorm: string, tagline: string): { cate
   if (BARBER_RE.test(nameNorm)) {
     const c = CATEGORY_BY_ID.get('barbershop')!
     return { categoryId: c.id, label: 'Barber Shop', color: c.color, icon: c.icon }
+  }
+  if (rawCat === 'urgent_care') {
+    const c = CATEGORY_BY_ID.get('hospitals')!
+    return { categoryId: c.id, label: 'Urgent Care', color: c.color, icon: c.icon }
   }
   if (HOSPITAL_RE.test(nameNorm) && !/\bhospitality\b/i.test(nameNorm)) {
     const c = CATEGORY_BY_ID.get('hospitals')!
