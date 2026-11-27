@@ -2000,7 +2000,6 @@ async function main() {
         if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
       },
       onShout: (info) => {
-        ears?.spoke({ name: info.name, text: info.text, at: info.at }, 'babble')
         window.dispatchEvent(new CustomEvent('voxelwright:robotaxi-shout', { detail: info }))
       },
     })

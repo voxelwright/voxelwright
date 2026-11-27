@@ -254,6 +254,7 @@ try {
       reactions: rt.reactions,
       shoutEvents: (globalThis.__rtShoutEvents ?? []).length,
       sampleShout: (globalThis.__rtShoutEvents ?? [])[0] ?? null,
+      spoken: e.ears?.count?.spoken ?? 0,
       folkCount: e.folk.drawn,
     }
   })
@@ -262,6 +263,7 @@ try {
   check(react.reactions.honks >= 1, `blocked cars honked & flashed high beams (${react.reactions.honks} honks)`)
   check(react.reactions.filmers >= 1 && react.reactions.yellers >= 1 && react.reactions.shouts >= 1 && react.shoutEvents >= 1,
     `nearby pedestrians stopped to film/yell & shouted (${react.reactions.filmers} filmers, ${react.reactions.yellers} yellers, ${react.reactions.shouts} shouts, ${react.shoutEvents} events)`)
+  check(react.spoken === 0, `bystander robotaxi comments do not play babble voice audio (spoken=${react.spoken})`)
 
   // Frame the stopped car and its own responding pedestrians at street level. Measure the
   // projected silhouette and distinct people, so a foreground back cannot stand in for a crowd.
