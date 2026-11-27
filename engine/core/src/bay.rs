@@ -394,6 +394,7 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    despike_roofs(&mut p.top, &p.class, tw, p.tstep);
     // Which buildings and trunks reach into each patch.
     p.pw = (wide >> PATCH) + 1;
     p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
@@ -469,6 +470,138 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     Some(p)
+}
+
+/// Remove narrow vertical lidar spikes (rooftop light poles, masts, vents, antennas) from building roofs.
+/// At L0 (`tstep == 5`, 0.5 m samples), a separable 5x5 (2.5 m) morphological opening over non-canopy roof
+/// samples removes isolated pillars narrower than 2.5 m that rise more than 2.5 m above the surrounding roof,
+/// while preserving flat/pitched roofs, parapets <= 2.5 m, step edges between wide buildings, standalone
+/// narrow buildings, and tree canopies. At L1 (`tstep == 20`, 2 m samples), a bounded 3-cell connected
+/// component filter removes 1- to 3-cell spikes (poles straddling a 2 m grid line) without flattening
+/// narrow rowhouses.
+fn despike_roofs(top: &mut [i16], class: &[u8], tw: usize, tstep: i32) {
+    const THRESH: i32 = 25; // 2.5 m in 10 cm cells
+    if tstep == 5 && tw >= 5 {
+        let n = tw * tw;
+        let is_roof = |t: &[i16], i: usize| t[i] != NONE && class[i] & CANOPY == 0;
+        let mut hmin = vec![i16::MAX; n];
+        let mut eroded = vec![i16::MAX; n];
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MAX;
+                for x in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let k = row + x;
+                    if is_roof(top, k) { m = m.min(top[k]); }
+                }
+                hmin[row + i] = m;
+            }
+        }
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MAX;
+                for y in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                    m = m.min(hmin[y * tw + i]);
+                }
+                eroded[row + i] = m;
+            }
+        }
+        let mut hmax = vec![i16::MIN; n];
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let mut m = i16::MIN;
+                for x in i.saturating_sub(2)..=(i + 2).min(tw - 1) {
+                    let k = row + x;
+                    if is_roof(top, k) && eroded[k] != i16::MAX { m = m.max(eroded[k]); }
+                }
+                hmax[row + i] = m;
+            }
+        }
+        for j in 0..tw {
+            let row = j * tw;
+            for i in 0..tw {
+                let k = row + i;
+                if !is_roof(top, k) { continue; }
+                let mut opened = i16::MIN;
+                for y in j.saturating_sub(2)..=(j + 2).min(tw - 1) {
+                    opened = opened.max(hmax[y * tw + i]);
+                }
+                if opened != i16::MIN && top[k] as i32 - opened as i32 > THRESH {
+                    top[k] = opened;
+                }
+            }
+        }
+    } else if tstep == 20 && tw >= 3 {
+        let is_built = |t: &[i16], i: usize| t[i] != NONE && class[i] & BUILT != 0;
+        let tw_i = tw as isize;
+        let mut comp = [(0isize, 0isize); 4];
+        for j in 0..tw_i {
+            for i in 0..tw_i {
+                let idx = (j * tw_i + i) as usize;
+                if !is_built(top, idx) { continue; }
+                let t0 = top[idx] as i32;
+                let mut lo = t0;
+                for (dy, dx) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let (ny, nx) = (j + dy, i + dx);
+                    if ny >= 0 && ny < tw_i && nx >= 0 && nx < tw_i {
+                        let nk = (ny * tw_i + nx) as usize;
+                        if is_built(top, nk) { lo = lo.min(top[nk] as i32); }
+                    }
+                }
+                if t0 - lo <= THRESH { continue; }
+                comp[0] = (j, i);
+                let (mut len, mut head, mut too_big) = (1usize, 0usize, false);
+                while head < len && !too_big {
+                    let (y, x) = comp[head];
+                    head += 1;
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            if dy == 0 && dx == 0 { continue; }
+                            let (ny, nx) = (y + dy, x + dx);
+                            if ny < 0 || ny >= tw_i || nx < 0 || nx >= tw_i { continue; }
+                            let nk = (ny * tw_i + nx) as usize;
+                            if !is_built(top, nk) || top[nk] as i32 <= t0 - THRESH { continue; }
+                            if comp[..len].contains(&(ny, nx)) { continue; }
+                            if len == 3 { too_big = true; break; }
+                            comp[len] = (ny, nx);
+                            len += 1;
+                        }
+                        if too_big { break; }
+                    }
+                }
+                if too_big { continue; }
+                let mut comp_min = i32::MAX;
+                let mut ring_max = i32::MIN;
+                let mut ring = [(0isize, 0isize); 24];
+                let mut ring_cnt = 0usize;
+                for &(y, x) in &comp[..len] {
+                    comp_min = comp_min.min(top[(y * tw_i + x) as usize] as i32);
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let (ny, nx) = (y + dy, x + dx);
+                            if ny < 0 || ny >= tw_i || nx < 0 || nx >= tw_i { continue; }
+                            if comp[..len].contains(&(ny, nx)) || ring[..ring_cnt].contains(&(ny, nx)) { continue; }
+                            let nk = (ny * tw_i + nx) as usize;
+                            if is_built(top, nk) {
+                                ring_max = ring_max.max(top[nk] as i32);
+                                if ring_cnt < ring.len() {
+                                    ring[ring_cnt] = (ny, nx);
+                                    ring_cnt += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if ring_cnt >= 3 && comp_min > ring_max + THRESH {
+                    for &(y, x) in &comp[..len] {
+                        top[(y * tw_i + x) as usize] = ring_max as i16;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// What a building's photographs say of it as evidence (bay/facade_evidence.py, written by bay/evidence_tile.py), in
@@ -2525,6 +2658,55 @@ mod tests {
                 assert_eq!(under(x, y, z, 40), expected, "under mismatch at ({x},{y},{z})");
             }
         });
+    }
+
+    #[test]
+    fn rooftop_narrow_pillars_are_despiked_in_fine_and_coarse_packs() {
+        // L0 (tstep=5, 0.5 m samples): a flat roof at 150 with a 2.0 m x 1.5 m (4x3) light-pole pillar at 220,
+        // a 1.5 m parapet at 165, a 4 m x 4 m (8x8) real penthouse at 200, and a tree canopy spike at 240.
+        let (gw, tw) = (5i32, 32i32);
+        let mut b0 = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 160, 40, gw, 0, 0, 5, tw, 0, 0, 0, 0, 0, 0] { b0.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b0.extend(20i16.to_le_bytes()); }
+        let mut top0 = vec![150i16; (tw * tw) as usize];
+        let mut cls0 = vec![YARD; (tw * tw) as usize];
+        for j in 6..9 { for i in 6..10 { top0[(j * tw + i) as usize] = 220; } } // 2.0 m x 1.5 m pillar
+        for i in 4..20 { top0[(12 * tw + i) as usize] = 165; } // 1.5 m parapet
+        for j in 18..26 { for i in 18..26 { top0[(j * tw + i) as usize] = 200; } } // 4 m x 4 m penthouse
+        top0[(3 * tw + 27) as usize] = 240;
+        cls0[(3 * tw + 27) as usize] = YARD | CANOPY; // tree crown must stay untouched
+        for t in &top0 { b0.extend(t.to_le_bytes()); }
+        b0.extend(&cls0);
+        b0.extend(vec![0u8; (tw * tw) as usize]);
+        let p0 = read(&b0).expect("valid L0 pack");
+        for j in 6..9 {
+            for i in 6..10 {
+                assert_eq!(p0.top[(j * tw + i) as usize], 150, "L0 pillar at ({i},{j}) should be removed");
+            }
+        }
+        assert_eq!(p0.top[(12 * tw + 10) as usize], 165, "1.5 m parapet must stay");
+        assert_eq!(p0.top[(21 * tw + 21) as usize], 200, "4 m x 4 m penthouse must stay");
+        assert_eq!(p0.top[(3 * tw + 27) as usize], 240, "canopy spike must stay");
+
+        // L1 (tstep=20, 2.0 m samples): flat BUILT roof at 150 with a 1-cell spike (220), a 2-cell straddling
+        // spike (216), and a 2x5 (4 m x 10 m) taller rowhouse (220).
+        let mut b1 = Vec::new();
+        for w in [0x3159_4142i32, 0, 0, 640, 160, gw, 0, 0, 20, tw, 0, 0, 0, 0, 0, 0] { b1.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { b1.extend(20i16.to_le_bytes()); }
+        let mut top1 = vec![150i16; (tw * tw) as usize];
+        let cls1 = vec![YARD | BUILT; (tw * tw) as usize];
+        top1[(5 * tw + 5) as usize] = 220; // 1-cell spike
+        top1[(10 * tw + 10) as usize] = 216;
+        top1[(10 * tw + 11) as usize] = 216; // 2-cell straddling spike
+        for j in 16..21 { for i in 16..18 { top1[(j * tw + i) as usize] = 220; } } // 4 m x 10 m rowhouse
+        for t in &top1 { b1.extend(t.to_le_bytes()); }
+        b1.extend(&cls1);
+        b1.extend(vec![0u8; (tw * tw) as usize]);
+        let p1 = read(&b1).expect("valid L1 pack");
+        assert_eq!(p1.top[(5 * tw + 5) as usize], 150, "L1 1-cell spike should be removed");
+        assert_eq!(p1.top[(10 * tw + 10) as usize], 150, "L1 2-cell spike should be removed");
+        assert_eq!(p1.top[(10 * tw + 11) as usize], 150, "L1 2-cell spike should be removed");
+        assert_eq!(p1.top[(18 * tw + 16) as usize], 220, "4 m x 10 m rowhouse must stay");
     }
 }
 
