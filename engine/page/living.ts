@@ -598,7 +598,7 @@ export function living(o: {
     }
   }
   const tell = (thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump', boost?: boolean, wetness?: number) => {
-    if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once, boost); return }
+    if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once, boost, wetness); return }
     o.send({ drive: { id: thing.id, go, turn, rise, roll: once === 'roll', jump: once === 'jump', ...(boost !== undefined ? { boost } : {}), ...(wetness !== undefined ? { wetness } : {}) } })
     o.wake()
   }

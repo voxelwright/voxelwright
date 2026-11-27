@@ -1,6 +1,6 @@
 // The door of a dedicated server (#526): strangers' pages reach the world through it, and nothing else does.
 //
-// It holds the host's socket to a master server (protocol v1, issue #526 and master/README.md), answers each page's
+// It holds the host's socket to a master server (protocol v1, issue #526 and guide/master.md), answers each page's
 // whole offer with a whole answer (node-datachannel, the lobby-transport skill's recipe), and carries the world's HTTP
 // over three data channels:
 //   ctl   JSON. The page's hello first: {hello: {proto, pin, name, key, sig, password?}}, where key is the page's
@@ -61,7 +61,7 @@ const RULE_ID = /^[a-z0-9][a-z0-9-]{0,23}$/
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/
 
 /**
- * What passes the door, and nothing else (the README says why each is on its side). `who`: everyone, builders
+ * What passes the door, and nothing else (guide/multiplayer.md says why each is on its side). `who`: everyone, builders
  * (everyone, or admins only when the server says so) or admins. `by`: where the door writes who asked (the body's
  * `by`, and for `here` its `name` too). `q`: the query's names that are passed on, each a whole number or a short
  * word; anything else in a query is dropped. `rate`: a pool of the connection's own that the route also counts against

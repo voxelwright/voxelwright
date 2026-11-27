@@ -448,7 +448,7 @@ async function listed(master: string, pin: string, signal: AbortSignal): Promise
   const rows: Row[] = [], ids = new Set<string>(), cursors = new Set<string>()
   let after: string | null = null, pages = 0
   do {
-    // At most as many pages as the rows they could hold at the master's own page size (master/README.md: 200), and
+    // At most as many pages as the rows they could hold at the master's own page size (guide/master.md: 200), and
     // never a cursor twice: a master that says there is more for ever is asked no further.
     if (++pages > Math.ceil(ROWS_MOST / 200) + 1 || (after && cursors.has(after))) return { rows, cut: true }
     if (after) cursors.add(after)
@@ -768,7 +768,7 @@ function openList() {
 function openHost() {
   const p = panel!
   p.$<HTMLElement>('#lobbies-h').textContent = 'Host a server'
-  // The README's command (engine/README.md, "A server of your own"), with the master this page finds servers through.
+  // The host command (guide/multiplayer.md), with the master this page finds servers through.
   p.$<HTMLElement>('.cmd').textContent = [
     'cd engine',
     'npm ci && npm run core',

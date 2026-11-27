@@ -4,8 +4,8 @@
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { join, resolve } from "node:path";
-import { startServer } from "../serve.mjs";
+import { join } from "node:path";
+import { serveLanding } from "./serve-landing.mjs";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require(process.env.PLAYWRIGHT ?? "playwright");
@@ -51,8 +51,8 @@ const browser = await chromium.launch({ channel: "chrome", args: ["--enable-unsa
 const errors = [];
 let server;
 try {
-  server = await startServer({ root: resolve(import.meta.dirname, "../../dist"), port: 0, host: "127.0.0.1" });
-  const base = `http://127.0.0.1:${server.address().port}/`;
+  server = await serveLanding();
+  const base = server.base;
   async function open({ width = 1440, height = 900, scale = 2, scheme = "dark", graphics, motion = "no-preference", mobile = false }) {
     const storage = [{ name: "support-button-muted", value: "1" }];
     if (graphics) storage.push({ name: "village.graphics", value: JSON.stringify(graphics) });
@@ -177,5 +177,5 @@ try {
   console.log("life checks passed; screenshots in", out);
 } finally {
   await browser.close();
-  server?.close();
+  await server?.close();
 }

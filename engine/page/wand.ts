@@ -512,7 +512,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
       return true
     },
   }
-  keys.always('KeyQ', (e) => { if (e.metaKey || e.ctrlKey || e.altKey) return false; self.held = !held; return true })
+  keys.always('KeyQ', (e) => { if (e.metaKey || e.ctrlKey || e.altKey || keys.live('mounted')) return false; self.held = !held; return true })
   panel.show()
   return self
 }

@@ -301,7 +301,6 @@
     "engine/kit/src/core/audio/release.wav": "file"
   },
   "engine/landing/ina/README.md": {
-    "engine/landing/ina/shoot.mjs": "lines:arg\\('(place|out|cells|server|fine)'",
     "engine/landing/ina/camera.json": [
       "camera"
     ],

@@ -2,9 +2,8 @@
 // rest, fire, rain, where the sea is, how high and how fast the eye is) turned into patches played at places and the
 // levels of the beds. The page tells it; it never asks the page to do anything, and the picture goes on without it.
 //
-// The core does not yet say when a body strikes something (that is the living lane's, #245). Until it does, a strike
-// is read here from how a body's speed changes between two tellings: a body that was moving and is suddenly not, or
-// not that way, has hit. It is late by one telling and misses a glancing blow.
+// Body strikes are reported directly by the core (`told.struck` records), and turned into material-specific
+// impact sounds here.
 import { SET, type Sound } from './sound.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from './kinds.ts'
 import { LIKES } from './likes.ts'
@@ -23,7 +22,7 @@ import type { Input } from '../input.ts'
 export interface Scene {
   /** The land's own top at a column, in cells (the core's `ground_at`): under -1 is sea. */
   ground(x: number, z: number): number
-  /** What sort of ground is under someone on foot there (the core's `paving_at`: 8 and over is paved). */
+  /** What sort of ground is under someone on foot there (the core's `paving_at`: block sort 0..5, plus 8 when paved). */
   paving(x: number, z: number): number
   rain(): number
   under(): boolean

@@ -1572,7 +1572,7 @@ export function street(o: {
   const CRASH_SCAN = 120 // 12 m proximity radius (cells)
   const HORN_CAR_REACH = 260 // 26 m traffic reaction radius (cells)
   const NEAR_MISS_MIN_KMH = 65
-  const NEAR_MISS_MAX_GAP = 20 // 2.0 m lateral clearance (cells)
+  const NEAR_MISS_MAX_GAP = 20 // 2.0 m clearance on any axis (cells)
   const NEAR_MISS_COOL = 3.0 // seconds per car
   let nearMissCb = o.onNearMiss
   let prevRideId = 0, prevRideAt: [number, number, number] | null = null, rideDt = 0

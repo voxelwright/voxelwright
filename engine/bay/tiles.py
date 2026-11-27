@@ -4,7 +4,7 @@ A page cannot hold a city: a square kilometre is 20 MB in each of eight cores. S
 and comes in three coarsenesses, each on its own grid of the world's frame (cells of 10 cm from the frame's corner):
 
     level 0   250 m a side   ground every 1 m, what stands every 0.5 m, outlines and trunks   near: cells to 0.8 m
-    level 1   1 km           every 2 m, no outlines: a building is a mass in its wall's colour    cells to 6.4 m
+    level 1   1 km           every 2 m, no outlines: a building is a mass in its wall's colour    cells to 1.6 m
     level 2   4 km           every 16 m                                                           past that
 
 They are packs like any other (bay.rs reads them), in ~/.village/engine/bay/packs/tiles/<level>/<x>_<z>.bay, with
