@@ -7,12 +7,13 @@
 //   -> warm-landing (a new page, same cache) -> warm-explore
 // It draws with the GPU, so it takes a turn first (engine/test/kit.mjs): ENGINE_TURN_WAIT=3600 where the lanes are busy.
 //
-//   node probes/network-82/measure.mjs --url https://voxelwright.world/ --out live.json [--explore 90] [--mbit 25] [--query farthest=6000] [--no-warm]
+//   node probes/network-82/measure.mjs --url https://voxelwright.world/ --out live.json [--explore 90] [--mbit 25] [--query farthest=6000] [--no-warm] [--disk-cache]
 //   node probes/network-82/measure.mjs --local /path/to/engine/dist-sf --out local.json [--overlay <dir laid over it>]
 //
 // "Worker requests" are network requests (cache hits excluded, 304s included) to the paths deploy/cloudflare.config.ts
 // sends to the Worker first: /releases/*, /bay/*, /weather.
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { extname, join } from 'node:path'
 import { chromium } from '../../engine/node_modules/playwright/index.mjs'
 import { arg, has, CHROME, turn } from '../../engine/test/kit.mjs'
@@ -49,8 +50,13 @@ const url = query ? `${base}${base.includes('?') ? '&' : '?'}${query}` : base
 const PORT = 9300 + Math.floor(Math.random() * 500)
 
 const back = await turn()
-const browser = await chromium.launch({ ...CHROME, args: [...CHROME.args, `--remote-debugging-port=${PORT}`] })
-const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
+// --disk-cache: a profile on disk for the run, so the HTTP cache is a visitor's (on disk, hundreds of MB). Without it
+// the context is Chrome's incognito kind, whose cache is in memory and small: a cold landing and an explore (94 MB)
+// push each other out of it, and a "warm" landing fetches nearly everything again (measured: 226 of 244 release files).
+const profile = has('disk-cache') ? mkdtempSync(join(tmpdir(), 'vw-net82-')) : null
+const launch = { ...CHROME, args: [...CHROME.args, `--remote-debugging-port=${PORT}`] }
+const browser = profile ? null : await chromium.launch(launch)
+const context = profile ? await chromium.launchPersistentContext(profile, { ...launch, viewport: { width: 1280, height: 720 } }) : await browser.newContext({ viewport: { width: 1280, height: 720 } })
 
 // ── Raw CDP: one socket to the browser, attached to every page and worker, Network on in each. ──
 const version = await fetch(`http://127.0.0.1:${PORT}/json/version`).then((r) => r.json())
@@ -148,7 +154,8 @@ try {
   await sleep(500)
   for (const r of reqs.values()) log.push({ ...r, unfinished: true })
   ws.close()
-  await browser.close()
+  await (browser ?? context).close()
+  if (profile) rmSync(profile, { recursive: true, force: true })
   site?.stop()
   back()
 }

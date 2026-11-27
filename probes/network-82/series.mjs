@@ -14,8 +14,8 @@ const here = dirname(fileURLToPath(import.meta.url)), dist = resolve(arg('dist',
 mkdirSync(out, { recursive: true })
 const pin = JSON.parse(readFileSync(join(dist, 'sf/current.json'), 'utf8'))
 const runs = [
-  ['local-baseline', ['--local', dist, '--explore', '60']],
-  ...(live ? [['live', ['--url', live, '--explore', '90']]] : []),
+  ['local-baseline', ['--local', dist, '--explore', '60', '--disk-cache']],
+  ...(live ? [['live', ['--url', live, '--explore', '90', '--disk-cache']]] : []),
   ...(overlay ? [['local-packs', ['--local', dist, '--overlay', resolve(overlay), '--query', `farpacks=${dirname(pin.manifest)}/packs/index.json`, '--explore', '60', '--no-warm']]] : []),
   ['local-6km', ['--local', dist, '--query', 'farthest=6000', '--explore', '60', '--no-warm']],
 ].filter(([name]) => !arg('only', null) || arg('only', '').split(',').includes(name))
