@@ -37,6 +37,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `fine.rs` | Fine-voxel meshing (`faces`, `facesWithSmooth` with octahedral smooth normals and AO via `wasm32` SIMD 3D prefix sums), RLE/base64 codec, shell-preserving `coarser` + leak sealing, and procedural vehicle sculptors (`sculptCoupe`, `sculptKart`, `sculptOjai`). |
 | `bodies.rs`, `bodies/living.rs` | Loose bodies, living things, people's bodies. |
 | `bodies/hull.rs` | How two rolling vehicles meet and part, and where a vehicle put into another's place ends up. |
+| `ballistics.rs` | Ranged combat and blast physics: sub-stepped 3D Amanatides-Woo DDA projectiles (`Caliber` presets), `kinds.rs`-driven penetration and grazing ricochet with exact momentum transfer, swept-sphere shaped-charge rockets with optional proportional-navigation guidance, and occluded delayed shockwaves (`ShockwaveQueue`, 64-ray Fibonacci occlusion at 340 m/s plus directional shrapnel). |
 | `fire.rs`, `water.rs` | Fire spreading from cell to cell. Water as depths over columns, not cells. |
 | `hash.rs` | Whole-number hashes and smooth noise that give the same result on every machine. |
 
