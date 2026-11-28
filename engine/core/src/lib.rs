@@ -12,6 +12,7 @@ pub mod heroes;
 pub mod bodies;
 pub mod broadphase;
 pub mod city;
+pub mod eqs;
 pub mod fine;
 pub mod fire;
 pub mod hash;
@@ -20,6 +21,7 @@ pub mod kinds;
 pub mod land;
 pub mod melee;
 pub mod nav;
+pub mod perception;
 pub mod ragdoll;
 pub mod scratch;
 pub mod solver;
@@ -1353,6 +1355,174 @@ pub extern "C" fn crowd_add_obstacle(x0: f32, z0: f32, x1: f32, z1: f32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn crowd_step(count: usize, dt: f32, time_horizon: f32) -> usize {
     INSTANCE.with_borrow_mut(|i| i.nav.crowd_step(count, dt, time_horizon))
+}
+
+// ── EQS-Lite spatial queries & spatial visual/acoustic perception (eqs.rs, perception.rs, #164) ──
+
+/// Pointer to the reusable `[x, y, z, score]` f32 output buffer (`eqs_results_len() * 4` floats).
+#[unsafe(no_mangle)]
+pub extern "C" fn eqs_results_ptr() -> *const f32 {
+    eqs::results_ptr()
+}
+
+/// Number of ranked candidates produced by the last `eqs_find_*` query (`0..=32`).
+#[unsafe(no_mangle)]
+pub extern "C" fn eqs_results_len() -> usize {
+    eqs::results_len()
+}
+
+/// Finds up to 32 scored cover positions within `radius` cells of `(ox, oy, oz)` occluded from
+/// threat `(tx, ty, tz)`. Returns the number of results written to `eqs_results_ptr()`.
+#[unsafe(no_mangle)]
+pub extern "C" fn eqs_find_cover(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    tx: f32,
+    ty: f32,
+    tz: f32,
+    radius: f32,
+) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.sync_edits(&bodies.ground);
+        eqs::query_cover(&mut i.nav.cache, &mut bodies.ground, ox, oy, oz, tx, ty, tz, radius)
+    })
+}
+
+/// Finds up to 32 scored rain-shelter positions within `radius` cells of `(ox, oy, oz)` with a
+/// solid overhead roof/awning `18..=60` cells above the floor. Returns result count at `eqs_results_ptr()`.
+#[unsafe(no_mangle)]
+pub extern "C" fn eqs_find_shelter(ox: f32, oy: f32, oz: f32, radius: f32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.sync_edits(&bodies.ground);
+        eqs::query_shelter(&mut i.nav.cache, &mut bodies.ground, ox, oy, oz, radius)
+    })
+}
+
+/// Finds up to 32 scored vantage positions within `[min_range, max_range]` cells of `(tx, ty, tz)`
+/// with clear eye-to-head/chest LOS. Returns result count at `eqs_results_ptr()`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn eqs_find_vantage(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    tx: f32,
+    ty: f32,
+    tz: f32,
+    min_range: f32,
+    max_range: f32,
+) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.sync_edits(&bodies.ground);
+        eqs::query_vantage(
+            &mut i.nav.cache,
+            &mut bodies.ground,
+            ox,
+            oy,
+            oz,
+            tx,
+            ty,
+            tz,
+            min_range,
+            max_range,
+        )
+    })
+}
+
+/// Fast 3D Amanatides-Woo DDA voxel line-of-sight check between `(ax, ay, az)` and `(bx, by, bz)`.
+/// Treats air (`0`), water (`5`), and glass (`11`) as transparent (`kind & 15`). Returns `1` if clear, `0` if blocked.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_los(ax: f32, ay: f32, az: f32, bx: f32, by: f32, bz: f32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| {
+        perception::has_los(&mut moving(i).ground, [ax, ay, az], [bx, by, bz]) as i32
+    })
+}
+
+/// Acoustic attenuation (`0.0..=1.0` remaining salience) from `(ax, ay, az)` to `(bx, by, bz)`
+/// within `max_radius` cells, combining `(1 - d/R)^1.5` falloff and per-material voxel absorption.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_acoustic_attenuation(
+    ax: f32,
+    ay: f32,
+    az: f32,
+    bx: f32,
+    by: f32,
+    bz: f32,
+    max_radius: f32,
+) -> f32 {
+    INSTANCE.with_borrow_mut(|i| {
+        perception::acoustic_attenuation(&mut moving(i).ground, [ax, ay, az], [bx, by, bz], max_radius)
+    })
+}
+
+/// Resets the batch spatial vision SoA agent slots and pair output buffer.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_reset() {
+    perception::vision_reset();
+}
+
+/// Maximum number of agents supported by batch spatial vision (`256`).
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_capacity() -> usize {
+    perception::VISION_MAX_AGENTS
+}
+
+/// Pointer to the contiguous SoA batch vision input buffer (`6 * 256` f32s: `x, y, z, yaw, lod_ring, flags`).
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_agents_ptr() -> *mut f32 {
+    perception::vision_agents_ptr()
+}
+
+/// Writes one agent slot in the batch spatial vision SoA buffer.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_set_agent(
+    idx: usize,
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+    lod_ring: f32,
+    flags: u32,
+) {
+    perception::vision_set_agent(idx, x, y, z, yaw, lod_ring, flags);
+}
+
+/// Executes one batch spatial vision pass over `0..count.min(256)` agents within `range` cells.
+/// Writes directed `(observer_idx, target_idx)` `u32` pairs to `perception_vision_pairs_ptr()` and returns pair count.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_step(count: usize, range: f32) -> usize {
+    INSTANCE.with_borrow_mut(|i| perception::vision_step(&mut moving(i).ground, count, range))
+}
+
+/// Pointer to the `[obs_0, tgt_0, ...]` `u32` pair buffer produced by the last `perception_vision_step`.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_pairs_ptr() -> *const u32 {
+    perception::vision_pairs_ptr()
+}
+
+/// Number of directed visibility pairs produced by the last `perception_vision_step`.
+#[unsafe(no_mangle)]
+pub extern "C" fn perception_vision_pairs_len() -> usize {
+    perception::vision_pairs_len()
 }
 
 #[cfg(test)]
