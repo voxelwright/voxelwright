@@ -5,8 +5,9 @@ import { shader, type Gpu, type Offscreen, GLOWS_OVER } from '../probe/gpu.ts'
 
 /** Diagnostic tonemap override: `?tonemap=aces` selects Narkowicz ACES; default is AgX. */
 const TONEMAP_ACES = typeof location !== 'undefined' && new URLSearchParams(location.search).get('tonemap') === 'aces'
-/** Base scene exposure before AgX/ACES tonemapping (calibrated to AgX Punchy for sunlit midtones and night depth). */
-const BASE_EXPOSURE = 0.60
+/** Base scene exposure before AgX tonemapping: lifts sunlit daytime whites above 1.0 while keeping dusk/night depth. */
+const DAY_EXPOSURE = 1.14
+const NIGHT_EXPOSURE = 0.64
 
 const codeOf = (useF16: boolean) => /* wgsl */ `${useF16 ? 'enable f16;\n' : ''}
 @group(0) @binding(0) var picture: texture_2d<f32>;
@@ -50,17 +51,18 @@ fn softBloom(c: vec3f, threshold: f32, knee: f32) -> vec3f {
   let lo = u.step * 0.5;
   let hi = max(lo, u.uvClamp);
   let exposure = u.extra.y;
-  let threshold = mix(${GLOWS_OVER.toFixed(2)} * 1.35, 0.95, u.strength);
+  let nightMask = min(u.strength * 1.45, 1.0);
+  let threshold = mix(${GLOWS_OVER.toFixed(2)} * 2.35, 1.10, nightMask);
   let knee = 0.35;
   var sum = vec3f(0.0);
   var wSum = 0.0;
   for (var k = 0; k < 4; k++) {
     let suv = clamp(base + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, lo, hi);
     let raw = max(textureSampleLevel(picture, smooth_, suv, 0.0).rgb, vec3f(0.0));
-    let exposed = min(raw * exposure, vec3f(12.0));
+    let exposed = min(raw * exposure, vec3f(20.0));
     let rawBloom = softBloom(exposed, threshold, knee);
-    let b = rawBloom / (1.0 + luma(rawBloom) * 0.35);
-    let w = 1.0 / (1.0 + luma(b));
+    let b = rawBloom / (1.0 + luma(rawBloom) * 0.05);
+    let w = 1.0 / (1.0 + luma(b) * 0.08);
     sum += b * w;
     wSum += w;
   }
@@ -135,10 +137,10 @@ fn agxDefaultContrastApprox(x: vec3f) -> vec3f {
     - 0.00232;
 }
 fn agxLook(val: vec3f) -> vec3f {
-  // AgX Punchy CDL look (power 1.32, saturation 1.30): crisp daylight contrast, deep night shadows, and rich colour without highlight hue skew.
-  let v = pow(max(val, vec3f(0.0)), vec3f(1.32));
+  // AgX Punchy CDL look (power 1.34, saturation 1.23): crisp sunlit contrast, airy sky hue, and deep night shadows without highlight hue skew.
+  let v = pow(max(val, vec3f(0.0)), vec3f(1.34));
   let l = luma(v);
-  return vec3f(l) + 1.30 * (v - vec3f(l));
+  return vec3f(l) + 1.23 * (v - vec3f(l));
 }
 fn tonemapAgX(color: vec3f) -> vec3f {
   let minEv = -12.47393;
@@ -286,7 +288,7 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     stepX: number, stepY: number, strength: number, pad: number,
     tr: number, tg: number, tb: number, ta: number,
     uvMaxX: number, uvMaxY: number, uvClampX: number, uvClampY: number,
-    spreadMaxX = 1, spreadMaxY = 1, extraX = 0, extraY = BASE_EXPOSURE,
+    spreadMaxX = 1, spreadMaxY = 1, extraX = 0, extraY = DAY_EXPOSURE,
   ) => {
     scratch[0] = stepX; scratch[1] = stepY; scratch[2] = strength; scratch[3] = pad
     scratch[4] = tr; scratch[5] = tg; scratch[6] = tb; scratch[7] = ta
@@ -370,8 +372,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     const qStepX = 1 / k.quarter[0], qStepY = 1 / k.quarter[1]
     const qActive: readonly [number, number] = [qW, qH]
 
-    const exposure = TONEMAP_ACES ? 0.43 : BASE_EXPOSURE
-    const bloomGain = 0.68 + night * 0.72
+    const dayCurve = Math.pow(Math.max(0, 1 - night), 1.8)
+    const exposure = TONEMAP_ACES ? 0.43 : NIGHT_EXPOSURE + (DAY_EXPOSURE - NIGHT_EXPOSURE) * dayCurve
+    const nightBloom = Math.min(1, night * 1.45)
+    const bloomGain = 0.42 + nightBloom * 1.45
 
     // 0: bright extraction (Karis average) from active HDR scene sub-rect -> quarter[0]
     writeU(0, srcStepX, srcStepY, night, 0, 1, 1, 1, 1, srcUvX, srcUvY, Math.max(srcStepX * 0.5, srcUvX - srcStepX * 0.5), Math.max(srcStepY * 0.5, srcUvY - srcStepY * 0.5), 1, 1, 0, exposure)
@@ -395,7 +399,7 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
       writeU(4, qStepX, qStepY, 0, 0, 1, 1, 1, 1, qUvX, qUvY, Math.max(qStepX * 0.5, qUvX - qStepX * 0.5), Math.max(qStepY * 0.5, qUvY - qStepY * 0.5))
       writeU(5, sStepX, 0, 0, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
       writeU(6, 0, sStepY, 0, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
-      writeU(7, 0, 0, 0.50, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
+      writeU(7, 0, 0, 0.85, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
       pass(encoder, down, k.binds[4], k.views[2], false, sActive)
       pass(encoder, blur, k.binds[5], k.views[3], false, sActive)
       pass(encoder, blur, k.binds[6], k.views[2], false, sActive)

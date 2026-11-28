@@ -419,6 +419,8 @@ export async function eggSky(device: GPUDevice, format: GPUTextureFormat, march:
       device.queue.writeBuffer(uniforms, 0, uniformData)
 
       const pass = encoder.beginRenderPass({ label: 'egg-sky', colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }] })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setBindGroup(0, held.bind)
       pass.setPipeline(fogPipeline)
       pass.draw(3)

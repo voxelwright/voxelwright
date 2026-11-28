@@ -96,7 +96,7 @@ fn landmarkLamp(p: vec3f) -> vec3f {
     let h = g.beacon[i];
     if (h.colour.a <= 0.0) { break; }
     let q = (p - h.at.xyz) * 0.1;
-    if (h.more.x > 0.0 && q.y > h.span.y - h.more.x && q.y <= h.span.y + 1.0 && length(q.xz) < h.span.z * 1.45 + 3.0) { return h.colour.rgb * 4.0; }
+    if (h.more.x > 0.0 && q.y > h.span.y - h.more.x && q.y <= h.span.y + 1.0 && length(q.xz) < h.span.z * 1.45 + 3.0) { return h.colour.rgb * 7.5; }
   }
   return vec3f(0.0);
 }
@@ -1307,7 +1307,7 @@ fn sky(rd: vec3f) -> vec3f {
       var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
       // Lit by whatever lights the day: gold and rose under a low sun, on the side towards it most; dark at night.
       if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward); }
-      col = mix(col, body * 1.25, cover * 0.92);
+      col = mix(col, body * mix(1.25, 1.85, g.day), cover * 0.92);
     }
   }
   return col;
@@ -1683,7 +1683,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     // A street lamp's own light is far brighter than anything it falls on: the last pass spreads it into a glow. (Not
     // the boards' lamps on arms while their light is off, boards.ts \`dark\`: the lamps in the box they keep.)
     let boardsOff = looks.letters[1].w < 0.0 && looks.keep1.w > 0.0 && all(p >= looks.keep0.xyz) && all(p <= looks.keep1.xyz);
-    if (stuff == 15u && !sign && !boardsOff) { col += vec3f(1.0, 0.76, 0.46) * 4.6 * dark; }
+    if (stuff == 15u && !sign && !boardsOff) { col += vec3f(1.0, 0.85, 0.60) * 10.5 * dark; }
     let fine = hit.cell * i32(1u << hit.level);
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,

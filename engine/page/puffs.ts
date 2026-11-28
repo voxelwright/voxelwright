@@ -185,11 +185,11 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   let sunTint = vec3f(1.35, 1.25, 1.08) * (sunFace * 0.85 + rim * 0.28);
   let lightCol = (shadowTint + sunTint) * mix(0.04, 1.0, u.day);
   // Keep non-emissive smoke below bloom threshold so bright steam never blooms into a glowing orb.
-  let smoke = min(baseCol * lightCol, vec3f(1.55));
+  let smoke = min(baseCol * lightCol, vec3f(1.65));
   // Fire in linear HDR: deep red-orange skirts climbing into incandescent gold-white cores that bloom smoothly under AgX.
   let core = body * body;
   let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
-  let warm = mix(mix(vec3f(2.2, 0.09, 0.004), vec3f(5.8, 1.15, 0.03), smoothstep(0.06, 0.38, hot)), vec3f(10.5, 5.8, 1.1), smoothstep(0.42, 0.92, hot));
+  let warm = mix(mix(vec3f(1.6, 0.055, 0.002), vec3f(4.6, 0.85, 0.02), smoothstep(0.06, 0.38, hot)), vec3f(9.2, 4.9, 0.85), smoothstep(0.42, 0.92, hot));
   let coolFlame = mix(mix(vec3f(0.06, 0.45, 4.2), vec3f(0.55, 2.6, 7.2), smoothstep(0.06, 0.36, hot)), vec3f(7.0, 8.8, 10.5), smoothstep(0.42, 0.92, hot));
   let isBlue = step(0.5, in.colour.b - in.colour.r) * step(in.colour.a, 0.05);
   let flame = mix(warm, coolFlame, isBlue);
