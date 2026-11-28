@@ -1115,7 +1115,31 @@ fn cs_trace_gi(@builtin(global_invocation_id) gid: vec3u) {
   let skyGround = params.skyGroundPad.xyz;
 
   // Offset cleanly into the adjacent air voxel along the surface normal to avoid self-intersection.
-  let startPos = worldPos + n * (vox0 * 0.52);
+  // When fine L0 geometry sits recessed inside a coarse 80 cm Cascade-0 voxel, step along +n (never
+  // backward through a wall) up to 1.55 voxels until landing in air so recessed facades never self-occlude
+  // while sealed rooms (whose inward +n is already air at 0.52) keep zero light leak.
+  var startPos = worldPos + n * (vox0 * 0.52);
+  let orig0 = params.cascadeOrigins[0];
+  if (orig0.w != 0) {
+    let dimI = vec3i(dimU);
+    for (var esc = 0u; esc < 2u; esc++) {
+      let v0 = vec3i(floor(startPos / vox0));
+      let rel0 = v0 - orig0.xyz;
+      if (any(rel0 < vec3i(1)) || any(rel0 >= dimI - vec3i(1))) { break; }
+      let tc0 = toroidalCoord(v0, dimU);
+      if (loadCascadeMip(0u, vec3i(tc0), 0).a < 0.5) { break; }
+      let candPos = worldPos + n * (vox0 * select(1.55, 1.05, esc == 0u));
+      let vCand = vec3i(floor(candPos / vox0));
+      let relCand = vCand - orig0.xyz;
+      if (any(relCand < vec3i(1)) || any(relCand >= dimI - vec3i(1))) { break; }
+      let tcCand = toroidalCoord(vCand, dimU);
+      if (loadCascadeMip(0u, vec3i(tcCand), 0).a < 0.5) {
+        startPos = candPos;
+        break;
+      }
+      startPos = candPos;
+    }
+  }
   let basis = makeBasis(n);
 
   if (mode == 1u) {
@@ -1542,17 +1566,6 @@ const ATROUS_UBO_BYTES = 48
 const FACE_WORDS_PER_VOXEL = 9
 const ATROUS_STEPS = [1, 2, 4] as const
 
-const SCREEN_TEX_USAGE =
-  GPUTextureUsage.TEXTURE_BINDING |
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.COPY_SRC
-
-const CASCADE_TEX_USAGE =
-  GPUTextureUsage.TEXTURE_BINDING |
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.COPY_SRC |
-  GPUTextureUsage.COPY_DST
-
 function isPow2(n: number): boolean {
   return Number.isInteger(n) && n >= 8 && (n & (n - 1)) === 0
 }
@@ -1581,6 +1594,15 @@ export async function createVoxelGI(
   device: GPUDevice,
   options: VoxelGIOptions = {},
 ): Promise<VoxelGIPass> {
+  const SCREEN_TEX_USAGE =
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.COPY_SRC
+  const CASCADE_TEX_USAGE =
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.COPY_SRC |
+    GPUTextureUsage.COPY_DST
   const cascadeSize: readonly [number, number, number] = options.cascadeSize ?? GI_DEFAULT_CASCADE_SIZE
   const cascadeVoxelCells: readonly [number, number, number] = options.cascadeVoxelCells ?? GI_DEFAULT_VOXEL_CELLS
   if (!isPow2(cascadeSize[0]) || !isPow2(cascadeSize[1]) || !isPow2(cascadeSize[2])) {
@@ -2199,12 +2221,12 @@ export async function createVoxelGI(
       const gy0 = (dimY + 3) >> 2
       const gz0 = (dimZ + 3) >> 2
 
-      const injectStartTs = timing?.all
+      const injectStartTs = timing?.all?.beginningOfPassWriteIndex !== undefined
         ? { querySet: timing.all.querySet, beginningOfPassWriteIndex: timing.all.beginningOfPassWriteIndex }
-        : timing?.inject
+        : timing?.inject?.beginningOfPassWriteIndex !== undefined
           ? { querySet: timing.inject.querySet, beginningOfPassWriteIndex: timing.inject.beginningOfPassWriteIndex }
           : undefined
-      const injectEndTs = timing?.inject
+      const injectEndTs = timing?.inject?.endOfPassWriteIndex !== undefined
         ? { querySet: timing.inject.querySet, endOfPassWriteIndex: timing.inject.endOfPassWriteIndex }
         : undefined
 
@@ -2222,12 +2244,12 @@ export async function createVoxelGI(
       }
 
       // Pass 2: cs_mip_radiance (mip 0->1 and mip 1->2 for all 3 cascades).
-      const mipStartTs = timing?.mip
+      const mipStartTs = timing?.mip?.beginningOfPassWriteIndex !== undefined
         ? { querySet: timing.mip.querySet, beginningOfPassWriteIndex: timing.mip.beginningOfPassWriteIndex }
         : undefined
-      const mipEndTs = timing?.all
+      const mipEndTs = timing?.all?.endOfPassWriteIndex !== undefined
         ? { querySet: timing.all.querySet, endOfPassWriteIndex: timing.all.endOfPassWriteIndex }
-        : timing?.mip
+        : timing?.mip?.endOfPassWriteIndex !== undefined
           ? { querySet: timing.mip.querySet, endOfPassWriteIndex: timing.mip.endOfPassWriteIndex }
           : undefined
 
@@ -2444,9 +2466,9 @@ export async function createVoxelGI(
           if (timing?.atrous) {
             if (atrousCount === 1) {
               ts = timing.atrous
-            } else if (i === 0) {
+            } else if (i === 0 && timing.atrous.beginningOfPassWriteIndex !== undefined) {
               ts = { querySet: timing.atrous.querySet, beginningOfPassWriteIndex: timing.atrous.beginningOfPassWriteIndex }
-            } else if (i === atrousCount - 1) {
+            } else if (i === atrousCount - 1 && timing.atrous.endOfPassWriteIndex !== undefined) {
               ts = { querySet: timing.atrous.querySet, endOfPassWriteIndex: timing.atrous.endOfPassWriteIndex }
             }
           }

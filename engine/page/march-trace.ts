@@ -1099,6 +1099,326 @@ struct VisPreOut {
 }
 
 /**
+ * Generates the shared half-res G-Buffer pass (`vs` + `fs_half_gbuf`) consumed by live Voxel GI
+ * and ReSTIR-DI right after Pass 1 (`cs_vis`) and before Pass 2 (`march-shade.ts`).
+ * Outputs half-res depth (`depth24plus`), world normal + linearZ (`rgba16float`), analytic motion
+ * vectors (`rg16float`, `prevUV - jitUV`), and surface material (`rgba8unorm`: rough, metal, wetSurf, 1).
+ */
+export function halfGbufCode(deps: Pick<TraceCodeDeps, 'GLOBALS' | 'LIT_LETTERS' | 'EDITS'>): string {
+  return /* wgsl */ `
+${deps.GLOBALS}
+${VIS_PACK_WGSL}
+
+struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, metallic: f32 }
+struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f, letters: array<vec4f, ${2 + 2 * deps.LIT_LETTERS}>, edits: array<vec4f, ${2 * deps.EDITS}> }
+struct ShadeExtra {
+  prevViewProj: mat4x4f,
+  info: vec4f,
+  jitter: vec4f,
+  gtaoInfo: vec4f,
+  atmoInfo: vec4f,
+  skySunDir: vec4f,
+  skyOvercast: vec4f,
+  anchorInfo: vec4f,
+  moonshotInfo: vec4f,
+}
+
+@group(0) @binding(0) var<uniform> g: Globals;
+@group(0) @binding(1) var<uniform> looks: Looks;
+@group(1) @binding(0) var<uniform> shadeExtra: ShadeExtra;
+@group(1) @binding(1) var vis0Tex: texture_2d<u32>;
+@group(1) @binding(2) var vis1Tex: texture_2d<f32>;
+
+const NEAR = 1.0;
+const FAR = 100000.0;
+
+struct HalfGbufOut {
+  @location(0) geom: vec4f,
+  @location(1) velocity: vec2f,
+  @location(2) material: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.5, 1.0);
+}
+
+@fragment fn fs_half_gbuf(@builtin(position) at: vec4f) -> HalfGbufOut {
+  let hpx = vec2i(at.xy);
+  let maxFull = max(vec2i(g.res) - vec2i(1), vec2i(0));
+  let fpx = clamp(hpx * 2, vec2i(0), maxFull);
+  let v1 = textureLoad(vis1Tex, fpx, 0);
+  if (v1.x < 0.0) {
+    return HalfGbufOut(vec4f(0.0), vec2f(0.0), vec4f(0.9, 0.0, 0.0, 0.0), 1.0);
+  }
+  let jitUV = (vec2f(fpx) + vec2f(0.5) + shadeExtra.jitter.xy) / g.res;
+  let uv = jitUV * 2.0 - 1.0;
+  let rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
+  let linZ = max(v1.x * dot(rd, g.forward), NEAR);
+  let d = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / linZ), 0.0, 1.0);
+
+  let v0 = textureLoad(vis0Tex, fpx, 0);
+  let kind = v0.w & 0xffffu;
+  let stuff = kind & 15u;
+  let ci = (kind >> 8u) & 255u;
+  var n = unpackFace((v0.w >> 20u) & 7u);
+  if (dot(n, n) < 0.5) { n = -rd; }
+  if (abs(n.y) < 0.5) {
+    if (stuff == 1u || stuff == 3u || stuff == 4u || stuff == 6u) {
+      n = vec3f(0.0, 1.0, 0.0);
+    } else if (stuff == 7u && fpx.y > 0) {
+      let above = textureLoad(vis0Tex, vec2i(fpx.x, fpx.y - 1), 0);
+      if (((above.w >> 20u) & 7u) == 3u && above.y == v0.y) {
+        n = vec3f(0.0, 1.0, 0.0);
+      }
+    }
+  }
+
+  var vel = vec2f(0.0);
+  if (shadeExtra.info.x >= 0.5) {
+    let prevClip = shadeExtra.prevViewProj * vec4f(g.eye + rd * v1.x, 1.0);
+    if (prevClip.w <= 1e-4) {
+      vel = vec2f(2.0, 2.0);
+    } else {
+      let prevNdc = prevClip.xy / prevClip.w;
+      let prevUV = vec2f(prevNdc.x * 0.5 + 0.5, 0.5 - prevNdc.y * 0.5);
+      vel = prevUV - jitUV;
+    }
+  }
+
+  let m = looks.material[stuff];
+  let surfRough = select(m.rough, min(m.rough, 0.22), (kind & 128u) != 0u);
+  let surfMet = select(m.metallic, max(m.metallic, 0.65), stuff == 12u && (((kind & 128u) != 0u) || ci == 0u));
+  let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
+  return HalfGbufOut(vec4f(n, min(linZ, 65000.0)), vel, vec4f(surfRough, surfMet, wetSurf, 1.0), d);
+}
+`
+}
+
+/**
+ * Generates Voxelwright's real 64-tree voxel occlusion snippet for `restir.ts`'s `occlusionWgsl` hook.
+ * Binds `march.ts`'s `beamLayout0` (`@group(1)`: `g`, `pool`, `top`) and traces a bounded 64-tree DDA
+ * shadow ray (`traceShadowRay(origin, dir, maxDist) -> f32`) skipping glass (11) and lamp housings (15)
+ * while blocking light cleanly on buildings, walls, and solid terrain.
+ */
+export function restirOcclusionWgsl(world: World, deps: Pick<TraceCodeDeps, 'GLOBALS'>): string {
+  return /* wgsl */ `
+${deps.GLOBALS}
+
+@group(1) @binding(0) var<uniform> g: Globals;
+@group(1) @binding(1) var<storage, read> pool: array<u32>;
+@group(1) @binding(2) var<storage, read> top: array<u32>;
+
+${treeCommonWgsl(world)}
+
+fn traceShadowRay(ro: vec3f, rdIn: vec3f, maxDist: f32) -> f32 {
+  if (maxDist <= 0.5) { return 1.0; }
+  let rd = select(rdIn, vec3f(0.00001), abs(rdIn) < vec3f(0.00001));
+  let inv = 1.0 / rd;
+  let ahead = max(sign(rd), vec3f(0.0));
+  let toward = vec3i(sign(rd));
+  var t = 0.0;
+  var L = 0u;
+  var have = 0u;
+  var held = vec3i(0);
+  var supAt = 0xffffffffu;
+  var supLo = 0u; var supHi = 0u;
+  var entry = 0u; var rootLo = 0u; var rootHi = 0u; var rootChild = 0u;
+  var midLo = 0u; var midHi = 0u; var midChild = 0u;
+  var leafLo = 0u; var leafHi = 0u; var leafChild = 0u;
+  var lv: Level;
+  var q0 = vec3f(0.0);
+  var k = vec3f(0.0);
+  var eps = 0.0;
+  var leaveAt = 0.0;
+  var last = vec3i(0);
+  var fresh = true;
+
+  let maxL = min(g.levels, 3u);
+  for (var i = 0u; i < 32u; i++) {
+    if (t >= maxDist) { return 1.0; }
+    if (fresh) {
+      if (L >= maxL) { return 1.0; }
+      lv = g.level[L];
+      q0 = (ro - lv.boxMin) * lv.scale;
+      k = inv / lv.scale;
+      eps = 0.004 / lv.scale;
+      last = vec3i(lv.boxSize) - 1;
+      let a = -q0 * k;
+      let b = (lv.boxSize - q0) * k;
+      let nearT = min(a, b);
+      let farT = max(a, b);
+      let comeAt = max(nearT.x, max(nearT.y, nearT.z));
+      leaveAt = min(min(farT.x, min(farT.y, farT.z)), maxDist);
+      if (rd.y > 0.0) { leaveAt = min(leaveAt, (lv.roof - ro.y) * inv.y); }
+      have = 0u;
+      supAt = 0xffffffffu;
+      fresh = false;
+      if (comeAt > t || leaveAt <= t) { L += 1u; fresh = true; continue; }
+      if (rd.y < 0.0 && ro.y + rd.y * t > lv.roof) { t = min((lv.roof - ro.y) * inv.y, leaveAt) + eps; }
+    }
+    if (t >= leaveAt) {
+      if (leaveAt >= maxDist - eps) { return 1.0; }
+      L += 1u;
+      fresh = true;
+      continue;
+    }
+    let q = q0 + rd * (t * lv.scale);
+    let c = clamp(vec3i(floor(q)), vec3i(0), last);
+    let moved = c ^ held;
+    let apart = u32(moved.x | moved.y | moved.z);
+    if (apart >= 64u) { have = 0u; } else if (apart >= 16u) { have = min(have, 1u); } else if (apart >= 4u) { have = min(have, 2u); }
+    held = c;
+    var size = 0;
+    var low = c;
+    var kind = 0u;
+    var skip = -1.0;
+
+    if (have == 0u) {
+      let kSec = c >> vec3u(6u);
+      let w = (vec3u(kSec) + lv.wrap) & (GRID - 1u);
+      let base = L * STRIDE;
+      let sup = w >> vec3u(2u);
+      let roofTop = f32(bitcast<i32>(top[base + ROOFS + w.x + GRID.x * w.z]) - lv.cells.y);
+      if (q.y > roofTop) {
+        let o = ((vec2f(kSec.xz * 64) + ahead.xz * 64.0) - q0.xz) * k.xz;
+        let leave = min(o.x, o.y);
+        if (q0.y + rd.y * (leave * lv.scale) > roofTop) {
+          t = min(max(leave, t), leaveAt) + eps;
+          continue;
+        }
+        let down = (roofTop - q0.y) * k.y;
+        if (down > t) { t = min(down, leaveAt) + eps; continue; }
+      }
+      let at = base + SLOTS + 2u * (sup.x + (GRID.x >> 2u) * (sup.z + (GRID.z >> 2u) * sup.y));
+      if (at != supAt) { supAt = at; supLo = top[at]; supHi = top[at + 1u]; }
+      if ((supLo | supHi) == 0u) {
+        size = 256;
+        low = (kSec - vec3i(w & vec3u(3u))) * 64;
+      } else if (!has(supLo, supHi, (w.x & 3u) + 4u * (w.z & 3u) + 16u * (w.y & 3u))) {
+        size = 64;
+        low = kSec * 64;
+      } else {
+        entry = top[base + w.x + GRID.x * (w.z + GRID.z * w.y)];
+        if ((entry & UNIFORM) != 0u) {
+          kind = entry & 0xffffu;
+          size = 64;
+          low = kSec * 64;
+        } else {
+          let info = pool[entry + 3u];
+          let child = pool[entry + 2u];
+          let m = meet(vec3f(kSec * 64 + vec3i((vec3u(info) >> vec3u(16u, 20u, 24u)) & vec3u(15u)) * 4), vec3f(kSec * 64 + vec3i(((vec3u(child) >> vec3u(20u, 24u, 28u)) & vec3u(15u)) + 1u) * 4), q0, k);
+          let enter = max(m.near.x, max(m.near.y, m.near.z));
+          if (m.leave <= max(enter, t)) {
+            size = 64;
+            low = kSec * 64;
+          } else {
+            rootLo = pool[entry]; rootHi = pool[entry + 1u]; rootChild = entry + (child & 0xfffffu);
+            have = 1u;
+            if (enter > t) { skip = enter; }
+          }
+        }
+      }
+    }
+    if (have == 1u && skip < 0.0 && size == 0) {
+      let kMid = c >> vec3u(4u);
+      let cc = vec3u(kMid) & vec3u(3u);
+      let bit = cc.x + 4u * cc.z + 16u * cc.y;
+      if (!has(rootLo, rootHi, bit)) {
+        size = 16;
+        low = kMid * 16;
+      } else {
+        let node = rootChild + 4u * before(rootLo, rootHi, bit);
+        let info = pool[node + 3u];
+        let child = pool[node + 2u];
+        let m = meet(vec3f(kMid * 16 + vec3i((vec3u(info) >> vec3u(16u, 20u, 24u)) & vec3u(15u))), vec3f(kMid * 16 + vec3i(((vec3u(child) >> vec3u(20u, 24u, 28u)) & vec3u(15u)) + 1u)), q0, k);
+        let enter = max(m.near.x, max(m.near.y, m.near.z));
+        if (m.leave <= max(enter, t)) {
+          size = 16;
+          low = kMid * 16;
+        } else if ((info & UNIFORM) != 0u) {
+          kind = info & 0xffffu;
+          size = 16;
+          low = kMid * 16;
+        } else {
+          midLo = pool[node]; midHi = pool[node + 1u]; midChild = entry + (child & 0xfffffu);
+          have = 2u;
+          if (enter > t) { skip = enter; }
+        }
+      }
+    }
+    if (have == 2u && skip < 0.0 && size == 0 && kind == 0u) {
+      let kLeaf = c >> vec3u(2u);
+      let cc = vec3u(kLeaf) & vec3u(3u);
+      let bit = cc.x + 4u * cc.z + 16u * cc.y;
+      if (!has(midLo, midHi, bit)) {
+        size = 4;
+        low = kLeaf * 4;
+      } else {
+        let node = midChild + 4u * before(midLo, midHi, bit);
+        let info = pool[node + 3u];
+        let m = meet(vec3f(kLeaf * 4 + vec3i((vec3u(info) >> vec3u(16u, 18u, 20u)) & vec3u(3u))), vec3f(kLeaf * 4 + vec3i(((vec3u(info) >> vec3u(22u, 24u, 26u)) & vec3u(3u)) + 1u)), q0, k);
+        let enter = max(m.near.x, max(m.near.y, m.near.z));
+        if (m.leave <= max(enter, t)) {
+          size = 4;
+          low = kLeaf * 4;
+        } else if ((info & UNIFORM) != 0u) {
+          kind = info & 0xffffu;
+          size = 4;
+          low = kLeaf * 4;
+        } else {
+          leafLo = pool[node]; leafHi = pool[node + 1u]; leafChild = entry + pool[node + 2u];
+          have = 3u;
+          if (enter > t) { skip = enter; }
+        }
+      }
+    }
+    if (skip >= 0.0) {
+      t = skip + eps;
+      continue;
+    }
+    if (have == 3u && size == 0 && kind == 0u) {
+      var cell = c;
+      let leaf = c >> vec3u(2u);
+      var side = ((vec3f(cell) + ahead) - q0) * k;
+      let each = abs(k);
+      loop {
+        if (t >= maxDist) { return 1.0; }
+        let cc = vec3u(cell) & vec3u(3u);
+        let bit = cc.x + 4u * cc.z + 16u * cc.y;
+        if (has(leafLo, leafHi, bit)) {
+          let nth = before(leafLo, leafHi, bit);
+          let kCell = (pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu;
+          let st = kCell & 15u;
+          if (st != 0u && st != 11u && st != 15u) { return 0.0; }
+        }
+        if (side.x <= side.y && side.x <= side.z) {
+          t = side.x; side.x += each.x; cell.x += toward.x;
+        } else if (side.y <= side.z) {
+          t = side.y; side.y += each.y; cell.y += toward.y;
+        } else {
+          t = side.z; side.z += each.z; cell.z += toward.z;
+        }
+        if (any((cell >> vec3u(2u)) != leaf)) { break; }
+      }
+      t += eps;
+      continue;
+    }
+    if (kind != 0u) {
+      let st = kind & 15u;
+      if (st != 11u && st != 15u) { return 0.0; }
+    }
+    let out = ((vec3f(low) + ahead * f32(size)) - q0) * k;
+    let next = min(out.x, min(out.y, out.z));
+    t = min(max(next, t), leaveAt) + eps;
+  }
+  return 1.0;
+}
+`
+}
+
+/**
  * Generates the post-overlay velocity patch pass (`vs` + `fs_patch_vel`) that runs right before
  * `taa.resolve()` when TAA is active:
  *   - Any dynamic overlay pixel written to `to.depth` in front of static world (`march` + `far`)

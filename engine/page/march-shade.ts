@@ -66,6 +66,8 @@ struct ShadeExtra {
   skyOvercast: vec4f,
   // xyz: world anchor in cells (floor(eye / SIDE) * SIDE), w: pad
   anchorInfo: vec4f,
+  // xy: half-res G-Buffer dims (halfW, halfH), z: giGain (0 when off), w: restirOn (1 when active)
+  moonshotInfo: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -81,6 +83,9 @@ ${LOCAL_LIGHTS_STRUCT}
 @group(1) @binding(1) var vis1Tex: texture_2d<f32>;
 @group(1) @binding(2) var<uniform> shadeExtra: ShadeExtra;
 @group(1) @binding(3) var gtaoTex: texture_2d<f32>;
+@group(1) @binding(4) var giTex: texture_2d<f32>;
+@group(1) @binding(5) var restirTex: texture_2d<f32>;
+@group(1) @binding(6) var halfGeomTex: texture_2d<f32>;
 ${CLUSTER_LIGHTS_WGSL}
 ${clusterLightsBindings(2, 0)}
 ${DYNAMIC_SHADOW_WGSL}
@@ -95,6 +100,8 @@ override UNDERWATER: bool = false;
 override LOCAL_OCCLUDE: bool = false;
 override USE_GTAO: bool = false;
 override USE_CLUSTER_LIGHTS: bool = false;
+override USE_GI: bool = false;
+override USE_RESTIR: bool = false;
 
 const INDOORS = 0.45;
 const NEAR = 1.0;
@@ -393,6 +400,52 @@ fn sampleGtao(px: vec2i, linearZ: f32) -> f32 {
   let wSum = w00 + w10 + w01 + w11;
   if (wSum <= 1e-5) { return clamp(t00.r, 0.0, 1.0); }
   return clamp((t00.r * w00 + t10.r * w10 + t01.r * w01 + t11.r * w11) / wSum, 0.0, 1.0);
+}
+
+// 4-tap depth + normal bilateral upsample from half-res GI / ReSTIR-DI targets using halfGeomTex (normal.xyz, linearZ.w).
+fn sampleHalfBilateral(tex: texture_2d<f32>, px: vec2i, n: vec3f, linearZ: f32) -> vec4f {
+  let hDim = vec2i(shadeExtra.moonshotInfo.xy);
+  let maxH = max(hDim - vec2i(1), vec2i(0));
+  let f = vec2f(px) * 0.5;
+  let b0 = clamp(vec2i(floor(f)), vec2i(0), maxH);
+  let b1 = min(b0 + vec2i(1), maxH);
+  let frac = clamp(f - vec2f(b0), vec2f(0.0), vec2f(1.0));
+  let c00 = b0;
+  let c10 = vec2i(b1.x, b0.y);
+  let c01 = vec2i(b0.x, b1.y);
+  let c11 = b1;
+  let g00 = textureLoad(halfGeomTex, c00, 0);
+  let g10 = textureLoad(halfGeomTex, c10, 0);
+  let g01 = textureLoad(halfGeomTex, c01, 0);
+  let g11 = textureLoad(halfGeomTex, c11, 0);
+  let invSig = 1.0 / max(linearZ * 0.08, 1.0);
+  let n00 = pow(max(dot(g00.xyz, n), 0.0), 6.0);
+  let n10 = pow(max(dot(g10.xyz, n), 0.0), 6.0);
+  let n01 = pow(max(dot(g01.xyz, n), 0.0), 6.0);
+  let n11 = pow(max(dot(g11.xyz, n), 0.0), 6.0);
+  let w00 = select(0.0, (1.0 - frac.x) * (1.0 - frac.y) * exp(-abs(g00.w - linearZ) * invSig) * n00, g00.w > 0.0);
+  let w10 = select(0.0, frac.x * (1.0 - frac.y) * exp(-abs(g10.w - linearZ) * invSig) * n10, g10.w > 0.0);
+  let w01 = select(0.0, (1.0 - frac.x) * frac.y * exp(-abs(g01.w - linearZ) * invSig) * n01, g01.w > 0.0);
+  let w11 = select(0.0, frac.x * frac.y * exp(-abs(g11.w - linearZ) * invSig) * n11, g11.w > 0.0);
+  let wSum = w00 + w10 + w01 + w11;
+  let v00 = textureLoad(tex, c00, 0);
+  let v10 = textureLoad(tex, c10, 0);
+  let v01 = textureLoad(tex, c01, 0);
+  let v11 = textureLoad(tex, c11, 0);
+  if (wSum > 1e-5) {
+    return (v00 * w00 + v10 * w10 + v01 * w01 + v11 * w11) / wSum;
+  }
+  // Fallback to nearest valid-depth half-res tap so silhouettes never pull black sky texels.
+  let d00 = select(1e9, abs(g00.w - linearZ), g00.w > 0.0);
+  let d10 = select(1e9, abs(g10.w - linearZ), g10.w > 0.0);
+  let d01 = select(1e9, abs(g01.w - linearZ), g01.w > 0.0);
+  let d11 = select(1e9, abs(g11.w - linearZ), g11.w > 0.0);
+  var best = v00;
+  var bestD = d00;
+  if (d10 < bestD) { best = v10; bestD = d10; }
+  if (d01 < bestD) { best = v01; bestD = d01; }
+  if (d11 < bestD) { best = v11; }
+  return best;
 }
 
 fn cloud(p: vec2f) -> f32 {
@@ -801,7 +854,19 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv:
   let sign = stuff == 15u && ci != 46u;
   let surfRough = select(m.rough, min(m.rough, 0.22), (hit.kind & 128u) != 0u);
   let surfMet = select(m.metallic, max(m.metallic, 0.65), stuff == 12u && (((hit.kind & 128u) != 0u) || ci == 0u));
+  let linZPrimary = max(hit.t * dot(rd, g.forward), NEAR);
+  if (USE_GI && shadows > 0u && (g.flags & 32u) == 0u && stuff != 5u && stuff != 15u && shadeExtra.moonshotInfo.z > 0.001) {
+    let giMix = 1.0 - smoothstep(3200.0, 3900.0, hit.t);
+    if (giMix > 0.001) {
+      let giRaw = sampleHalfBilateral(giTex, px, n, linZPrimary);
+      let giIrr = max(giRaw.rgb, vec3f(0.0)) * shadeExtra.moonshotInfo.z;
+      giOverride = vec4f(min(giIrr, vec3f(60000.0)), giMix);
+      // Soften GTAO slightly when combined with 80 cm voxel GI so fine contact creases stay crisp without double-darkening corners.
+      ambientAo = mix(ambientAo, mix(vec3f(1.0), ambientAo, 0.72), giMix);
+    }
+  }
   ${useF16 ? 'var col = vec3<f16>(min(max(shadePbrAo(albedo, n, rd, g.sun, direct, directOpen, ambientAo, specAo, surfRough, select(m.glow, 0.0, sign), surfMet), vec3f(0.0)), vec3f(60000.0)));' : 'var col = shadePbrAo(albedo, n, rd, g.sun, direct, directOpen, ambientAo, specAo, surfRough, select(m.glow, 0.0, sign), surfMet);'}
+  giOverride = vec4f(0.0);
   if (NIGHT && g.weather.z > 0.0) {
     let dark = g.weather.z;
     let letters = lettered(p, n, stuff == 15u && ci == 6u);
@@ -879,7 +944,19 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv:
     ${useF16 ? 'col += vec3<f16>(min(max(nightAdd, vec3f(0.0)), vec3f(60000.0)));' : 'col += nightAdd;'}
   }
   if (NIGHT && stuff != 5u) {
-    if (USE_CLUSTER_LIGHTS) {
+    if (USE_RESTIR) {
+      if (shadeExtra.moonshotInfo.w > 0.5 && hit.t < 4000.0) {
+        let rs = sampleHalfBilateral(restirTex, px, n, linZPrimary);
+        let diffIrr = max(rs.rgb, vec3f(0.0));
+        let specLum = max(rs.a, 0.0);
+        let dLuma = dot(diffIrr, vec3f(0.2126, 0.7152, 0.0722));
+        let specTint = select(vec3f(1.0), min(diffIrr / max(dLuma, 1e-4), vec3f(3.0)), dLuma > 1e-4);
+        let rawSum = albedo * diffIrr + specTint * specLum;
+        let peak = max(rawSum.r, max(rawSum.g, rawSum.b));
+        let localAdd = rawSum / (1.0 + max(peak - 0.12, 0.0) * 1.55);
+        ${useF16 ? 'col += vec3<f16>(min(max(localAdd, vec3f(0.0)), vec3f(60000.0)));' : 'col += localAdd;'}
+      }
+    } else if (USE_CLUSTER_LIGHTS) {
       if (clusterParams.counts.x > 0u && hit.t < 4000.0) {
         let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
         let linZ = max(hit.t * dot(rd, g.forward), NEAR);
