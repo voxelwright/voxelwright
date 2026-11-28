@@ -8,6 +8,7 @@
 pub mod bay;
 pub mod heroes;
 pub mod bodies;
+pub mod broadphase;
 pub mod city;
 pub mod fine;
 pub mod fire;
@@ -418,6 +419,8 @@ pub extern "C" fn world_edit(after: i32) {
         let b = moving(i);
         for e in edits {
             // Whatever sleeps where the world has changed is stepped again, and sleeps again if nothing reached it.
+            let (lo, hi) = bodies::reach(&e);
+            b.wake_in_aabb(lo.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
             b.stir_edit(&e);
             b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
