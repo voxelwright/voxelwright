@@ -43,13 +43,19 @@ try {
     await page.keyboard.down('KeyW')
     await page.waitForTimeout(2000)
     const straight = await where()
+    const tel = await page.evaluate(() => ({
+      gear: globalThis.engine.alive.telemetry?.gear ?? 0,
+      kmh: globalThis.engine.alive.telemetry?.kmh ?? 0,
+      feet: globalThis.thing.state?.feet ?? 0,
+      hudGear: document.querySelector('[data-panel="drive-hud"] .dh-gear')?.textContent ?? '',
+    }))
     await shot('driving')
     await page.keyboard.up('KeyW')
-    return { straight }
+    return { straight, tel }
   }
   let took = null, driven
   if (out) { page.screenshot = async () => null; took = await film(page, 4, async () => { driven = await drive() }) } else driven = await drive()
-  const { straight } = driven
+  const { straight, tel } = driven
   if (took && out) {
     const webm = join(out, 'drive.webm'), mp4 = join(out, 'drive.mp4')
     await writeFile(webm, took.webm)
@@ -59,6 +65,7 @@ try {
   }
   const went = Math.hypot(straight.at[0] - parked.at[0], straight.at[2] - parked.at[2])
   check(went > 45 && straight.up > 0.97, `W for two seconds takes it ${(went / 10).toFixed(1)} m up the street, upright`)
+  check(tel.feet >= 2 && tel.gear >= 2 && tel.hudGear === String(tel.gear), `grounded on ${tel.feet} wheels at ${Math.round(tel.kmh)} km/h, the gearbox shifts past 1st (gear ${tel.gear}, HUD "${tel.hudGear}")`)
   // Let go: it stops, and sleeps.
   const asleep = () => page.waitForFunction(() => globalThis.engine.bodies === 0, null, { timeout: 15_000 }).catch(() => {})
   await asleep()

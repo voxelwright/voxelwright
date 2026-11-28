@@ -23,12 +23,12 @@ await step('told: records read as the core writes them, an unknown kind skipped'
   const words = new Uint32Array([
     5, 16, 7, f32(1), f32(2), f32(3), 0, 0, 0, f32(1), 8, f32(4), f32(5), f32(6), 0, 0, 0, f32(1),
     99, 2, 1, 2,
-    11, 12, 7, f32(3), 2, 0, 0, 0, 0, 1, 0, 0, 0, f32(1),
+    11, 12, 7, f32(3), 4, 3, 0, 0, 0, 1, 0, 0, 0, f32(1),
     6, 1, 42,
   ])
   const t = read(words)
   assert.deepEqual(t.moves.map((m) => m.id), [7, 8])
-  assert.deepEqual(t.live.map((l) => [l.id, l.speed, l.aloft]), [[7, 3, true]])
+  assert.deepEqual(t.live.map((l) => [l.id, l.speed, l.feet, l.touches, l.aloft]), [[7, 3, 4, 3, true]])
   assert.deepEqual(t.broke, [42])
 })
 
