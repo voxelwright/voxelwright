@@ -1,11 +1,11 @@
-// Fire, smoke and dust (#151, #166): soft lumps that face the eye, drawn over the picture and
-// tested against its depth. A puff is hot or it is not: hot, it glows and adds its light; as it
-// cools it turns to smoke, which covers what is behind it, swells, rises and thins. When a voxel
-// solidity sampler is attached (`setSolidSampler`), an internal 32^3 Eulerian `SmokeGrid` advects
-// buoyant indoor smoke beneath solid ceilings and vents it through broken openings.
-import { shader, type Target } from '../probe/gpu.ts'
-import type { View } from './march.ts'
-import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
+// Fire, smoke and dust (#151, #166, #165): soft volumetric billows that face the eye, depth-faded
+// smoothly against scene geometry (no hard billboard intersection lines), lit by directional world
+// shadows (sunMap) and dynamic local lights (fires, explosions, street lamps, car headlights).
+// When a voxel solidity sampler is attached (`setSolidSampler`), an internal 32^3 Eulerian
+// `SmokeGrid` advects buoyant indoor smoke beneath solid ceilings and vents it through openings.
+import { FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
+import { GLOBALS, MAX_LEVELS, SUNLIT, type Marcher, type View } from './march.ts'
+import { LIGHT_EXTRA, LIGHTS_BYTES, LOCAL_LIGHTS_STRUCT, localLightsEval, type LocalLightSink } from './lights.ts'
 import { crashOpening } from './crash-opening.ts'
 import type { Piece } from './pieces.ts'
 import { deformPointCpu, type DeformState } from './deform.ts'
@@ -93,17 +93,95 @@ const LASTS = 8, KEPT = 384
 /** Numbers a puff as the GPU is told it: where (finest cells from the anchor) and how big; its colour and how much it covers; how hot, its own number, how far through its life. */
 const EACH = 12
 
+const GLOBALS_BYTES = 144 + MAX_LEVELS * 128 + 192 + 512 + 16
+
 const CODE = /* wgsl */ `
-struct U { eye: vec3f, tanHalf: f32, right: vec3f, aspect: f32, up: vec3f, pad0: f32, forward: vec3f, pad1: f32, sun: vec3f, day: f32 }
+struct U {
+  eye: vec3f, tanHalf: f32,
+  right: vec3f, aspect: f32,
+  up: vec3f, resX: f32,
+  forward: vec3f, resY: f32,
+  sun: vec3f, day: f32,
+  hasWorld: u32, pad0: u32, pad1: u32, pad2: u32,
+}
 @group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var depthTex: texture_depth_2d;
+${GLOBALS}
+${LOCAL_LIGHTS_STRUCT}
+@group(1) @binding(0) var<uniform> g: Globals;
+@group(1) @binding(1) var sunMap: texture_2d_array<f32>;
+@group(1) @binding(2) var<uniform> localLights: LocalLights;
+${SUNLIT}
+${localLightsEval()}
+
+// Procedural town street lamps (matching pieces.ts / march.ts 1280x800 block grid) so town night smoke catches lamp glow.
+fn puffTownLamps(at: vec3f, n: vec3f) -> f32 {
+  let worldXZ = at.xz + vec2f(g.fog.w, g.fogTint.a);
+  let out = (floor(worldXZ / vec2f(1280.0, 800.0)) + 0.5) * vec2f(1280.0, 800.0) - vec2f(700.0, 4070.0);
+  if (dot(out, out) >= 35000.0 * 35000.0) { return 0.0; }
+  let block = worldXZ - floor(worldXZ / vec2f(1280.0, 800.0)) * vec2f(1280.0, 800.0);
+  var pool = 0.0;
+  for (var k = 0; k < 9; k++) {
+    let lamp = array<vec2f, 9>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0), vec2f(369.0, 35.0), vec2f(673.0, 105.0), vec2f(977.0, 35.0), vec2f(35.0, 361.0), vec2f(105.0, 581.0))[k];
+    var to = lamp - block;
+    to -= round(to / vec2f(1280.0, 800.0)) * vec2f(1280.0, 800.0);
+    let line = vec3f(to.x, 60.0, to.y);
+    pool += (0.35 + 0.65 * max(dot(n, normalize(line)), 0.0)) / (1.0 + dot(to, to) / 6400.0);
+  }
+  return min(pool, 1.3);
+}
+
+// Forward-scattering silver-lining & wrap-around glow from nearby local lights (fires, blasts, headlights, lamps).
+fn evalSmokeScatter(p: vec3f, n: vec3f, rd: vec3f, roundZ: f32, body: f32) -> vec3f {
+  if (localLights.info.x == 0u) { return vec3f(0.0); }
+  let masks = localLightMask(p);
+  if ((masks.x | masks.y) == 0u) { return vec3f(0.0); }
+  let rimEdge = pow(1.0 - max(roundZ, 0.0), 1.75) * (0.45 + 0.55 * (1.0 - body * 0.45));
+  var sum = vec3f(0.0);
+  for (var word = 0u; word < 2u; word++) {
+    var mask = select(masks.x, masks.y, word == 1u);
+    let baseIdx = word * 32u;
+    while (mask != 0u) {
+      let bit = countTrailingZeros(mask);
+      mask &= mask - 1u;
+      let l = localLights.items[baseIdx + bit];
+      let toL = l.posRange.xyz - p;
+      let d2 = dot(toL, toL);
+      let norm2 = d2 * l.posRange.w;
+      if (norm2 >= 1.0) { continue; }
+      let invD = inverseSqrt(max(d2, 9.0));
+      let L = toL * invD;
+      var spot = 1.0;
+      if (l.dirCone.w > -1.5) {
+        let cosA = dot(-L, l.dirCone.xyz);
+        if (cosA <= l.dirCone.w) { continue; }
+        let uCone = clamp((cosA - l.dirCone.w) * l.colSpot.w, 0.0, 1.0);
+        let cone = uCone * uCone * (3.0 - 2.0 * uCone);
+        spot = mix(cone, cone * (0.38 + 0.62 * cone * cone), l.shape.y);
+      }
+      let win = 1.0 - norm2 * norm2;
+      let att = (win * win) / (1.0 + d2 * l.shape.x);
+      let rad = l.colSpot.rgb * (att * spot);
+      // Soft spherical wrap illumination + forward-scattering backlit rim through smoke fringes.
+      let wrapNdl = clamp((dot(n, L) + 0.48) / 1.48, 0.0, 1.0);
+      let fwd = pow(max(dot(rd, L), 0.0), 2.5);
+      sum += rad * (wrapNdl * 0.24 + (0.28 + 0.85 * fwd) * rimEdge);
+    }
+  }
+  let peak = max(sum.r, max(sum.g, sum.b));
+  return sum / (1.0 + max(peak - 0.35, 0.0) * 1.1);
+}
+
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) uv: vec2f,
   @location(1) @interpolate(flat) colour: vec4f,
   @location(2) @interpolate(flat) more: vec4f,
+  @location(3) seen: vec3f,
+  @location(4) @interpolate(flat) radius: f32,
 }
-const NEAR = 1.0;
-const FAR = 100000.0;
+const NEAR = ${NEAR.toFixed(1)};
+const FAR = ${FAR.toFixed(1)};
 @vertex fn vs(@builtin(vertex_index) v: u32, @location(0) at: vec4f, @location(1) colour: vec4f, @location(2) more: vec4f) -> Out {
   let corner = vec2f(f32(v & 1u), f32((v >> 1u) & 1u)) * 2.0 - 1.0;
   var world = at.xyz - u.eye + (u.right * corner.x + u.up * corner.y) * at.w;
@@ -117,6 +195,8 @@ const FAR = 100000.0;
   out.uv = corner;
   out.colour = colour;
   out.more = more;
+  out.seen = world;
+  out.radius = at.w;
   return out;
 }
 fn lump(c: vec2i, seed: u32) -> f32 {
@@ -135,6 +215,14 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   return cloud(uv * 2.2 + drift, seed) * 0.62 + cloud(uv * 4.8 + drift * 1.7, seed + 7u) * 0.38;
 }
 @fragment fn fs(in: Out) -> @location(0) vec4f {
+  // Manual scene depth comparison + soft-particle fade (reads to.depth without depth-attachment conflict).
+  let maxCoord = vec2i(max(i32(u.resX) - 1, 0), max(i32(u.resY) - 1, 0));
+  let px = clamp(vec2i(in.pos.xy), vec2i(0), maxCoord);
+  let sceneD = textureLoad(depthTex, px, 0);
+  let sceneLinearZ = select(FAR, NEAR / max(1.0 - sceneD * ((FAR - NEAR) / FAR), 1e-6), sceneD < 1.0);
+  let fragLinearZ = dot(in.seen, u.forward);
+  if (fragLinearZ <= NEAR || fragLinearZ >= sceneLinearZ) { discard; }
+
   let heat = in.more.x;
   let age = in.more.z;
   let seed = u32(in.more.y);
@@ -148,25 +236,31 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
     let main = (1.0 - smoothstep(0.42, 1.0, edge)) * (1.0 - smoothstep(0.85, 1.0, height));
     let forkHeight = 0.68 + 0.09 * sin(phase * 0.76);
     let forkWidth = foot * 0.35 * max(0.0, 1.0 - height / forkHeight);
-    let forkEdge = abs(in.uv.x + foot * (0.34 + 0.13 * sin(phase - height*8.0))) / max(0.005, forkWidth);
-    let tongue = max(main, (1.0 - smoothstep(0.3, 1.0, forkEdge)) * (1.0 - smoothstep(forkHeight-0.16, forkHeight, height)));
+    let forkEdge = abs(in.uv.x + foot * (0.34 + 0.13 * sin(phase - height * 8.0))) / max(0.005, forkWidth);
+    let tongue = max(main, (1.0 - smoothstep(0.3, 1.0, forkEdge)) * (1.0 - smoothstep(forkHeight - 0.16, forkHeight, height)));
     let core = (1.0 - smoothstep(0.04, 0.64, edge)) * (1.0 - smoothstep(0.12, 0.68, height));
     let colour = mix(vec3f(2.6, 0.22, 0.012), vec3f(5.5, 2.4, 0.32), core);
-    return vec4f(colour * tongue, tongue * 0.44);
+    let flameFade = saturate((sceneLinearZ - fragLinearZ) / max(in.radius * 0.45, 0.5));
+    return vec4f(colour * (tongue * flameFade), tongue * 0.44 * flameFade);
   }
-  // A puff is a sculpted curling billow lit with warm sunlight on its sunward folds and cool sky
-  // fill in its shadowed undersides, so smoke reads with 3D volume instead of a flat grey smudge.
+  // A puff is a sculpted curling billow lit with warm sunlight on its sunward folds, world sun-map
+  // shadow reception, cool sky fill in shadowed undersides, and nearby local fire/lamp lights.
   let r = length(in.uv);
   if (r >= 1.0) { discard; }
   let drift = vec2f(f32(seed & 15u), age * 2.4 + f32((seed >> 4u) & 15u));
   let billow = billowAt(in.uv, drift, seed);
   let body = (1.0 - smoothstep(0.42, 0.96, r + (billow - 0.5) * 0.82)) * (1.0 - r * r * r);
   if (body <= 0.004) { discard; }
+  // Soft-particle depth fade proportional to puff radius eliminates hard wall/sidewalk billboard cuts
+  // while capping fadeDist so huge lingering clouds stay visible near walls.
+  let fadeDist = clamp(in.radius * 1.4, 1.2, 18.0);
+  let rawSoft = saturate((sceneLinearZ - fragLinearZ) / fadeDist);
+  let softFade = rawSoft * (2.0 - rawSoft);
+  if (softFade <= 0.002) { discard; }
   // The smoke a blast leaves comes late (more.w): it shows as the ball of fire goes out, not in front of it.
   let fade = smoothstep(in.more.w, in.more.w + 0.06, age) * (1.0 - smoothstep(0.55, 1.0, age));
-  // While it burns it is fire and not smoke: its smoke shows as it cools. Covered by its own smoke from the first, a
-  // ball of fire was a dark smudge with a little orange a third of a second after it went off.
-  let cover = in.colour.a * body * fade * (1.0 - 0.92 * smoothstep(0.05, 0.6, heat));
+  // While it burns it is fire and not smoke: its smoke shows as it cools.
+  let cover = in.colour.a * body * fade * (1.0 - 0.92 * smoothstep(0.05, 0.6, heat)) * softFade;
   // Directional billow self-shadowing: sample slightly toward the sun in screen space so each lobe
   // has a bright sunlit crest and a cool shadowed underside matching the world's daylight.
   let round = vec3f(in.uv.x, in.uv.y, sqrt(max(1.0 - r * r, 0.0)));
@@ -177,15 +271,44 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   let sunFace = clamp(dot(round, towards) * 0.65 + 0.35 + foldRelief * 0.55, 0.0, 1.25);
   let topLight = 0.5 + 0.5 * round.y;
   let rim = pow(1.0 - max(round.z, 0.0), 2.2) * (0.25 + 0.55 * max(dot(towards, vec3f(0.0, 0.0, 1.0)), 0.0));
+  // World-space spherical normal and sample position on the puff's front hemisphere for shadow & local lights.
+  let worldN = normalize(u.right * round.x + u.up * round.y - u.forward * round.z);
+  let rd = normalize(in.seen);
+  let worldP = in.seen + u.eye - u.forward * (round.z * in.radius * 0.45);
+  var worldSun = 1.0;
+  var sunRadiance = vec3f(1.35, 1.25, 1.08) * mix(0.04, 1.0, u.day);
+  var skyAmbient = mix(vec3f(0.05, 0.07, 0.12), vec3f(0.14, 0.20, 0.30), topLight) * mix(0.04, 1.0, u.day);
+  if (u.hasWorld != 0u && g.levels > 0u) {
+    let sunny = sunlit(worldP, u.sun, 0u);
+    if (sunny >= 0.0) { worldSun = sunny; }
+    sunRadiance = g.lightSun.rgb * 1.85;
+    let fillDown = vec3f(0.10, 0.10, 0.105) * g.lightFill.a;
+    skyAmbient = mix(fillDown, g.lightFill.rgb * 0.95, topLight);
+  }
   // Pale steam scatters light internally (never dark grey in its core); dark oil smoke keeps deep shadowed undersides.
   let baseCol = pow(max(in.colour.rgb, vec3f(0.0)), vec3f(2.2));
   let lum = dot(in.colour.rgb, vec3f(0.333));
   let scatter = smoothstep(0.45, 0.82, lum);
-  let shadowTint = mix(mix(vec3f(0.05, 0.07, 0.12), vec3f(0.14, 0.20, 0.30), topLight), vec3f(0.32, 0.36, 0.42), scatter * 0.65);
-  let sunTint = vec3f(1.35, 1.25, 1.08) * (sunFace * 0.85 + rim * 0.28);
-  let lightCol = (shadowTint + sunTint) * mix(0.04, 1.0, u.day);
-  // Keep non-emissive smoke below bloom threshold so bright steam never blooms into a glowing orb.
-  let smoke = min(baseCol * lightCol, vec3f(1.65));
+  let shadowTint = mix(skyAmbient, max(skyAmbient * 1.45, vec3f(0.28, 0.32, 0.38) * mix(0.06, 1.0, u.day)), scatter * 0.65);
+  let sunTint = sunRadiance * (sunFace * 0.85 + rim * 0.28) * worldSun;
+  var smoke = baseCol * (shadowTint + sunTint);
+  // Warm local light reception on smoke from nearby fires, blasts, street lamps, and car headlights.
+  if (u.hasWorld != 0u) {
+    let localAlbedo = mix(baseCol, vec3f(0.26), 0.34);
+    if (localLights.info.x > 0u) {
+      let localDiff = evalLocalLights(worldP, worldN, rd, localAlbedo, 0.95, 0.0, 0.0);
+      let localRim = evalSmokeScatter(worldP, worldN, rd, round.z, body) * mix(localAlbedo, vec3f(0.45), 0.35);
+      smoke += (localDiff + localRim) * (1.0 - smoothstep(0.25, 0.85, heat));
+    }
+    if (g.weather.z > 0.0) {
+      let townPool = puffTownLamps(worldP, worldN);
+      if (townPool > 0.0) {
+        smoke += localAlbedo * vec3f(1.0, 0.78, 0.48) * townPool * g.weather.z * 0.95;
+      }
+    }
+  }
+  // Keep non-emissive smoke below aggressive bloom threshold so bright steam never blooms into a glowing orb.
+  smoke = min(smoke, vec3f(1.75));
   // Fire in linear HDR: deep red-orange skirts climbing into incandescent gold-white cores that bloom smoothly under AgX.
   let core = body * body;
   let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
@@ -194,7 +317,7 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   let isBlue = step(0.5, in.colour.b - in.colour.r) * step(in.colour.a, 0.05);
   let flame = mix(warm, coolFlame, isBlue);
   let pureJet = step(in.colour.a, 0.02) * smoothstep(0.5, 0.9, heat);
-  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.35 + billow * 1.15) * body * fade * (0.95 + pureJet * 0.85);
+  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.35 + billow * 1.15) * body * fade * (0.95 + pureJet * 0.85) * softFade;
   return vec4f(smoke * cover + glow, cover);
 }
 `
@@ -237,19 +360,77 @@ export interface Puffs {
   readonly live: number
 }
 
-export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promise<Puffs> {
+export async function puffs(device: GPUDevice, format: GPUTextureFormat, march?: Marcher): Promise<Puffs> {
   const module = await shader(device, 'puffs', CODE)
+  const both = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT
+  const ownLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: both, buffer: {} },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth' } },
+    ],
+  })
+  const worldLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {} },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: {} },
+    ],
+  })
+  const layout = device.createPipelineLayout({ bindGroupLayouts: [ownLayout, worldLayout] })
   const blend: GPUBlendComponent = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
   const pipeline = await device.createRenderPipelineAsync({
-    label: 'puffs', layout: 'auto',
+    label: 'puffs', layout,
     vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: EACH * 4, stepMode: 'instance', attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }, { shaderLocation: 1, offset: 16, format: 'float32x4' }, { shaderLocation: 2, offset: 32, format: 'float32x4' }] }] },
     fragment: { module, entryPoint: 'fs', targets: [{ format, blend: { color: blend, alpha: blend } }] },
     primitive: { topology: 'triangle-strip', cullMode: 'none' },
-    depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' },
   })
-  const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const uniforms = device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const instances = device.createBuffer({ label: 'puff instances', size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
-  const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
+  // Fallback world lighting group for standalone tests without a bound Marcher.
+  const dummyGlobals = device.createBuffer({ size: GLOBALS_BYTES, usage: GPUBufferUsage.UNIFORM })
+  const dummySun = device.createTexture({ size: [1, 1, 1], format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING })
+  const dummyLights = device.createBuffer({ size: LIGHTS_BYTES, usage: GPUBufferUsage.UNIFORM })
+  const fallbackWorldBind = device.createBindGroup({
+    layout: worldLayout,
+    entries: [
+      { binding: 0, resource: { buffer: dummyGlobals } },
+      { binding: 1, resource: dummySun.createView({ dimension: '2d-array' }) },
+      { binding: 2, resource: { buffer: dummyLights } },
+    ],
+  })
+  let ownBind: { depth: GPUTextureView; group: GPUBindGroup } | null = null
+  const ownFor = (depth: GPUTextureView) => {
+    if (ownBind?.depth !== depth) {
+      ownBind = {
+        depth,
+        group: device.createBindGroup({
+          layout: ownLayout,
+          entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: depth }],
+        }),
+      }
+    }
+    return ownBind.group
+  }
+  let worldBind: { march: Marcher; group: GPUBindGroup } | null = null
+  const worldFor = () => {
+    const active = march ?? (globalThis as { engine?: { march?: Marcher } }).engine?.march
+    if (!active) return { group: fallbackWorldBind, hasWorld: 0 }
+    if (worldBind?.march !== active) {
+      worldBind = {
+        march: active,
+        group: device.createBindGroup({
+          layout: worldLayout,
+          entries: [
+            { binding: 0, resource: { buffer: active.globals } },
+            { binding: 1, resource: active.sun.all },
+            { binding: 2, resource: { buffer: active.localLights.buffer } },
+          ],
+        }),
+      }
+    }
+    return { group: worldBind.group, hasWorld: 1 }
+  }
+  const uBlock = new ArrayBuffer(96), uF32 = new Float32Array(uBlock), uU32 = new Uint32Array(uBlock)
   // Where each is in the world (as doubles: the world is big), how it moves, and how it changes as it ages.
   const p = new Float64Array(MOST * 3), v = new Float32Array(MOST * 3)
   const size = new Float32Array(MOST), grow = new Float32Array(MOST), life = new Float32Array(MOST), span = new Float32Array(MOST)
@@ -651,18 +832,25 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
 
       if (!n) return
-      device.queue.writeBuffer(uniforms, 0, new Float32Array([
+      const { group: wGroup, hasWorld } = worldFor()
+      uF32.set([
         view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf,
-        ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), day,
-      ]))
+        view.right[0], view.right[1], view.right[2], to.size[0] / to.size[1],
+        view.up[0], view.up[1], view.up[2], to.size[0],
+        view.forward[0], view.forward[1], view.forward[2], to.size[1],
+        sun[0] / sunLength, sun[1] / sunLength, sun[2] / sunLength, day,
+      ], 0)
+      uU32[20] = hasWorld; uU32[21] = 0; uU32[22] = 0; uU32[23] = 0
+      device.queue.writeBuffer(uniforms, 0, uBlock)
+      // No depthStencilAttachment: to.depth is bound as texture_depth_2d for soft-particle fade.
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
-        depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
       pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
-      pass.setBindGroup(0, bind)
+      pass.setBindGroup(0, ownFor(to.depth))
+      pass.setBindGroup(1, wGroup)
       pass.setVertexBuffer(0, instances)
       pass.draw(4, n)
       pass.end()
