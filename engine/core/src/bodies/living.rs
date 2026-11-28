@@ -29,6 +29,110 @@ const QUIET: f32 = 1.0;
 /// Which way a thing faces in its own cells.
 const FRONTS: [V; 4] = [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]];
 
+/// Bitmask flags for detachable vehicle body panels (`Live::detached_panels`).
+pub const PANEL_HOOD: u8 = 1;
+pub const PANEL_TRUNK: u8 = 2;
+pub const PANEL_DOOR_L: u8 = 4;
+pub const PANEL_DOOR_R: u8 = 8;
+
+/// Thresholds for heavy vehicles ramming cleanly through brittle wood/glass/plaster walls.
+pub const RAM_CARVE_MIN_SPEED: f32 = 45.0;
+pub const RAM_CARVE_MIN_MASS: f32 = 4000.0;
+pub const RAM_CARVE_MIN_IMPULSE: f32 = 400_000.0;
+
+/// Which vehicle component sheared off during a severe localized impact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DetachedKind {
+    /// One of the vehicle's wheels (`0..4`, matching `Live::feet` index and bit `1 << index`).
+    Wheel(u8),
+    /// Front hood / bonnet (`PANEL_HOOD = 1`).
+    Hood,
+    /// Rear trunk / tailgate (`PANEL_TRUNK = 2`).
+    Trunk,
+    /// Left-side door (`PANEL_DOOR_L = 4`).
+    DoorL,
+    /// Right-side door (`PANEL_DOOR_R = 8`).
+    DoorR,
+}
+
+/// Specification for a sheared-off wheel or body panel so the caller/solver can spawn
+/// an independent tumbling voxel `Body` inheriting chassis velocity and angular spin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DetachedPart {
+    pub kind: DetachedKind,
+    /// Local voxel bounding box `(min_cell, max_cell)` (inclusive-exclusive) in chassis grid coordinates.
+    pub local_box: ([usize; 3], [usize; 3]),
+    /// World-space spawn center of the detached part (cells).
+    pub world_pos: V,
+    /// Initial world-space orientation quaternion (inherited from chassis).
+    pub rot: Q,
+    /// Inherited world-space linear velocity (`v_chassis + w x r + eject`, cells/s).
+    pub vel: V,
+    /// Inherited world-space angular velocity (`w_chassis + tumble`, rad/s).
+    pub spin: V,
+}
+
+/// Tow / winch anchor on a vehicle chassis, ready to bind to `joints.rs` ropes/cables.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TowingHitch {
+    /// Anchor position in body-local coordinates relative to the body's center of mass (cells).
+    pub local_anchor: [f32; 3],
+    /// Maximum cable tension (mass * cells/s^2) before the tow hitch shears free.
+    pub max_tension: f32,
+    /// Whether a tow line / winch cable is currently bound to this hitch.
+    pub active: bool,
+}
+
+impl TowingHitch {
+    pub const fn new(local_anchor: [f32; 3], max_tension: f32) -> Self {
+        Self { local_anchor, max_tension, active: false }
+    }
+
+    /// World-space position of this hitch anchor for a given chassis pose `(pos, rot)`.
+    #[inline]
+    pub fn world_anchor(&self, pos: V, rot: Q) -> V {
+        add(pos, turn(rot, self.local_anchor))
+    }
+
+    /// World-space position of this hitch anchor for the given chassis `Body`.
+    #[inline]
+    pub fn world_anchor_of(&self, b: &Body) -> V {
+        self.world_anchor(b.pos, b.rot)
+    }
+
+    /// Whether an applied cable tension exceeds this hitch's structural limit.
+    #[inline]
+    pub fn exceeds_tension(&self, tension: f32) -> bool {
+        self.active && tension.is_finite() && tension > self.max_tension
+    }
+}
+
+/// Pure mapping from crash closing speed (cells/s) and impulse `push` to physical `Hull::crush_local`
+/// indentation depth in coarse 10 cm cells. Mirrors `engine/page/deform.ts` `crushDepthForImpact`.
+pub fn crush_depth_for_impact(closing_speed: f32, push: f32) -> f32 {
+    if !closing_speed.is_finite() || closing_speed < 35.0 || !push.is_finite() || push < 0.0 {
+        return 0.0;
+    }
+    let severity = ((closing_speed - 18.0) / 110.0).clamp(0.0, 1.0) * (0.85 + 0.15 * push / (push + 8000.0));
+    ((0.08 + 2.5 * severity) * 0.9).clamp(0.0, 6.0)
+}
+
+/// Returns the ramming-carve impulse when a heavy vehicle is moving fast enough to chew cleanly
+/// through brittle wood, glass, or plaster walls; `None` for slow or lightweight impacts.
+pub fn ram_carve_impulse(speed: f32, mass: f32) -> Option<f32> {
+    if !speed.is_finite() || !mass.is_finite() || speed < RAM_CARVE_MIN_SPEED || mass < RAM_CARVE_MIN_MASS {
+        return None;
+    }
+    let impulse = speed * mass;
+    (impulse >= RAM_CARVE_MIN_IMPULSE).then_some(impulse)
+}
+
+/// Whether a wall material is brittle enough for a ramming heavy vehicle to carve cleanly through.
+#[inline]
+pub const fn is_ram_carvable_material(mat: u8) -> bool {
+    matches!(mat, WOOD | GLASS | PLASTER | LEAVES)
+}
+
 /// A foot: where the ray starts (from the body's own low corner, in cells), how far down it reaches, and whether it
 /// steers and drives. `pressed` and `spun` are how far it is pushed in and how far it has rolled, for drawing a wheel.
 pub struct Foot {
@@ -145,6 +249,19 @@ pub struct Live {
     /// its speed other vehicles' hulls took from it in the step.
     pub(super) hull: Option<Box<super::hull::Hull>>,
     pub(super) given: V,
+    /// Detachable vehicle wheels bitmask (bit `i` = `1 << i` for foot `i` in `0..4`).
+    pub detached_wheels: u8,
+    /// Detachable body panels bitmask (`PANEL_HOOD=1`, `PANEL_TRUNK=2`, `PANEL_DOOR_L=4`, `PANEL_DOOR_R=8`).
+    pub detached_panels: u8,
+    /// Remaining structural health (`0.0..=1.0`) for each of the 4 wheels.
+    pub wheel_health: [f32; 4],
+    /// Remaining structural health (`0.0..=1.0`) for body panels `[Hood, Trunk, DoorL, DoorR]`.
+    pub panel_health: [f32; 4],
+    /// Front and rear towing / winch hitches ready to bind to `joints.rs` ropes/cables.
+    #[allow(private_interfaces)]
+    pub front_hitch: TowingHitch,
+    #[allow(private_interfaces)]
+    pub rear_hitch: TowingHitch,
 }
 
 impl Live {
@@ -156,6 +273,9 @@ impl Live {
             burnout_charge: 0.0, launch_timer: 0.0, launch_power: 0.0,
             boost_ask: false, boost_fuel: 1.0, boost_on: false, boost_cd: 0.0, air_time: 0.0,
             wetness: 0.0, surface_grip: 0.0, surf_cell: [i32::MIN; 2], surf_base: 1.0, wheelbase: 28.0, hull: None, given: [0.0; 3],
+            detached_wheels: 0, detached_panels: 0, wheel_health: [1.0; 4], panel_health: [1.0; 4],
+            front_hitch: TowingHitch::new([0.0; 3], 250_000.0),
+            rear_hitch: TowingHitch::new([0.0; 3], 250_000.0),
         }
     }
 
@@ -177,6 +297,10 @@ impl Live {
         self.jump = n[9].clamp(0.0, 300.0);
         self.tough = n[10].clamp(10.0, 2000.0);
         self.feet = n[11..].chunks_exact(6).take(16).map(|f| Foot { at: [f[0], f[1], f[2]], reach: f[3].clamp(1.0, 24.0), steers: f[4] != 0.0, drives: f[5] != 0.0, pressed: 0.0, spun: 0.0, road: f32::NAN, rise: 0.0 }).collect();
+        self.detached_wheels = 0;
+        self.detached_panels = 0;
+        self.wheel_health = [1.0; 4];
+        self.panel_health = [1.0; 4];
         let fwd = FRONTS[self.front as usize];
         let (mut lo, mut hi) = (f32::MAX, f32::MIN);
         for f in &self.feet {
@@ -186,6 +310,309 @@ impl Live {
         }
         self.wheelbase = if hi > lo { hi - lo } else { 28.0 };
         true
+    }
+
+    /// Whether wheel/foot `index` has been sheared off.
+    #[inline]
+    pub fn wheel_detached(&self, index: usize) -> bool {
+        index < 8 && (self.detached_wheels & (1u8 << index)) != 0
+    }
+
+    /// Whether a body panel (`PANEL_HOOD`, `PANEL_TRUNK`, `PANEL_DOOR_L`, `PANEL_DOOR_R`) has detached.
+    #[inline]
+    pub fn panel_detached(&self, panel_bit: u8) -> bool {
+        (self.detached_panels & panel_bit) != 0
+    }
+
+    /// Number of wheels still attached to the chassis.
+    #[inline]
+    pub fn attached_wheel_count(&self) -> usize {
+        (0..self.feet.len()).filter(|&i| !self.wheel_detached(i)).count()
+    }
+
+    /// Restores all detachable wheels and body panels to full structural health.
+    pub fn repair_parts(&mut self) {
+        self.detached_wheels = 0;
+        self.detached_panels = 0;
+        self.wheel_health = [1.0; 4];
+        self.panel_health = [1.0; 4];
+    }
+
+    /// World-space anchor position of the front (`rear == false`) or rear (`rear == true`) towing hitch.
+    #[inline]
+    pub fn hitch_world_pos(&self, b: &Body, rear: bool) -> V {
+        if rear { self.rear_hitch.world_anchor_of(b) } else { self.front_hitch.world_anchor_of(b) }
+    }
+
+    /// Binds or releases the front or rear towing hitch.
+    #[inline]
+    pub fn bind_hitch(&mut self, rear: bool, active: bool) {
+        if rear {
+            self.rear_hitch.active = active;
+        } else {
+            self.front_hitch.active = active;
+        }
+    }
+
+    /// Threshold check for heavy vehicles ramming cleanly through brittle wood/glass/plaster walls.
+    #[inline]
+    pub fn ram_carve_impulse(speed: f32, mass: f32) -> Option<f32> {
+        ram_carve_impulse(speed, mass)
+    }
+
+    /// Whether a wall material is brittle enough for a ramming heavy vehicle to carve cleanly through.
+    #[inline]
+    pub const fn is_ram_carvable_material(mat: u8) -> bool {
+        is_ram_carvable_material(mat)
+    }
+
+    /// Evaluates whether this vehicle's current forward speed and mass exceed the ram-carve threshold.
+    #[inline]
+    pub fn current_ram_carve_impulse(&self, b: &Body) -> Option<f32> {
+        if !self.rides() || b.inv_mass <= 0.0 {
+            return None;
+        }
+        let front = turn(b.rot, FRONTS[self.front as usize]);
+        let fwd_speed = dot(b.vel, front).abs();
+        ram_carve_impulse(fwd_speed, 1.0 / b.inv_mass)
+    }
+
+    /// Deforms the vehicle's physical `Hull` half-extents at a body-local COM-relative point.
+    pub fn crush_hull_local(&mut self, point: V, normal: V, depth: f32) -> f32 {
+        self.hull.as_mut().map_or(0.0, |hull| hull.crush_local(point, normal, depth))
+    }
+
+    /// Deforms the vehicle's physical `Hull` half-extents at a world-space impact point and normal.
+    pub fn crush_hull_world(&mut self, b: &Body, world_point: V, world_normal: V, depth: f32) -> f32 {
+        let local_point = back(b.rot, sub(world_point, b.pos));
+        let local_normal = back(b.rot, world_normal);
+        self.crush_hull_local(local_point, local_normal, depth)
+    }
+
+    /// Current physical `Hull` half-extents `(hx, hy, hz)` if this living thing has a vehicle hull.
+    #[inline]
+    pub fn hull_half(&self) -> Option<V> {
+        self.hull.as_ref().map(|h| h.half())
+    }
+
+    /// Current physical `Hull` COM-relative bounds `(lo, hi)` if this living thing has a vehicle hull.
+    #[inline]
+    pub fn hull_bounds(&self) -> Option<(V, V)> {
+        self.hull.as_ref().map(|h| h.bounds())
+    }
+
+    /// Computes default front/rear towing hitch anchors from chassis dimensions and mass.
+    fn configure_hitches(&mut self, b: &Body) {
+        let fwd = FRONTS[self.front as usize];
+        let long_axis = if self.front < 2 { 0 } else { 2 };
+        let lat_axis = if self.front < 2 { 2 } else { 0 };
+        let y = (b.size[1] as f32 * 0.30).clamp(1.0, b.size[1] as f32 - 1.0);
+        let lat_mid = b.size[lat_axis] as f32 * 0.5;
+        let long_sign = fwd[long_axis];
+        let mut front_grid = [0.0f32; 3];
+        let mut rear_grid = [0.0f32; 3];
+        front_grid[1] = y;
+        rear_grid[1] = y;
+        front_grid[lat_axis] = lat_mid;
+        rear_grid[lat_axis] = lat_mid;
+        front_grid[long_axis] = if long_sign > 0.0 { b.size[long_axis] as f32 } else { 0.0 };
+        rear_grid[long_axis] = if long_sign > 0.0 { 0.0 } else { b.size[long_axis] as f32 };
+        let mass = if b.inv_mass > 0.0 { 1.0 / b.inv_mass } else { 10_000.0 };
+        let max_tension = (mass * G * 4.0).max(50_000.0);
+        self.front_hitch = TowingHitch::new(sub(front_grid, b.com), max_tension);
+        self.rear_hitch = TowingHitch::new(sub(rear_grid, b.com), max_tension);
+    }
+
+    /// Computes a wheel's local voxel bounding box `(min, max)` in chassis grid coordinates.
+    fn wheel_local_box(&self, b: &Body, index: usize) -> ([usize; 3], [usize; 3]) {
+        let foot = &self.feet[index];
+        let along_x = self.front < 2;
+        let r_wheel = (foot.reach * 0.5).round().clamp(2.0, 5.0) as isize;
+        let lat_half = 1isize;
+        let mut lo = [0usize; 3];
+        let mut hi = [0usize; 3];
+        for a in 0..3 {
+            let max_s = b.size[a].max(1) as isize;
+            let c = foot.at[a].round() as isize;
+            let half = if (along_x && a == 2) || (!along_x && a == 0) { lat_half } else { r_wheel };
+            let a0 = (c - half).clamp(0, max_s - 1);
+            let a1 = (c + half).clamp(a0 + 1, max_s);
+            lo[a] = a0 as usize;
+            hi[a] = a1 as usize;
+        }
+        (lo, hi)
+    }
+
+    /// Computes a body panel's local voxel bounding box `(min, max)` in chassis grid coordinates.
+    fn panel_local_box(&self, b: &Body, kind: DetachedKind) -> ([usize; 3], [usize; 3]) {
+        let [sx, sy, sz] = b.size;
+        let along_x = self.front < 2;
+        let fwd_pos = self.front % 2 == 0;
+        let long_s = if along_x { sx } else { sz }.max(1);
+        let lat_s = if along_x { sz } else { sx }.max(1);
+        // Right side in local grid along `lat_axis`:
+        // front 0 (+x): right = +z (high lat); front 1 (-x): right = -z (low lat)
+        // front 2 (+z): right = -x (low lat);  front 3 (-z): right = +x (high lat)
+        let right_is_high = self.front == 0 || self.front == 3;
+        let (l0, l1, w0, w1, y0, y1) = match kind {
+            DetachedKind::Hood => {
+                let len = (long_s * 28 / 100).max(2).min(long_s);
+                let (a0, a1) = if fwd_pos { (long_s - len, long_s) } else { (0, len) };
+                (a0, a1, 1.min(lat_s - 1), lat_s.saturating_sub(1).max(1), sy * 30 / 100, (sy * 70 / 100).max(sy * 30 / 100 + 1).min(sy))
+            }
+            DetachedKind::Trunk => {
+                let len = (long_s * 24 / 100).max(2).min(long_s);
+                let (a0, a1) = if fwd_pos { (0, len) } else { (long_s - len, long_s) };
+                (a0, a1, 1.min(lat_s - 1), lat_s.saturating_sub(1).max(1), sy * 30 / 100, (sy * 70 / 100).max(sy * 30 / 100 + 1).min(sy))
+            }
+            DetachedKind::DoorL | DetachedKind::DoorR => {
+                let is_right = matches!(kind, DetachedKind::DoorR);
+                let high_side = is_right == right_is_high;
+                let a0 = long_s * 28 / 100;
+                let a1 = (long_s * 70 / 100).max(a0 + 1).min(long_s);
+                let thick = 2.min(lat_s);
+                let (b0, b1) = if high_side { (lat_s - thick, lat_s) } else { (0, thick) };
+                (a0, a1, b0, b1, sy * 20 / 100, (sy * 85 / 100).max(sy * 20 / 100 + 1).min(sy))
+            }
+            DetachedKind::Wheel(idx) => return self.wheel_local_box(b, idx as usize),
+        };
+        let y0 = y0.min(sy.saturating_sub(1));
+        let y1 = y1.max(y0 + 1).min(sy.max(1));
+        let w1 = w1.max(w0 + 1).min(lat_s);
+        let l1 = l1.max(l0 + 1).min(long_s);
+        if along_x { ([l0, y0, w0], [l1, y1, w1]) } else { ([w0, y0, l0], [w1, y1, l1]) }
+    }
+
+    /// Evaluates a localized world-space impact on a rolling vehicle:
+    /// - Syncs physical `Hull::crush_local` for substantial hits (`impact_speed >= 35` cells/s).
+    /// - Ignores curb chatter and moderate bumps (`impact_speed <= tough * 0.55`) for part detachment.
+    /// - Damages and shears off struck wheels (disabling their `Foot` suspension ray) or body panels
+    ///   (Hood/Trunk/DoorL/DoorR), returning `DetachedPart` specs carrying inherited velocity & spin.
+    #[allow(private_interfaces)]
+    pub fn apply_impact(
+        &mut self,
+        b: &Body,
+        world_point: V,
+        world_normal: V,
+        impact_speed: f32,
+        push: f32,
+    ) -> Vec<DetachedPart> {
+        let mut detached = Vec::new();
+        if !self.rides()
+            || !impact_speed.is_finite()
+            || impact_speed <= 0.0
+            || !push.is_finite()
+            || push < 0.0
+            || world_point.iter().any(|v| !v.is_finite())
+            || world_normal.iter().any(|v| !v.is_finite())
+        {
+            return detached;
+        }
+        let local_com = back(b.rot, sub(world_point, b.pos));
+        let local_grid = add(local_com, b.com);
+        let local_norm = if dot(world_normal, world_normal) > 1e-10 {
+            unit(back(b.rot, world_normal))
+        } else {
+            unit(local_com)
+        };
+
+        // 1. Physical hull crush sync (matches deform.ts `crushDepthForImpact`).
+        let hull_depth = crush_depth_for_impact(impact_speed, push);
+        if hull_depth > 0.0 {
+            self.crush_hull_local(local_com, local_norm, hull_depth);
+        }
+
+        // 2. Curb chatter and moderate bumps never damage or shear off wheels or panels.
+        let tough = self.tough.max(40.0);
+        let quiet_limit = tough * 0.55;
+        if impact_speed <= quiet_limit {
+            return detached;
+        }
+        let excess = (impact_speed - quiet_limit) / (tough * 0.65);
+        let mass_mod = 0.85 + 0.15 * (push / (push + 8000.0));
+        let damage = (excess * excess * mass_mod).max(0.0);
+
+        let build_part = |kind: DetachedKind, local_box: ([usize; 3], [usize; 3]), eject_up: f32| -> DetachedPart {
+            let mid_local = [
+                (local_box.0[0] + local_box.1[0]) as f32 * 0.5,
+                (local_box.0[1] + local_box.1[1]) as f32 * 0.5,
+                (local_box.0[2] + local_box.1[2]) as f32 * 0.5,
+            ];
+            let r_local = sub(mid_local, b.com);
+            let r_world = turn(b.rot, r_local);
+            let world_pos = add(b.pos, r_world);
+            let out_dir = if dot(r_world, r_world) > 1e-4 { unit(r_world) } else { [0.0, 1.0, 0.0] };
+            let eject_spd = (impact_speed * 0.12).clamp(8.0, 35.0);
+            let vel = add(b.speed_at(r_world), add(scale(out_dir, eject_spd), [0.0, eject_up, 0.0]));
+            let tumble_axis = unit(cross(out_dir, [0.0, 1.0, 0.0]));
+            let spin = add(b.spin, scale(tumble_axis, (impact_speed * 0.03).clamp(2.0, 8.0)));
+            DetachedPart { kind, local_box, world_pos, rot: b.rot, vel, spin }
+        };
+
+        // 3. Localized wheel shear check.
+        let wheel_count = self.feet.len().min(4);
+        for i in 0..wheel_count {
+            if self.wheel_detached(i) {
+                continue;
+            }
+            let foot_at = self.feet[i].at;
+            let wheel_r = (self.feet[i].reach * 1.35).max(5.5);
+            let d = sub(local_grid, foot_at);
+            let dist = dot(d, d).sqrt();
+            if dist >= wheel_r {
+                continue;
+            }
+            let prox = if dist <= wheel_r * 0.55 {
+                1.0
+            } else {
+                (1.0 - (dist - wheel_r * 0.55) / (wheel_r * 0.45)).clamp(0.0, 1.0)
+            };
+            self.wheel_health[i] = (self.wheel_health[i] - damage * prox).max(0.0);
+            if self.wheel_health[i] <= 0.0 {
+                self.detached_wheels |= 1u8 << i;
+                self.feet[i].pressed = 0.0;
+                self.feet[i].road = f32::NAN;
+                self.feet[i].rise = 0.0;
+                let local_box = self.wheel_local_box(b, i);
+                detached.push(build_part(DetachedKind::Wheel(i as u8), local_box, 12.0));
+            }
+        }
+
+        // 4. Localized body panel rip-off check (Hood=1, Trunk=2, DoorL=4, DoorR=8).
+        let fwd = FRONTS[self.front as usize];
+        let right_local = [-fwd[2], 0.0, fwd[0]];
+        let long_axis = if self.front < 2 { 0 } else { 2 };
+        let lat_axis = if self.front < 2 { 2 } else { 0 };
+        let center = [b.size[0] as f32 * 0.5, b.size[1] as f32 * 0.5, b.size[2] as f32 * 0.5];
+        let rel = sub(local_grid, center);
+        let along = dot(rel, fwd) / (b.size[long_axis] as f32 * 0.5).max(1.0);
+        let across = dot(rel, right_local) / (b.size[lat_axis] as f32 * 0.5).max(1.0);
+
+        let panel_hit = if along >= 0.35 && along.abs() >= across.abs() * 0.75 {
+            Some((0usize, PANEL_HOOD, DetachedKind::Hood))
+        } else if along <= -0.35 && along.abs() >= across.abs() * 0.75 {
+            Some((1usize, PANEL_TRUNK, DetachedKind::Trunk))
+        } else if across <= -0.35 {
+            Some((2usize, PANEL_DOOR_L, DetachedKind::DoorL))
+        } else if across >= 0.35 {
+            Some((3usize, PANEL_DOOR_R, DetachedKind::DoorR))
+        } else {
+            None
+        };
+
+        if let Some((idx, bit, kind)) = panel_hit {
+            if !self.panel_detached(bit) {
+                self.panel_health[idx] = (self.panel_health[idx] - damage).max(0.0);
+                if self.panel_health[idx] <= 0.0 {
+                    self.detached_panels |= bit;
+                    let local_box = self.panel_local_box(b, kind);
+                    let eject_up = if matches!(kind, DetachedKind::Hood | DetachedKind::Trunk) { 22.0 } else { 10.0 };
+                    detached.push(build_part(kind, local_box, eject_up));
+                }
+            }
+        }
+
+        detached
     }
 
     /// Whether it rides on feet that roll (a car, a cart): not on legs, nor turned to a down of its own.
@@ -351,8 +778,8 @@ impl Live {
         // from how the body leans; and no steeper than the town's steepest street is believed: a step is not a hill.
         let rolling = self.rides();
         let grade = {
-            // The line through the road under each foot, by how far along the thing the foot is.
-            let [k, a, y, aa, ay] = self.feet.iter().filter(|f| f.road.is_finite()).fold([0.0f32; 5], |[k, a, y, aa, ay], f| {
+            // The line through the road under each attached foot, by how far along the thing the foot is.
+            let [k, a, y, aa, ay] = self.feet.iter().enumerate().filter(|&(idx, f)| (!rolling || !self.wheel_detached(idx)) && f.road.is_finite()).fold([0.0f32; 5], |[k, a, y, aa, ay], (_, f)| {
                 let along = dot(turn(b.rot, sub(f.at, b.com)), flat);
                 [k + 1.0, a + along, y + f.road, aa + along * along, ay + along * f.road]
             });
@@ -482,7 +909,15 @@ impl Live {
         let mut pushes: Vec<(V, V)> = Vec::with_capacity(self.feet.len() * 3);
         let mut held = [0.0; 3];
         let mut grips: Vec<(V, V, f32)> = Vec::with_capacity(self.feet.len());
-        for foot in self.feet.iter_mut() {
+        let detached_wheels = self.detached_wheels;
+        for (idx, foot) in self.feet.iter_mut().enumerate() {
+            if rolling && idx < 8 && (detached_wheels & (1u8 << idx)) != 0 {
+                // Detached wheel: disable suspension ray so the corner drops and drags realistically.
+                foot.pressed = 0.0;
+                foot.road = f32::NAN;
+                foot.rise = 0.0;
+                continue;
+            }
             let r = turn(b.rot, sub(foot.at, b.com));
             let far = ray(ground, add(b.pos, w(r)), w(down), foot.reach);
             let Some(far) = far else {
@@ -1004,8 +1439,90 @@ impl Bodies {
         });
         b.asleep = false;
         let hull = b.live.as_ref().unwrap().rides().then(|| Box::new(super::hull::Hull::of(b)));
-        b.live.as_mut().unwrap().hull = hull;
+        if b.live.as_ref().unwrap().rides() {
+            let mut live = b.live.take().unwrap();
+            live.hull = hull;
+            live.configure_hitches(b);
+            b.live = Some(live);
+        } else {
+            b.live.as_mut().unwrap().hull = hull;
+        }
         true
+    }
+
+    /// Evaluates a localized impact on vehicle `id`, syncing physical hull crush and detaching
+    /// sheared wheels or panels. Returns `DetachedPart` specs for the caller/solver to spawn.
+    #[allow(private_interfaces)]
+    pub fn apply_vehicle_impact(
+        &mut self,
+        id: u32,
+        world_point: V,
+        world_normal: V,
+        impact_speed: f32,
+        push: f32,
+    ) -> Vec<DetachedPart> {
+        let Some(idx) = self.list.iter().position(|b| b.id == id && b.live.is_some()) else {
+            return Vec::new();
+        };
+        let Some(mut live) = self.list[idx].live.take() else {
+            return Vec::new();
+        };
+        let detached = live.apply_impact(&self.list[idx], world_point, world_normal, impact_speed, push);
+        if !detached.is_empty() {
+            self.list[idx].asleep = false;
+        }
+        self.list[idx].live = Some(live);
+        detached
+    }
+
+    /// Spawns an independent tumbling voxel `Body` for a `DetachedPart` sheared from `vehicle_id`,
+    /// inheriting the part's world pose, linear velocity, and angular spin.
+    #[allow(private_interfaces)]
+    pub fn spawn_detached_part(&mut self, vehicle_id: u32, part: &DetachedPart) -> Option<u32> {
+        let src = self.list.iter().find(|b| b.id == vehicle_id)?;
+        let (lo, hi) = part.local_box;
+        let size = [
+            hi[0].saturating_sub(lo[0]).max(1),
+            hi[1].saturating_sub(lo[1]).max(1),
+            hi[2].saturating_sub(lo[2]).max(1),
+        ];
+        let mut grid = vec![0 as Kind; size[0] * size[1] * size[2]];
+        let mut count = 0usize;
+        for y in 0..size[1] {
+            for z in 0..size[2] {
+                for x in 0..size[0] {
+                    let (sx, sy, sz) = (lo[0] + x, lo[1] + y, lo[2] + z);
+                    if sx < src.size[0] && sy < src.size[1] && sz < src.size[2] {
+                        let k = src.cells[src.at(sx, sy, sz)];
+                        if k != 0 {
+                            grid[x + size[0] * (z + size[2] * y)] = k;
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // If the chassis cells in that region were already carved/hollow, synthesize a compact steel chunk.
+        if count == 0 {
+            grid.fill(crate::kinds::kind(crate::kinds::STEEL, crate::kinds::OWN));
+        }
+        let born = [
+            src.born[0] + lo[0] as i32,
+            src.born[1] + lo[1] as i32,
+            src.born[2] + lo[2] as i32,
+        ];
+        let mut body = Body::new(self.next, grid, size, born);
+        self.next += 1;
+        body.pos = part.world_pos;
+        body.rot = part.rot;
+        body.vel = part.vel;
+        body.spin = part.spin;
+        body.lump = true;
+        body.limit_points(LUMP_POINTS);
+        let id = body.id;
+        self.born(&body);
+        self.list.push(body);
+        Some(id)
     }
 
     /// Tells a living thing what to do until it is told again, or for a second: go and turn and rise from -1 to 1,
@@ -1287,6 +1804,8 @@ impl Bodies {
                 if live.launch_timer > 0.0 { flags |= 4; }
                 flags |= ((live.boost_fuel.clamp(0.0, 1.0) * 255.0).round() as u32) << 8;
                 flags |= ((live.burnout_charge.clamp(0.0, 1.0) * 255.0).round() as u32) << 16;
+                flags |= ((live.detached_wheels & 0x0f) as u32) << 24;
+                flags |= ((live.detached_panels & 0x0f) as u32) << 28;
             }
             words.extend([b.id, dot(b.vel, front).to_bits(), live.on, touches, told[0].to_bits(), told[1].to_bits(), told[2].to_bits(), flags, q[0].to_bits(), q[1].to_bits(), q[2].to_bits(), q[3].to_bits()]);
         }
@@ -2599,6 +3118,221 @@ pub mod tests {
         assert!(sport_yaw > bus_yaw * 1.15, "sports car turns in sharper than heavy bus: {sport_yaw:.2} vs {bus_yaw:.2}");
         assert!(bus_roll < sport_roll * 0.85 && bus_roll < 0.06, "heavy bus stays planted with low body roll: {bus_roll:.4} vs sport {sport_roll:.4}");
         assert!(bus_coast > sport_coast, "heavy bus retains stronger coasting momentum: {bus_coast:.2} vs {sport_coast:.2}");
+    }
+
+    #[test]
+    fn severe_corner_impact_detaches_front_right_wheel() {
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        {
+            let b = the(&bodies, id);
+            let live = b.live.as_ref().unwrap();
+            assert_eq!(live.detached_wheels, 0);
+            assert_eq!(live.on, 4, "all 4 feet stand on the road before impact");
+            assert!(live.feet[3].pressed > 0.5, "front-right foot carries load before detachment");
+        }
+        // Give chassis forward velocity and slight yaw spin, then strike front-right wheel corner (foot 3: at [35, 3, 17]).
+        let (hit_world, norm_world, expected_wheel_pos, chassis_vel_at_wheel) = {
+            let b = bodies.list.iter_mut().find(|b| b.id == id).unwrap();
+            b.asleep = false;
+            b.vel = [160.0, 0.0, 0.0];
+            b.spin = [0.0, 0.4, 0.0];
+            let foot_at = b.live.as_ref().unwrap().feet[3].at;
+            let r_world = turn(b.rot, sub(foot_at, b.com));
+            (add(b.pos, r_world), turn(b.rot, [0.6, 0.0, 0.8]), add(b.pos, r_world), b.speed_at(r_world))
+        };
+        let parts = bodies.apply_vehicle_impact(id, hit_world, norm_world, 165.0, 32_000.0);
+        let wheel_part = parts.iter().find(|p| p.kind == DetachedKind::Wheel(3)).expect("front-right wheel (index 3) must detach");
+        {
+            let b = the(&bodies, id);
+            let live = b.live.as_ref().unwrap();
+            assert_eq!(live.detached_wheels, 1u8 << 3, "only front-right wheel bit is set: {:04b}", live.detached_wheels);
+            assert!(live.wheel_detached(3) && !live.wheel_detached(0) && !live.wheel_detached(1) && !live.wheel_detached(2));
+            assert_eq!(live.attached_wheel_count(), 3);
+            assert_eq!(live.wheel_health[3], 0.0);
+            assert_eq!(live.feet[3].pressed, 0.0);
+            assert!(live.feet[3].road.is_nan());
+        }
+        // Check detached wheel spec carries a valid local box around foot 3 and inherits chassis velocity + spin.
+        let (lo, hi) = wheel_part.local_box;
+        assert!(lo[0] <= 35 && hi[0] > 35 && lo[2] <= 17 && hi[2] >= 17, "wheel local_box covers front-right wheel: {:?}", wheel_part.local_box);
+        let pos_err = sub(wheel_part.world_pos, expected_wheel_pos);
+        assert!(dot(pos_err, pos_err).sqrt() < 3.0, "detached wheel spawns near hub: {:?}", pos_err);
+        assert!(wheel_part.vel[0] > chassis_vel_at_wheel[0] - 5.0, "detached wheel inherits chassis forward velocity: {:?} vs {:?}", wheel_part.vel, chassis_vel_at_wheel);
+        assert!(dot(wheel_part.spin, wheel_part.spin).sqrt() > 1.0, "detached wheel tumbles: {:?}", wheel_part.spin);
+
+        // Spawning the DetachedPart creates an independent tumbling voxel Body in the solver.
+        let wheel_body_id = bodies.spawn_detached_part(id, wheel_part).expect("spawn detached wheel body");
+        assert_ne!(wheel_body_id, id);
+        let wb = the(&bodies, wheel_body_id);
+        assert!(wb.live.is_none() && wb.count > 0);
+        assert_eq!(wb.vel, wheel_part.vel);
+
+        // Step the car forward and verify foot 3 never exerts spring force and the front-right corner drops below front-left.
+        bodies.list.iter_mut().find(|b| b.id == id).unwrap().vel = [0.0; 3];
+        bodies.list.iter_mut().find(|b| b.id == id).unwrap().spin = [0.0; 3];
+        run(&mut bodies, 0.6, id, [0.0; 3]);
+        let b = the(&bodies, id);
+        let live = b.live.as_ref().unwrap();
+        assert_eq!(live.feet[3].pressed, 0.0, "detached wheel foot must remain unpressed (no upward spring force)");
+        assert!(live.feet[3].road.is_nan(), "detached wheel foot ray stays disabled");
+        assert!(live.on <= 3, "at most 3 remaining feet can touch the road: on={}", live.on);
+        let fl_world = add(b.pos, turn(b.rot, sub(live.feet[2].at, b.com)));
+        let fr_world = add(b.pos, turn(b.rot, sub(live.feet[3].at, b.com)));
+        assert!(fr_world[1] < fl_world[1] - 0.5, "missing front-right wheel drops that corner below front-left: fr={:.2} vs fl={:.2}", fr_world[1], fl_world[1]);
+    }
+
+    #[test]
+    fn catastrophic_front_crash_detaches_hood_and_crushes_hull() {
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        run(&mut bodies, 1.0, id, [0.0; 3]);
+
+        let (orig_lo, orig_hi) = the(&bodies, id).live.as_ref().unwrap().hull_bounds().expect("car has hull");
+        let orig_half = the(&bodies, id).live.as_ref().unwrap().hull_half().expect("car has hull");
+
+        // Dead-center catastrophic front bumper impact: rips off hood and shortens front hull extent.
+        let (hit_world, norm_world) = {
+            let b = bodies.list.iter_mut().find(|b| b.id == id).unwrap();
+            b.asleep = false;
+            b.vel = [180.0, 0.0, 0.0];
+            let local_front = sub([41.0, 5.0, 9.0], b.com);
+            (add(b.pos, turn(b.rot, local_front)), turn(b.rot, [1.0, 0.0, 0.0]))
+        };
+        let parts = bodies.apply_vehicle_impact(id, hit_world, norm_world, 180.0, 40_000.0);
+        assert!(parts.iter().any(|p| p.kind == DetachedKind::Hood), "catastrophic front crash detaches hood: {parts:?}");
+
+        let b = the(&bodies, id);
+        let live = b.live.as_ref().unwrap();
+        assert!(live.panel_detached(PANEL_HOOD) && (live.detached_panels & PANEL_HOOD) != 0);
+        assert_eq!(live.panel_health[0], 0.0);
+        assert_eq!(live.detached_wheels, 0, "dead-center front hit leaves corner wheels attached");
+
+        let (new_lo, new_hi) = live.hull_bounds().unwrap();
+        let new_half = live.hull_half().unwrap();
+        let expected_depth = crush_depth_for_impact(180.0, 40_000.0);
+        assert!(expected_depth > 2.0, "expected substantial crush depth: {expected_depth}");
+        assert!((orig_hi[0] - new_hi[0] - expected_depth).abs() < 1e-3, "front +x hull face shortened by {expected_depth:.2}: was {:.2}, now {:.2}", orig_hi[0], new_hi[0]);
+        assert!((new_lo[0] - orig_lo[0]).abs() < 1e-3, "rear -x hull face stays intact: was {:.2}, now {:.2}", orig_lo[0], new_lo[0]);
+        assert!(new_half[0] < orig_half[0] - 1.0, "hull half-extent shortened: {:.2} -> {:.2}", orig_half[0], new_half[0]);
+
+        // Repeated extreme hits respect the 55% cabin survival floor and never invert the hull.
+        for _ in 0..25 {
+            bodies.apply_vehicle_impact(id, hit_world, norm_world, 220.0, 60_000.0);
+        }
+        let clamped_half = the(&bodies, id).live.as_ref().unwrap().hull_half().unwrap();
+        assert!(clamped_half[0] >= orig_half[0] * 0.55 - 1e-3, "cabin survival floor preserved: {:.2} vs {:.2}", clamped_half[0], orig_half[0] * 0.55);
+
+        // Verify Trunk, DoorL, and DoorR detach cleanly on severe rear/left/right impacts.
+        for (local_pt, norm, expected_bit, expected_kind) in [
+            ([1.0, 5.0, 9.0], [-1.0, 0.0, 0.0], PANEL_TRUNK, DetachedKind::Trunk),
+            ([21.0, 5.0, 1.0], [0.0, 0.0, -1.0], PANEL_DOOR_L, DetachedKind::DoorL),
+            ([21.0, 5.0, 17.0], [0.0, 0.0, 1.0], PANEL_DOOR_R, DetachedKind::DoorR),
+        ] {
+            let b = the(&bodies, id);
+            let wp = add(b.pos, turn(b.rot, sub(local_pt, b.com)));
+            let wn = turn(b.rot, norm);
+            let detached = bodies.apply_vehicle_impact(id, wp, wn, 180.0, 35_000.0);
+            assert!(detached.iter().any(|p| p.kind == expected_kind), "expected {expected_kind:?} to detach");
+            assert!(the(&bodies, id).live.as_ref().unwrap().panel_detached(expected_bit));
+        }
+        assert_eq!(the(&bodies, id).live.as_ref().unwrap().detached_panels, PANEL_HOOD | PANEL_TRUNK | PANEL_DOOR_L | PANEL_DOOR_R);
+    }
+
+    #[test]
+    fn moderate_curb_bump_leaves_wheels_and_panels_intact() {
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        run(&mut bodies, 1.0, id, [0.0; 3]);
+        let orig_half = the(&bodies, id).live.as_ref().unwrap().hull_half().unwrap();
+
+        // Repeated curb chatter and moderate bumps on wheels and bumpers.
+        for speed in [15.0f32, 28.0, 34.0, 55.0] {
+            for local_pt in [[35.0, 3.0, 17.0], [35.0, 3.0, 1.0], [41.0, 4.0, 9.0], [21.0, 4.0, 17.0]] {
+                let b = the(&bodies, id);
+                let wp = add(b.pos, turn(b.rot, sub(local_pt, b.com)));
+                let wn = turn(b.rot, [1.0, 0.0, 0.0]);
+                let parts = bodies.apply_vehicle_impact(id, wp, wn, speed, 6_000.0);
+                assert!(parts.is_empty(), "moderate bump at speed {speed} must not detach anything: {parts:?}");
+            }
+        }
+        let live = the(&bodies, id).live.as_ref().unwrap();
+        assert_eq!(live.detached_wheels, 0);
+        assert_eq!(live.detached_panels, 0);
+        assert_eq!(live.wheel_health, [1.0; 4]);
+        assert_eq!(live.panel_health, [1.0; 4]);
+        assert_eq!(live.attached_wheel_count(), 4);
+        // Curb bumps below 35 cells/s also leave physical hull untouched (55 cells/s only causes minor crease).
+        assert!(live.hull_half().unwrap()[0] > orig_half[0] * 0.85);
+    }
+
+    #[test]
+    fn towing_hitch_world_anchor_transforms_with_chassis_pose() {
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+
+        // Verify default front & rear hitches are configured at bumpers with sensible max_tension.
+        {
+            let b = the(&bodies, id);
+            let live = b.live.as_ref().unwrap();
+            assert!(!live.front_hitch.active && !live.rear_hitch.active);
+            assert!(live.front_hitch.local_anchor[0] > 15.0, "front hitch is at +x bumper: {:?}", live.front_hitch.local_anchor);
+            assert!(live.rear_hitch.local_anchor[0] < -15.0, "rear hitch is at -x bumper: {:?}", live.rear_hitch.local_anchor);
+            assert!(live.front_hitch.max_tension >= 50_000.0);
+        }
+
+        // Test binding and tension limit check.
+        {
+            let b = bodies.list.iter_mut().find(|b| b.id == id).unwrap();
+            let live = b.live.as_mut().unwrap();
+            let limit = live.rear_hitch.max_tension;
+            assert!(!live.rear_hitch.exceeds_tension(limit * 2.0), "inactive hitch does not trip tension limit");
+            live.bind_hitch(true, true);
+            assert!(live.rear_hitch.active);
+            assert!(!live.rear_hitch.exceeds_tension(limit * 0.5));
+            assert!(live.rear_hitch.exceeds_tension(limit * 1.1));
+        }
+
+        // Test accurate world transform across multiple translated and rotated chassis poses.
+        let poses: [(V, Q); 4] = [
+            ([1000.0, 2410.0, 4100.0], [0.0, 0.0, 0.0, 1.0]),
+            ([1250.0, 2425.0, 3980.0], about(1, std::f32::consts::FRAC_PI_2)),
+            ([900.0, 2405.0, 4200.0], about(1, std::f32::consts::PI)),
+            ([1111.5, 2418.25, 4042.75], {
+                let q = qmul(qmul(about(1, 0.7), about(2, -0.2)), about(0, 0.15));
+                let l = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+                q.map(|v| v / l)
+            }),
+        ];
+        for (pos, rot) in poses {
+            assert!(bodies.place(id, pos, rot));
+            let b = the(&bodies, id);
+            let live = b.live.as_ref().unwrap();
+            let front_w = live.hitch_world_pos(b, false);
+            let rear_w = live.hitch_world_pos(b, true);
+            let expect_front = add(b.pos, turn(b.rot, live.front_hitch.local_anchor));
+            let expect_rear = add(b.pos, turn(b.rot, live.rear_hitch.local_anchor));
+            for a in 0..3 {
+                assert!((front_w[a] - expect_front[a]).abs() < 1e-4, "front hitch mismatch on axis {a}");
+                assert!((rear_w[a] - expect_rear[a]).abs() < 1e-4, "rear hitch mismatch on axis {a}");
+            }
+            let span = sub(front_w, rear_w);
+            let dist = dot(span, span).sqrt();
+            assert!((dist - CAR[0] as f32).abs() < 1e-3, "rigid hitch span preserved under pose transform: {dist}");
+        }
+
+        // Verify ram_carve_impulse thresholds and material filter.
+        assert_eq!(Live::ram_carve_impulse(30.0, 20_000.0), None);
+        assert_eq!(Live::ram_carve_impulse(120.0, 2_000.0), None);
+        assert_eq!(Live::ram_carve_impulse(f32::NAN, 20_000.0), None);
+        assert_eq!(Live::ram_carve_impulse(100.0, 20_000.0), Some(2_000_000.0));
+        assert!(is_ram_carvable_material(WOOD) && is_ram_carvable_material(GLASS) && is_ram_carvable_material(PLASTER));
+        assert!(!is_ram_carvable_material(STEEL) && !is_ram_carvable_material(CONCRETE));
     }
 }
 

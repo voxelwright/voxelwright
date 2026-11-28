@@ -52,7 +52,7 @@ const inboxDir = arg('inbox', DEFAULT_INBOX)
 const handleInbox = createInboxRoutes(inboxDir, { send: (res, code, body, type) => send(res, code, body, type), foreign })
 /** What the page may ask for: the folders of pages, never the server or its tests. */
 const OPEN = ['probe', 'page']
-const TYPES = { '.html': 'text/html; charset=utf-8', '.ts': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.json': 'application/json' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.ts': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.json': 'application/json' }
 /** A page that is its own origin's only reader may share memory with its workers and read a fine clock. */
 const HEADERS = { 'Cache-Control': 'no-store', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }
 const BODY_MOST = 2 << 20
@@ -62,7 +62,7 @@ const send = (res, code, body, type = 'text/plain; charset=utf-8') => { res.writ
 async function file(res, path, host = '') {
   const rel = normalize(path).replace(/^[/\\]+/, '')
   // Of a plugin (plugins.mjs) a page may have its page side, and no more.
-  if (rel.startsWith('..') || !(OPEN.includes(rel.split(sep)[0]) || /^plugins[/\\][a-z0-9-]+[/\\]page\.ts$/.test(rel)) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
+  if (rel.startsWith('..') || !(OPEN.includes(rel.split(sep)[0]) || rel === 'sf-walks.mjs' || /^plugins[/\\][a-z0-9-]+[/\\]page\.ts$/.test(rel)) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
   let body
   try { body = await readFile(rel.startsWith('plugins') ? join(pluginsDir, rel.slice(8)) : join(root, rel)) } catch { return send(res, 404, 'not here') }
   if (extname(rel) === '.ts') {
@@ -226,6 +226,10 @@ world.others   what the other rules of this world listen for, as names: ["said",
 world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near, look, tall, broad}. id is the same from one call to the next; near is how far the nearest person is; look is what they look like ({coat, legs, hair, skin, shoes, wear}: colours, and what they have on by name) and tall and broad their build against the usual. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
 world.sees(a, b)   whether a sees b now (ids of world.people): true when b is within ${600} cells, a clear line runs from a's eyes to b's head or chest through the world as it stands (walls, what was built and broken; glass and water are seen through, leaves hide), and b is in front of a (a little behind the shoulder counts) or within ${25} cells, where anyone is noticed. It is also each person's own list: world.people[i].sees is the ids of whom they see. Asked for pairs with someone at a page or in a seat: two actors do not see each other. So one who got away is one no pursuer sees, not only one far off
 world.things   the living things (what was made to be driven, ridden or flown: a car, a boat, a craft) within ${1500} cells of anyone, and every one this rule drives however far off, nearest first (at most ${32}): {id, name, scheme, at: [x, y, z], yaw, speed, awake, upright, near, mine, driven, riders, own, seats}. id is its record's and stays the same; name is what it was made as ("car"); scheme is how it is driven (drive, fly, hover, ride); speed is cells a second along its front; upright is false when it lies on its side or roof; mine is true while this rule drives it, driven while another does
+world.city     bounded read-only snapshot of the living-city coordinator: {now, heat (0 to 5), districts, witnesses, mood: {dominant, counts, panicRatio, totalNpcs}, smartObjects, recentEvents, directorBrief}. Read it to weave district heat, active witness alerts, crowd mood, and player-made affordances into rules and the director without overriding the city's own simulation
+world.stimulus(kind, at, opts)   emits a bounded acoustic/visual stimulus into the living-city coordinator (kind: blast, gunshot, crash, crime, siren, shout, horn, stalled_car, made_thing; at: [x, z] or [x, y, z]; opts: {radius, loudness, severity, threat, decayMs, actorId, suspectId, reportable, district}). Non-omniscient: only perceiving witnesses react. At most 8 a second a rule
+world.social(actorId, action, opts)   runs a 0 ms contextual social exchange or witness interception on an actor (action: greet, antagonize, defuse, intimidate, apologize, bribe; opts: {by, seed, quiet, district}). Updates trust, mood, witness chains, and speaks the bark unless quiet: true. At most 8 a second a rule
+world.smartObject(id, {at, name, size, facing, affordances, district, remove})   registers or unregisters a rule-owned Smart Object (affordance kinds: sit, shelter, browse, cover, spectacle, queue; validated and clamped inside bounds; at: null or remove: true unregisters). At most 16 per rule; cleaned up when the rule is taken out
 world.keep     the rule's own memory: an object, carried from call to call, when the rule is put again changed, and when the world starts again. At most 64 KB as JSON
 world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this rule, or changes one: only the fields given change. name is shown over its head (its id, until it is given one); name: null shows none. id: lower-case letters, digits and dashes, up to 24. A new actor needs at: [x, z]; given again, at moves it there at once. An actor asked for is in world.people for the rest of that same call (fresh: true), where it was asked to stand, so world.who(id) finds it at once: never drop an actor from what you keep because world.who did not know it in the call that made it. to: [x, z] is where it walks over the world's own cells (null stops it): straight while that is open, and round what is in its way when it is not (a parked car, a lamp, a corner), up kerbs and stairs, down drops, and up onto something waist-high with its hands. Where there is no way it gets as near as it can, and stopped says what kept it from the rest. An actor does not stand in anyone: it goes round a person or another actor in its way, stops beside one who stands where it was going (stopped says who), follows no nearer than two bodies can stand (8 cells), and one placed (at) where someone stands is put a step to one side. face: [x, z] turns it. pace is cells a second (13 is a walk, at most 400). look is {coat, legs, hair, skin, shoes: "#rrggbb", tall, broad: 0.8 to 1.2, wear, carry, extra} (LOOKS, below). say is heard by everyone within 30 m
 world.person(id, {pace, jump, climb, fly, fall, down, cling, look, move, aim})   what the body of someone at a page can do, what their figure looks like and what it does with its limbs: only the fields given change, and null puts one back as it was. look, move and aim are as world.actor's (LOOKS and MOVES, below): move: "strike", "kick", "duck", "block" or keys of the rule's own makes their own figure do it, on their page and everyone's (it strikes nobody: a blow is world.push or world.down); look: {coat: "#15161a", wear: ["coat", "glasses"]} dresses them. They see it in the view behind (V). id is theirs in world.people (kind "page"). pace: how fast they run, cells a second (45 as they are; a walk is a third of it; up to 400). jump: how high, cells (7; up to 300). climb: how high a wall they get up when they go on against it, cells (0: steps and kerbs only; 100000: any wall). fly: how fast they fly, cells a second (0: they do not; then Space rises, C sinks). fall: how much of the world's pull they feel (1; 0.2 comes down slowly; 0 hangs). down: which way is down for them, a way [dx, dy, dz] in the world's axes ([0, -1, 0] as it is; [1, 0, 0] and they fall east, stand on a wall that faces west and run up and along it; [0, 1, 0] and the ceiling is their floor). cling: true and their down turns to whatever they walk onto: walked at a wall they walk up it, over its top and down the far side. Their eye turns with them, in their head while they are on a wall. Their own page moves their body by these. What a rule set goes back when the rule is taken out. Someone whose page is loaded again comes back as the same person, with the same id: for ten minutes after they go missing from world.people what a rule gave them here, how it dressed them and what they hold are kept for them, so keep what you know of a person under their id (world.keep) and do not forget them the moment they are missing
@@ -280,6 +284,8 @@ POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source"
 GET  /world/rules         how each rule is doing: {id, name, by, running, listens, actors, calls, ms, worst, error} (the world's own; ?given=1 lists the engine's rule for talk too)
 GET  /world/rules?id=     one rule, with its source
 GET  /world/realm         {name, about, arrive, look, director, rule (the id of the realm's own rule, the one written for its idea, if it says), rules: [ids]}
+GET  /world/city          living-city telemetry snapshot: {now, heat, districts, witnesses, mood, smartObjects, recentEvents, directorBrief, npcs, players, slots, bolos, units}
+POST /world/social        {"by": name, "actorId": id, "action": "greet" | "antagonize" | "defuse" | "intimidate" | "apologize" | "bribe"}   runs a 0 ms contextual bark, trust/mood update, and witness interception on an actor; returns {actorId, name, action, bark, trust, mood, intercepted, interceptResult, secondaryWitnesses, escalateToMind, mindContext}
 A realm's hour (look.hour) is the hour of the day in it for everyone: the town's residents are out by it in the world's own process and on every page there, whatever hour a page shows. A realm that says none has them out as at eleven.
 
 REALMS
@@ -382,6 +388,11 @@ const WAIT_MOST = 10_000
 const THING_MOST = 2 + 5 * 240_000, THING_CELLS_MOST = 256 ** 3
 /** What bodies may ask a second, all told: around takes the world's one thread 30 ms (measured), so this is at most six tenths of it. */
 const BODIES_A_SECOND = 20
+/** What social actions may be asked a second, all told, and the allowlisted social actions (#164). */
+const SOCIALS_A_SECOND = 20
+const SOCIAL_ACTIONS = new Set(['greet', 'antagonize', 'defuse', 'intimidate', 'apologize', 'bribe'])
+const SOCIAL_ACTOR_ID = /^[a-zA-Z0-9][a-zA-Z0-9_./ -]{0,63}$/
+const FORBIDDEN_IDS = new Set(['__proto__', 'constructor', 'prototype'])
 /** What riders may tell living things a second, all told: each says it four times a second and when a key changes. */
 const DRIVES_A_SECOND = 240
 /** The most columns one question about tops may be of: a square 26 m a side. */
@@ -425,7 +436,7 @@ const place = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => whole(
 // same ask as the edit that is the thing's cells, so there are never cells of a thing without one; the cells are
 // kept once, as that edit. Records are in the world's file as the asks that made and changed them.
 /** The fields other lanes own. To this server each is JSON of at most so many bytes: whoever uses one checks it. */
-const OPEN_FIELDS = ['parts', 'behaviour', 'controls', 'seats', 'sounds', 'facts'], FIELD_MOST = 16384, FACTS_MOST = 1024
+const OPEN_FIELDS = ['parts', 'behaviour', 'affordances', 'controls', 'seats', 'sounds', 'facts'], FIELD_MOST = 16384, FACTS_MOST = 1024
 const FACINGS = ['south', 'north', 'east', 'west']
 const ID = /^[a-z0-9][a-z0-9-]{0,39}$/
 /** A thing's record as it may be kept: `whole` for a new one (it has all of what the making lane owns), else a change (an id and open fields). Or why not. */
@@ -719,6 +730,7 @@ function open(of) {
   // A thing that was in someone's hand when the world stopped is in nobody's now: it is put down where it was taken from.
   for (const t of things.values()) if (t.record.held) thread.postMessage({ settle: { id: t.record.id, rows: rowsOf(t), at: t.record.at, grain: t.record.grain } })
   for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, name: t.record.name, controls: t.record.controls, rows: rowsOf(t) } })
+  for (const t of things.values()) if (t.record.affordances || t.record.behaviour?.affordances) thread.postMessage({ made: t.record })
   // The rules the world had are put in again, each as it was last put: their actors come back when each starts.
   let peopleKept = {}
   try { const read = JSON.parse(readFileSync(peopleFile, 'utf8')); if (read && typeof read === 'object' && !Array.isArray(read)) peopleKept = read } catch { /* none kept, or not readable: the rules start with nothing */ }
@@ -794,7 +806,7 @@ function open(of) {
     for (const r of readers) if (r.writableLength < 1 << 20) r.write(now)
   })
   thread.on('error', (e) => { down = String(e); console.error(`the world stopped: ${down}`) })
-  let asked = 0, since = Date.now(), seated = 0, seatedSince = Date.now(), driven = 0, drivenSince = Date.now()
+  let asked = 0, since = Date.now(), seated = 0, seatedSince = Date.now(), driven = 0, drivenSince = Date.now(), socialed = 0, socialSince = Date.now()
   const body = async (req, most) => { const parts = []; let size = 0; for await (const chunk of req) { size += chunk.length; if (size > most) return null; parts.push(chunk) } try { return JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return undefined } }
   world = {
     body,
@@ -936,6 +948,42 @@ function open(of) {
     minds: (url, res) => (down ? send(res, 503, 'the world has stopped') : minds.take(url, res)),
     mind: async (req, res) => { const b = await body(req, 4096); return down ? send(res, 503, 'the world has stopped') : minds.mind(b, res) },
     realm: (res) => send(res, 200, JSON.stringify({ ...realm, ...(ground && !realm.arrive ? { arrive: groundWord().arrive } : {}), rules: [...rules.keys()] }), TYPES['.json']),
+    /** Live living-city telemetry snapshot (#164): heat, witnesses, crowd mood, Smart Objects, directorBrief. */
+    async city(res) {
+      if (down) return send(res, 503, 'the world has stopped')
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ city: true, id }) })
+      if (m.error) return send(res, 503, m.error)
+      send(res, 200, JSON.stringify(m.city), TYPES['.json'])
+    },
+    /** 0 ms contextual social exchange & witness interception (#164). */
+    async social(req, res) {
+      if (down) return send(res, 503, 'the world has stopped')
+      const now = Date.now()
+      if (now - socialSince > 1000) { socialSince = now; socialed = 0 }
+      if (++socialed > SOCIALS_A_SECOND) return send(res, 429, 'too many social requests: wait a second')
+      const b = await body(req, 2048)
+      if (b === null) return send(res, 413, 'too much')
+      if (!b || typeof b !== 'object' || Array.isArray(b)) return send(res, 400, 'a social request is {by, actorId, action}')
+      let by = 'player'
+      if (b.by !== undefined) {
+        if (typeof b.by !== 'string') return send(res, 400, 'say who you are: "by" is your name, up to 24 characters')
+        by = text(b.by, 24)
+        if (!by) return send(res, 400, 'say who you are: "by" is your name, up to 24 characters')
+        if (by.includes('/')) return send(res, 400, 'a name with "/" in it is an actor of a rule: use another')
+      }
+      const actorId = typeof b.actorId === 'string' ? b.actorId.trim() : ''
+      if (!actorId || !SOCIAL_ACTOR_ID.test(actorId) || FORBIDDEN_IDS.has(actorId)) return send(res, 400, 'actorId must be a valid actor id (1 to 64 characters)')
+      const action = typeof b.action === 'string' ? b.action.trim().toLowerCase() : ''
+      if (!SOCIAL_ACTIONS.has(action)) return send(res, 400, `action must be one of: ${[...SOCIAL_ACTIONS].join(', ')}`)
+      const seed = Number.isFinite(b.seed) ? b.seed : 0
+      const quiet = b.quiet === true
+      const district = typeof b.district === 'string' ? text(b.district, 48) : ''
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ social: { by, actorId, action, seed, quiet, ...(district ? { district } : {}) }, id }) })
+      if (m.error) return send(res, m.status || 409, m.error)
+      send(res, 200, JSON.stringify(m.social), TYPES['.json'])
+    },
     /** What it stands on, and what of that its process holds now (tiles by level), with this server's memory. */
     async ground(res) {
       if (down) return send(res, 503, 'the world has stopped')
@@ -1379,6 +1427,8 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && route === '/world/things') return world.things(url, res)
     if (req.method === 'GET' && route === '/world/rules') return done(world.rules(url, res))
     if (req.method === 'GET' && route === '/world/realm') return world.realm(res)
+    if (req.method === 'GET' && route === '/world/city') return done(world.city(res))
+    if (req.method === 'POST' && route === '/world/social') return done(world.social(req, res))
     if (req.method === 'GET' && route === '/world/minds') return world.minds(url, res)
     if (req.method === 'POST' && route === '/world/mind') return done(world.mind(req, res))
     if (req.method === 'GET' && route === '/world/') return done(world.guide(res))

@@ -14,9 +14,10 @@
 //                                 missed (cells out and back, bodies born and gone, dust),
 //                                 `state` is where things are now (bodies, fire, water)
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { parentPort, workerData } from 'node:worker_threads'
 import { gzipSync } from 'node:zlib'
 import { controlsOf, numbers } from './page/living.ts'
@@ -26,6 +27,7 @@ import { rowsOf as keptRows } from './rules/kept.mjs'
 import { about, REACH_MOST } from './about.mjs'
 import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
+import { createWalkGraph, squareBounds } from './sf-walks.mjs'
 import { lookOf, ownLook } from './page/wear.ts'
 import { plugger } from './plugins.mjs'
 import { blows } from './rules/blows.mjs'
@@ -35,6 +37,10 @@ import { hands } from './rules/hands.mjs'
 import { boxOf, holding } from './rules/holding.mjs'
 import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
+import { createLivingCity } from './rules/living-city.mjs'
+import { STIMULUS_KINDS } from './rules/stimulus.mjs'
+import { inferAffordances } from './make/affordances.mjs'
+import { directorCityBrief } from './make/director.mjs'
 import { text } from './text.mjs'
 import { reading } from './ground.mjs'
 import { dropped, forget, ground as groundOf, hold, holding as tilesHeld, holds, owned, owning, prepare, shares, unpin } from './page/bay.ts'
@@ -54,6 +60,92 @@ let hearing = null
 // One listener for everything, from the start: an object asked of the server is heard at once, before anything that
 // waits its turn (what is waiting may be waiting for it); the rest is done in order.
 parentPort.on('message', (m) => { if (m.got) { fetches.get(m.got.n)?.(m.got); fetches.delete(m.got.n) } else if (hearing) hearing(m); else early.push(m) })
+/** Shared deterministic SF pedestrian walk graph and lazy life/*.json loader (#164). */
+const sfWalks = createWalkGraph()
+const sfSquares = new Map()
+let sfIndex = null
+let sfSquareLoader = null
+async function initSfLife(source, read, passed) {
+  const tryDiskIndex = (url) => {
+    try {
+      const idx = JSON.parse(readFileSync(fileURLToPath(url), 'utf8'))
+      if (!idx?.life) return null
+      return {
+        idx,
+        loader: (relPath) => {
+          const sqUrl = new URL(relPath, url)
+          return { sync: () => JSON.parse(readFileSync(fileURLToPath(sqUrl), 'utf8')) }
+        },
+      }
+    } catch { return null }
+  }
+  // 1. Prefer street life bundled in the pinned release manifest (local or remote).
+  const rec = source?.record?.('life/index.json')
+  if (rec) {
+    try {
+      const resp = await read(rec.url)
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer()
+        passed(rec.url, buf)
+        const idx = JSON.parse(Buffer.from(buf).toString('utf8'))
+        if (idx?.life) {
+          sfIndex = idx
+          sfSquareLoader = (relPath) => {
+            const sqRec = source.record(`life/${relPath}`)
+            if (!sqRec) return null
+            if (sqRec.url.startsWith('file:')) {
+              return { sync: () => JSON.parse(readFileSync(fileURLToPath(sqRec.url), 'utf8')) }
+            }
+            return {
+              async: async () => {
+                const r = await read(sqRec.url)
+                if (!r.ok) return null
+                const b = await r.arrayBuffer()
+                passed(sqRec.url, b)
+                return JSON.parse(Buffer.from(b).toString('utf8'))
+              },
+            }
+          }
+          return
+        }
+      }
+    } catch { /* fall through to disk/pilot life */ }
+  }
+  // 2. Local release directory with life/ beside current.json, else built-in engine/sf/pilot-life/.
+  const candidates = []
+  if (!GROUND.remote && typeof GROUND.pointer === 'string' && GROUND.pointer.startsWith('file:')) {
+    candidates.push(new URL('life/index.json', GROUND.pointer))
+  }
+  candidates.push(new URL('./sf/pilot-life/index.json', import.meta.url))
+  for (const url of candidates) {
+    const found = tryDiskIndex(url)
+    if (found) { sfIndex = found.idx; sfSquareLoader = found.loader; return }
+  }
+}
+/** Loads SF life/*.json squares within `radius` cells of `(x, z)` lazily and caches them in `sfWalks`. */
+function ensureSfSquares(x, z, radius = 3500) {
+  if (!sfIndex?.life || !sfSquareLoader) return
+  for (const [name, entry] of Object.entries(sfIndex.life)) {
+    if (sfSquares.has(name)) continue
+    const [x0, z0, x1, z1] = squareBounds(name)
+    const dx = Math.max(x0 - x, 0, x - x1), dz = Math.max(z0 - z, 0, z - z1)
+    if (Math.hypot(dx, dz) > radius) continue
+    const loader = sfSquareLoader(entry.path)
+    if (!loader) continue
+    if (loader.sync) {
+      sfSquares.set(name, 'held')
+      try { sfWalks.addSquare(name, loader.sync()) } catch { sfSquares.delete(name) }
+    } else if (loader.async) {
+      sfSquares.set(name, 'asked')
+      void loader.async().then((data) => {
+        if (data) { sfWalks.addSquare(name, data); sfSquares.set(name, 'held'); town.at = 0 }
+        else sfSquares.delete(name)
+      }, () => sfSquares.delete(name))
+    }
+  }
+}
+/** Foot height on San Francisco ground (matches street.ts `feetAt`: avoids awning roofs). */
+const sfFeetAt = (x, z) => { const ix = Math.round(x), iz = Math.round(z), f = core.feet_at(ix, iz), g = core.ground_at(ix, iz); return f - g > 25 ? g + 1 : f }
 if (GROUND) {
   // What is not yet on disk is asked of the server's own thread, which asks the host once for everyone (ground.mjs `once`).
   const fetcher = (url) => new Promise((resolve) => { const n = ++fetching; fetches.set(n, resolve); parentPort.postMessage({ wants: { n, url } }) })
@@ -64,6 +156,8 @@ if (GROUND) {
   const taken = (c, x0, z0, size) => { const b = [x0 - 96, z0 - 96, x0 + size + 96, z0 + size + 96]; c.world_regrow(...b); grew.push(b) }
   const s = await hold({ pointer: GROUND.pointer, read, passed, heroes: JSON.parse(Buffer.from(GROUND.heroes).toString('utf8')), squares: GROUND.squares ? new Uint8Array(GROUND.squares).slice().buffer : null, kerbs: GROUND.kerbs ? new Uint8Array(GROUND.kerbs).slice().buffer : null, taken, most: GROUND.most })
   if (s.release !== GROUND.release) throw new Error(`the world's process read release ${s.release}, the server ${GROUND.release}`)
+  await initSfLife(s, read, passed)
+  if (GROUND.arrive?.at) ensureSfSquares(GROUND.arrive.at[0], GROUND.arrive.at[GROUND.arrive.at.length - 1])
 }
 /** Where tiles have come since what was asked meanwhile was last made again (`fresh`): boxes of columns. */
 let grew = []
@@ -212,8 +306,11 @@ function heed(words) {
   }
   for (const [id, a] of [...alive]) {
     if (broke.has(a.body)) {
+      const crashAt = a.pose?.at ?? a.born?.at ?? null
       alive.delete(id)
       driven.broke(id)
+      if (crashAt) emitWorldStimulus('crash', crashAt, { radius: 550, meta: { thing: id, name: a.name || id } })
+      removeMadeThingFromCity(id)
       parentPort.postMessage({ living: { thing: id, body: 0 } })
       parentPort.postMessage({ echo: { by: 'the world', gone: id } })
     } else if (moved) {
@@ -304,10 +401,16 @@ let grasp = null
 const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal && !p.aloft ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.frame ? { frame: p.frame } : {}), ...(p.aloft ? { aloft: true } : {}), ...(grasp?.carried(p.by) ? { look: { ...(p.look ?? {}), carry: grasp.carried(p.by) } } : p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}), ...(p.struck && Date.now() - p.struck.t < 1500 ? { struck: p.struck } : {}) } }) }
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
-function shock(at, radius) {
+function shock(at, radius, by = null) {
   const now = Date.now()
   shocks.push({ at, radius, t: now / 1000 })
   while (shocks.length > 32 || (shocks.length && now / 1000 - shocks[0].t > 60)) shocks.shift()
+  emitWorldStimulus('blast', at, {
+    radius: Math.max(450, Math.min(1200, (Number(radius) || 8) * 80)),
+    actorId: typeof by === 'string' && by ? by : null,
+    suspectId: typeof by === 'string' && by ? by : null,
+    now,
+  })
   for (const p of folk.values()) {
     const far = Math.hypot(p.at[0] - at[0], p.at[1] + 9 - at[1], p.at[2] - at[2])
     if (far < radius * 2.5 + 10) { p.down = now + 3500; p.goal = null; p.stopped = 'knocked down by a blast: on your feet again in a few seconds' } else if (far < radius * 6 + 60) p.flinch = now + 1500
@@ -359,6 +462,7 @@ function seat(m) {
     if (voices.length > 400) voices.shift()
     parentPort.postMessage({ said: v })
     happen('said', { by: p.by, name: p.name, text: m.text, at: v.at })
+    if (SHOUT_RE.test(m.text)) emitWorldStimulus('shout', v.at, { actorId: p.by, now })
     return { said: v.n }
   }
   if (m.op === 'me') return { you: state(p) }
@@ -369,10 +473,16 @@ function seat(m) {
       const dx = o.at[0] - p.at[0], dz = o.at[2] - p.at[2], far = Math.hypot(dx, dz, o.at[1] - p.at[1])
       if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.thinking ? 'thinking' : o.goal ? 'walking' : 'standing' })
     }
-    // The town's residents, by the same rule the pages draw them from, at the realm's own hour (`hourNow`).
-    // A released world has none yet: they walk the town's blocks, which are not its streets (#526).
-    const found = [], n = GROUND ? 0 : residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken, standing())
-    const town = found.slice(0, n).map((r) => ({ far: Math.round(Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2])), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.walking > 0.5 ? 'walking' : r.reading > 0.5 ? 'reading a phone' : 'standing' })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
+    // The town's residents, or San Francisco's shared pedestrians (sf-walks.mjs), at the realm's hour & rain.
+    let town
+    if (GROUND) {
+      ensureSfSquares(p.at[0], p.at[2])
+      const { people: sfPeople } = sfWalks.query([p.at[0], p.at[2]], { reach: Math.min(within, 400), t: now / 1000, hour: hourNow(), rain: rainNow(), taken, shocks, feetAt: sfFeetAt })
+      town = sfPeople.map((r) => ({ far: Math.round(r.dist), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.waiting ? 'waiting at a crossing' : r.walking > 0.5 ? 'walking' : 'standing', archetype: r.archetype, activity: r.activity, lod: r.lod })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
+    } else {
+      const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken, standing())
+      town = found.slice(0, n).map((r) => ({ far: Math.round(Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2])), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.walking > 0.5 ? 'walking' : r.reading > 0.5 ? 'reading a phone' : 'standing' })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
+    }
     const heard = voices.filter((v) => v.n > (m.since || 0) && v.by !== p.by && Math.hypot(v.at[0] - p.at[0], v.at[1] - p.at[1], v.at[2] - p.at[2]) <= EARSHOT).map((v) => ({ n: v.n, name: v.name, text: v.text, far: Math.round(Math.hypot(v.at[0] - p.at[0], v.at[2] - p.at[2])), seconds_ago: Math.round((now - v.t) / 1000) }))
     // What the eyes meet, level, the eight ways round.
     const eye = [Math.round(p.at[0]) + 0.5, p.at[1] + EYES + 0.5, Math.round(p.at[2]) + 0.5]
@@ -399,11 +509,22 @@ const residentId = (seed) => `r${(seed >>> 0).toString(36)}`
 let town = { at: 0, list: [], by: new Map() }
 /** The residents near people now (nearest first), found again four times a second at most. */
 function townNear(now) {
-  if (GROUND || now - town.at < 250) return town
+  if (now - town.at < 250) return town
   const by = new Map(), found = []
   let persons = 0
   for (const p of folk.values()) {
     if (p.rule || persons++ >= 8) continue
+    if (GROUND) {
+      ensureSfSquares(p.at[0], p.at[2])
+      const { people: sfPeople } = sfWalks.query([p.at[0], p.at[2]], { reach: TOLD_WITHIN, t: now / 1000, hour: hourNow(), rain: rainNow(), taken, shocks, feetAt: sfFeetAt })
+      for (const r of sfPeople) {
+        const far = r.dist, id = r.id, old = by.get(id)
+        if (far <= TOLD_WITHIN && (!old || far < old.far)) {
+          by.set(id, { id, seed: r.seed, home: [...r.home], at: [...r.at], yaw: r.yaw, stride: r.stride, walking: r.walking > 0.5, archetype: r.archetype, activity: r.activity, lod: r.lod, far })
+        }
+      }
+      continue
+    }
     const n = residents(core, [p.at[0], p.at[2]], TOLD_WITHIN, now / 1000, hourNow(), found, shocks, taken, standing())
     for (let i = 0; i < n; i++) {
       const r = found[i], far = Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2]), id = residentId(r.seed), old = by.get(id)
@@ -414,19 +535,25 @@ function townNear(now) {
   return (town = { at: now, list, by: new Map(list.map((r) => [r.id, r])) })
 }
 /** The residents a rule is told of: who, where, how they face, whether they walk, and how far the nearest person is. */
-const townTold = () => townNear(Date.now()).list.map((r) => ({ id: r.id, at: r.at.map(Math.round), yaw: Number(r.yaw.toFixed(2)), walking: r.walking, near: Math.round(r.far), ...looksOf(r.seed) }))
+const townTold = () => townNear(Date.now()).list.map((r) => ({ id: r.id, at: r.at.map(Math.round), yaw: Number(r.yaw.toFixed(2)), walking: r.walking, near: Math.round(r.far), ...(r.archetype ? { seed: r.seed, archetype: r.archetype, activity: r.activity, lod: r.lod, home: r.home } : {}), ...looksOf(r.seed) }))
 /** What a resident looks like by their own number (page/wear.ts `ownLook`), kept for those lately asked about. */
 const looked = new Map()
 const looksOf = (seed) => { let l = looked.get(seed); if (!l) { if (looked.size > 512) looked.clear(); looked.set(seed, l = ownLook(seed)) } return l }
 /** A resident becomes a body of a rule's, where they are this moment; or why not. */
 function take(rule, short, id, now, wrong) {
   const r = typeof id === 'string' ? townNear(now).by.get(id) : undefined
-  if (!r && GROUND) { wrong('this world is San Francisco from a release, and has no residents yet: there is nobody to take'); return null }
   if (!r) { wrong(`no resident "${String(id).slice(0, 16)}" is near anyone now: world.residents says who is`); return null }
   if (taken.has(r.seed)) { wrong(`resident "${r.id}" is somebody's actor already`); return null }
   if (taken.size >= TAKEN_MOST) { wrong(`the world's rules hold ${TAKEN_MOST} residents already: let one go first`); return null }
   // Where they are now, not a quarter of a second ago: nobody should see them jump.
-  const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, hourNow(), fresh, shocks, taken, standing()), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
+  let live
+  if (GROUND) {
+    ensureSfSquares(r.home[0], r.home[1])
+    live = sfWalks.whereabouts(r.seed, r.home, now / 1000, hourNow(), rainNow(), { shocks, feetAt: sfFeetAt }) ?? r
+  } else {
+    const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, hourNow(), fresh, shocks, taken, standing())
+    live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
+  }
   const p = { by: `${rule.id}/${short}`, short, rule: rule.id, name: '', seat: true, at: [...live.at], yaw: live.yaw, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0, was: r.seed, home: [...r.home], stride: live.stride }
   folk.set(p.by, p); taken.set(r.seed, p); town.at = 0
   return p
@@ -438,7 +565,14 @@ function release(p) {
 }
 /** A body on its way back: towards where its round has got to; there (or out of time), it is a resident again. Says whether it has gone. */
 function goingBack(p, now) {
-  const w = whereabouts(core, p.home, now / 1000), far = w ? Math.hypot(w.at[0] - p.at[0], w.at[2] - p.at[2]) : 0
+  let w
+  if (GROUND) {
+    ensureSfSquares(p.home[0], p.home[1])
+    w = sfWalks.whereabouts(p.was, p.home, now / 1000, hourNow(), rainNow(), { feetAt: sfFeetAt })
+  } else {
+    w = whereabouts(core, p.home, now / 1000)
+  }
+  const far = w ? Math.hypot(w.at[0] - p.at[0], w.at[2] - p.at[2]) : 0
   if (!w || far < 2 || now > p.back) { folk.delete(p.by); taken.delete(p.was); town.at = 0; p.gone = true; tell(p); return true }
   p.goal = [w.at[0], w.at[2]]
   return false
@@ -485,6 +619,225 @@ function turned(p, now) {
 }
 /** What is in a body's way at a place, for the telling: the first thing from the knees up, or a drop. */
 const inTheWay = (x, y, z) => { for (let k = 0; k < TALL; k++) { const kind = core.world_kind(Math.round(x), Math.round(y) + CLIMB + k, Math.round(z)); if (kind) return `${MATERIALS[kind & 15]} in the way` } return 'a drop too far to step down' }
+// ── Living-City AI (#164) ────────────────────────────────────────────────────
+// Lazily instantiated per world so idle worlds pay zero cost; stepped at ~3.3 Hz
+// (every 3rd 100 ms tick) while NPCs, active witness chains, or BOLOs exist.
+const SOCIAL_ACTIONS = new Set(['greet', 'antagonize', 'defuse', 'intimidate', 'apologize', 'bribe'])
+const STIMULUS_SET = new Set(STIMULUS_KINDS)
+const STIMULI_A_SECOND = 8, SOCIALS_A_SECOND = 8, SMART_OBJECTS_PER_RULE = 16
+const SMART_OBJ_ID = /^[a-z0-9][a-z0-9_-]{0,31}$/
+const CITY_FACINGS = ['south', 'north', 'east', 'west']
+const SHOUT_RE = /!|[A-Z]{4,}/
+const EMPTY_CITY_MOOD = Object.freeze({ dominant: 'calm', counts: Object.freeze({ calm: 0, warm: 0, wary: 0, annoyed: 0, angry: 0, alarmed: 0 }), panicRatio: 0, totalNpcs: 0 })
+const EMPTY_CITY_BRIEF = directorCityBrief({ maxHeat: 0, districtHeat: {}, activeWitnesses: [], crowdMood: EMPTY_CITY_MOOD, recentEvents: [], madeAffordances: [] })
+let livingCity = null
+let cityCache = null
+let cityDispatchDirty = false
+const syncedNpcs = new Set()
+const syncedPlayers = new Set()
+const thingMeta = new Map()
+const ruleSmartObjects = new Map()
+
+function ensureLivingCity() {
+  if (livingCity) return livingCity
+  livingCity = createLivingCity({
+    kind: (x, y, z) => core.world_kind(x, y, z),
+    now: () => Date.now(),
+    districtOf: () => (realmIs?.name ? String(realmIs.name) : 'downtown'),
+    weatherOf: () => {
+      const rain = rainNow()
+      const h = hourNow()
+      const night = h < 6 || h >= 20
+      return { rain, night, label: rain > 0.3 ? 'rain' : night ? 'night' : 'clear' }
+    },
+  })
+  return livingCity
+}
+
+function invalidateCity() { cityCache = null }
+
+/** Syncs `folk` actors and players into `livingCity` without mutating `folk`. */
+function syncLivingFolk(now = Date.now()) {
+  if (!livingCity) return
+  for (const p of folk.values()) {
+    if (p.gone) continue
+    if (p.rule && p.rule !== '~') {
+      if (livingCity.getNpc(p.by)) livingCity.updateNpc(p.by, { pos: p.at, yaw: p.yaw })
+      else livingCity.registerNpc(p.by, { pos: p.at, yaw: p.yaw, name: p.name || p.short, now })
+      syncedNpcs.add(p.by)
+    } else if (!p.rule) {
+      if (livingCity.getPlayer(p.by)) livingCity.updatePlayer(p.by, { pos: p.at, yaw: p.yaw, look: p.look ?? null, now })
+      else livingCity.registerPlayer(p.by, { pos: p.at, yaw: p.yaw, look: p.look ?? null, now })
+      syncedPlayers.add(p.by)
+    }
+  }
+  for (const id of [...syncedNpcs]) {
+    const p = folk.get(id)
+    if (!p || p.gone || !p.rule || p.rule === '~') { livingCity.removeNpc(id); syncedNpcs.delete(id) }
+  }
+  for (const id of [...syncedPlayers]) {
+    const p = folk.get(id)
+    if (!p || p.gone || p.rule) { livingCity.removePlayer(id); syncedPlayers.delete(id) }
+  }
+}
+
+/** Emits a world-level stimulus into `livingCity` (blasts, crashes, shouts). */
+function emitWorldStimulus(kind, pos, opts = {}) {
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now()
+  const lc = ensureLivingCity()
+  syncLivingFolk(now)
+  const res = lc.emitStimulus({ ...opts, kind, pos, now })
+  cityDispatchDirty = true
+  invalidateCity()
+  return res
+}
+
+/** Registers a player-made thing in `livingCity` when it has explicit or inferred affordances. */
+function syncMadeThingToCity(thing, { emit = false, now = Date.now() } = {}) {
+  if (!thing || typeof thing !== 'object' || !thing.id) return
+  const prev = thingMeta.get(thing.id)
+  const merged = prev ? { ...prev, ...thing } : { ...thing }
+  thingMeta.set(thing.id, merged)
+  const rawAff = merged.affordances ?? merged.behaviour?.affordances ?? null
+  const inferred = rawAff == null && merged.name ? inferAffordances({ name: merged.name, size: merged.size ?? [16, 16, 16] }).slots : []
+  if (rawAff != null || inferred.length > 0) {
+    const lc = ensureLivingCity()
+    syncLivingFolk(now)
+    lc.registerMadeThing({
+      id: merged.id,
+      name: merged.name || merged.id,
+      at: merged.at ?? [0, 0, 0],
+      size: merged.size ?? [16, 16, 16],
+      facing: merged.facing ?? 'south',
+      by: merged.by ?? null,
+      affordances: rawAff ?? inferred,
+      emitStimulus: emit,
+      now,
+    })
+    invalidateCity()
+  } else if (emit && livingCity && Array.isArray(merged.at)) {
+    syncLivingFolk(now)
+    livingCity.emitStimulus({ kind: 'made_thing', pos: merged.at, actorId: merged.by ?? null, now, meta: { objectId: merged.id, name: merged.name || merged.id } })
+    invalidateCity()
+  }
+}
+
+function removeMadeThingFromCity(id) {
+  thingMeta.delete(id)
+  if (!livingCity) return
+  livingCity.unregisterMadeThing(id)
+  invalidateCity()
+}
+
+function stepLivingCity(now) {
+  if (!livingCity) return
+  syncLivingFolk(now)
+  if (livingCity.npcCount === 0 && !cityDispatchDirty) return
+  const summary = livingCity.step(now)
+  cityDispatchDirty = summary.activeWitnesses.length > 0 || summary.maxHeat > 0
+  invalidateCity()
+}
+
+/** Resolves an actor id to a live rule actor in `folk`. */
+function resolveLivingNpc(actorId, ruleId = null) {
+  if (typeof actorId !== 'string' || !actorId) return null
+  if (ruleId) {
+    const own = folk.get(`${ruleId}/${actorId}`)
+    if (own && own.rule && own.rule !== '~') return own
+  }
+  const direct = folk.get(actorId)
+  if (direct && direct.rule && direct.rule !== '~') return direct
+  let found = null
+  for (const p of folk.values()) {
+    if (!p.rule || p.rule === '~') continue
+    if (p.short === actorId || (p.name && p.name === actorId)) {
+      if (found) return null
+      found = p
+    }
+  }
+  return found
+}
+
+/** Bounded read-only living-city snapshot for sandboxed rules (`world.city`) and `GET /world/city`. */
+function citySnapshot(now = Date.now(), full = false) {
+  if (!full && !livingCity) {
+    return { now, heat: 0, districts: {}, witnesses: [], mood: EMPTY_CITY_MOOD, smartObjects: [], recentEvents: [], directorBrief: EMPTY_CITY_BRIEF }
+  }
+  if (!full && cityCache && now - cityCache.at < 200) return cityCache.data
+  const lc = ensureLivingCity()
+  syncLivingFolk(now)
+  const summary = lc.directorSummary(now)
+  const districts = {}
+  const orderedDistricts = Object.entries(summary.districtHeat)
+    .sort((a, b) => (b[1]?.heat ?? 0) - (a[1]?.heat ?? 0) || (b[1]?.recentIncidents ?? 0) - (a[1]?.recentIncidents ?? 0))
+    .slice(0, 8)
+  for (const [k, v] of orderedDistricts) districts[k] = v
+  const smartObjects = summary.madeAffordances.slice(0, 8).map((m) => {
+    const meta = thingMeta.get(m.id)
+    const obj = lc.smartObjects.getObject(m.id)
+    const pos = obj?.pos ?? meta?.at ?? null
+    return { ...m, ...(Array.isArray(pos) ? { at: pos.map(Math.round) } : {}) }
+  })
+  const data = {
+    now: summary.now,
+    heat: summary.maxHeat,
+    districts,
+    witnesses: summary.activeWitnesses,
+    mood: summary.crowdMood,
+    smartObjects,
+    recentEvents: summary.recentEvents,
+    directorBrief: directorCityBrief(summary),
+  }
+  cityCache = { at: now, data }
+  if (!full) return data
+  const dSnap = lc.dispatch.snapshot()
+  return {
+    ...data,
+    npcs: lc.npcCount,
+    players: syncedPlayers.size,
+    slots: lc.smartObjects.slotCount,
+    bolos: dSnap.bolos.slice(0, 16),
+    units: dSnap.units.slice(0, 16),
+  }
+}
+
+/** Executes a 0 ms social exchange / witness interception (`POST /world/social`). */
+function handleSocial(req) {
+  const now = Date.now()
+  const p = resolveLivingNpc(req.actorId)
+  if (!p) return { status: 404, error: `no actor "${String(req.actorId).slice(0, 32)}" is in the world` }
+  const lc = ensureLivingCity()
+  syncLivingFolk(now)
+  const by = req.by || 'player'
+  const res = lc.interactSocial(by, p.by, req.action, {
+    now,
+    seed: Number.isFinite(req.seed) ? req.seed : 0,
+    ...(req.district ? { district: req.district } : {}),
+  })
+  cityDispatchDirty = true
+  invalidateCity()
+  if (!req.quiet && res.bark?.text) {
+    const words = text(res.bark.text, 200)
+    if (words) utter(p, words, now)
+  }
+  const npc = lc.getNpc(p.by)
+  return {
+    social: {
+      actorId: p.by,
+      name: p.name || p.short,
+      action: req.action,
+      bark: res.bark,
+      trust: lc.memory.recall(p.by, by).trust,
+      mood: npc?.mood ?? res.bark?.mood ?? 'calm',
+      intercepted: res.intercepted,
+      interceptResult: res.interceptResult,
+      secondaryWitnesses: res.secondaryWitnesses,
+      escalateToMind: res.escalateToMind,
+      mindContext: res.mindContext,
+    },
+  }
+}
+
 /** How bodies get about: round what is in the way, after or away from someone, and who is near whom (about.mjs). */
 const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, z), tall: TALL, pace: PACE, say: inTheWay, hear: (rule, event, e) => ruled.happen(event, e, rule), rate: () => body.rate })
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
@@ -495,6 +848,7 @@ setInterval(() => {
   const now = Date.now()
   ticks++
   rests(now)
+  if (ticks % 3 === 0) stepLivingCity(now)
   if (ticks % 10 === 0) blow.sweep(now)
   if (driven.step(now)) nudged = true
   driven.watch(now)
@@ -622,7 +976,7 @@ const directing = () => realmIs?.director === true && voiced
 let directed = false
 /** Said whenever the record or the voice changes: the director is woken (told 'start', as any rule put back is) or put to rest. */
 const direct = () => { const now = directing(); if (now === directed) return; directed = now; if (now) happen('start', { why: 'woken' }, DIRECTOR); else if (ruled.has(DIRECTOR)) drop(DIRECTOR, true) }
-const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants, event) => { during = event; try { obey(rule, wants, Date.now()) } finally { during = '' } }, voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? ''), director: realmIs.director === true } : null), still: (id) => id === DIRECTOR && !directing() })
+const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), city: () => citySnapshot(), does: () => [...does.keys()], obey: (rule, wants, event) => { during = event; try { obey(rule, wants, Date.now()) } finally { during = '' } }, voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? ''), director: realmIs.director === true } : null), still: (id) => id === DIRECTOR && !directing() })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
 /** A rule is taken out, and its actors go with it. `rests`: the rule itself stays, with what it keeps, and only what it put into the world goes. */
@@ -635,8 +989,14 @@ function drop(id, rests = false) {
   driven.dropped(id)
   minds.drop(id)
   builds.dropped(id)
+  const ownedObjs = ruleSmartObjects.get(id)
+  if (ownedObjs) {
+    for (const objId of ownedObjs) removeMadeThingFromCity(objId)
+    ruleSmartObjects.delete(id)
+  }
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
+  syncLivingFolk(Date.now())
 }
 /**
  * What a rule may ask for, by name: `world.<name>(id, fields)` in a rule comes here as `{do: name, id, ...fields}`.
@@ -664,8 +1024,10 @@ function spoke(p, words, to, echo) {
 const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name || 'Someone', text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
 /** What this world is called and is about, as the server last said (it keeps the realm's record): for the people of it who are asked to think. */
 let realmIs = null
-/** The hour of the day here (#264): the realm's own, if it says one; else eleven, which is what a page has the town's residents out by when nothing says. A page in this world goes by the same, so a rule takes only residents that every page draws. */
-const HOUR = 11, hourNow = () => (typeof realmIs?.hour === 'number' ? realmIs.hour : HOUR)
+/** The hour of the day and rain here (#264, #164): the realm's own if set, else 11h and dry. Pages go by the same clock and schedule. */
+const HOUR = 11
+const hourNow = () => (typeof realmIs?.hour === 'number' ? realmIs.hour : typeof realmIs?.look?.hour === 'number' ? realmIs.look.hour : HOUR)
+const rainNow = () => (typeof realmIs?.look?.rain === 'number' ? realmIs.look.rain : typeof realmIs?.rain === 'number' ? realmIs.rain : 0)
 const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen, spoke, answering: () => during, realm: () => realmIs })
 setInterval(() => minds.tidy(Date.now()), 1000)
 /** Makes an actor of the rule's, or changes one. */
@@ -770,6 +1132,113 @@ does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */
 does.set('mark', getting.mark)
 does.set('show', hand.show)
+/** Emits a bounded acoustic/visual stimulus into the living-city coordinator (#164). */
+does.set('stimulus', (rule, w, now, wrong) => {
+  const kind = typeof w.kind === 'string' ? w.kind.trim().toLowerCase() : typeof w.id === 'string' ? w.id.trim().toLowerCase() : ''
+  if (!STIMULUS_SET.has(kind)) return wrong(`stimulus kind must be one of: ${STIMULUS_KINDS.join(', ')}`)
+  const rawAt = w.at ?? w.pos
+  if (!pair(rawAt)) return wrong('stimulus needs a place: at: [x, z] or [x, y, z]')
+  if (now - (rule.stimSince ?? 0) >= 1000) { rule.stimSince = now; rule.stims = 0 }
+  if (++rule.stims > STIMULI_A_SECOND) return wrong(`a rule may emit at most ${STIMULI_A_SECOND} stimuli a second`)
+  const x = Math.round(rawAt[0]), z = Math.round(rawAt[rawAt.length - 1])
+  const y = rawAt.length === 3 ? Math.round(rawAt[1]) : (stand(x, z) ?? core.ground_at(x, z) + 1)
+  const opts = { now }
+  if (w.radius !== undefined) {
+    if (!Number.isFinite(w.radius) || w.radius < 1 || w.radius > 1200) return wrong('stimulus radius must be 1 to 1200 cells')
+    opts.radius = w.radius
+  }
+  if (w.loudness !== undefined) {
+    if (!Number.isFinite(w.loudness) || w.loudness < 0 || w.loudness > 1) return wrong('stimulus loudness must be 0 to 1')
+    opts.loudness = w.loudness
+  }
+  if (w.severity !== undefined) {
+    if (!Number.isFinite(w.severity) || w.severity < 1 || w.severity > 5) return wrong('stimulus severity must be 1 to 5')
+    opts.severity = Math.round(w.severity)
+  }
+  if (w.threat !== undefined) {
+    if (!Number.isFinite(w.threat) || w.threat < 0 || w.threat > 1) return wrong('stimulus threat must be 0 to 1')
+    opts.threat = w.threat
+  }
+  if (w.decayMs !== undefined) {
+    if (!Number.isFinite(w.decayMs) || w.decayMs < 500 || w.decayMs > 30_000) return wrong('stimulus decayMs must be 500 to 30000')
+    opts.decayMs = w.decayMs
+  }
+  if (w.reportable !== undefined) opts.reportable = Boolean(w.reportable)
+  if (typeof w.district === 'string') opts.district = text(w.district, 48)
+  const rawActor = w.suspectId ?? w.actorId
+  if (typeof rawActor === 'string' && rawActor) {
+    const resolved = folk.get(`${rule.id}/${rawActor}`) ?? folk.get(rawActor)
+    opts.actorId = resolved ? resolved.by : text(rawActor, 48)
+    opts.suspectId = opts.actorId
+  }
+  emitWorldStimulus(kind, [x, y, z], opts)
+})
+/** Runs a bounded 0 ms social exchange or witness interception on an actor (#164). */
+does.set('social', (rule, w, now, wrong) => {
+  const rawId = w.id ?? w.actorId
+  const action = typeof w.action === 'string' ? w.action.trim().toLowerCase() : ''
+  if (!SOCIAL_ACTIONS.has(action)) return wrong(`social action must be one of: ${[...SOCIAL_ACTIONS].join(', ')}`)
+  if (now - (rule.socSince ?? 0) >= 1000) { rule.socSince = now; rule.socs = 0 }
+  if (++rule.socs > SOCIALS_A_SECOND) return wrong(`a rule may run at most ${SOCIALS_A_SECOND} social actions a second`)
+  const p = resolveLivingNpc(rawId, rule.id)
+  if (!p) return wrong(`social: no actor "${String(rawId ?? '').slice(0, 24)}" is in the world`)
+  const rawBy = w.by ?? w.from
+  const speaker = typeof rawBy === 'string' && rawBy ? (folk.get(rawBy)?.by ?? folk.get(`${rule.id}/${rawBy}`)?.by ?? text(rawBy, 24)) : rule.id
+  const lc = ensureLivingCity()
+  syncLivingFolk(now)
+  const res = lc.interactSocial(speaker || rule.id, p.by, action, {
+    now,
+    seed: Number.isFinite(w.seed) ? w.seed : 0,
+    ...(typeof w.district === 'string' && w.district ? { district: text(w.district, 48) } : {}),
+  })
+  cityDispatchDirty = true
+  invalidateCity()
+  if (w.quiet !== true && res.bark?.text) {
+    const words = text(res.bark.text, 200)
+    if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
+    if (words && ++rule.says <= SAYS_A_SECOND) utter(p, words, now)
+  }
+})
+/** Registers or unregisters a rule-owned Smart Object in `livingCity` (#164). */
+does.set('smartObject', (rule, w, now, wrong) => {
+  const rawId = w.id
+  if (typeof rawId !== 'string' || !SMART_OBJ_ID.test(rawId)) return wrong('smartObject id must be lower-case letters, digits, dashes or underscores, up to 32')
+  const key = `rule:${rule.id}:${rawId}`
+  let owned = ruleSmartObjects.get(rule.id)
+  if (w.remove === true || w.at === null) {
+    if (owned) owned.delete(key)
+    removeMadeThingFromCity(key)
+    return
+  }
+  const rawAt = w.at ?? w.pos
+  if (!pair(rawAt)) return wrong('smartObject needs a place: at: [x, z] or [x, y, z]')
+  if (!owned) { owned = new Set(); ruleSmartObjects.set(rule.id, owned) }
+  if (!owned.has(key) && owned.size >= SMART_OBJECTS_PER_RULE) return wrong(`a rule may register at most ${SMART_OBJECTS_PER_RULE} smart objects`)
+  const x = Math.round(rawAt[0]), z = Math.round(rawAt[rawAt.length - 1])
+  const y = rawAt.length === 3 ? Math.round(rawAt[1]) : (stand(x, z) ?? core.ground_at(x, z) + 1)
+  let size = [12, 10, 12]
+  if (w.size !== undefined) {
+    if (!Array.isArray(w.size) || w.size.length !== 3 || !w.size.every((v) => Number.isFinite(v) && v >= 1 && v <= 64)) return wrong('smartObject size must be [w, h, d] between 1 and 64')
+    size = w.size.map(Math.round)
+  }
+  const facing = typeof w.facing === 'string' && CITY_FACINGS.includes(w.facing) ? w.facing : 'south'
+  const name = text(typeof w.name === 'string' ? w.name : rawId, 60) || rawId
+  const lc = ensureLivingCity()
+  syncLivingFolk(now)
+  lc.registerMadeThing({
+    id: key,
+    name,
+    at: [x, y, z],
+    size,
+    facing,
+    by: rule.id,
+    affordances: w.affordances ?? undefined,
+    ...(typeof w.district === 'string' && w.district ? { district: text(w.district, 48) } : {}),
+    now,
+  })
+  owned.add(key)
+  invalidateCity()
+})
 // What a realm sounds like, `world.sound`, is a plugin (plugins/sound), as its music is (plugins/music).
 // Engine plugins (plugins.mjs, the WORKSHOP lane): more that a rule can hear and do, each a folder under plugins/,
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
@@ -854,12 +1323,15 @@ function livesNow() {
   })
 }
 function handle(said) {
-  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle } = said
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle, city, social, made } = said
+  if (city) return parentPort.postMessage({ id, city: citySnapshot(Date.now(), true) })
+  if (social) return parentPort.postMessage({ id, ...handleSocial(social) })
+  if (made) return syncMadeThingToCity(made, { emit: false, now: Date.now() })
   // A thing a world started again finds still held by nobody: put down where it was taken from.
   if (settle) { const down = grasp.settle(settle.id, settle.rows, settle.at, settle.grain); if (down) { parentPort.postMessage({ echo: down }); edit(down.edit); nudged = true } return }
   // What the world's people remembered of talk when it last stopped.
   if (talked !== undefined) return minds.back(talked)
-  if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; direct(); return }
+  if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; town.at = 0; direct(); return }
   // Whether a model answers for this world's people now: said at once, whatever else waits.
   if (answers !== undefined) { voiced = answers === true; direct(); return }
   // The core swapped for another build (#264, the workshop): a new module of the same file is started, and from then
@@ -949,14 +1421,16 @@ function handle(said) {
     const a = alive.get(ask.gone)
     // (Its rule hears it broke: the core says so of a body that vanishes, and `heed` tells the rule.)
     if (a) { told(core.living_vanish(a.body), false); alive.delete(ask.gone); parentPort.postMessage({ living: { thing: ask.gone, body: 0 } }); nudged = true }
+    removeMadeThingFromCity(ask.gone)
     if (id !== undefined) parentPort.postMessage({ id, laid: true, loose: 0 })
     return
   }
+  if (ask.gone) removeMadeThingFromCity(ask.gone)
   // A rule put in or taken out, or what the realm is called: kept as every ask is, and nothing of the cells' to do.
   if (ask.rule) return void plugging.then(() => ruled.put(ask.rule, ruled.has(ask.rule.id) ? 'changed' : 'put'))
   if (ask.unrule) return drop(ask.unrule)
   if (ask.realm) return
-  if (ask.blast) shock(ask.blast, ask.radius)
+  if (ask.blast) shock(ask.blast, ask.radius, ask.by)
   if (ask.blast) told(core.bodies_blast(ask.blast[0], ask.blast[1], ask.blast[2], ask.radius, -1, ask.spark ? 1 : 0), true)
   else if (ask.ignite) { core.bodies_ignite(ask.ignite[0], ask.ignite[1], ask.ignite[2], ask.radius); told(core.bodies_advance(0), false) }
   else if (ask.ball) told(core.bodies_throw(...ask.ball.from, ...ask.ball.speed, ask.ball.radius, ask.ball.kind), false)
@@ -967,13 +1441,17 @@ function handle(said) {
     // A thing that comes with its controls lives at once: before the world is asked what the edit left unheld, or a
     // car set down on a sloping street would be let fall as loose cells first.
     if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, ask.edit.slice(2), true, text(ask.thing.name ?? '', 40))
+    if (ask.thing) syncMadeThingToCity(ask.thing, { emit: true, now: Date.now() })
     const before = core.bodies_count(), n = core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0)
     // Asked to say how it went (an ask with `wait`, make/place.mjs `send`): how many bodies the edit left loose, now that it is laid.
     if (id !== undefined) parentPort.postMessage({ id, laid: true, loose: Math.max(0, core.bodies_count() - before), ...(ask.thing?.controls !== undefined ? { alive: alive.has(ask.thing.id) } : {}) })
     told(n, true)
   }
   // A thing that is there, given controls with a motor, lives from now on (the server sent its cells with the ask).
-  else if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, rows, true, text(ask.thing.name ?? '', 40))
+  else if (ask.thing) {
+    if (ask.thing.controls !== undefined) live(ask.thing.id, ask.thing.controls, rows, true, text(ask.thing.name ?? '', 40))
+    syncMadeThingToCity(ask.thing, { emit: false, now: Date.now() })
+  }
   // Water may have been let out: it is found when the world is next moved on.
   nudged = true
 }

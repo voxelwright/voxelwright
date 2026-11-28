@@ -59,11 +59,12 @@ The full list of events and wants is the guide itself. [engine/test/whole.mjs](h
 | Bodies | `struck`, `landed`, `ride`, `crossed`, `arrived`, `broke` | `person`, `clock`, `throw`, `push`, `down`, `drive`, `seat`, `thing`, `line` | `engine/rules` |
 | Hands | `act`, `pick`, `held`, `put`, `thrown` | `offer`, `show`, `give`, `take` | `rules/hands.mjs`, `rules/holding.mjs` |
 | The world | `built`, `ground`, `seen` | `blast`, `ignite`, `build`, `ground`, `look`, `matter`, `paint` | `rules/blows.mjs`, plugins |
+| Living city | | `stimulus`, `social`, `smartObject` | `world.mjs`, `rules/living-city.mjs` |
 | Sound | | `sound`, `music` | `plugins/sound`, `plugins/music` |
 | Other rules and models | `asked`, `answered` | `ask`, `answer`, `make`, `write` | `plugins/ask`, `plugins/make`, `plugins/write` |
 | Anything refused | `refused` | | `obey` in `world.mjs` |
 
-`world.people`, `world.near`, `world.residents`, `world.things` and `world.keep` are read from the copy each call gets.
+`world.people`, `world.near`, `world.residents`, `world.things`, `world.city` and `world.keep` are read from the copy each call gets. `world.city` carries a bounded read-only snapshot (`{now, heat, districts, witnesses, mood, smartObjects, recentEvents, directorBrief}`) from the world's `createLivingCity` coordinator, and the server exposes the same live state at `GET /world/city` and 0 ms Greet/Antagonize/Defuse/Intimidate/Apologize/Bribe interactions at `POST /world/social`.
 
 ### The rule sandbox
 
@@ -111,6 +112,7 @@ Alongside sandboxed rules, `engine/rules/` and `engine/make/` provide determinis
 | `engine/make/affordances.mjs` | Pure-data affordance validator (`validateAffordances`, allowlisting `sit`, `shelter`, `browse`, `cover`, `spectacle`, `queue`, clamping coordinates inside bounds, capping at 8 slots and stripping unknown fields) and geometric + label auto-tagger (`inferAffordances`). |
 | `engine/rules/stimulus.mjs` | Spatial-hashed Acoustic & Visual Stimulus Event Bus (`createStimulusBus`) with propagation radius, voxel material wall attenuation (`rayAttenuation`), decay and deterministic divergent crowd reactions (`chooseReaction`: `flee`, `shelter`, `film`, `confront`, `call_help`, `glance`). |
 | `engine/rules/sight.mjs` | Line-of-sight engine (`sight`) with XZ spatial-hash bucketing, opt-in `actorToActor: true` NPC-to-NPC witness detection (default `false`), and per-actor LOD throttling (Ring 1 every `KEPT`, Ring 2 every `3 * KEPT`, Ring 3 skipped). |
+| `engine/rules/living-city.mjs` | Unified living-city coordinator (`createLivingCity`) wired lazily into `engine/world.mjs` (~3.3 Hz tick cadence when active): auto-registers player-made `affordances` as Smart Objects, emits stimuli on blasts, crashes, shouts, and creations, serves `GET /world/city` and `POST /world/social`, and feeds `world.city` plus bounded `world.stimulus`, `world.social`, and `world.smartObject` wants. |
 
 ## Realms
 
@@ -182,4 +184,5 @@ node test/rulewrite.mjs         # a rule written from words, with kept replies a
 node test/realms.mjs            # realms start, rest, survive a restart and stay apart
 node test/whole.mjs             # every event and want is still in the guide
 node test/ai-statetree.mjs      # StateTree, Smart Objects, affordances, stimulus bus and upgraded sight
+node test/world-living-city.mjs # live serve.mjs + world.mjs living-city API, blasts, social barks and rule wants
 ```

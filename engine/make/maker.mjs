@@ -30,6 +30,7 @@ import { turned } from './alive.mjs'
 import { OWN_FRONT, bodyOf, driven } from './drivable.mjs'
 import { CORE } from './core.mjs'
 import { emptied, middle, outOf, site, stands, towards } from './place.mjs'
+import { inferAffordances, validateAffordances } from './affordances.mjs'
 import { text } from '../text.mjs'
 
 /** A journal that keeps nothing. */
@@ -135,11 +136,74 @@ export async function placing({ world, where, thing }) {
   try { const p = await sited(world, thing, found, facing); return { origin: p.origin, facing, moved: p.moved } } catch (e) { if (e.place || e.form) return { why: e.message }; throw e }
 }
 
+/** Extract optional raw `affordances` from a parts reply without affecting strict form checks. */
+function extractRawAffordances(reply) {
+  if (typeof reply !== 'string' || !reply.includes('affordances')) return null
+  let body = reply.trim()
+  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(body)
+  if (fenced) body = fenced[1]
+  try {
+    const parsed = JSON.parse(body)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.affordances !== undefined
+      ? parsed.affordances
+      : null
+  } catch {
+    const a = body.indexOf('{'), b = body.lastIndexOf('}')
+    if (a < 0 || b <= a) return null
+    try {
+      const parsed = JSON.parse(body.slice(a, b + 1))
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.affordances !== undefined
+        ? parsed.affordances
+        : null
+    } catch { return null }
+  }
+}
+
+/**
+ * Attach validated, data-only Smart Object `affordances` onto a finalized made
+ * thing (`thing.affordances` and `thing.record.behaviour.affordances`).
+ * Preserves validated model-provided affordances when present, falls back to
+ * `inferAffordances({ name, size, cells })` for static creations, and omits
+ * the field entirely when no specific affordances apply (zero wire impact).
+ */
+export function attachAffordances(thing, { rawAffordances = null, wish = '', scale = 1 } = {}) {
+  if (!thing || typeof thing !== 'object') return thing
+  const size = Array.isArray(thing.size) && thing.size.length === 3 ? thing.size : null
+  if (!size) return thing
+
+  const raw = rawAffordances ?? thing.affordances ?? thing.record?.behaviour?.affordances ?? null
+  let slots = []
+  if (raw != null) {
+    let source = raw
+    if (scale > 1) {
+      const scaleSlot = (s) => (s && typeof s === 'object' && Array.isArray(s.pos) && s.pos.length === 3
+        ? { ...s, pos: s.pos.map((v) => (typeof v === 'number' ? v * scale : v)) }
+        : s)
+      if (Array.isArray(raw)) source = raw.map(scaleSlot)
+      else if (raw && typeof raw === 'object' && Array.isArray(raw.slots)) source = { ...raw, slots: raw.slots.map(scaleSlot) }
+    }
+    slots = validateAffordances(source, size).slots
+  }
+  if (!slots.length && !thing.living) {
+    const inferred = inferAffordances({ name: thing.name || wish || '', size, cells: thing.cells ?? null })
+    if (inferred.inferredBy.some((b) => b !== 'fallback')) slots = inferred.slots
+  }
+  if (!slots.length) return thing
+
+  thing.affordances = slots
+  const prevBeh = thing.record?.behaviour && typeof thing.record.behaviour === 'object' && !Array.isArray(thing.record.behaviour)
+    ? thing.record.behaviour
+    : null
+  thing.record = { ...(thing.record ?? {}), behaviour: { ...(prevBeh ?? {}), affordances: slots } }
+  return thing
+}
+
 /** A kept reply (`recalled`, make/library.mjs) as the thing `make` would stand: read, but neither placed nor sent. */
 export async function kept(entry) {
   const { how, proved } = recalled(entry), text = entry.made ?? entry.reply
   // (One that says it is driven is shown and made alive: make/drivable.mjs.)
-  return enlivened(how === 'parts' ? read(text, { lenient: true }) : await built(text, how, proved.joined), () => {})
+  const thing = await enlivened(how === 'parts' ? read(text, { lenient: true }) : await built(text, how, proved.joined), () => {})
+  return attachAffordances(thing, { rawAffordances: how === 'parts' ? extractRawAffordances(text) : null })
 }
 
 /**
@@ -195,7 +259,7 @@ async function settle(world, core, thing, found, facing, clear, lap = () => {}) 
 async function deliver({ out, thing, placed, world, by, journal, wish, facing, clear, replaces, say, lap = () => {} }) {
   // What goes: the rows it stands as, or for a thing of finer cells those (and then only if all of its stand-in stands: it is sent whole).
   const fine = placed.fine
-  Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (fine?.rows ?? placed.rows).length, grain: fine?.grain, coarse: placed.coarse || undefined, origin: placed.origin, moved: placed.moved })
+  Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (fine?.rows ?? placed.rows).length, grain: fine?.grain, coarse: placed.coarse || undefined, origin: placed.origin, moved: placed.moved, ...(thing.affordances?.length ? { affordances: thing.affordances } : {}) })
   if (placed.coarse) say('a thing of finer cells stands near: this one is made in the world\'s own cells', { stage: 'note', why: 'made plainer: a fine thing stands near' })
   // It is written down before it is sent, and what came of it after: a send that was cut short is not made again blindly.
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
@@ -336,7 +400,10 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
     out.ms += got.ms; out.cost += got.cost ?? 0; out.model = got.model; out.reply = got.text
     why = ''
     try {
-      const thing = await enlivened(how === 'parts' ? scaled(read(got.text, { lenient: true, most }), times) : await built(got.text, how, proved.joined), say)
+      const thing = attachAffordances(
+        await enlivened(how === 'parts' ? scaled(read(got.text, { lenient: true, most }), times) : await built(got.text, how, proved.joined), say),
+        { rawAffordances: how === 'parts' ? extractRawAffordances(got.text) : null, wish, scale: times }
+      )
       if (proved.stands) thing.stands = true
       // (What is made only to be kept, below, is kept as cells too.)
       if (thing.made) { const m = thing.made; out.toCells = () => written(m, m.extra) }
@@ -381,7 +448,7 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
   // Anything left out or let fall is at least one in a hundred: rounded to none, a thing that lost a few rows was kept as having stood whole (make/best.mjs `whole`), and stood unchecked ever after.
   if (best.share < 1) out.left = Math.max(1, Math.round((1 - best.share) * 100))
   if (!placed) return { ...out, state: 'held', why: best.blocked, name: thing.name, size: thing.size, hold: { thing, facing, wish, model: out.model } }
-  if (dry) { Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (placed.fine?.rows ?? placed.rows).length, grain: placed.fine?.grain, origin: placed.origin, moved: placed.moved }); return { ...out, state: 'dry', made: placed.rows, fine: placed.fine } }
+  if (dry) { Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (placed.fine?.rows ?? placed.rows).length, grain: placed.fine?.grain, origin: placed.origin, moved: placed.moved, ...(thing.affordances?.length ? { affordances: thing.affordances } : {}) }); return { ...out, state: 'dry', made: placed.rows, fine: placed.fine } }
   return deliver({ out, thing, placed, world, by, journal, wish, facing, say, lap })
 }
 

@@ -29,6 +29,11 @@ pub struct Hull {
     /// The box round its cells, in its own axes from its middle of mass: its middle, and half its size.
     mid: V,
     half: V,
+    /// Original uncrushed half-extents (for enforcing a cabin survival floor during `crush_local`).
+    orig_half: V,
+    /// Owning body's grid dimensions and center of mass (for trimming `inside` cells on `crush_local`).
+    size: [usize; 3],
+    com: V,
     /// Each of its cells: whether it is within the rectangle round the body's cells at its own height. The cabin is,
     /// and the boot, and the corner a tapered nose leaves empty; over the bonnet is not, where the body at that
     /// height is the cabin alone. By the body's own cells alone a point in the hollow cabin touched nothing; by its
@@ -64,7 +69,91 @@ impl Hull {
             hi = [hi[0].max(x1 as f32 + 1.0), hi[1].max(y as f32 + 1.0), hi[2].max(z1 as f32 + 1.0)];
         }
         let (mid, half) = ([0, 1, 2].map(|a| (lo[a] + hi[a]) / 2.0 - b.com[a]), [0, 1, 2].map(|a| (hi[a] - lo[a]) / 2.0));
-        Hull { mid, half, inside }
+        Hull { mid, half, orig_half: half, size: b.size, com: b.com, inside }
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub fn mid(&self) -> V {
+        self.mid
+    }
+
+    #[inline]
+    pub fn half(&self) -> V {
+        self.half
+    }
+
+    #[allow(dead_code)]
+    #[inline]
+    pub fn orig_half(&self) -> V {
+        self.orig_half
+    }
+
+    #[inline]
+    pub fn bounds(&self) -> (V, V) {
+        (sub(self.mid, self.half), add(self.mid, self.half))
+    }
+
+    /// Deforms the physical collision hull inward at a body-local impact `point` (relative to body COM),
+    /// shortening the struck face along `normal` by up to `depth` cells while preserving a 55% cabin
+    /// survival floor on each axis. Returns the total crush applied across axes (cells).
+    pub fn crush_local(&mut self, point: V, normal: V, depth: f32) -> f32 {
+        if !depth.is_finite()
+            || depth <= 0.0
+            || point.iter().any(|v| !v.is_finite())
+            || normal.iter().any(|v| !v.is_finite())
+        {
+            return 0.0;
+        }
+        let n_len_sq = dot(normal, normal);
+        if n_len_sq <= 1e-10 {
+            return 0.0;
+        }
+        let n = scale(normal, 1.0 / n_len_sq.sqrt());
+        let rel = sub(point, self.mid);
+        let mut applied = 0.0f32;
+        for a in 0..3 {
+            let w = n[a].abs();
+            if w < 0.2 {
+                continue;
+            }
+            let want = depth * w;
+            let min_half = (self.orig_half[a] * 0.55).max(1.0).min(self.orig_half[a]);
+            let room = (self.half[a] - min_half).max(0.0) * 2.0;
+            let shrink = want.min(room);
+            if shrink <= 1e-5 {
+                continue;
+            }
+            let side = if rel[a].abs() > 1e-3 { rel[a].signum() } else { n[a].signum() };
+            self.half[a] -= shrink * 0.5;
+            self.mid[a] -= side * shrink * 0.5;
+            applied += shrink;
+        }
+        if applied > 0.0 && !self.inside.is_empty() {
+            let [sx, sy, sz] = self.size;
+            let lo = sub(self.mid, self.half);
+            let hi = add(self.mid, self.half);
+            for y in 0..sy {
+                let py = y as f32 + 0.5 - self.com[1];
+                let out_y = py < lo[1] || py > hi[1];
+                for z in 0..sz {
+                    let pz = z as f32 + 0.5 - self.com[2];
+                    let out_yz = out_y || pz < lo[2] || pz > hi[2];
+                    let row = sx * (z + sz * y);
+                    for x in 0..sx {
+                        if out_yz {
+                            self.inside[row + x] = false;
+                        } else {
+                            let px = x as f32 + 0.5 - self.com[0];
+                            if px < lo[0] || px > hi[0] {
+                                self.inside[row + x] = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        applied
     }
 
     fn holds(&self, b: &Body, c: [i32; 3]) -> bool {

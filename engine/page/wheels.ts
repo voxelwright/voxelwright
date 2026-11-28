@@ -170,6 +170,8 @@ export interface WheelVehicle {
   drifting?: boolean
   burnout?: number
   decel?: number
+  /** Bitmask (`0..15`) of detached wheels (`1 << footIndex`); omitted or 0 keeps all wheels rendered. */
+  detachedWheels?: number
 }
 
 export interface WheelDebug {
@@ -181,11 +183,24 @@ export interface WheelDebug {
   offset: readonly [number, number, number]
   /** Combined camber/toe tilt magnitude in radians from vehicle deformation (#61). */
   tilt: number
+  /** Whether this wheel has been detached and skipped from rendering (#166). */
+  detached: boolean
+}
+
+/** Pure helper checking whether wheel `footIndex` is marked detached in a `0..15` bitmask. */
+export function isWheelDetached(detachedWheels: number | undefined, footIndex: number): boolean {
+  if (!detachedWheels || footIndex < 0 || footIndex >= 8) return false
+  return ((detachedWheels | 0) & (1 << footIndex)) !== 0
 }
 
 export interface Wheels {
   /** Updates wheel spin, steering, independent suspension compression, and brake rotor heat. */
-  step(dt: number, vehicles: readonly WheelVehicle[], groundUnder: (x: number, y: number, z: number) => number): void
+  step(
+    dt: number,
+    vehicles: readonly WheelVehicle[],
+    groundUnder: (x: number, y: number, z: number) => number,
+    detachedByVehicle?: ReadonlyMap<number, number>,
+  ): void
   /** Draws all visible active vehicle wheels. No GPU work when none are active/visible. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Sets sun direction and day factor to match the scene's lighting. */
@@ -612,6 +627,7 @@ interface VehicleState {
     camber: number
     toe: number
     tilt: number
+    detached: boolean
     init: boolean
   }[]
   lastSeen: number
@@ -707,7 +723,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
       active.length = 0
       lastCount = 0
     },
-    step(dt, vehicles, groundUnder) {
+    step(dt, vehicles, groundUnder, detachedByVehicle) {
       tick++
       active.length = 0
       if (!vehicles.length) {
@@ -719,6 +735,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
 
       for (const v of vehicles) {
         if (v.feet.length < 2) continue
+        const detachedMask = ((v.detachedWheels ?? detachedByVehicle?.get(v.id) ?? 0) | 0) & 0x0f
         let st = states.get(v.id)
         if (!st || st.wheels.length !== v.feet.length) {
           st = {
@@ -726,7 +743,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
             prevPos: [v.pos[0], v.pos[1], v.pos[2]],
             deformState: undefined,
             deformRev: -1,
-            wheels: v.feet.map(() => ({ roll: 0, susp: 0, heat: 0, steer: 0, offset: [0, 0, 0] as [number, number, number], camber: 0, toe: 0, tilt: 0, init: false })),
+            wheels: v.feet.map(() => ({ roll: 0, susp: 0, heat: 0, steer: 0, offset: [0, 0, 0] as [number, number, number], camber: 0, toe: 0, tilt: 0, detached: false, init: false })),
             lastSeen: tick,
           }
           states.set(v.id, st)
@@ -796,6 +813,15 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
           if (active.length >= MAX_WHEELS) break
           const foot = v.feet[i]
           const ws = st.wheels[i]
+          if (isWheelDetached(detachedMask, i)) {
+            ws.detached = true
+            ws.susp = 0
+            ws.heat = 0
+            ws.steer = 0
+            ws.init = false
+            continue
+          }
+          ws.detached = false
           const prof = v.profile?.feet[i]
 
           const fLat = alongX ? foot.at[2] : foot.at[0]
