@@ -77,5 +77,5 @@ export const WORLD: Record<string, Patch> = {
   // Let go: steel drawn hard across steel, struck once, and the blade ringing on through the dark of the instant.
   cleaveStrike: { how: 'struck', hard: 1, rough: 0.3, shape: 'plate', pitch: 1900, ring: 1.1, damp: 0.1, bend: 0.3, air: { from: 9500, to: 1500, for: 0.24, gain: 0.9, q: 1.2 }, gain: 0.85 },
   // Time (#226): a heavy clock's stroke with a breath of air through it. Low and slow as time stops, high and fast as it is wound back.
-  rewind: { how: 'struck', hard: 0.55, rough: 0.5, shape: 'bar', pitch: 480, ring: 0.14, damp: 0.7, bend: 0.2, air: { from: 420, to: 2600, for: 0.3, gain: 0.5, q: 1.1 }, gain: 0.7 },
+  rewind: { how: 'struck', hard: 0.75, rough: 0.5, shape: 'bar', pitch: 480, ring: 0.16, damp: 0.6, bend: 0.2, air: { from: 420, to: 2600, for: 0.3, gain: 0.8, q: 1.1 }, gain: 1 },
 }

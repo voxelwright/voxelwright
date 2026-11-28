@@ -120,7 +120,8 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     pressTaken = false
     each((m) => { if (m.pointerDown?.() === true) pressTaken = true; return pressTaken })
   }
-  const secondary = () => each((m) => m.rightClick?.())
+  /** A right click: whether a mode took it. */
+  const secondary = () => { let took = false; each((m) => { if (m.rightClick?.() === true) took = true; return took }); return took }
   /** Every live mode that was in the middle of something calls it off. */
   const cancel = () => { for (let i = stack.length - 1; i >= 0; i--) { stack[i].cancel?.(); if (stack[i].solid) return } }
   const live = (name: string) => {
@@ -153,7 +154,8 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     pressTaken = false
     if (phone || still() || document.pointerLockElement !== canvas) return
     if (e.button === 0) press(true)
-    else if (e.button === 2) secondary()
+    // (with the pointer held a browser says `click` for the second button too: one a mode took is that mode's, as a press is)
+    else if (e.button === 2) pressTaken = secondary()
   })
   // The button comes up wherever the pointer is: a press a mode took must always end.
   addEventListener('mouseup', (e) => { if (e.button === 0 && !phone) press(false) })
@@ -231,7 +233,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     always(code, act) { everywhere.set(code, act) },
     use,
     press,
-    secondary,
+    secondary: () => { secondary() },
     turnBy: turned,
     hold(code, on) {
       if (!on) { down.delete(code); return }

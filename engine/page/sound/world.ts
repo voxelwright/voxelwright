@@ -94,8 +94,6 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
     grind = Math.max(grind, Math.min(0.5, radius / 50)); grindPan = voice.hear(at).pan
     // A charge near by is danger; a hammer blow is not, nor a blast a long way off.
     if (radius >= 10) threat = Math.max(threat, Math.min(1, voice.hear(at, reach).gain * 3))
-    // The hills answer a charge: the nearer and the bigger, the more of the world they send back (#226).
-    if (radius >= 10) hills = Math.max(hills, Math.min(0.45, (0.12 + radius / 160) * Math.min(1, voice.hear(at, reach).gain * 2.5)))
   }
 
   // ── The Cleave and Time (#226) ──────────────────────────────────────────
@@ -104,6 +102,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
   let cutHush = 0, cutFor = 0, blastHush = 0, blastFor = 0, deaf = 0, hills = 0
   let drawing = 0, time: 'live' | 'frozen' | 'rewinding' = 'live', wound = 1, tockIn = 0, tockAlt = false
   const inHead = (p: Patch, how: Play = {}) => voice.play(p, { ...how, bus: BUS.head })
+  /** How hard the seam's held tone is begun, and how loud the synthesiser then makes it (dsp.ts `hold`: half the patch's gain times its force to the power 1.2). */
+  const DRAWN = 0.8, DRAW_BEGAN = 0.5 * WORLD.cleaveDraw.gain * DRAWN ** 1.2
   const stopDrawing = () => { if (drawing) voice.release(drawing); drawing = 0 }
   /** How hushed the world's bus is now, and how dull (Hz), and what the hills send back: told to the synthesiser. */
   const tellWorldBus = () => {
@@ -121,8 +121,9 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
     const k = Math.min(1, Math.max(0, intensity))
     if (phase === 'aim') { stopDrawing(); inHead(WORLD.cleaveAim, { force: 0.6, gain: 0.5, room: 0.15 }) }
     else if (phase === 'draw') {
-      if (!drawing) drawing = voice.hold(WORLD.cleaveDraw, { bus: BUS.head, force: 0.5, gain: 0.34, room: 0.2 })
-      if (drawing) voice.glide(drawing, 660 * 2 ** (0.6 * k), 0.45 + 0.55 * k)
+      if (!drawing) drawing = voice.hold(WORLD.cleaveDraw, { bus: BUS.head, force: DRAWN, gain: 0.6, room: 0.2 })
+      // (a glide's loudness is the tone's own, not a share of how it began: from a little under how it began to twice that)
+      if (drawing) voice.glide(drawing, 660 * 2 ** (0.6 * k), DRAW_BEGAN * (0.8 + 1.2 * k))
     } else if (phase === 'cancel') { stopDrawing(); inHead(WORLD.cleaveAim, { force: 0.3, size: 1.5, gain: 0.25 }) }
     else if (phase === 'strike') {
       stopDrawing()
@@ -133,7 +134,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
       inHead(WORLD.cleaveAim, { after: 0.03, pitch: 3136, force: 0.55, gain: 0.3, room: 0.3 })
     } else {
       // The cut lands: a deep heavy hit in the head; out in the world stone gives, and the hills answer.
-      inHead(WORLD.boom, { force: 0.85, size: 1.1, gain: 0.5 + 0.3 * k })
+      inHead(WORLD.boom, { force: 0.85, size: 1.1, gain: 0.4 + 0.25 * k })
       if (k > 0.05) voice.play(BREAK.concrete, { after: 0.08, force: 0.45 + 0.45 * k, size: 2.2, gain: 0.55, room: 0.3 })
       hills = Math.max(hills, 0.2 + 0.25 * k); threat = Math.max(threat, 0.3 * k)
     }
@@ -167,7 +168,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
     hills *= Math.exp(-dt / 3)
     if (time !== 'live' && (tockIn -= dt) <= 0) {
       const back = time === 'rewinding'
-      inHead(WORLD.rewind, { size: (tockAlt ? 1.3 : 1.05) * (back ? 0.8 : 1), force: 0.55, gain: back ? 0.3 : 0.42, pan: tockAlt ? -0.15 : 0.15 })
+      inHead(WORLD.rewind, { size: (tockAlt ? 1.3 : 1.05) * (back ? 0.8 : 1), force: 0.9, gain: back ? 0.75 : 1, pan: tockAlt ? -0.15 : 0.15 })
       tockAlt = !tockAlt; tockIn = back ? Math.max(0.085, 0.34 / wound) : 1
     }
     tellWorldBus()
