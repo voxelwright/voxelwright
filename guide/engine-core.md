@@ -31,7 +31,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes, including surveyed vector kerbs (`bay_kerbs`) carved at 1.25 cm sub-cell precision, slim fine-subcell aerial cables across L0–L2 (2.5 cm at L0/L1 and 5 cm at L2 so overhead wires continue down the street past the L0 boundary), perimeter cornice blending over lidar dropouts, and solid-probe column caching beneath overhead fixtures. Where no pack is loaded the world is level water. |
 | `heroes.rs` | Landmarks written as programs, asked for any cell at any size. |
 | `scratch.rs` | Building a sector's cells, edits, blasts, finer cells (including per-sector fine blocks at coarse LODs via `sector_fine_runs`). |
-| `tree.rs` | Encoding a sector as a tree (reusing thread-local scratch buffers and fast 4-cell leaf paths). |
+| `tree.rs` | Encoding a sector as a 64-tree with intra-sector SVDAG deduplication (sharing identical non-uniform leaf payloads, mono-kind runs, and mid leaf-node arrays via generation-stamped thread-local scratch tables, keeping the GPU binary format unchanged and `FINE` leaves dedicated). |
 | `kinds.rs` | Materials, flags, palette, what a material weighs and how it breaks. |
 | `support.rs` | What stands and what falls after an edit (reusing thread-local solver scratch and sparse resets). |
 | `fine.rs` | Fine-voxel meshing (`faces`, `facesWithSmooth` with octahedral smooth normals and AO via `wasm32` SIMD 3D prefix sums), RLE/base64 codec, shell-preserving `coarser` + leak sealing, and procedural vehicle sculptors (`sculptCoupe`, `sculptKart`, `sculptOjai`). |
