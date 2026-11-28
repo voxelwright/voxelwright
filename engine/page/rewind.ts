@@ -329,8 +329,8 @@ export async function createRewind(gpu: Gpu, format: GPUTextureFormat = gpu.scen
       pass.end()
     },
     postFx(out) {
-      // (the colour is drained by half, toward a cold silver, so that fire is still fire; toward old gold while it winds back)
-      out.doom = on * 0.86; out.doomWarm = on > 0 ? 1 : 0; out.doomKeep = 0.5
+      // (the colour is drained nearly all the way to a cold silver, but what is warm keeps its own, so fire is still fire; toward old gold while it winds back)
+      out.doom = on * 0.92; out.doomWarm = on > 0 ? 1 : 0; out.doomKeep = 0.15
       out.doomTint[0] = 0.4 + 0.2 * gold; out.doomTint[1] = 0.47 + 0.02 * gold; out.doomTint[2] = 0.62 - 0.32 * gold
       out.rewind = streak; out.wave = on > 0 ? wave : 9
       // (as it stops: a frame of ink and its turn-about, and a pale flash. These are a blast's to set too: time

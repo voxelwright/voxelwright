@@ -694,7 +694,7 @@ fn tone1(uv: vec2f) -> f32 { let l = luma(scene(uv)); return 1.5 * l / (1.0 + l)
   let fromMid = length((vUv - 0.5) * asp0);
   var reached = 1.0;
   if (fx.doom.w < 8.0) { reached = 1.0 - smoothstep(fx.doom.w - 0.2, fx.doom.w, fromMid); }
-  c = mix(c, dl * fx.doomCol.rgb + c * fx.doomCol.w, fx.doom.x * (1.0 - smoothstep(1.5, 3.0, dl)) * (1.0 - 0.9 * warm) * reached);
+  c = mix(c, dl * fx.doomCol.rgb + c * fx.doomCol.w, fx.doom.x * (1.0 - smoothstep(3.0, 6.0, dl)) * (1.0 - 0.9 * warm) * reached);
   // (time stopping: the edge of that wave, as it goes out from the middle of the view)
   if (fx.doom.w < 8.0) {
     let wd = (fromMid - fx.doom.w) / 0.018;

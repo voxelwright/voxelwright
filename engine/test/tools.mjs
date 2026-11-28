@@ -8,6 +8,18 @@
 import { start, still } from './kit.mjs'
 
 const { city, check, failures, finish } = await start()
+/** How coloured the middle of the picture is (mean of each pixel's max less its min channel, 0 to 1), clear of the HUD. */
+const chroma = async (page) => {
+  const png = (await page.screenshot({ clip: { x: 280, y: 60, width: 720, height: 480 } })).toString('base64')
+  return page.evaluate(async (png) => {
+    const paper = new OffscreenCanvas(180, 120).getContext('2d')
+    paper.drawImage(await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob()), 0, 0, 180, 120)
+    const d = paper.getImageData(0, 0, 180, 120).data
+    let sum = 0
+    for (let i = 0; i < d.length; i += 4) sum += Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2])
+    return sum / (d.length / 4) / 255
+  }, png)
+}
 try {
   const page = await city('scale=0.5&fire=0')
   await still(page)
@@ -72,6 +84,27 @@ try {
     }
   }
   check(lit > 0, `the torch set a tree alight (${lit} cells burning after a second)`)
+
+  // The thirteen tools run the width of a laptop's screen: the minimap in the corner stands clear of the bar (#226).
+  const crossed = await page.evaluate(() => {
+    const map = document.querySelector('#minimap'), bar = document.querySelector('#tools')
+    if (!map || !bar || getComputedStyle(map).display === 'none') return null
+    const a = map.getBoundingClientRect(), b = bar.getBoundingClientRect()
+    return a.right > b.left && b.right > a.left && a.bottom > b.top && b.bottom > a.top
+  })
+  check(crossed !== true, 'the minimap does not cover the tool bar')
+
+  // Time stopped (T, nothing in the hands): the colour drains to silver, seen in the picture itself. Looked at away from the fire.
+  await page.evaluate(() => { globalThis.engine.pose.yaw += Math.PI; globalThis.engine.pose.pitch = 0.1 })
+  await page.waitForTimeout(600)
+  const live = await chroma(page)
+  await page.keyboard.down('KeyT'); await page.waitForTimeout(60); await page.keyboard.up('KeyT')
+  await page.waitForFunction(() => globalThis.engine.rewind.state === 'frozen', null, { timeout: 10_000 })
+  await page.waitForTimeout(1200)
+  const stopped = await chroma(page)
+  check(stopped < live * 0.45, `time stopped drains the colour (chroma ${live.toFixed(3)} running, ${stopped.toFixed(3)} stopped)`)
+  await page.keyboard.down('KeyT'); await page.waitForTimeout(60); await page.keyboard.up('KeyT')
+  await page.waitForFunction(() => globalThis.engine.rewind.state === 'live', null, { timeout: 10_000 })
 } catch (e) {
   failures.push(String(e))
 }
