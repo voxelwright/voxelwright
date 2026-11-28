@@ -111,6 +111,7 @@ function createMockDom() {
     body: null,
     createElement(tag) { return new MockEl(tag, doc) },
     getElementById(id) { return doc.head.query((e) => e.id === id) || doc.body.query((e) => e.id === id) },
+    querySelector(sel) { return sel.startsWith('#') ? doc.getElementById(sel.slice(1)) : null },
   }
   doc.head = new MockEl('head', doc)
   doc.body = new MockEl('body', doc)
@@ -244,6 +245,17 @@ console.log('2. Auto-hide HUD, offline 0 ms escalation, overhead speech pills & 
     `prompt shifts clear of character body box (dx=${dxShift}px, dy=${dyShift}px)`,
   )
   bodyBoxes = []
+
+  // The tool bar along the foot of the picture (thirteen tools since #226) is not covered: the prompt stands above it.
+  const toolsBar = doc.createElement('div')
+  toolsBar.id = 'tools'
+  toolsBar._rect = { left: 120, top: 670, right: 1160, bottom: 706, width: 1040, height: 36 }
+  doc.body.append(toolsBar)
+  social.frame(nowMs)
+  const lifted = parseFloat(promptEl.style.getPropertyValue('--soc-dy')) || 0
+  check(696 + lifted <= 670, `prompt stands above the tool bar, not over it (dy=${lifted}px)`)
+  toolsBar.remove()
+  social.frame(nowMs)
 
   // Driving / typing / first view hides prompt immediately and releases keys.
   disabled = true

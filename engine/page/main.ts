@@ -7,7 +7,16 @@
 //   ?fly=1 (on by default at the address /): the flight that measures this device and posts what it found; ?seconds=40 how long it flies
 //   ?shadows=0  ?mirrors=0  ?heat=1 (show how many steps each pixel took)  ?detail=1 (pixels a thing must be wide to be drawn as itself)
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
-import { glow, type GlowSource } from './glow.ts'
+import { fxLive, glow, postFx, type GlowSource } from './glow.ts'
+import { createCleave, type Cleave, type CleaveCut } from './cleave.ts'
+import { createRewind, type Rewind } from './rewind.ts'
+import { createGrass, type Grass } from './grass.ts'
+import { createAvbdRubble, type AvbdRubble } from './avbd-rubble.ts'
+import { createCombatTools, hasMeleeExports, type CableAnchor, type CombatTools, type RayHit, type ToolName } from './combat-tools.ts'
+import { SportsWasm } from './sports-court.ts'
+import { RagdollLiveController, type RagdollMoverCallbacks } from './ragdoll-live.ts'
+import { BONE } from './ragdoll-bridge.ts'
+import type { CombatSound } from './sound/combat.ts'
 import { createTaa, haltonJitter, type TaaPass } from './taa.ts'
 import { createDynamicShadows, type DynamicShadows } from './dynamic-shadows.ts'
 import { createSkyLut, type SkyLut } from './sky-lut.ts'
@@ -44,7 +53,7 @@ import { restedRows, rowsOf, thing } from './fine.ts'
 import { useFineCore } from './fine-core.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
-import type { Answer, Ask } from './mover.ts'
+import type { Answer, Ask, Combat } from './mover.ts'
 import { read, type Born } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
 import { hands } from './hands.ts'
@@ -58,7 +67,7 @@ import { fog } from './fog.ts'
 import { eggSky } from './eggs-sky.ts'
 import { BAY, BUDGET, DEVICE, HOLD, holds, heroes as landmarksOf, mapData, place as placeOf, placesData, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, streetLamps, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
-import { input } from './input.ts'
+import { input, type Mode } from './input.ts'
 import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker, later } from './ask.ts'
@@ -369,6 +378,14 @@ async function main() {
     wheels(device, gpu.sceneFormat, march.localLights.buffer),
     clusterLightsEnabled ? march.localLights.initClustered().catch((e) => { console.warn('clusterLights init failed:', e); clusterLightsEnabled = false; return null }) : Promise.resolve(null),
   ])
+  // Small Magic (#226) and the live tools (#166): made off the first frame (`spellsReady`), null until they are there.
+  let cleave: Cleave | null = null, rewind: Rewind | null = null, grass: Grass | null = null, rubble: AvbdRubble | null = null, combat: CombatTools | null = null
+  // The spells' pass is built ahead of its first use, off the frame.
+  void blit.warmFx()
+  // Smoke that meets walls (#166, smoke-grid.ts): its 32³ grid round the eye knows what is solid. `?smokegrid=0` leaves it out.
+  if (query.get('smokegrid') !== '0') smoke.setSolidSampler((x, y, z) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)) !== 0)
+  /** Whether the billows of a blast and the tongues of its fire are drawn (#226, billows.ts): `?billows=0`, or `engine.off.add('billows')`, leaves them out. */
+  const billowsAsked = query.get('billows') !== '0'
   // Show the place once its near boxes and skyline are ready. Coarser fallback cells have lower fetch priority.
   const nearLevels = farModel.listing && farModel.reach > 0
     ? world.levels.filter((l) => l.index === 0 || ((l.grid[0] * SIDE) << (l.index - 1)) / 2 < farModel.reach * M)
@@ -495,14 +512,17 @@ async function main() {
   for (const type of ['pointerup', 'pointercancel']) addEventListener(type, () => { if (deaf) { deaf = false; deafUntil = performance.now() + 400 } }, true)
   addEventListener('click', (e) => { if (deaf || performance.now() < deafUntil) { deaf = false; deafUntil = 0; e.stopImmediatePropagation(); e.preventDefault() } }, true)
 
+  /** What the Cleave does to the eye (#226): degrees added to the view, and its blows (pitch, yaw, roll). */
+  let spellFov = 0, spellJolt: readonly [number, number, number] = [0, 0, 0]
   const view = (): View => {
-    const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
-    const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
+    const pitch = pose.pitch + spellJolt[0], yaw = pose.yaw + spellJolt[1]
+    const cp = Math.cos(pitch), forward = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp] as const
+    const level = [Math.cos(yaw), 0, Math.sin(yaw)] as const
     const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
-    const curRoll = roll + driveRoll
+    const curRoll = roll + driveRoll + spellJolt[2]
     // A photographic lens (such as SF's 25.05° landing cut) can be narrower than the driving camera's 40° floor.
-    const curFov = driveFov === 0 && fov > 0 && fov < 180 ? fov
-      : Math.min(115, Math.max(40, (Number.isFinite(fov) ? fov : 70) + driveFov))
+    const curFov = (driveFov === 0 && fov > 0 && fov < 180 ? fov
+      : Math.min(115, Math.max(40, (Number.isFinite(fov) ? fov : 70) + driveFov))) + spellFov
     const cr = Math.cos(curRoll), sr = Math.sin(curRoll)
     const right = curRoll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
     const up = curRoll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
@@ -589,6 +609,12 @@ async function main() {
   let streetLife: Street | null = null
   let neighborhood: Neighborhood | null = null
   let social: SocialController | null = null
+  /** The people seen in the last frame, by their seed (#166): who a blast, a shot or a cut can knock down. */
+  const folkSeen = new Map<number, Person>()
+  /** Whoever has gone limp is drawn as their ragdoll lies (ragdoll-live.ts), until they are up again. */
+  const ragdolls = new RagdollLiveController(), limp = new Map<number, number>()
+  /** How long someone may lie before they are drawn walking again, whatever their ragdoll does (s). */
+  const LIMP_LONGEST = 25
   let phoneOs: PhoneOS | null = null
   let interiorSys: InteriorSystem | null = null
   let deliveryCtrl: DeliveryController | null = null
@@ -598,7 +624,9 @@ async function main() {
     if (outdoorOnly && interiorSys?.active) return EMPTY_PEOPLE
     const list = src(v, s)
     social?.observeLocal(list)
-    return list
+    for (const p of list) folkSeen.set(p.seed, p)
+    if (!limp.size) return list
+    return list.map((p) => { const ragdollPose = limp.has(p.seed) ? ragdolls.poseFor(p.seed) : undefined; return ragdollPose ? { ...p, ragdollPose } : p })
   }
   const lively = !!LOCAL?.street && query.get('street') !== '0'
   if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(observeNpcFolk(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()), true))
@@ -643,6 +671,8 @@ async function main() {
     debris.light(sun, day)
     water.light(sun, day)
     carWheels.light(sun, day)
+    grass?.light(sun, day)
+    rubble?.light(sun, day)
   }
   const setHour = (h: number | null) => {
     const next = h === null ? null : ((h % 24) + 24) % 24
@@ -1058,6 +1088,10 @@ async function main() {
     shot?.after(dt)
     const budget = rate ? Math.max(1000 / rate, screenMs) : fastestMs
     steer(budget, gap, resting)
+    // The spells first (#226), by the wall's clock: how fast the world goes this frame, and what they do to the eye.
+    stepSpells(dt)
+    /** How fast the world goes this frame: its own pace (a shared world's), times the spells'. */
+    const worldRate = tempo.rate * spellRate
     const v = view(), to = fit()
     // How fast the eye goes, metres a second.
     const eyeSpeed = eyeWas ? Math.hypot(v.eye[0] - eyeWas[0], v.eye[1] - eyeWas[1], v.eye[2] - eyeWas[2]) / (M * FINE) / Math.max(dt, 1e-3) : 0
@@ -1088,12 +1122,14 @@ async function main() {
     let windowed = false, gtaoRan = false, taaRan = false
     let clusterRan = false, dynShadowRan = false, volCloudsRan = false, froxelFogRan = false
     if (!indoors) {
-      debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
+      debris.step(dt * worldRate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
       gathering.step(dt)
-      smoke.step(dt * tempo.rate)
-      roadTracks.step(dt * tempo.rate)
-      if (!off.has('wheels')) carWheels.step(dt * tempo.rate, wheelVehicles(), groundUnder)
+      smoke.step(dt * worldRate)
+      if (rewind) smoke.setClock(rewind.clock)
+      roadTracks.step(dt * worldRate)
+      if (!off.has('wheels')) carWheels.step(dt * worldRate, wheelVehicles(), groundUnder)
     }
+    stepFight(dt, v, worldRate)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
     // (Moving: more than a metre a second.)
@@ -1262,6 +1298,7 @@ async function main() {
       }
 
       // 4. Prepare people before dynamic shadows & march so both dynamic shadows and overlay-tbdr share one pass.
+      folkSeen.clear()
       const drawPeople = !off.has('people') && folk.prepare(to, v, seconds, dynShadowActive)
 
       // 5. Dynamic-object 2-cascade directional shadow maps (cars/pieces + people -> sampled in march-shade.ts).
@@ -1334,6 +1371,9 @@ async function main() {
         if (!froxelFogActive) marine.draw(encoder, to, farModel.depth, v, seconds)
       }
       if (!off.has('water') && !indoors) water.draw(encoder, to, v, seconds)
+      // Grass over the ground and rubble thrown by what broke (#226): depth-tested into the picture.
+      if (grass && !indoors && !off.has('grass')) { grass.update(v.eye, groundSample, { dt: dt * worldRate, pushPos: me.feet?.at ?? null }); grass.draw(encoder, to, v) }
+      if (rubble && !indoors && !off.has('avbd') && rubble.count > 0) { rubble.step(encoder, Math.min(dt * worldRate, 1 / 30), core.ground_at(Math.round(v.eye[0]), Math.round(v.eye[2]))); rubble.drawTo(encoder, to, v) }
       // Shared TBDR overlay pass (#165): run all CPU prep, queue.writeBuffer uploads, and crumbs-compute BEFORE
       // beginning ONE shared GPURenderPassEncoder over (to.color, to.depth) to avoid 6-7 tile load/store flushes.
       const drawShade = !indoors && !off.has('under') && alive.things.length > 0 && shade.prepare(to, v, shades(), groundUnder, march.day, march.sun.s)
@@ -1344,6 +1384,8 @@ async function main() {
       const drawInteriorSigns = !off.has('signs') && (interiorSys?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog)) ?? false)
       let drawCrumbs = false
       if (!indoors && !off.has('crumbs')) {
+        // (crumbs and sparks bounce off what the picture shows, #166)
+        debris.setDepthSource(off.has('crumbdepth') ? null : to.depth)
         debris.defer()
         debris.draw(encoder, to, v)
         drawCrumbs = debris.ready
@@ -1370,7 +1412,9 @@ async function main() {
         if (drawCrumbs) debris.record(pass)
         pass.end()
       }
+      smoke.billowsEnabled = billowsAsked && !off.has('billows')
       if (!indoors && !off.has('puffs')) smoke.draw(encoder, to, v)
+      if (combat && !off.has('combat')) combat.draw(encoder, to, v, seconds)
 
       // 6. 3D Froxel Volumetric Fog (active only during fog/rain/overcast; composited onto linear HDR BEFORE TAA & bloom).
       if (froxelFogActive && froxelFog) {
@@ -1449,6 +1493,8 @@ async function main() {
       pluginDraws.draw(encoder, to, v, seconds)
       staff.draw(encoder, to, v, seconds)
     }
+    // The Cleave's seam and point and time's motes, over everything; then what they do to the whole picture (glow.ts).
+    const fxNow = drawSpells(encoder, to, v, (now - started) / 1000)
     let blitSrc: GlowSource = to
     if (taaActive && taaPass) {
       march.patchVelocity(encoder, to, farModel.depth)
@@ -1484,7 +1530,7 @@ async function main() {
     const texBegan = performance.now()
     const backbufferView = context.getCurrentTexture().createView()
     const texMs = performance.now() - texBegan
-    blit(encoder, blitSrc, backbufferView, march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
+    blit(encoder, blitSrc, backbufferView, march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift, fxNow, fxNow ? to.depth : null)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 18, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 144) }
     const subBegan = performance.now()
     device.queue.submit([encoder.finish()])
@@ -1670,6 +1716,8 @@ async function main() {
     const answer = e.data, t0 = performance.now()
     // An answer about the world as it was before it was put back: a blast's cells must not come down in the new one.
     if (!far && answer.age !== moverAge) { stale.answers++; return }
+    // A ragdoll made (#166): its id, and nothing else.
+    if (answer.ragdoll !== undefined) { ragdollMade.shift()?.(answer.ragdoll); bodies = Math.max(bodies, answer.bodies); return }
     queueMicrotask(() => { spent.heard += performance.now() - t0 })
     // (A step's answer: what was asked once a frame, `fallOn`.)
     const step = !far && ticking && !answer.released && answer.spawned === undefined
@@ -1697,6 +1745,10 @@ async function main() {
     }
     // Born first: a shard may be born and break again within the one answer.
     for (const born of told.born) { moving.set(born.id, falling.add(born)); fell.pieces++; fell.cells += born.cells }
+    // How much a cut cut, for how hard it lands (cleave.ts `stats.much`), and whoever waits for it (`engine.cut`).
+    if (answer.cleft) { if (cleave) cleave.stats.much = Math.min(1, told.born.reduce((n, b) => n + b.cells, 0) / 20000); for (const done of cleftWaiters.splice(0)) done() }
+    if (told.poses.length) ragdolls.ingestPoses(told.poses)
+    for (const l of told.live) if (l.detachedWheels) wheelsOff.set(l.id, l.detachedWheels); else wheelsOff.delete(l.id)
     if (!far || far.live) ears?.told(told, moving)
     for (const id of told.broke) { moving.get(id)?.destroy(); moving.delete(id) }
     // Something went up of itself: the cells it emptied came as edits, and this is its fire, smoke and shock.
@@ -1893,7 +1945,7 @@ async function main() {
       out.push({
         id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
         bornLow: piece.born.low, bornCom: piece.born.com,
-        front: t.motor.front, steerLimit: t.motor.steer, topSpeed: t.motor.top,
+        front: t.motor.front, steerLimit: t.motor.steer, topSpeed: t.motor.top, detachedWheels: wheelsOff.get(t.id) ?? 0,
         feet: t.motor.feet, hasFine: !!(t.fine?.length || t.kept?.length), profile: t.wheelProfile,
         ...(look0 && deform ? { deform, fineLow: look0.low, finePer: look0.per } : {}),
         ...(active ? { steerInput: active.steer, throttle: active.throttle, brake: active.brake, handbrake: active.handbrake, fwdSpeed: active.fwdSpeed, latSpeed: active.latSpeed, slip: active.slip, drifting: active.drifting, burnout: active.burnout, decel: active.decel } : st ? { steerInput: st.turn, throttle: st.go, brake: stBrake, handbrake: st.rise > 0.1, fwdSpeed: st.speed } : {}),
@@ -1920,7 +1972,13 @@ async function main() {
   const fallOn = (dt: number) => {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
-    if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; tickSentAt = performance.now(); tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
+    // (Time stopped or wound back, the mover is not stepped: where things are is time's, rewind.ts. What the Cleave
+    // holds up is moved on by the wall's clock with the step, `hang`.)
+    const timeRuns = !rewind || rewind.state === 'live'
+    // The sea and the rain that loose bodies meet (#166, `bodies_set_env`): told again when the rain changes, or the mover is new.
+    const env = `${moverAge}:${Math.round(march.rain * 20)}`
+    if (!far && env !== envTold) { envTold = env; mover.postMessage({ env: { sea: 0, rain: Math.round(march.rain * 20) / 20 } } satisfies Ask) }
+    if (!far && timeRuns && (bodies > 0 || burning > 0 || running || hangOwed > 0) && !ticking) { ticking = true; tickSentAt = performance.now(); tickAt = frameAt; tickTook = owed; mover.postMessage({ tick: owed * tempo.rate * spellRate, ...(hangOwed > 0 ? { hang: Math.min(hangOwed, 0.1) } : {}) } satisfies Ask); owed = 0; hangOwed = 0 }
     if (!far && (silent(moverWorker) > moverPatience || (ticking && tickSentAt > 0 && performance.now() - tickSentAt > moverPatience))) {
       if (ticking && silent(moverWorker) <= moverPatience) report.notes.push(`mover stalled on step (${Math.round(performance.now() - tickSentAt)} ms)`)
       loseMover(moverWorker)
@@ -1960,7 +2018,7 @@ async function main() {
   const struck = (at: readonly [number, number, number], radius: number, seen = true) => {
     put()
     change(ball(at[0], at[1], at[2], radius, 0))
-    if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }); ears?.blast(at, radius) }
+    if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }); ears?.blast(at, radius); blasted(at, radius) }
   }
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
   // On foot a person is where their feet are, facing the way their body does; flying, where their eye is.
@@ -2294,21 +2352,6 @@ async function main() {
     change(edit)
   }
 
-  /** Cuts level through what is ahead: a slot two cells thick and 9 m across. What stood on it has nothing under it. */
-  const cut = async () => {
-    const v = view(), hit = await march.pick(v)
-    if (!hit) return null
-    const at = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit.t + 2))) as [number, number, number], reach = 44, runs: number[] = []
-    telemetry?.edit({ op: 'cut', at, radius: reach })
-    for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) {
-      const half = Math.floor(Math.sqrt(reach * reach - dz * dz))
-      runs.push(at[0] - half, at[0] + half + 1, at[1] + dy, at[2] + dz, 0)
-    }
-    make(rows(Int32Array.from(runs), [at[0] - reach, at[1], at[2] - reach, at[0] + reach + 1, at[1] + 2, at[2] + reach + 1]), at)
-    cuts.push({ at, radius: reach })
-    return { at, ...hit }
-  }
-
   /** Puts a ball of brick a metre across against what is ahead. With nothing under it, it falls. */
   const place = async () => {
     const v = view(), hit = await march.pick(v)
@@ -2319,23 +2362,287 @@ async function main() {
     return { at, ...hit }
   }
 
+  // ── Small Magic (#226) and the live tools (#166) ──────────────────────────
+  // The Cleave (tool 6), time stopped and wound back (T), grass, thrown rubble, and the weapons after the first
+  // seven tools. Each is made off the first frame and does nothing until it is there.
+  type V3 = [number, number, number]
+  /** How far a cut reaches (cells): 45 m, so that a cut is made in a frame or two and still parts a whole building. */
+  const CLEAVE_REACH = 450
+  /** How fast the world goes for the spells this frame (the Cleave's slowing times time's stopping), and the wall's seconds owed to what the Cleave holds up. */
+  let spellRate = 1, hangOwed = 0, envTold = ''
+  /** T went down for time while the hands held nothing to throw (hands.ts takes T then): held, time is wound back. */
+  let timeKey = false
+  /** Wheels a living thing has lost (#166, told.ts `live`), for the wheels drawn on it. */
+  const wheelsOff = new Map<number, number>()
+  /** Whoever waits for a ragdoll's id, and for a cut's answer, in the order asked. */
+  const ragdollMade: ((id: number) => void)[] = [], cleftWaiters: (() => void)[] = []
+  /** What the spells and blasts do to the whole picture, filled anew each frame (glow.ts). */
+  const fx = postFx()
+  /** Its plain numbers as they are with nothing on, put back each frame before the spells fill theirs. */
+  const fxNone = (({ view: _v, depthUv: _d, line: _l, rings: _r, seam: _s, shock: _k, hole: _h, doomTint: _t, ...plain }) => plain)(postFx())
+  /** The last blast seen, for its frame of ink and its ring in the air. */
+  let lastBlast: { at: V3; radius: number; t: number } | null = null
+  const unitV = (a: readonly number[]): V3 => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l] }
+  const turnV = (q: readonly number[], v: readonly number[]): V3 => { const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)] }
+
+  /** The first solid cell along a way from a place (a voxel walk, cells), or a loose piece nearer: where, its face, how far. */
+  const rayHit = (from: readonly number[], dir: readonly number[], reach: number): RayHit | null => {
+    const d = unitV(dir), cell = [Math.floor(from[0]), Math.floor(from[1]), Math.floor(from[2])], step = d.map((v) => (v > 0 ? 1 : -1))
+    const next = d.map((v, a) => (v === 0 ? Infinity : ((v > 0 ? cell[a] + 1 - from[a] : from[a] - cell[a]) / Math.abs(v))))
+    const each = d.map((v) => (v === 0 ? Infinity : 1 / Math.abs(v)))
+    let t = 0, axis = -1, world: RayHit | null = null
+    while (t <= reach) {
+      const kind = core.world_kind(cell[0], cell[1], cell[2])
+      if (kind && axis >= 0) {
+        const normal: V3 = [0, 0, 0]; normal[axis] = -step[axis]
+        world = { pos: [from[0] + d[0] * t, from[1] + d[1] * t, from[2] + d[2] * t], normal, dist: t, bodyId: 0, mirror: (kind & 15) === 11, hard: (kind & 15) === 5 }
+        break
+      }
+      axis = next[0] < next[1] ? (next[0] < next[2] ? 0 : 2) : next[1] < next[2] ? 1 : 2
+      t = next[axis]; next[axis] += each[axis]; cell[axis] += step[axis]
+    }
+    // (a loose piece, as a ball round its middle, nearer than the world)
+    let best = world?.dist ?? reach, body: RayHit | null = null
+    for (const [id, p] of moving) {
+      const r = Math.hypot(p.born.size[0], p.born.size[1], p.born.size[2]) * p.cell * 0.4, o = [p.pos[0] - from[0], p.pos[1] - from[1], p.pos[2] - from[2]]
+      const along = o[0] * d[0] + o[1] * d[1] + o[2] * d[2], off = o[0] * o[0] + o[1] * o[1] + o[2] * o[2] - along * along
+      if (along < 0 || off > r * r) continue
+      const at = along - Math.sqrt(r * r - off)
+      if (at > 0 && at < best) { best = at; const pos: V3 = [from[0] + d[0] * at, from[1] + d[1] * at, from[2] + d[2] * at]; body = { pos, normal: unitV([pos[0] - p.pos[0], pos[1] - p.pos[1], pos[2] - p.pos[2]]), dist: at, bodyId: id } }
+    }
+    return body ?? world
+  }
+  /** A weapon's work, told to the mover and answered as a blast is. */
+  const fight = (c: Combat) => { if (far) return; waiting++; mover.postMessage({ combat: c } satisfies Ask); bodies = Math.max(bodies, 1) }
+  /** Emptied cells (x, y, z each, as the melee arena tells them), as one edit of the world. */
+  const carveCells = (cells: Int32Array) => {
+    if (far || cells.length < 3) return
+    const runs: number[] = [], box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
+    for (let i = 0; i + 2 < cells.length; i += 3) {
+      const x = cells[i], y = cells[i + 1], z = cells[i + 2]
+      if (!core.world_kind(x, y, z)) continue
+      runs.push(x, x + 1, y, z, 0)
+      box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.min(box[2], z); box[3] = Math.max(box[3], x + 1); box[4] = Math.max(box[4], y + 1); box[5] = Math.max(box[5], z + 1)
+    }
+    if (runs.length) make(rows(Int32Array.from(runs), box as [number, number, number, number, number, number]), [cells[0], cells[1], cells[2]])
+  }
+  /** What a person is told when they go limp (ragdoll-live.ts): made and struck by the mover. */
+  const limbs: RagdollMoverCallbacks = {
+    ragdollSpawn: (feet) => far ? 0 : new Promise<number>((done) => { ragdollMade.push(done); mover.postMessage({ ragdoll: [feet[0], feet[1], feet[2]] } satisfies Ask); bodies = Math.max(bodies, 1) }),
+    ragdollHit: (id, bone, impulse, cut) => { mover.postMessage({ ragdollHit: { id, bone, impulse: [impulse[0], impulse[1], impulse[2]], cut } } satisfies Ask); bodies = Math.max(bodies, 1); return true },
+    onSettled: (npc) => { limp.delete(npc) },
+    combatAudio: { bluntHit: (o) => ears?.combat.bluntHit(o) ?? false, bladeStab: (o) => ears?.combat.bladeStab(o) ?? false, shockwaveBoom: (o) => ears?.combat.shockwaveBoom(o) ?? false },
+  }
+  /** The most people down at once. */
+  const LIMP_MOST = 12
+  /** People within `radius` of a place go limp, thrown out from it (`power`: their speed, cells a second); with `cut`, a blade's. */
+  const knock = (at: readonly number[], radius: number, power: number, cut = 0) => {
+    if (far || query.get('ragdolls') === '0') return
+    for (const p of folkSeen.values()) {
+      if (limp.size >= LIMP_MOST) return
+      const o = [p.at[0] - at[0], p.at[1] + 9 - at[1], p.at[2] - at[2]], d = Math.hypot(o[0], o[1], o[2])
+      if (d > radius || limp.has(p.seed)) continue
+      const k = power * 70 * (1 - d / radius) ** 0.5, w = unitV([o[0], Math.abs(o[1]) + d * 0.6 + 1, o[2]])
+      limp.set(p.seed, performance.now())
+      void ragdolls.onHitOrBlast(p.seed, p.at, [w[0] * k, w[1] * k, w[2] * k], cut > 0 ? { bone: BONE.Chest, cutEnergy: cut } : { radius: radius / M }, limbs).then((hit) => { if (!hit && !ragdolls.poseFor(p.seed)) limp.delete(p.seed) }, () => limp.delete(p.seed))
+    }
+  }
+  /** The person a shot along a way meets first, before `reach` cells: knocked down as a shot knocks them. */
+  const shootFolk = (from: readonly number[], dir: readonly number[], reach: number, power: number, cut = 0) => {
+    const d = unitV(dir)
+    let best = reach, who: Person | null = null
+    for (const p of folkSeen.values()) {
+      const o = [p.at[0] - from[0], p.at[1] + 9 - from[1], p.at[2] - from[2]], along = o[0] * d[0] + o[1] * d[1] + o[2] * d[2]
+      if (along <= 0 || along >= best) continue
+      if (Math.hypot(o[0] - d[0] * along, o[1] - d[1] * along, o[2] - d[2] * along) < 6) { best = along; who = p }
+    }
+    if (who) knock([who.at[0] - d[0] * 4, who.at[1] + 9, who.at[2] - d[2] * 4], 8, power, cut)
+  }
+  /** A blast's marks beyond the cells it empties (#226, #166): the grass laid flat and burnt, rubble thrown, the smoke's walls looked at again, its frame of ink, and whoever stood near it. */
+  const blasted = (at: readonly [number, number, number], radius: number) => {
+    grass?.setShock(at, radius * 4, Math.min(2, radius / 8)); grass?.scorch(at, radius * 1.4); grass?.flatten(at, radius * 2.5)
+    if (rubble && radius >= 10 && !off.has('avbd')) rubble.spawnBurst(at, radius, Math.min(256, Math.round(radius * 6)), core.ground_at(Math.round(at[0]), Math.round(at[2])), [0.42, 0.38, 0.34], { emberHeat: 0.6 })
+    const r = radius * 2 + 16
+    smoke.refreshSmokeSolids({ minX: at[0] - r, minY: at[1] - r, minZ: at[2] - r, maxX: at[0] + r, maxY: at[1] + r, maxZ: at[2] + r })
+    if (radius >= 10) lastBlast = { at: [at[0], at[1], at[2]], radius, t: 0 }
+    knock(at, radius * 3 + 20, 40 + radius * 4)
+  }
+
+  /** The cut made (cleave.ts `onCut`): told to the mover, and its marks on the world beside it. */
+  const cleft = (cut: CleaveCut) => {
+    if (far) return
+    waiting++
+    mover.postMessage({ cleave: cut } satisfies Ask)
+    // Where it struck in the middle of the stroke: the road there is closed, the grass laid flat, rubble thrown and people cut down.
+    const h = cut.theta / 2, mid = unitV([cut.e1[0] * Math.cos(h) + cut.e2[0] * Math.sin(h), cut.e1[1] * Math.cos(h) + cut.e2[1] * Math.sin(h), cut.e1[2] * Math.cos(h) + cut.e2[2] * Math.sin(h)])
+    const hit = rayHit(cut.eye, mid, cut.reach), d = hit?.dist ?? cut.reach * 0.6, at: V3 = [Math.round(cut.eye[0] + mid[0] * d), Math.round(cut.eye[1] + mid[1] * d), Math.round(cut.eye[2] + mid[2] * d)]
+    telemetry?.edit({ op: 'cut', at, radius: 44 })
+    cuts.push({ at, radius: 44 })
+    grass?.setShock(at, 600, 1.4)
+    if (rubble && !off.has('avbd')) rubble.spawnBurst(at, 30, 96, core.ground_at(at[0], at[2]), [0.55, 0.5, 0.42], { emberHeat: 0.9, speedScale: 1.4 })
+    // (whoever the sheet passed through: within a metre and a half of it, inside its reach)
+    for (const p of folkSeen.values()) {
+      const o = [p.at[0] - cut.eye[0], p.at[1] + 9 - cut.eye[1], p.at[2] - cut.eye[2]], off = Math.abs(o[0] * cut.normal[0] + o[1] * cut.normal[1] + o[2] * cut.normal[2])
+      if (off < 15 && Math.hypot(o[0], o[1], o[2]) < cut.reach) knock([p.at[0], p.at[1] + 9 - cut.normal[1] * 4, p.at[2]], 6, 30, 400)
+    }
+  }
+  /** A cut through what is ahead, or through `at` (cells), as a player would draw it: a level stroke across the way to it. Resolves with where once the mover has made it. */
+  const cut = async (at?: readonly number[], radius = 44) => {
+    if (!cleave) await spellsReady
+    if (!cleave) return null
+    const v = view()
+    let target: V3, hit: Awaited<ReturnType<typeof march.pick>> | null = null
+    if (at) target = [Math.round(at[0]), Math.round(at[1]), Math.round(at[2])]
+    else { hit = await march.pick(v); if (!hit) return null; target = v.eye.map((e, a) => Math.round(e + v.forward[a] * (hit!.t + 2))) as V3 }
+    const dist = Math.hypot(target[0] - v.eye[0], target[1] - v.eye[1], target[2] - v.eye[2]), way = dist < 1 ? unitV(v.forward) : unitV([target[0] - v.eye[0], target[1] - v.eye[1], target[2] - v.eye[2]])
+    const across = unitV([-way[2], 0, way[0]]), spread = Math.tan(Math.min(0.9, Math.max(0.2, Math.atan2(radius, Math.max(1, dist)))))
+    const from = unitV([way[0] - across[0] * spread, way[1], way[2] - across[2] * spread]), to = unitV([way[0] + across[0] * spread, way[1], way[2] + across[2] * spread])
+    const done = new Promise<void>((r) => { cleftWaiters.push(r); setTimeout(r, 4000) })
+    cleave.strike(v.eye, from, to)
+    cuts.push({ at: target, radius })
+    await done
+    return { at: target, ...(hit ?? {}) }
+  }
+
+  /** The ground under a column for the grass (grass.ts): the height of its surface (the cell over its top), and what its top is made of. */
+  const groundSample = (x: number, z: number) => { const ix = Math.round(x), iz = Math.round(z), top = core.ground_at(ix, iz); return { y: top + 1, kind: core.world_kind(ix, top, iz) } }
+  /** What is heard of the weapons (sound/combat.ts), once there is sound. */
+  const combatEars = new Proxy({} as Partial<CombatSound>, { get: (_, name) => (...a: unknown[]) => (ears?.combat as unknown as Record<string, ((...a: unknown[]) => unknown) | undefined> | undefined)?.[name as string]?.(...a) })
+  /** Where each grappled anchor sits on its body, in the body's own frame, so that the cable is drawn to it as the body moves. */
+  const anchored = new WeakMap<CableAnchor, V3>()
+  let jointHandle = 0, litAt = 0
+  const spellsReady = Promise.all([
+    createCleave(gpu, gpu.sceneFormat, { reach: CLEAVE_REACH, onCut: cleft, onCue: (what, much) => ears?.cleave(what, much), probe: (eye, dir, reach) => rayHit(eye, dir, reach)?.dist ?? null }).then((made) => {
+      cleave = made
+      if (tools[tool]?.name === 'Cleave') pickTool(tool)
+    }),
+    createRewind(gpu, gpu.sceneFormat, { ground: (x, z) => core.ground_at(Math.round(x), Math.round(z)), onCue: (what) => ears?.rewind(what === 'back' ? 'rewinding' : what === 'go' ? 'live' : 'frozen') }).then((made) => {
+      rewind = made
+      made.onPose = (id, pos, rot) => { const p = moving.get(id); if (!p) return; p.pos = [pos[0], pos[1], pos[2]]; p.rot = [rot[0], rot[1], rot[2], rot[3]]; went.delete(p) }
+      // Let go after it was wound back: each piece goes on from where it was put, as it was going then.
+      made.onResumePose = (id, pos, rot, vel, spin) => { if (!far && moving.has(id)) mover.postMessage({ pose: { id, pos: [pos[0], pos[1], pos[2]], rot: [rot[0], rot[1], rot[2], rot[3]], vel: [vel[0], vel[1], vel[2]], spin: [spin[0], spin[1], spin[2]] } } satisfies Ask) }
+    }),
+    query.get('grass') === '0' || off.has('grass') ? null : createGrass(device, gpu.sceneFormat, march).then((made) => { grass = made; made.light(shown.sun, shown.day) }),
+    query.get('avbd') === '0' || off.has('avbd') || !hasCompute ? null : createAvbdRubble(device, gpu.sceneFormat, march).then((made) => { rubble = made; made.light(shown.sun, shown.day) }),
+    createCombatTools(device, gpu.sceneFormat, {
+      melee: hasMeleeExports(core) ? core : null,
+      sports: (() => { try { return new SportsWasm(core as never) } catch { return null } })(),
+      combatAudio: combatEars,
+      emitSparks: (at, dir, count, colour) => smoke.emitMoltenSparks(at, count, dir, colour),
+      raycast: rayHit,
+      groundAt: (x, z) => core.ground_at(Math.round(x), Math.round(z)),
+      carveCells,
+      // The blade through loose pieces it passes (the world's cells come as the arena's kerf).
+      carveCapsule: (a, b, radius) => {
+        for (const [id, p] of moving) {
+          const r = Math.hypot(p.born.size[0], p.born.size[1], p.born.size[2]) * p.cell * 0.5 + radius, ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [p.pos[0] - a[0], p.pos[1] - a[1], p.pos[2] - a[2]]
+          const k = Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / Math.max(1e-6, ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2])))
+          if (Math.hypot(ap[0] - ab[0] * k, ap[1] - ab[1] * k, ap[2] - ab[2] * k) < r) fight({ op: 'carveCapsule', body: id, a: [a[0], a[1], a[2]], b: [b[0], b[1], b[2]], radius })
+        }
+        knock(b, 10, 20, 300)
+      },
+      igniteCell: (cell) => { const now = performance.now(); if (far || now - litAt < 200) return; litAt = now; ticking = true; mover.postMessage({ ignite: [cell[0], cell[1], cell[2]], radius: 2, tick: 0 } satisfies Ask) },
+      ballisticsFire: (caliber, from, dir) => { fight({ op: 'ballistics', caliber, from: [from[0], from[1], from[2]], dir: [dir[0], dir[1], dir[2]] }); shootFolk(from, dir, rayHit(from, dir, 4000)?.dist ?? 4000, 60); return 0 },
+      shockwaveBlast: (at, radius, pressure, shrapnel) => { fight({ op: 'shockwave', at: [at[0], at[1], at[2]], radius, pressure, shrapnel }); strike([Math.round(at[0]), Math.round(at[1]), Math.round(at[2])], Math.min(16, Math.round(radius * 0.3)), true); return 1 },
+      beamsFire: (from, dir, power, dt) => { fight({ op: 'beams', from: [from[0], from[1], from[2]], dir: [dir[0], dir[1], dir[2]], power, dt }); shootFolk(from, dir, rayHit(from, dir, 512)?.dist ?? 512, 10, 200) },
+      jointsAddRope: (a, b, length, breaks) => {
+        if (far) return 0
+        for (const end of [a, b]) { const p = end.bodyId ? moving.get(end.bodyId) : undefined; if (p) anchored.set(end, turnV([-p.rot[0], -p.rot[1], -p.rot[2], p.rot[3]], [end.pos[0] - p.pos[0], end.pos[1] - p.pos[1], end.pos[2] - p.pos[2]])) }
+        const handle = ++jointHandle
+        mover.postMessage({ joint: { handle, op: 'rope', a: a.bodyId, b: b.bodyId, at: [a.pos[0], a.pos[1], a.pos[2]], to: [b.pos[0], b.pos[1], b.pos[2]], length, breaks } } satisfies Ask)
+        bodies = Math.max(bodies, 1)
+        return handle
+      },
+      jointsSetWinch: (handle, speed) => { if (far) return false; mover.postMessage({ winch: { handle, speed } } satisfies Ask); bodies = Math.max(bodies, 1); return true },
+      anchorAt: (end) => { if (!end.bodyId) return end.pos; const p = moving.get(end.bodyId), local = anchored.get(end); if (!p || !local) return null; const w = turnV(p.rot, local); return [p.pos[0] + w[0], p.pos[1] + w[1], p.pos[2] + w[2]] },
+    }).then((made) => { combat = made; pickTool(tool) }),
+  ]).catch((e) => { console.warn('spells: not all could be made', e); report.notes.push(`spells: ${e}`) })
+
+  /** The spells, each frame, before the eye is placed: the Cleave's slowing and its hold on the view, and time's key. */
+  const stepSpells = (dt: number) => {
+    let rate = 1
+    spellFov = 0; spellJolt = [0, 0, 0]
+    if (cleave) {
+      const s = cleave.step(dt, view(), canvas.width / Math.max(1, canvas.height))
+      rate *= s.timeScale; spellFov = s.fovDelta; spellJolt = s.jolt
+      if (s.hanging) hangOwed += dt
+    }
+    if (rewind) {
+      if (!controls.held('KeyT')) timeKey = false
+      const was = rewind.state, r = rewind.step(dt, timeKey, view())
+      rate *= r.rate
+      // (time stopped: what moves stands where it is drawn, and is not drawn on ahead of the last step)
+      if (was === 'live' && r.state !== 'live') for (const p of moving.values()) went.delete(p)
+      // While time runs, what moved is written down: every loose piece, and how many edits the world has had.
+      if (r.state === 'live' && moving.size) rewind.record(dt * tempo.rate * rate, [...moving].map(([id, p]) => ({ id, pos: p.pos, rot: p.rot })), heard)
+    }
+    if (lastBlast) { lastBlast.t += dt; if (lastBlast.t > 0.7) lastBlast = null }
+    if (limp.size) { const now = performance.now(); for (const [seed, at] of limp) if (now - at > LIMP_LONGEST * 1000) limp.delete(seed) }
+    spellRate = rate
+  }
+  /** The weapons moved on, by the world's time, with the eye where it is. */
+  const stepFight = (dt: number, v: View, rate: number) => { combat?.update(dt * rate, v.eye, v.forward) }
+  /** The Cleave's seam and time's motes drawn into the picture, and what the last pass is told of them and of the last blast: null when it is told nothing. */
+  const drawSpells = (encoder: GPUCommandEncoder, to: Offscreen, v: View, t: number) => {
+    if (cleave) cleave.draw(encoder, to, v, t)
+    if (rewind) rewind.draw(encoder, to, v, t)
+    if (off.has('postfx')) return null
+    Object.assign(fx, fxNone)
+    fx.view = v; fx.aspect = to.size[0] / Math.max(1, to.size[1]); fx.depthUv[0] = to.size[0] / to.allocSize[0]; fx.depthUv[1] = to.size[1] / to.allocSize[1]
+    fx.seam.glow = 0; fx.rings.age = 0; fx.shock.power = 0; fx.hole.power = 0
+    cleave?.postFx(fx)
+    rewind?.postFx(fx)
+    if (lastBlast) {
+      const k = lastBlast.t / 0.7
+      fx.ink = lastBlast.t < 1 / 30 ? 1 : lastBlast.t < 2 / 30 ? -1 : 0
+      fx.blaze = Math.max(0, 0.6 * (1 - k * 3))
+      fx.shock.at[0] = lastBlast.at[0]; fx.shock.at[1] = lastBlast.at[1]; fx.shock.at[2] = lastBlast.at[2]
+      fx.shock.radius = lastBlast.radius * (1.5 + 14 * k); fx.shock.power = (1 - k) * Math.min(1, lastBlast.radius / 24)
+    }
+    return fxLive(fx) ? fx : null
+  }
+
   // ── Tools ───────────────────────────────────────────────────────────────
   // What a click, a tap on the red button, or the space of a touch does: one of these, picked by key or from the bar.
+  // The first seven keep their keys (1 to 7); the weapons (#166) come after them.
+  const FIGHTS: Readonly<Record<string, ToolName>> = { Lightsaber: 'saber', Rifle: 'rifle', Rocket: 'rocket', Laser: 'laser', Grapple: 'grapple', Tennis: 'tennis' }
+  /** A weapon used once (a tap, a check): pressed and let go. */
+  const fire = () => { const v = view(); combat?.primary(v.eye, v.forward, true); combat?.primary(v.eye, v.forward, false); return null }
   const tools: { name: string; use: () => unknown }[] = [
     { name: 'Hammer', use: () => blast(5, false) },
     { name: 'Charge', use: () => blast(12) },
     { name: 'Big charge', use: () => blast(32) },
     { name: 'Cannon', use: shoot },
     { name: 'Torch', use: () => ignite(4) },
-    { name: 'Cutter', use: cut },
+    { name: 'Cleave', use: () => { cleave?.tap(); return null } },
     { name: 'Brick', use: place },
+    ...Object.keys(FIGHTS).map((name) => ({ name, use: fire })),
   ]
-  let tool = 1
+  /** While a weapon is in hand the picture's button is its: held, a laser burns on, and the second button is its other use. */
+  const fighting: Mode = {
+    name: 'fighting',
+    pointerDown: () => { const v = view(); combat?.primary(v.eye, v.forward, true); return true },
+    pointerUp: () => { const v = view(); combat?.primary(v.eye, v.forward, false); return true },
+    rightClick: () => { const v = view(); combat?.secondary(v.eye, v.forward); return true },
+    wheel: (deltaY) => { if (combat?.tool !== 'grapple') return false; combat.reel(deltaY < 0 ? 1 : -1); return true },
+    use: () => { fire(); return true },
+  }
+  let tool = 1, putCleaveAway: (() => void) | null = null, putWeaponAway: (() => void) | null = null
   const bar = over.tools(tools.map((t) => t.name), (i) => pickTool(i))
-  const pickTool = (i: number) => { tool = i; bar.picked(i) }
+  const pickTool = (i: number) => {
+    tool = i; bar.picked(i)
+    const name = tools[i]?.name ?? ''
+    // The Cleave's gesture is the picture's while it is in hand; put away, whatever was begun comes to nothing.
+    if (name === 'Cleave' && cleave) { putCleaveAway ??= controls.push(cleave.mode()) } else { cleave?.cancel(); putCleaveAway?.(); putCleaveAway = null }
+    const weapon = FIGHTS[name] ?? null
+    combat?.select(weapon)
+    if (weapon && combat) { putWeaponAway ??= controls.push(fighting) } else { putWeaponAway?.(); putWeaponAway = null }
+  }
   pickTool(tool)
-  tools.forEach((_, i) => own.keys.set(`Digit${i + 1}`, () => pickTool(i)))
+  tools.forEach((_, i) => { if (i < 9) own.keys.set(`Digit${i + 1}`, () => pickTool(i)) })
   own.keys.set('KeyF', () => void ignite())
+  // Time (#226): T with nothing in the hands to throw (hands.ts has it then). Tapped it stops, held it winds back.
+  own.keys.set('KeyT', () => { timeKey = true })
   own.use = () => { const { name, use } = tools[tool]; void Promise.resolve(use()).then((hit) => { telemetry?.event('tool', { name, ...(hit && typeof hit === 'object' ? { at: (hit as { at?: number[] }).at, material: (hit as { material?: number }).material } : {}) }); ears?.used(name, hit as Parameters<NonNullable<typeof ears>['used']>[1]) }); return true }
 
   /** What is ahead when the head is turned a little (radians right and up) from where it looks: for the checks. */
@@ -2892,6 +3199,10 @@ async function main() {
     if (afoot) me.walk(false)
     mover.postMessage({ forget: true } satisfies Ask)
     moverAge++
+    // What the spells and weapons held of the world before (#226, #166) is let go with it.
+    cleave?.clear(); rewind?.end(); rewind?.forget(); rubble?.clear(); combat?.select(null); ragdolls.clear(); limp.clear(); folkSeen.clear(); wheelsOff.clear(); hangOwed = 0
+    for (const done of ragdollMade.splice(0)) done(0)
+    pickTool(tool)
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
     moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0; placedLamps.length = 0
@@ -3042,6 +3353,8 @@ async function main() {
     }
     watchers.add(hatch)
   }
+  // Small Magic (#226) and the live tools (#166), for the checks and the Studio: each null until it is made.
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ get cleave() { return cleave }, get rewind() { return rewind }, get grass() { return grass }, get avbd() { return rubble }, get billows() { return smoke.billows }, get combat() { return combat }, ragdolls, get limp() { return limp.size }, spells: spellsReady, get spellRate() { return spellRate } }))
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, /** Dynamic local lights stats (vehicles, SF street lamps, systemic emissives; active preset budget). */ get localLights() { return march.localLights.stats }, /** The sun's maps' share of a frame (#73): what a tile was last measured to take on the GPU (`tileMs`), the share of a moving frame (`share`, ms), whether the eye moved in the last frame, and how many tiles it had room for and drew. */ sunRoom, /** Whether a thing the last step moved is drawn on to the time of the frame (#73, `drawAhead`; `?ahead=0` turns it off). */ get ahead() { return aheadOn }, set ahead(on: boolean) { aheadOn = on }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, get neighborhood() { return neighborhood }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
@@ -3228,7 +3541,7 @@ async function main() {
   })
   feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, social, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) { const reach = e.radius ?? 44, runs: number[] = []; for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) { const half = Math.floor(Math.sqrt(reach * reach - dz * dz)); runs.push(e.at[0] - half, e.at[0] + half + 1, e.at[1] + dy, e.at[2] + dz, 0) } make(rows(Int32Array.from(runs), [e.at[0] - reach, e.at[1], e.at[2] - reach, e.at[0] + reach + 1, e.at[1] + 2, e.at[2] + reach + 1]), e.at); cuts.push({ at: e.at, radius: reach }) } else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, social, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) void cut(e.at, e.radius ?? 44); else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
   // Native in-game T3 Studio & Game-Use runtime (#98): local dev only; computed URL keeps it out of static sf/build.mjs deploys.
   const studioWanted = query.get('studio') !== '0' && (query.get('studio') === '1' || /(?:^|#|&)studio=/.test(location.hash) || (!navigator.webdriver && !!document.querySelector('meta[name="vw-studio"]')))
   if (!LOCAL && studioWanted) {

@@ -9,7 +9,7 @@
 export const OWN: Readonly<Record<string, string>> = {
   KeyW: 'forward', KeyS: 'back', KeyA: 'left', KeyD: 'right', KeyC: 'down',
   KeyQ: 'the wand in hand', KeyX: 'what the wand shares',
-  KeyG: 'pick up and put down', KeyT: 'throw what is held',
+  KeyG: 'pick up and put down', KeyT: 'throw what is held; with nothing held, stop time and hold to wind it back',
   KeyB: 'on foot or flying', KeyP: 'the portal',
   // On foot V is the eye's, and the foot's mode is put over the offers whenever the body is taken up again (after a
   // ride, through the portal): an offer on V worked or not by what the person had done since the page opened.

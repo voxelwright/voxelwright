@@ -141,6 +141,19 @@ pub fn quat_conj(q: Q4) -> Q4 {
 }
 
 #[inline]
+fn quat_dot(a: Q4, b: Q4) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+}
+
+/// Angle (radians, `0..=PI`) of the turn from `a` to `b`.
+#[inline]
+pub fn quat_angle(a: Q4, b: Q4) -> f32 {
+    let d = quat_mul(quat_conj(a), b);
+    let v = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    2.0 * v.atan2(d[3].abs())
+}
+
+#[inline]
 pub fn quat_norm(q: Q4) -> Q4 {
     let l = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
     if l > 1e-8 {
@@ -1027,10 +1040,23 @@ impl AngularDrive3D {
 /// Breakable 6-DOF rigid weld (hoods, doors, wheels, structural beams).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FixedJoint {
-    /// Target relative orientation `q_a^-1 * q_b`.
+    /// Target relative orientation `q_a^-1 * q_b`. A plastic weld that yields moves this to where it was bent.
     pub rel_rot: [f32; 4],
     pub linear_softness: Softness,
     pub angular_softness: Softness,
+    /// Angular force (torque, mass·cells²/s²) past which the weld gives and stays bent instead of holding
+    /// rigidly (`f32::INFINITY` = never yields, the default).
+    pub yield_torque: f32,
+    /// How far (radians from `orig_rel_rot`) a yielding weld may bend before it snaps (`f32::INFINITY` = never).
+    pub break_bend: f32,
+    /// The relative orientation the weld was made at: `yielded_angle` is measured from it.
+    pub orig_rel_rot: [f32; 4],
+    /// How far the weld has bent for good (radians from `orig_rel_rot`).
+    pub yielded_angle: f32,
+    /// Brittle welds (mortar, putty, rivets): a tensile pull along the line between the two pieces breaks it at
+    /// `break_force`, while shear and compression need [`PUSH_SHARE`] times that. `false` keeps the plain
+    /// total-force check.
+    pub break_on_pull: bool,
 }
 
 impl Default for FixedJoint {
@@ -1039,7 +1065,47 @@ impl Default for FixedJoint {
             rel_rot: ID_QUAT,
             linear_softness: Softness::RIGID,
             angular_softness: Softness::RIGID,
+            yield_torque: f32::INFINITY,
+            break_bend: f32::INFINITY,
+            orig_rel_rot: ID_QUAT,
+            yielded_angle: 0.0,
+            break_on_pull: false,
         }
+    }
+}
+
+/// How much more than `break_force` a `break_on_pull` weld takes in shear or compression before it breaks.
+pub const PUSH_SHARE: f32 = 2.0;
+
+/// A weld counts as yielding once its accumulated angular impulse is this share of its cap.
+const YIELDING: f32 = 0.98;
+
+impl FixedJoint {
+    /// Holds the bodies at relative orientation `q` (`q_a^-1 * q_b`), which is also where bending is measured from.
+    pub fn with_rel_rot(mut self, q: [f32; 4]) -> Self {
+        let q = quat_norm(q);
+        self.rel_rot = q;
+        self.orig_rel_rot = q;
+        self
+    }
+
+    /// Makes the weld plastic: past `yield_torque` it bends and stays bent, and it snaps once bent `break_bend` rad.
+    pub fn plastic(mut self, yield_torque: f32, break_bend: f32) -> Self {
+        self.yield_torque = if yield_torque > 0.0 { yield_torque } else { f32::INFINITY };
+        self.break_bend = if break_bend > 0.0 { break_bend } else { f32::INFINITY };
+        self
+    }
+
+    /// Whether a tensile pull breaks it at `break_force` (see [`FixedJoint::break_on_pull`]).
+    pub fn break_on_pull(mut self, on: bool) -> Self {
+        self.break_on_pull = on;
+        self
+    }
+
+    /// Whether the weld yields.
+    #[inline]
+    pub fn is_plastic(&self) -> bool {
+        self.yield_torque.is_finite()
     }
 }
 
@@ -1240,6 +1306,73 @@ pub enum JointEvent {
     Broken { id: u32, impulse: f32 },
 }
 
+/// How a weld of one kind fails (Small Magic's `materials.ts` rules, armed by [`JointSet::calibrate_and_arm`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WeldRule {
+    /// It breaks at `margin` times the load it carries standing.
+    pub margin: f32,
+    /// ...and never below `floor` times the weight of the lighter of its two pieces (for torque, that weight's moment
+    /// about the weld over [`WELD_FLOOR_ARM`]): what a knock or the shake of a collapse next door can't break.
+    pub floor: f32,
+    /// Brittle welds break on a tensile pull as well as a bend (`break_on_pull`); plastic ones only on a bend.
+    pub pull: bool,
+    /// Plastic: past `yield_margin` times its standing torque (never below `yield_floor`) it gives and stays bent
+    /// (`f32::INFINITY` = brittle, never yields).
+    pub yield_margin: f32,
+    pub yield_floor: f32,
+    /// Plastic: it snaps once bent this far (radians; `f32::INFINITY` = brittle).
+    pub bend: f32,
+}
+
+impl WeldRule {
+    const fn brittle(margin: f32, floor: f32) -> Self {
+        Self { margin, floor, pull: true, yield_margin: f32::INFINITY, yield_floor: 0.0, bend: f32::INFINITY }
+    }
+
+    const fn plastic(margin: f32, floor: f32, pull: bool, yield_margin: f32, yield_floor: f32, bend: f32) -> Self {
+        Self { margin, floor, pull, yield_margin, yield_floor, bend }
+    }
+
+    /// Brick on brick, and brick on stone.
+    pub const MORTAR: Self = Self::brittle(3.0, 40.0);
+    /// Along one timber member: sags, then snaps across the grain.
+    pub const GRAIN: Self = Self::plastic(6.0, 90.0, false, 1.5, 4.0, 0.2);
+    /// Pegged mortise and tenon, half-laps: gives sooner than the timber itself.
+    pub const JOINERY: Self = Self::plastic(6.0, 70.0, false, 1.3, 2.5, 0.26);
+    /// Steel to steel: bends a long way, rarely lets go (tears on a pull of three times its standing load).
+    pub const RIVET: Self = Self::plastic(3.0, 60.0, true, 1.5, 2.0, 1.2);
+    /// Steel to anything else.
+    pub const BOLT: Self = Self::plastic(6.0, 40.0, false, 1.4, 2.0, 0.7);
+    /// Dressed stone on stone (plinths, piers).
+    pub const STONEWORK: Self = Self::brittle(4.0, 60.0);
+    /// Glass in its frame.
+    pub const PUTTY: Self = Self::brittle(2.5, 30.0);
+    /// Into the ground: only a charge shifts it.
+    pub const FOOTING: Self = Self::brittle(6.0, 80.0);
+}
+
+/// The torque floor's lever normalisation (cells²/cells, a piece about 2 m across each side of the weld): Small
+/// Magic divides a weld's floor moment by the squared span of its two pieces; one fixed span keeps that scale.
+pub const WELD_FLOOR_ARM: f32 = 16.0;
+
+/// Warm-start impulses of a whole joint set, by joint id ([`JointSet::snapshot_impulses`]).
+#[derive(Clone, Debug, Default)]
+pub struct JointImpulseSnapshot {
+    entries: Vec<(u32, ImpulseCache)>,
+    prev_dt: f32,
+}
+
+impl JointImpulseSnapshot {
+    /// How many joints it holds.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// Solver iteration & warm-starting configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SolverConfig {
@@ -1296,6 +1429,9 @@ struct ImpulseCache {
     /// Continuous unwrapped hinge angle for multi-turn / wide limit tracking.
     hinge_angle: f32,
     hinge_angle_init: bool,
+    /// Unit line from body A's middle to body B's (a static side counts at its anchor), taken when the joint was
+    /// last prepared: what a `break_on_pull` weld reads its tension along.
+    pull_axis: V3,
 }
 
 impl ImpulseCache {
@@ -1475,6 +1611,8 @@ enum PreparedKind {
         ang_err: V3,
         ang_eff: M3,
         ang_soft: SoftCoeffs,
+        /// Most accumulated angular impulse a plastic weld carries this substep (`yield_torque * h`; infinite if rigid).
+        max_ang_imp: f32,
     },
     Hinge {
         lin_err: V3,
@@ -1771,6 +1909,8 @@ impl JointSet {
             for b in bodies.iter_mut() {
                 b.integrate_positions(h);
             }
+            // Before projection: a weld that gave this substep holds where it bent, not where it was made.
+            self.evaluate_plastic_yield(bodies, h, &mut events);
             if config.position_iters > 0 {
                 self.solve_positions_internal(bodies, h, config);
             }
@@ -1978,6 +2118,13 @@ impl JointSet {
                     let k_ang = m3_add(&ia, &ib);
                     let q_target = quat_mul(ba.rot, quat_norm(cfg.rel_rot));
                     let ang_err = quat_error_vec(bb.rot, q_target);
+                    if cfg.break_on_pull {
+                        // A static side has no middle of its own: it counts at its anchor.
+                        let ca = if ba.is_static() { pa } else { ba.pos };
+                        let cb = if bb.is_static() { pb } else { bb.pos };
+                        let fallback = v_unit_or(rb, [0.0, 1.0, 0.0]);
+                        self.joints[j_idx].cache.pull_axis = v_unit_or(v_sub(cb, ca), fallback);
+                    }
                     PreparedKind::Fixed {
                         lin_err: d,
                         lin_eff: m3_inv(&k_lin),
@@ -1985,6 +2132,7 @@ impl JointSet {
                         ang_err,
                         ang_eff: m3_inv(&k_ang),
                         ang_soft: cfg.angular_softness.coeffs(h),
+                        max_ang_imp: if cfg.is_plastic() { cfg.yield_torque * h } else { f32::INFINITY },
                     }
                 }
                 JointKind::Hinge(cfg) => {
@@ -2414,7 +2562,11 @@ impl JointSet {
                     );
                     apply_angular_impulse(bodies, c, ang_total);
                 }
-                PreparedKind::Fixed { .. } => {
+                PreparedKind::Fixed { max_ang_imp, .. } => {
+                    if max_ang_imp.is_finite() {
+                        // A step longer than the last scales the cache up: a plastic weld still carries no more than its yield.
+                        cache.ang = clamp_vec(cache.ang, max_ang_imp);
+                    }
                     apply_linear_impulse(bodies, c, cache.lin);
                     apply_angular_impulse(bodies, c, cache.ang);
                 }
@@ -2687,12 +2839,17 @@ impl JointSet {
             let ba = Self::read_body(bodies, c.slot_a);
             let bb = Self::read_body(bodies, c.slot_b);
             match p.kind {
-                PreparedKind::Fixed { lin_eff, ang_eff, .. } => {
+                PreparedKind::Fixed { lin_eff, ang_eff, max_ang_imp, .. } => {
                     let vrel = point_rel_vel(&ba, c.ra, &bb, c.rb);
                     let dl = v_neg(m3_mul_v(&lin_eff, vrel));
                     apply_linear_impulse(bodies, c, dl);
                     let wrel = v_sub(bb.spin, ba.spin);
-                    let dw = v_neg(m3_mul_v(&ang_eff, wrel));
+                    let mut dw = v_neg(m3_mul_v(&ang_eff, wrel));
+                    if max_ang_imp.is_finite() {
+                        // Only the headroom left under the yield: a weld at its yield keeps bending.
+                        let room = (max_ang_imp - v_len(self.joints[c.joint_idx].cache.ang)).max(0.0);
+                        dw = clamp_vec(dw, room);
+                    }
                     apply_angular_impulse(bodies, c, dw);
                 }
                 PreparedKind::Hinge { lin_eff, t1, t2, align_eff, .. } => {
@@ -2807,6 +2964,10 @@ impl JointSet {
                             let k = point_k_matrix(inv_ma + inv_mb, ra, &ia, rb, &ib);
                             let dl = v_neg(m3_mul_v(&m3_inv(&k), err));
                             apply_pos_linear(bodies, sa, sb, inv_ma, inv_mb, &ia, &ib, ra, rb, dl);
+                        }
+                        // A weld giving at its yield is not set straight again: its bend is where it now holds.
+                        if cfg.is_plastic() && v_len(j.cache.ang) >= cfg.yield_torque * h * YIELDING {
+                            continue;
                         }
                         let ba = Self::read_body(bodies, sa);
                         let bb = Self::read_body(bodies, sb);
@@ -3160,6 +3321,22 @@ impl JointSet {
 
             let lin_force = lin_imp * inv_h;
             let ang_torque = ang_imp * inv_h;
+            if let JointKind::Fixed(cfg) = j.kind {
+                if cfg.break_on_pull && j.break_force.is_finite() {
+                    // The joint pushes B back toward A along the line between them when they are pulled apart.
+                    let tension = (-v_dot(j.cache.lin, j.cache.pull_axis)).max(0.0) * inv_h;
+                    if tension > j.break_force || lin_force > j.break_force * PUSH_SHARE {
+                        j.broken = true;
+                        j.cache.zero_impulses();
+                        events.push(JointEvent::Broken { id: j.id, impulse: lin_imp });
+                    } else if ang_torque > j.break_torque {
+                        j.broken = true;
+                        j.cache.zero_impulses();
+                        events.push(JointEvent::Broken { id: j.id, impulse: ang_imp });
+                    }
+                    continue;
+                }
+            }
             if lin_force > j.break_force {
                 j.broken = true;
                 j.cache.zero_impulses();
@@ -3170,6 +3347,180 @@ impl JointSet {
                 events.push(JointEvent::Broken { id: j.id, impulse: ang_imp });
             }
         }
+    }
+
+    /// Plastic welds: one that has carried its yield this substep (its angular impulse at the cap) and has turned
+    /// away from where it holds keeps the turn for good (`rel_rot` moves to the bodies' relative orientation now),
+    /// `yielded_angle` grows, and once it has bent `break_bend` from where it was made it breaks
+    /// ([`JointEvent::Broken`]). Call after position integration and before position projection; `step_bodies` does.
+    pub fn evaluate_plastic_yield(&mut self, bodies: &[SolverBody], h: f32, events: &mut Vec<JointEvent>) {
+        if h <= 0.0 {
+            return;
+        }
+        let any = self
+            .joints
+            .iter()
+            .any(|j| !j.broken && matches!(j.kind, JointKind::Fixed(cfg) if cfg.is_plastic()));
+        if !any {
+            return;
+        }
+        self.build_body_map(bodies);
+        for idx in 0..self.joints.len() {
+            let j = &self.joints[idx];
+            if j.broken {
+                continue;
+            }
+            let JointKind::Fixed(mut cfg) = j.kind else { continue };
+            if !cfg.is_plastic() || v_len(j.cache.ang) < cfg.yield_torque * h * YIELDING {
+                continue;
+            }
+            let ba = Self::read_body(bodies, self.lookup_slot(j.body_a));
+            let bb = Self::read_body(bodies, self.lookup_slot(j.body_b));
+            if (ba.is_static() || ba.asleep) && (bb.is_static() || bb.asleep) {
+                continue;
+            }
+            let mut rel = quat_norm(quat_mul(quat_conj(ba.rot), bb.rot));
+            let held = quat_norm(cfg.rel_rot);
+            if quat_dot(rel, held) < 0.0 {
+                rel = [-rel[0], -rel[1], -rel[2], -rel[3]];
+            }
+            if quat_angle(rel, held) <= 1e-6 {
+                continue;
+            }
+            cfg.rel_rot = rel;
+            cfg.yielded_angle = quat_angle(cfg.orig_rel_rot, rel);
+            let snapped = cfg.yielded_angle >= cfg.break_bend;
+            let j = &mut self.joints[idx];
+            j.kind = JointKind::Fixed(cfg);
+            if snapped {
+                let impulse = v_len(j.cache.ang);
+                j.broken = true;
+                j.cache.zero_impulses();
+                events.push(JointEvent::Broken { id: j.id, impulse });
+            }
+        }
+    }
+
+    /// Settle-and-arm (Small Magic's `Structure.settle` / `arm`): steps the bodies `settle_steps` times with every
+    /// weld named in `rules` unbreakable and rigid, gravity easing on over the first third, and reads each weld's
+    /// standing load (force and torque, the larger of the readings over the last third). Then each weld is armed in
+    /// place by its rule: it breaks at `margin` times what it carries standing, never below `floor` times the
+    /// weight (and the weight's moment) of the lighter of its two pieces; a plastic rule yields at `yield_margin`
+    /// times its standing torque (never below its floor, never above nine tenths of its strength) and snaps once bent
+    /// `bend`. A structure armed so stands under its own weight and breaks along its load paths when something is
+    /// knocked out of it. The warm-start impulses carry straight on. Returns how many welds were armed.
+    pub fn calibrate_and_arm(
+        &mut self,
+        bodies: &mut [SolverBody],
+        gravity: [f32; 3],
+        dt: f32,
+        settle_steps: u32,
+        config: &SolverConfig,
+        rules: &[(u32, WeldRule)],
+    ) -> usize {
+        if dt <= 0.0 || rules.is_empty() {
+            return 0;
+        }
+        let mut idxs: Vec<(usize, WeldRule)> = Vec::with_capacity(rules.len());
+        for &(id, rule) in rules {
+            if let Some(i) = self.joints.iter().position(|j| j.id == id && !j.broken) {
+                idxs.push((i, rule));
+            }
+        }
+        for &(i, _) in &idxs {
+            let j = &mut self.joints[i];
+            j.break_force = f32::INFINITY;
+            j.break_torque = f32::INFINITY;
+            if let JointKind::Fixed(cfg) = &mut j.kind {
+                cfg.yield_torque = f32::INFINITY;
+                cfg.break_bend = f32::INFINITY;
+            }
+        }
+        let steps = settle_steps.max(1);
+        let ramp = (steps / 3).max(1);
+        let read_from = steps - (steps / 3).max(1);
+        let h = dt / config.substeps.max(1) as f32;
+        let mut loads = vec![(0.0f32, 0.0f32); idxs.len()];
+        for k in 1..=steps {
+            let g = v_scale(gravity, (k as f32 / ramp as f32).min(1.0));
+            self.step_bodies(bodies, g, dt, config);
+            if k > read_from {
+                for (n, &(i, _)) in idxs.iter().enumerate() {
+                    let c = &self.joints[i].cache;
+                    loads[n].0 = loads[n].0.max(v_len(c.lin) / h);
+                    loads[n].1 = loads[n].1.max(v_len(c.ang) / h);
+                }
+            }
+        }
+        self.build_body_map(bodies);
+        let g = v_len(gravity);
+        let mut armed = 0;
+        for (n, &(i, rule)) in idxs.iter().enumerate() {
+            let j = &self.joints[i];
+            if j.broken {
+                continue;
+            }
+            let ba = Self::read_body(bodies, self.lookup_slot(j.body_a));
+            let bb = Self::read_body(bodies, self.lookup_slot(j.body_b));
+            // The lighter free piece: its weight, and its weight's moment about the weld.
+            let (mut weight, mut moment) = (f32::INFINITY, f32::INFINITY);
+            for (b, local) in [(ba, j.local_a), (bb, j.local_b)] {
+                if b.is_static() {
+                    continue;
+                }
+                let w = g / b.inv_mass;
+                weight = weight.min(w);
+                moment = moment.min(w * v_len(quat_rotate(b.rot, local)).max(1.0));
+            }
+            if !weight.is_finite() {
+                continue;
+            }
+            let (load_lin, load_ang) = loads[n];
+            let strength_force = (rule.floor * weight).max(rule.margin * load_lin);
+            let strength_torque = (rule.floor * moment / WELD_FLOOR_ARM).max(rule.margin * load_ang);
+            let plastic = rule.yield_margin.is_finite() && rule.bend.is_finite();
+            let j = &mut self.joints[i];
+            j.break_force = if rule.pull { strength_force } else { f32::INFINITY };
+            j.break_torque = strength_torque;
+            if let JointKind::Fixed(cfg) = &mut j.kind {
+                cfg.break_on_pull = rule.pull;
+                if plastic {
+                    let floor = rule.yield_floor * moment / WELD_FLOOR_ARM;
+                    cfg.yield_torque = (0.9 * strength_torque).min(floor.max(rule.yield_margin * load_ang));
+                    cfg.break_bend = rule.bend;
+                } else {
+                    cfg.yield_torque = f32::INFINITY;
+                    cfg.break_bend = f32::INFINITY;
+                }
+            }
+            armed += 1;
+        }
+        armed
+    }
+
+    /// Every live joint's warm-start impulses, by id: to carry convergence across a rewind or a rebuild.
+    pub fn snapshot_impulses(&self) -> JointImpulseSnapshot {
+        let mut entries: Vec<(u32, ImpulseCache)> =
+            self.joints.iter().filter(|j| !j.broken).map(|j| (j.id, j.cache)).collect();
+        entries.sort_unstable_by_key(|e| e.0);
+        JointImpulseSnapshot { entries, prev_dt: self.prev_dt }
+    }
+
+    /// Puts back what [`JointSet::snapshot_impulses`] took. Joints gone or broken since are skipped, and joints
+    /// made since keep their own. Returns how many joints were restored.
+    pub fn restore_impulses(&mut self, snap: &JointImpulseSnapshot) -> usize {
+        let mut n = 0;
+        for j in &mut self.joints {
+            if j.broken {
+                continue;
+            }
+            if let Ok(k) = snap.entries.binary_search_by_key(&j.id, |e| e.0) {
+                j.cache = snap.entries[k].1;
+                n += 1;
+            }
+        }
+        self.prev_dt = snap.prev_dt;
+        n
     }
 }
 
@@ -3396,6 +3747,7 @@ fn solve_single_joint_velocity(
             ang_err,
             ang_eff,
             ang_soft,
+            max_ang_imp,
         } => {
             let ba = JointSet::read_body(bodies, c.slot_a);
             let bb = JointSet::read_body(bodies, c.slot_b);
@@ -3418,8 +3770,16 @@ fn solve_single_joint_velocity(
                 v_neg(v_scale(m3_mul_v(&ang_eff, arhs), sa.mass_coeff)),
                 v_scale(cache.ang, sa.impulse_coeff),
             );
-            cache.ang = v_add(cache.ang, dw);
-            apply_angular_impulse(bodies, c, dw);
+            if max_ang_imp.is_finite() {
+                // A plastic weld carries at most its yield: past it, the bodies turn against it and it bends.
+                let total = clamp_vec(v_add(cache.ang, dw), max_ang_imp);
+                let dw = v_sub(total, cache.ang);
+                cache.ang = total;
+                apply_angular_impulse(bodies, c, dw);
+            } else {
+                cache.ang = v_add(cache.ang, dw);
+                apply_angular_impulse(bodies, c, dw);
+            }
         }
         PreparedKind::Hinge {
             lin_err,
@@ -4741,5 +5101,159 @@ mod tests {
         let pb = v_add(bodies[1].pos, quat_rotate(bodies[1].rot, [-5.0, 0.0, 0.0]));
         assert!(v_len(v_sub(p0, [0.0, 40.0, 0.0])) < 0.05);
         assert!(v_len(v_sub(pb, pa)) < 0.05);
+    }
+
+    /// A 20-mass beam 10 cells long cantilevered off the world at its root: standing torque 20 * 98 * 5 = 9800.
+    fn cantilever(cfg: FixedJoint) -> (Vec<SolverBody>, JointSet, u32) {
+        let bodies = vec![SolverBody::dynamic_box(1, [5.0, 20.0, 0.0], 20.0, [5.0, 2.0, 2.0])];
+        let mut set = JointSet::new();
+        let id = set.add(Joint::fixed(0, 1, [0.0, 20.0, 0.0], [-5.0, 0.0, 0.0], cfg));
+        (bodies, set, id)
+    }
+
+    fn fixed_cfg(set: &JointSet, id: u32) -> FixedJoint {
+        match set.get(id).unwrap().kind {
+            JointKind::Fixed(cfg) => cfg,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn plastic_cantilever_sags_under_overload_and_keeps_its_bend() {
+        let (mut bodies, mut set, id) = cantilever(FixedJoint::default().plastic(15_000.0, f32::INFINITY));
+        let cfg = SolverConfig::default();
+        for _ in 0..120 {
+            assert!(set.step_bodies(&mut bodies, [0.0, -G, 0.0], DT, &cfg).is_empty());
+        }
+        let standing = fixed_cfg(&set, id).yielded_angle;
+        assert!(standing < 0.005, "a weld under its yield must not bend: {standing}");
+        // Two and a half times its weight: 24,500 of torque against a yield of 15,000.
+        for _ in 0..30 {
+            assert!(set.step_bodies(&mut bodies, [0.0, -2.5 * G, 0.0], DT, &cfg).is_empty());
+        }
+        assert!(fixed_cfg(&set, id).yielded_angle > 0.05, "overloaded weld must yield");
+        // Back under its own weight it comes to rest bent (its swing carries it a little further first).
+        for _ in 0..240 {
+            assert!(set.step_bodies(&mut bodies, [0.0, -G, 0.0], DT, &cfg).is_empty());
+        }
+        let bent = fixed_cfg(&set, id).yielded_angle;
+        assert!(bodies[0].pos[1] < 19.5, "the tip must sag: y={}", bodies[0].pos[1]);
+        // Unloaded: it does not spring back.
+        for _ in 0..120 {
+            assert!(set.step_bodies(&mut bodies, ZERO3, DT, &cfg).is_empty());
+        }
+        let held = fixed_cfg(&set, id);
+        let turned = quat_angle(ID_QUAT, bodies[0].rot);
+        assert!((held.yielded_angle - bent).abs() < 0.02, "the bend must be kept: {} then {}", bent, held.yielded_angle);
+        assert!((turned - held.yielded_angle).abs() < 0.03, "the beam stays where it bent: {turned} vs {}", held.yielded_angle);
+        assert!(!set.get(id).unwrap().broken);
+    }
+
+    #[test]
+    fn rigid_fixed_joint_is_unchanged_by_the_plastic_fields() {
+        let (mut a, mut sa, _) = cantilever(FixedJoint::default());
+        let (mut b, mut sb, _) = cantilever(FixedJoint::default().break_on_pull(false));
+        let cfg = SolverConfig::default();
+        for _ in 0..60 {
+            sa.step_bodies(&mut a, [0.0, -2.5 * G, 0.0], DT, &cfg);
+            sb.step_bodies(&mut b, [0.0, -2.5 * G, 0.0], DT, &cfg);
+        }
+        assert_eq!(a[0].pos, b[0].pos);
+        assert!((a[0].pos[1] - 20.0).abs() < 0.3, "a rigid weld holds: y={}", a[0].pos[1]);
+    }
+
+    #[test]
+    fn plastic_weld_snaps_at_its_bend_limit() {
+        let (mut bodies, mut set, id) = cantilever(FixedJoint::default().plastic(15_000.0, 0.1));
+        let cfg = SolverConfig::default();
+        let mut broke = None;
+        for step in 0..240 {
+            let events = set.step_bodies(&mut bodies, [0.0, -2.5 * G, 0.0], DT, &cfg);
+            if let Some(JointEvent::Broken { id: got, .. }) = events.first() {
+                broke = Some((*got, step));
+                break;
+            }
+        }
+        let (got, step) = broke.expect("bent past its limit, the weld must break");
+        assert_eq!(got, id);
+        assert!(step > 2, "it bends first, then breaks (broke at step {step})");
+        assert!(set.get(id).unwrap().broken);
+        assert!(fixed_cfg(&set, id).yielded_angle >= 0.1);
+    }
+
+    #[test]
+    fn break_on_pull_breaks_in_tension_and_holds_the_same_push() {
+        // A 10-mass block welded to the world 4 cells above (hanging) or below (standing) its middle.
+        let run = |hanging: bool| {
+            let mut bodies = vec![SolverBody::dynamic_box(1, [0.0, 10.0, 0.0], 10.0, [2.0, 2.0, 2.0])];
+            let mut set = JointSet::new();
+            let (world, local) = if hanging { ([0.0, 14.0, 0.0], [0.0, 4.0, 0.0]) } else { ([0.0, 6.0, 0.0], [0.0, -4.0, 0.0]) };
+            let id = set.add(Joint::fixed(0, 1, world, local, FixedJoint::default().break_on_pull(true)).with_break(1_500.0, f32::INFINITY));
+            let cfg = SolverConfig::default();
+            // Twice its weight: 1,960 along the line, over 1,500 but under 2 * 1,500.
+            for _ in 0..60 {
+                if !set.step_bodies(&mut bodies, [0.0, -2.0 * G, 0.0], DT, &cfg).is_empty() {
+                    break;
+                }
+            }
+            set.get(id).unwrap().broken
+        };
+        assert!(run(true), "a pull past break_force must break a break_on_pull weld");
+        assert!(!run(false), "the same load as a push must hold (PUSH_SHARE)");
+    }
+
+    #[test]
+    fn settled_and_armed_weld_stands_and_breaks_under_overload() {
+        let (mut bodies, mut set, id) = cantilever(FixedJoint::default());
+        let cfg = SolverConfig::default();
+        let armed = set.calibrate_and_arm(&mut bodies, [0.0, -G, 0.0], DT, 90, &cfg, &[(id, WeldRule::JOINERY)]);
+        assert_eq!(armed, 1);
+        let j = set.get(id).unwrap();
+        let weld = fixed_cfg(&set, id);
+        assert!(j.break_torque.is_finite() && weld.yield_torque.is_finite());
+        assert!(weld.yield_torque > 9_800.0, "yield must clear the standing torque: {}", weld.yield_torque);
+        assert!(weld.yield_torque < j.break_torque);
+        assert_eq!(weld.break_bend, WeldRule::JOINERY.bend);
+        // Standing: it never brings itself down.
+        for _ in 0..360 {
+            assert!(set.step_bodies(&mut bodies, [0.0, -G, 0.0], DT, &cfg).is_empty());
+        }
+        assert!(fixed_cfg(&set, id).yielded_angle < 0.01);
+        // Asked to carry three times what it was built for, it sags and snaps.
+        let mut broke = false;
+        for _ in 0..360 {
+            if !set.step_bodies(&mut bodies, [0.0, -3.0 * G, 0.0], DT, &cfg).is_empty() {
+                broke = true;
+                break;
+            }
+        }
+        assert!(broke, "overloaded armed joinery must break (bend {})", fixed_cfg(&set, id).yielded_angle);
+    }
+
+    #[test]
+    fn warm_start_snapshot_restores_convergence() {
+        let (mut bodies, mut set, _) = cantilever(FixedJoint::default());
+        let cfg = SolverConfig::default();
+        for _ in 0..60 {
+            set.step_bodies(&mut bodies, [0.0, -G, 0.0], DT, &cfg);
+        }
+        let snap = set.snapshot_impulses();
+        assert_eq!(snap.len(), 1);
+        let fresh = || {
+            let mut s = JointSet::new();
+            s.add(Joint::fixed(0, 1, [0.0, 20.0, 0.0], [-5.0, 0.0, 0.0], FixedJoint::default()));
+            s
+        };
+        let (mut restored, mut cold) = (fresh(), fresh());
+        assert_eq!(restored.restore_impulses(&snap), 1);
+        let (mut a, mut b, mut c) = (bodies.clone(), bodies.clone(), bodies.clone());
+        for _ in 0..5 {
+            set.step_bodies(&mut a, [0.0, -G, 0.0], DT, &cfg);
+            restored.step_bodies(&mut b, [0.0, -G, 0.0], DT, &cfg);
+            cold.step_bodies(&mut c, [0.0, -G, 0.0], DT, &cfg);
+        }
+        assert_eq!(a[0].pos, b[0].pos, "restored impulses must step exactly as the original");
+        assert_eq!(a[0].vel, b[0].vel);
+        assert_ne!(a[0].pos, c[0].pos, "a cold start differs, so the snapshot is what carried it");
     }
 }

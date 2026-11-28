@@ -180,6 +180,8 @@ export interface RagdollRenderPose {
   feetPos: Vec3
   /** Pelvis heading yaw in radians (`0 = -Z`, positive clockwise from above, matching `people.ts`). */
   yaw: number
+  /** Raw severed-bone bits from the solver, before hiding descendants. */
+  missingLimbs: number
   visibility: LimbVisibility
   limbs: LimbTransform[]
   stumpCaps: WorldStumpCap[]
@@ -709,6 +711,7 @@ export function poseToLimbTransforms(pose: RagdollPoseRecord, opts: PoseBridgeOp
     pelvisPos,
     feetPos,
     yaw,
+    missingLimbs: pose.missingLimbs,
     visibility,
     limbs,
     stumpCaps,

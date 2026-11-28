@@ -216,7 +216,7 @@ try {
       check(w === name.toLowerCase(), `a click on ${name}: the weather asked for is ${w}`)
     }
     // Each tool by a click, and back from the keys: the bank follows.
-    for (const [i, name] of ['Hammer', 'Charge', 'Big charge', 'Cannon', 'Torch', 'Cutter', 'Brick'].entries()) {
+    for (const [i, name] of ['Hammer', 'Charge', 'Big charge', 'Cannon', 'Torch', 'Cleave', 'Brick'].entries()) {
       await roles.tools.locator('label').nth(i).click()
       check((await page.evaluate(() => globalThis.engine.tool)) === name, `a click on ${i + 1} ${name}: the tool in hand is ${name}`)
     }
