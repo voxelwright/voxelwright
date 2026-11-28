@@ -132,6 +132,7 @@ let checks = [
   ['sound-combat', 'node', ['test/sound-combat.mjs'], false],
   ['smoke-grid', 'node', ['test/smoke-grid.mjs'], false],
   ['volumetric-bitmasks', 'node', ['test/volumetric-bitmasks.mjs'], true],
+  ['autotile', 'node', ['test/autotile.mjs'], true],
   ['sports-rollback', 'node', ['test/sports-rollback.mjs'], false],
   ['ragdoll-bridge', 'node', ['test/ragdoll-bridge.mjs'], false],
   ['delivery', 'node', ['test/delivery.mjs'], true],
