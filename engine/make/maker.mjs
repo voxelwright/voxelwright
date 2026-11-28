@@ -29,7 +29,7 @@ import { read as readCells, refused as unread, written } from './cells.mjs'
 import { turned } from './alive.mjs'
 import { OWN_FRONT, bodyOf, driven } from './drivable.mjs'
 import { CORE } from './core.mjs'
-import { emptied, middle, outOf, site, stands, towards } from './place.mjs'
+import { emptied, middle, outOf, probePlacement, site, stands, towards } from './place.mjs'
 import { inferAffordances, validateAffordances } from './affordances.mjs'
 import { text } from '../text.mjs'
 
@@ -355,13 +355,14 @@ async function enlivened(thing, say) {
  *
  * `say(words, stage)` is told how it goes: { stage: 'place', at, facing }, { stage: 'asking', try }, { stage: 'shaped', name, size, facing }, { stage: 'refused', why }, { stage: 'sending', id, name, at, size, facing }.
  * `model` is how a reply is got ({ system, prompt } to { text, model, ms, cost }): the real binary unless another is given.
+ * `qa`: optional { worldSampler, ...probeOptions } for make and put. Findings accompany the result as qa.
  * `tries`: how many times it is asked at most (a reply that is kept is the same however often it is asked for: once).
  * `proved`: what was proved of a kept thing when it was kept (make/library.mjs), and is not proved again: `joined` (every
  * cell joined to the ground) and `stands` (it stood whole: on level ground the core is not asked). The place, the ground
  * under it, what is in the way and what the world says when it is laid are checked every time.
  * Resolves with `times`: [stage, ms] for each stage, and for a program or cells `toCells()`: the thing as cells, to keep.
  */
-export async function make({ wish = '', picture, page, world, where, fill, grow = 'cap', facing, by = 'maker', journal = NOWHERE, model = async () => { throw new Error('no model is connected') }, how = 'parts', proved = {}, instead, tries = TRIES, dry = false, core = CORE, say = () => {} }) {
+export async function make({ wish = '', picture, page, world, where, fill, grow = 'cap', facing, by = 'maker', journal = NOWHERE, model = async () => { throw new Error('no model is connected') }, how = 'parts', proved = {}, instead, tries = TRIES, dry = false, qa = null, core = CORE, say = () => {} }) {
   const lap = lapper()
   wish = String(wish).trim().slice(0, 400)
   if (!wish && !picture && !page) return { state: 'refused', why: 'say what to make' }
@@ -448,6 +449,7 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
   // Anything left out or let fall is at least one in a hundred: rounded to none, a thing that lost a few rows was kept as having stood whole (make/best.mjs `whole`), and stood unchecked ever after.
   if (best.share < 1) out.left = Math.max(1, Math.round((1 - best.share) * 100))
   if (!placed) return { ...out, state: 'held', why: best.blocked, name: thing.name, size: thing.size, hold: { thing, facing, wish, model: out.model } }
+  if (qa) out.qa = probePlacement(placed.rows, qa.worldSampler, qa)
   if (dry) { Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (placed.fine?.rows ?? placed.rows).length, grain: placed.fine?.grain, origin: placed.origin, moved: placed.moved, ...(thing.affordances?.length ? { affordances: thing.affordances } : {}) }); return { ...out, state: 'dry', made: placed.rows, fine: placed.fine } }
   return deliver({ out, thing, placed, world, by, journal, wish, facing, say, lap })
 }
@@ -457,7 +459,7 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
  * place, with whatever is in its box emptied first: what stood there is gone, and what stood on that falls.
  * Resolves as `make` does; `held` again if that place will not take it either.
  */
-export async function put({ hold, world, where, clear = false, by = 'maker', journal = NOWHERE, core = CORE, say = () => {} }) {
+export async function put({ hold, world, where, clear = false, qa = null, by = 'maker', journal = NOWHERE, core = CORE, say = () => {} }) {
   const { thing, wish } = hold
   // To clear a place is to mean that place: what is looked at, whatever it is.
   const found = clear && where.from ? await world.look(where.from, where.toward).then((m) => (m.at ? { spot: m.at, eye: where.from, wall: false } : ground(world, where))) : await ground(world, where)
@@ -469,6 +471,7 @@ export async function put({ hold, world, where, clear = false, by = 'maker', jou
   let placed
   try { placed = await settle(world, core, thing, found, facing, clear) } catch (e) { if (!e.place && !e.form) throw e; return { ...out, state: 'held', why: e.message, name: thing.name, size: thing.size, hold } }
   if (!placed.rows.length) return { ...out, state: 'held', why: 'it would not stand there', name: thing.name, size: thing.size, hold }
+  if (qa) out.qa = probePlacement(placed.rows, qa.worldSampler, qa)
   return deliver({ out, thing, placed, world, by, journal, wish, facing, clear, say })
 }
 
