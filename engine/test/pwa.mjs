@@ -278,4 +278,67 @@ import {
   assert.deepEqual(registered, [['/sw.js', { scope: '/' }]])
 }
 
+// 6. Regression: mounting realmControls when install is already available (beforeinstallprompt fired before mount)
+// must not throw a TDZ ReferenceError accessing `kit` before initialization.
+{
+  const mkEl = (extra = {}) => ({
+    id: '',
+    rel: '',
+    href: '',
+    textContent: '',
+    innerHTML: '',
+    hidden: false,
+    dataset: {},
+    style: { setProperty() {} },
+    classList: { contains: () => false, toggle: () => false, add: () => {}, remove: () => {} },
+    setAttribute() {},
+    addEventListener() {},
+    querySelectorAll: () => [],
+    ...extra,
+  })
+  const installBtn = mkEl({ hidden: true })
+  const elements = new Map([
+    ['button.install', installBtn],
+  ])
+  const rootEl = mkEl({
+    querySelector: (sel) => elements.get(sel) ?? mkEl(),
+  })
+  const prev = {
+    document: globalThis.document,
+    location: globalThis.location,
+    matchMedia: globalThis.matchMedia,
+    addEventListener: globalThis.addEventListener,
+  }
+  try {
+    globalThis.document = {
+      documentElement: mkEl(),
+      head: { append() {} },
+      body: { append() {} },
+      getElementById: () => null,
+      querySelector: () => null,
+      createElement: (tag) => (tag === 'div' ? rootEl : mkEl()),
+    }
+    globalThis.location = { search: '?kit=plain' }
+    globalThis.matchMedia = () => ({ matches: false, addEventListener() {} })
+    globalThis.addEventListener = () => {}
+    const { realmControls } = await import('../page/realm-ui.ts')
+    realmControls({
+      march: { day: 1, weather: () => {} },
+      controls: { hold() {}, use() {}, thumb: null },
+      hour: () => 12,
+      setHour() {},
+      east: () => 0,
+      tools: ['Walk'],
+      tool: () => 0,
+      pickTool() {},
+      reset() {},
+      watch() {},
+      install: { available: () => true, prompt: async () => 'accepted', subscribe: () => () => {} },
+    })
+    assert.equal(installBtn.hidden, false, 'install button becomes visible when already available on mount')
+  } finally {
+    Object.assign(globalThis, prev)
+  }
+}
+
 console.log('ok pwa')
