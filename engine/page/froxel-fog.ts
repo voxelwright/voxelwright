@@ -459,10 +459,17 @@ fn cs_integrate(@builtin(global_invocation_id) gid: vec3u) {
 `
 
 const COMPOSITE_WGSL = /* wgsl */ `
+struct FroxelCompositeView {
+  // xy: active viewport size (0 => fall back to sceneDepth dimensions), z: hasFarDepth (0/1), w: pad
+  viewport: vec4f,
+}
+
 @group(0) @binding(0) var froxelFogVolume: texture_3d<f32>;
 @group(0) @binding(1) var froxelFogSampler: sampler;
 @group(0) @binding(2) var<uniform> froxelFogParams: FroxelFogParams;
 @group(0) @binding(3) var sceneDepth: texture_depth_2d;
+@group(0) @binding(4) var farDepth: texture_depth_2d;
+@group(0) @binding(5) var<uniform> compView: FroxelCompositeView;
 
 ${FROXEL_FOG_WGSL}
 
@@ -473,7 +480,8 @@ ${FROXEL_FOG_WGSL}
 
 @fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let depthDims = vec2f(textureDimensions(sceneDepth));
-  let uv = pos.xy / max(depthDims, vec2f(1.0));
+  let activeDims = select(depthDims, compView.viewport.xy, compView.viewport.x > 0.5 && compView.viewport.y > 0.5);
+  let uv = pos.xy / max(activeDims, vec2f(1.0));
   let px = clamp(vec2i(pos.xy), vec2i(0), vec2i(depthDims) - vec2i(1));
   let z = textureLoad(sceneDepth, px, 0);
 
@@ -482,6 +490,14 @@ ${FROXEL_FOG_WGSL}
   var linearDepth = froxelFogParams.depth.y;
   if (z < 1.0) {
     linearDepth = nearD / max(1.0 - z * (farD - nearD) / farD, 1e-6);
+  }
+  if (compView.viewport.z > 0.5) {
+    let fDims = vec2i(textureDimensions(farDepth));
+    let fpx = clamp(px, vec2i(0), max(fDims - vec2i(1), vec2i(0)));
+    let w = textureLoad(farDepth, fpx, 0);
+    if (w > 0.0) {
+      linearDepth = min(linearDepth, 1.0 / w);
+    }
   }
 
   let fog = sampleFroxelFog(uv, linearDepth);
@@ -576,6 +592,10 @@ export interface FroxelFogApplyParams {
   target: GPUTextureView
   format: GPUTextureFormat
   depth: GPUTextureView
+  /** Optional far-model reciprocal-depth texture (`farModel.depth`, `depth32float`). */
+  farDepth?: GPUTextureView | null
+  /** Optional active dynamic-resolution viewport `[width, height]` inside a larger grow-only target. */
+  viewportSize?: readonly [number, number]
   /** Scene depth NEAR in cells (default `NEAR = 1`). */
   near?: number
   /** Scene depth FAR in cells (default `FAR = 100000`). */
@@ -726,6 +746,8 @@ export async function createFroxelFog(
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d' } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d' } },
+      { binding: 5, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
     ],
   })
 
@@ -797,6 +819,29 @@ export async function createFroxelFog(
     [1, 1],
   )
   const dummyShadowView = dummyShadowTex.createView()
+
+  // Default 1x1 zero depth32float texture when no external far-model depth is bound.
+  const dummyFarDepthTex = device.createTexture({
+    label: 'froxel-far-depth-dummy',
+    size: [1, 1],
+    format: 'depth32float',
+    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+  })
+  const dummyFarDepthView = dummyFarDepthTex.createView()
+  {
+    const clearEnc = device.createCommandEncoder()
+    clearEnc.beginRenderPass({
+      colorAttachments: [],
+      depthStencilAttachment: { view: dummyFarDepthView, depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
+    }).end()
+    device.queue.submit([clearEnc.finish()])
+  }
+  const compViewUniforms = device.createBuffer({
+    label: 'froxel-composite-view-u',
+    size: 16,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  })
+  const compViewF32 = new Float32Array(new ArrayBuffer(16))
 
   const sampler = device.createSampler({
     label: 'froxel-linear',
@@ -890,6 +935,7 @@ export async function createFroxelFog(
   ]
 
   let cachedDepthView: GPUTextureView | null = null
+  let cachedFarDepthView: GPUTextureView | null = null
   let cachedCompositeBind: GPUBindGroup | null = null
 
   // Mutable previous-frame camera state (pre-allocated arrays, zero GC).
@@ -1190,8 +1236,20 @@ export async function createFroxelFog(
         samplingF32[7] = strength
         device.queue.writeBuffer(samplingUniforms, 0, samplingBuf)
       }
-      if (cachedDepthView !== params.depth || !cachedCompositeBind) {
+      const vw = params.viewportSize ? Math.max(1, params.viewportSize[0]) : 0
+      const vh = params.viewportSize ? Math.max(1, params.viewportSize[1]) : 0
+      const hasFar = params.farDepth ? 1 : 0
+      if (vw !== compViewF32[0] || vh !== compViewF32[1] || hasFar !== compViewF32[2]) {
+        compViewF32[0] = vw
+        compViewF32[1] = vh
+        compViewF32[2] = hasFar
+        compViewF32[3] = 0
+        device.queue.writeBuffer(compViewUniforms, 0, compViewF32)
+      }
+      const farView = params.farDepth ?? dummyFarDepthView
+      if (cachedDepthView !== params.depth || cachedFarDepthView !== farView || !cachedCompositeBind) {
         cachedDepthView = params.depth
+        cachedFarDepthView = farView
         cachedCompositeBind = device.createBindGroup({
           label: 'froxel-composite-bg',
           layout: compositeLayout,
@@ -1200,6 +1258,8 @@ export async function createFroxelFog(
             { binding: 1, resource: sampler },
             { binding: 2, resource: { buffer: samplingUniforms } },
             { binding: 3, resource: params.depth },
+            { binding: 4, resource: farView },
+            { binding: 5, resource: { buffer: compViewUniforms } },
           ],
         })
       }
@@ -1209,6 +1269,10 @@ export async function createFroxelFog(
         colorAttachments: [{ view: params.target, loadOp: 'load', storeOp: 'store' }],
         ...(params.timestampWrites ? { timestampWrites: params.timestampWrites } : {}),
       })
+      if (vw > 0 && vh > 0) {
+        renderPass.setViewport?.(0, 0, vw, vh, 0, 1)
+        renderPass.setScissorRect?.(0, 0, vw, vh)
+      }
       renderPass.setPipeline(pipe)
       renderPass.setBindGroup(0, cachedCompositeBind)
       renderPass.draw(3)
@@ -1239,12 +1303,15 @@ export async function createFroxelFog(
       scatterTex1.destroy()
       integratedTexture.destroy()
       dummyShadowTex.destroy()
+      dummyFarDepthTex.destroy()
       injectUniforms.destroy()
       lightsBuffer.destroy()
       samplingUniforms.destroy()
+      compViewUniforms.destroy()
       compositePipelines.clear()
       cachedCompositeBind = null
       cachedDepthView = null
+      cachedFarDepthView = null
     },
   }
 

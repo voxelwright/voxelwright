@@ -6,6 +6,7 @@
 // with its shadow laid on the ground under it. `figure` is the one place that says what a person
 // looks like and how one moves.
 import { shader, type Target } from '../probe/gpu.ts'
+import type { DynamicShadows } from './dynamic-shadows.ts'
 import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
 import { LOCAL_LIGHTS_STRUCT, localLightsEval } from './lights.ts'
 import { CHANNELS, play, type Channel, type Move } from './moves.ts'
@@ -796,6 +797,8 @@ export interface People {
   /** Records the prepared shadows, bodies and speech boards into an active `(to.color, to.depth)` render pass. */
   record(pass: GPURenderPassEncoder): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View, seconds: number, sharedPass?: GPURenderPassEncoder): void
+  /** Queues nearby prepared people as OBB shadow casters into `DynamicShadows` (zero GC). Call after `prepare()`. */
+  castShadows(shadows: DynamicShadows): number
   /** How many people and boxes the last frame drew, and what working them out cost this thread (ms, smoothed). */
   readonly drawn: { people: number; boxes: number; ms: number }
 }
@@ -908,11 +911,15 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   const drawn = { people: 0, boxes: 0, ms: 0 }
   let preparedBoxes = 0, preparedLies = 0, preparedNamed = 0
   let preparedPanes: GPUTextureView | null = null
+  const MAX_SHADOW_PEOPLE = 256
+  const shadowPeople = new Float32Array(MAX_SHADOW_PEOPLE * 6)
+  let shadowPeopleCount = 0
   const self: People = {
     from: [],
     drawn,
     prepare(to, view, seconds) {
       const began = performance.now()
+      shadowPeopleCount = 0
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64) as unknown as V3
       const sun = march.sun.s
       // Which way a shadow lies on the ground, and how long a figure's is: no longer than six of its heights.
@@ -941,6 +948,15 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
           const o = lies++ * 8, lying = p.down ?? 0
           shade[o] = p.at[0] - anchor[0]; shade[o + 1] = p.at[1] - anchor[1]; shade[o + 2] = p.at[2] - anchor[2]; shade[o + 3] = (p.umbrella ? 5 : 2.6) + lying * 2
           shade[o + 4] = -sun[0] / flat; shade[o + 5] = -sun[2] / flat; shade[o + 6] = reach * (1 - lying * 0.8); shade[o + 7] = 0
+        }
+        if (shadowPeopleCount < MAX_SHADOW_PEOPLE && off < 1400) {
+          const so = shadowPeopleCount++ * 6
+          shadowPeople[so] = p.at[0]
+          shadowPeople[so + 1] = p.at[1]
+          shadowPeople[so + 2] = p.at[2]
+          shadowPeople[so + 3] = p.yaw
+          shadowPeople[so + 4] = p.down ?? 0
+          shadowPeople[so + 5] = p.umbrella ? 1 : 0
         }
       }
       drawn.people = count; drawn.boxes = n / EACH
@@ -998,6 +1014,22 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
       pass.setScissorRect(0, 0, to.size[0], to.size[1])
       self.record(pass)
       pass.end()
+    },
+    castShadows(shadows) {
+      let added = 0
+      for (let i = 0; i < shadowPeopleCount; i++) {
+        const o = i * 6
+        const px = shadowPeople[o], py = shadowPeople[o + 1], pz = shadowPeople[o + 2]
+        const yaw = shadowPeople[o + 3], down = shadowPeople[o + 4], umbrella = shadowPeople[o + 5]
+        const qy = Math.sin(-yaw * 0.5), qw = Math.cos(-yaw * 0.5)
+        if (down > 0.5) {
+          if (shadows.addBoxCasterRaw(px, py + 1.4, pz, 1.8, 1.4, 7.5, 0, qy, 0, qw)) added++
+        } else {
+          if (shadows.addBoxCasterRaw(px, py + 8.4, pz, 1.65, 8.4, 1.35, 0, qy, 0, qw)) added++
+          if (umbrella > 0.5 && shadows.addBoxCasterRaw(px, py + 19.2, pz, 5.2, 0.8, 5.2, 0, 0, 0, 1)) added++
+        }
+      }
+      return added
     },
   }
   return self

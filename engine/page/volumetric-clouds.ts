@@ -139,6 +139,33 @@ export interface VolumetricCloudsStats {
   readonly vramBytes: number
 }
 
+export interface VolumetricCloudsCompositeParams {
+  target: GPUTextureView
+  format: GPUTextureFormat
+  /** Primary marched scene depth texture (`depth24plus`, 1.0 = open sky). */
+  depth: GPUTextureView
+  /** Optional far-model reciprocal-depth texture (`depth32float`, 0.0 = open sky). */
+  farDepth?: GPUTextureView | null
+  /** Optional marcher glass panes texture (`rgba16float`, `.a == 0.0` = no glass pane in front). */
+  panes?: GPUTextureView | null
+  /** Active full-res viewport size `[width, height]` inside a grow-only target. */
+  viewportSize: readonly [number, number]
+  /** Camera altitude in km (used for horizon fade when below the cloud shell). */
+  camAltKm?: number
+  /** Unit camera forward direction (Y-up). */
+  cameraForward: V3
+  /** Unit camera right direction (Y-up). */
+  cameraRight: V3
+  /** Unit camera up direction (Y-up). */
+  cameraUp: V3
+  /** Tangent of half vertical FOV (`Math.tan(fovY / 2)`). */
+  tanHalfFovY: number
+  /** Viewport aspect ratio (defaults to `viewportSize[0] / viewportSize[1]`). */
+  aspect?: number
+  /** Optional GPU timestamp writes for the sky composite render pass. */
+  timestampWrites?: GPURenderPassTimestampWrites
+}
+
 export interface VolumetricClouds {
   /** Underlying persistent `rgba16float` output texture of the most recent `update()`. */
   readonly texture: GPUTexture
@@ -156,6 +183,8 @@ export interface VolumetricClouds {
   readonly weatherTexture: GPUTexture
   /** Encodes Pass 1 (raymarch) + Pass 2 (temporal reprojection) and returns the resolved cloud `GPUTextureView`. */
   update(encoder: GPUCommandEncoder, params: VolumetricCloudsParams): GPUTextureView
+  /** Composites the resolved volumetric clouds strictly onto open sky pixels behind marched geometry, far skyscrapers, and glass panes. */
+  compositeSky(encoder: GPUCommandEncoder, params: VolumetricCloudsCompositeParams): void
   /** Invalidates temporal history so the next `update()` performs a full-quarter-res trace. */
   reset(): void
   /** Reports active dimensions, temporal scheduling counters, realloc count, and VRAM footprint. */
@@ -1017,6 +1046,81 @@ fn cs_reproject_clouds(@builtin(global_invocation_id) gid: vec3u) {
 }
 `
 
+const COMPOSITE_SKY_UNIFORM_BYTES = 80
+
+const COMPOSITE_SKY_WGSL = /* wgsl */ `
+${VOLUMETRIC_CLOUDS_WGSL}
+
+struct CloudSkyCompositeUniforms {
+  // xy: active viewport size, z: hasFarDepth (0/1), w: hasPanes (0/1)
+  viewportFlags: vec4f,
+  // xyz: cameraForward, w: camAltKm
+  camFwdAlt: vec4f,
+  // xyz: cameraRight, w: aspect
+  camRightAspect: vec4f,
+  // xyz: cameraUp, w: tanHalfFovY
+  camUpTan: vec4f,
+  // x: cloudMinAltKm, y..w: pad
+  fadeInfo: vec4f,
+}
+
+@group(0) @binding(0) var volCloudsTex: texture_2d<f32>;
+@group(0) @binding(1) var volCloudsSampler: sampler;
+@group(0) @binding(2) var<uniform> volCloudsParams: VolumetricCloudsParams;
+@group(0) @binding(3) var sceneDepth: texture_depth_2d;
+@group(0) @binding(4) var farDepthTex: texture_depth_2d;
+@group(0) @binding(5) var panesTex: texture_2d<f32>;
+@group(0) @binding(6) var<uniform> skyComp: CloudSkyCompositeUniforms;
+
+@vertex fn vs(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4f {
+  let uv = vec2f(f32((idx << 1u) & 2u), f32(idx & 2u));
+  return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
+}
+
+@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let dDims = vec2i(textureDimensions(sceneDepth));
+  let px = clamp(vec2i(pos.xy), vec2i(0), max(dDims - vec2i(1), vec2i(0)));
+  if (textureLoad(sceneDepth, px, 0) < 0.999999) {
+    discard;
+  }
+  if (skyComp.viewportFlags.z > 0.5) {
+    let fDims = vec2i(textureDimensions(farDepthTex));
+    let fpx = clamp(px, vec2i(0), max(fDims - vec2i(1), vec2i(0)));
+    if (textureLoad(farDepthTex, fpx, 0) > 0.0) {
+      discard;
+    }
+  }
+  if (skyComp.viewportFlags.w > 0.5) {
+    let pDims = vec2i(textureDimensions(panesTex));
+    let ppx = clamp(px, vec2i(0), max(pDims - vec2i(1), vec2i(0)));
+    if (textureLoad(panesTex, ppx, 0).a > 0.0) {
+      discard;
+    }
+  }
+
+  let uv = pos.xy / max(skyComp.viewportFlags.xy, vec2f(1.0));
+  var cloud = sampleVolumetricClouds(uv);
+  if (skyComp.camFwdAlt.w < skyComp.fadeInfo.x) {
+    let ndcX = uv.x * 2.0 - 1.0;
+    let ndcY = 1.0 - uv.y * 2.0;
+    let rd = normalize(
+      skyComp.camFwdAlt.xyz
+      + skyComp.camRightAspect.xyz * (ndcX * skyComp.camUpTan.w * skyComp.camRightAspect.w)
+      + skyComp.camUpTan.xyz * (ndcY * skyComp.camUpTan.w)
+    );
+    let elevFade = smoothstep(0.004, 0.065, rd.y);
+    cloud = vec4f(cloud.rgb * elevFade, mix(1.0, cloud.a, elevFade));
+  }
+  let trans = clamp(cloud.a, 0.0, 1.0);
+  let scatter = max(cloud.rgb, vec3f(0.0));
+  if (trans >= 0.9998 && max(scatter.r, max(scatter.g, scatter.b)) <= 1e-5) {
+    discard;
+  }
+  // Linear HDR blend: dst = dst * trans + scatter.
+  return vec4f(scatter, trans);
+}
+`
+
 /**
  * Creates a standalone, zero-GC WebGPU volumetric 3D cloud engine sized up to `maxSize`.
  * Precomputes the tileable 3D shape, 3D detail, and 2D weather noise LUTs once on the GPU.
@@ -1032,13 +1136,14 @@ export async function createVolumetricClouds(
   const reportedMax: readonly [number, number] = [maxW, maxH]
   const reportedMaxCloud: readonly [number, number] = [maxCloudW, maxCloudH]
 
-  // Compile init + runtime compute shaders in parallel.
-  const [genShapeMod, genDetailMod, genWeatherMod, traceMod, reprojectMod] = await Promise.all([
+  // Compile init + runtime compute shaders and sky composite shader in parallel.
+  const [genShapeMod, genDetailMod, genWeatherMod, traceMod, reprojectMod, compSkyMod] = await Promise.all([
     shader(device, 'vol-clouds-gen-shape', GEN_SHAPE_WGSL),
     shader(device, 'vol-clouds-gen-detail', GEN_DETAIL_WGSL),
     shader(device, 'vol-clouds-gen-weather', GEN_WEATHER_WGSL),
     shader(device, 'vol-clouds-trace', TRACE_CLOUDS_WGSL),
     shader(device, 'vol-clouds-reproject', REPROJECT_CLOUDS_WGSL),
+    shader(device, 'vol-clouds-composite-sky', COMPOSITE_SKY_WGSL),
   ])
 
   // Explicit bind group layouts (zero layout:'auto' surprises).
@@ -1332,6 +1437,93 @@ export async function createVolumetricClouds(
   const tracePassDesc: GPUComputePassDescriptor = { label: 'vol-clouds-trace' }
   const reprojectPassDesc: GPUComputePassDescriptor = { label: 'vol-clouds-reproject' }
 
+  // Lazy fullscreen sky composite resources (strictly sky pixels behind marched & far geometry).
+  let lastCloudMinAltKm: number = DEFAULT_CLOUD_SHELL.cloudMinAltKm
+  const compSkyBgl = device.createBindGroupLayout({
+    label: 'vol-clouds-comp-sky-bgl',
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d' } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d' } },
+      { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+      { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+    ],
+  })
+  const compSkyPl = device.createPipelineLayout({ label: 'vol-clouds-comp-sky-pl', bindGroupLayouts: [compSkyBgl] })
+  const compSkyPipelines = new Map<GPUTextureFormat, GPURenderPipeline>()
+  let compSkyUniformBuf: GPUBuffer | null = null
+  const compSkyStaging = new Float32Array(new ArrayBuffer(COMPOSITE_SKY_UNIFORM_BYTES))
+  let dummyFarDepthTex: GPUTexture | null = null
+  let dummyFarDepthView: GPUTextureView | null = null
+  let dummyPanesTex: GPUTexture | null = null
+  let dummyPanesView: GPUTextureView | null = null
+  let compCachedDepth: GPUTextureView | null = null
+  let compCachedFarDepth: GPUTextureView | null = null
+  let compCachedPanes: GPUTextureView | null = null
+  const compSkyBinds: [GPUBindGroup | null, GPUBindGroup | null] = [null, null]
+
+  const ensureCompSkyResources = () => {
+    if (!compSkyUniformBuf) {
+      compSkyUniformBuf = device.createBuffer({
+        label: 'vol-clouds-comp-sky-u',
+        size: COMPOSITE_SKY_UNIFORM_BYTES,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      })
+    }
+    if (!dummyFarDepthTex) {
+      dummyFarDepthTex = device.createTexture({
+        label: 'vol-clouds-dummy-fardepth',
+        size: [1, 1, 1],
+        format: 'depth32float',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+      })
+      dummyFarDepthView = dummyFarDepthTex.createView()
+      const enc = device.createCommandEncoder({ label: 'vol-clouds-clear-dummy-fardepth' })
+      enc.beginRenderPass({
+        colorAttachments: [],
+        depthStencilAttachment: { view: dummyFarDepthView, depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
+      }).end()
+      device.queue.submit([enc.finish()])
+    }
+    if (!dummyPanesTex) {
+      dummyPanesTex = device.createTexture({
+        label: 'vol-clouds-dummy-panes',
+        size: [1, 1, 1],
+        format: 'rgba16float',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      })
+      device.queue.writeTexture({ texture: dummyPanesTex }, new Uint16Array(4), { bytesPerRow: 8 }, [1, 1, 1])
+      dummyPanesView = dummyPanesTex.createView()
+    }
+  }
+
+  const getCompSkyPipeline = (format: GPUTextureFormat): GPURenderPipeline => {
+    let pipe = compSkyPipelines.get(format)
+    if (!pipe) {
+      pipe = device.createRenderPipeline({
+        label: `vol-clouds-comp-sky-${format}`,
+        layout: compSkyPl,
+        vertex: { module: compSkyMod, entryPoint: 'vs' },
+        fragment: {
+          module: compSkyMod,
+          entryPoint: 'fs',
+          targets: [{
+            format,
+            blend: {
+              color: { srcFactor: 'one', dstFactor: 'src-alpha', operation: 'add' },
+              alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
+            },
+          }],
+        },
+        primitive: { topology: 'triangle-list' },
+      })
+      compSkyPipelines.set(format, pipe)
+    }
+    return pipe
+  }
+
   const self: VolumetricClouds = {
     get texture() {
       return historyTextures[lastOutIdx]
@@ -1404,6 +1596,7 @@ export async function createVolumetricClouds(
 
       const planetRadiusKm = Math.max(params.planetRadiusKm ?? DEFAULT_CLOUD_SHELL.planetRadiusKm, 100)
       const cloudMinAltKm = Math.max(params.cloudMinAltKm ?? DEFAULT_CLOUD_SHELL.cloudMinAltKm, 0.05)
+      lastCloudMinAltKm = cloudMinAltKm
       const cloudMaxAltKm = Math.max(params.cloudMaxAltKm ?? DEFAULT_CLOUD_SHELL.cloudMaxAltKm, cloudMinAltKm + 0.2)
       const maxRayDistKm = Math.max(params.maxRayDistKm ?? DEFAULT_CLOUD_SHELL.maxRayDistKm, 5)
       const coverage = clamp(params.coverage ?? DEFAULT_CLOUD_SHELL.coverage, 0, 1)
@@ -1546,6 +1739,72 @@ export async function createVolumetricClouds(
       return historyViews[writeIdx]
     },
 
+    compositeSky(encoder: GPUCommandEncoder, params: VolumetricCloudsCompositeParams) {
+      if (destroyed || frames === 0) return
+      const vw = Math.max(1, Math.floor(params.viewportSize[0]))
+      const vh = Math.max(1, Math.floor(params.viewportSize[1]))
+      ensureCompSkyResources()
+
+      const farView = params.farDepth ?? dummyFarDepthView!
+      const panesView = params.panes ?? dummyPanesView!
+      if (compCachedDepth !== params.depth || compCachedFarDepth !== farView || compCachedPanes !== panesView) {
+        compCachedDepth = params.depth
+        compCachedFarDepth = farView
+        compCachedPanes = panesView
+        compSkyBinds[0] = null
+        compSkyBinds[1] = null
+      }
+      let bg = compSkyBinds[lastOutIdx]
+      if (!bg) {
+        bg = device.createBindGroup({
+          label: `vol-clouds-comp-sky-bg-${lastOutIdx}`,
+          layout: compSkyBgl,
+          entries: [
+            { binding: 0, resource: historyViews[lastOutIdx] },
+            { binding: 1, resource: clampSampler },
+            { binding: 2, resource: { buffer: compositeUniforms } },
+            { binding: 3, resource: params.depth },
+            { binding: 4, resource: farView },
+            { binding: 5, resource: panesView },
+            { binding: 6, resource: { buffer: compSkyUniformBuf! } },
+          ],
+        })
+        compSkyBinds[lastOutIdx] = bg
+      }
+
+      const fwd = unit3(params.cameraForward, [0, 0, -1])
+      const right = unit3(params.cameraRight, [1, 0, 0])
+      const up = unit3(params.cameraUp, [0, 1, 0])
+      const aspect = Math.max(params.aspect ?? vw / vh, 1e-3)
+      const tanHalf = Math.max(params.tanHalfFovY, 1e-4)
+
+      compSkyStaging[0] = vw
+      compSkyStaging[1] = vh
+      compSkyStaging[2] = params.farDepth ? 1 : 0
+      compSkyStaging[3] = params.panes ? 1 : 0
+      compSkyStaging[4] = fwd[0]; compSkyStaging[5] = fwd[1]; compSkyStaging[6] = fwd[2]
+      compSkyStaging[7] = Math.max(params.camAltKm ?? 0.05, 0)
+      compSkyStaging[8] = right[0]; compSkyStaging[9] = right[1]; compSkyStaging[10] = right[2]
+      compSkyStaging[11] = aspect
+      compSkyStaging[12] = up[0]; compSkyStaging[13] = up[1]; compSkyStaging[14] = up[2]
+      compSkyStaging[15] = tanHalf
+      compSkyStaging[16] = lastCloudMinAltKm
+      compSkyStaging[17] = 0; compSkyStaging[18] = 0; compSkyStaging[19] = 0
+      device.queue.writeBuffer(compSkyUniformBuf!, 0, compSkyStaging)
+
+      const pass = encoder.beginRenderPass({
+        label: 'vol-clouds-composite-sky',
+        colorAttachments: [{ view: params.target, loadOp: 'load', storeOp: 'store' }],
+        ...(params.timestampWrites ? { timestampWrites: params.timestampWrites } : {}),
+      })
+      pass.setViewport(0, 0, vw, vh, 0, 1)
+      pass.setScissorRect(0, 0, vw, vh)
+      pass.setPipeline(getCompSkyPipeline(params.format))
+      pass.setBindGroup(0, bg)
+      pass.draw(3)
+      pass.end()
+    },
+
     reset() {
       historyValid = false
     },
@@ -1578,6 +1837,9 @@ export async function createVolumetricClouds(
       historyTextures[1].destroy()
       uniformBuffer.destroy()
       compositeUniforms.destroy()
+      compSkyUniformBuf?.destroy()
+      dummyFarDepthTex?.destroy()
+      dummyPanesTex?.destroy()
     },
   }
 

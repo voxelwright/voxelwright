@@ -9,7 +9,7 @@ const { city, check, failures, finish } = await start()
 const percent = (x) => `${(x * 100).toFixed(1)}%`
 try {
   const page = await city('scale=0.5&fire=0')
-  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over { display: none }' })
+  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over, #minimap { display: none }' })
   // Standing in the street, facing house fronts.
   await page.evaluate(() => Object.assign(globalThis.engine.pose, { y: globalThis.engine.pose.y - 10.2, yaw: 60 * Math.PI / 180, pitch: 5 * Math.PI / 180 }))
   const look = () => seen(page)
