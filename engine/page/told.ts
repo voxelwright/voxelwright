@@ -42,8 +42,9 @@ export interface Told {
  * One thing meeting another: `a` the body that struck, `b` the body struck or 0 for the standing world; where (the
  * world's finest cells); how fast the two were closing (cells a second: 10 is 1 m/s); how hard (weight times the
  * speed lost); the kind of each at the touch (`kind & 15` is the material); and flags: 1 `a` is a living thing,
- * 2 `b` is, 4 the blow broke something. Things resting on each other are not told.
+ * 2 `b` is, 4 the blow broke something, 8 `a` is a figure (person), 16 `b` is a figure. Things resting on each other are not told.
  */
+export const STRUCK_FIGURE_MASK = 24
 export interface Struck { a: number; b: number; at: [number, number, number]; speed: number; push: number; kindA: number; kindB: number; flags: number }
 
 const EDIT = 1, BORN = 2, GONE = 3, DUST = 4, MOVES = 5, BROKE = 6, FIRE = 7, FLOW = 8, BURST = 9, STRUCK = 10, LIVE = 11, FIGURE = 12, POSE = POSE_TAG

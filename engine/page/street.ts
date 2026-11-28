@@ -370,6 +370,61 @@ export function coordinateCablePhases<L extends { p: ArrayLike<number>; cum: Arr
   return bases
 }
 
+/** Tuning constants for waking parked cars near someone on foot (cells). */
+export const FOOT_PARKED_WAKE_RADIUS = 160
+export const FOOT_PARKED_WAKE_Y = 60
+export const FOOT_PARKED_CAP = 4
+export const FOOT_PARKED_EVICT_MIN_DIST = 50
+export const FOOT_PARKED_EVICT_MARGIN = 15
+
+/**
+ * Pure wake/eviction planner for on-foot parked cars (`reachable`):
+ * - Only unmoved parked cars occupying kerb slots (never distant crashed/thrown or driven-away cars) count toward `cap`.
+ * - Up to `cap` nearest unwoken candidates within `wakeRadius` (and `wakeY` vertically) are selected.
+ * - When at capacity, the farthest unmoved awake parked car outside entry reach (`evictMinDist`) and meaningfully
+ *   farther than the incoming car (`evictMargin`) is evicted so walking down a dense block wakes cars ahead.
+ */
+export function planParkedWakes<T extends { x: number; y: number; z: number }>(
+  feet: readonly number[],
+  active: readonly { car: T; x: number; z: number }[],
+  candidates: readonly T[],
+  wakingCount: number,
+  {
+    cap = FOOT_PARKED_CAP,
+    wakeRadius = FOOT_PARKED_WAKE_RADIUS,
+    wakeY = FOOT_PARKED_WAKE_Y,
+    evictMinDist = FOOT_PARKED_EVICT_MIN_DIST,
+    evictMargin = FOOT_PARKED_EVICT_MARGIN,
+  } = {},
+): { wake: T[]; evict: T[] } {
+  const pool = active.map((a) => ({ car: a.car, dist: Math.hypot(a.x - feet[0], a.z - feet[2]) }))
+  const near = candidates
+    .map((car) => ({ car, dist: Math.hypot(car.x - feet[0], car.z - feet[2]) }))
+    .filter(({ car, dist }) => dist < wakeRadius && Math.abs(car.y - feet[1]) < wakeY)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, cap)
+  const wake: T[] = []
+  const evict: T[] = []
+  let inFlight = wakingCount
+  for (const { car, dist } of near) {
+    if (pool.length + inFlight >= cap) {
+      let farIdx = -1, farDist = -1
+      for (let i = 0; i < pool.length; i++) {
+        if (pool[i].dist > farDist) { farDist = pool[i].dist; farIdx = i }
+      }
+      if (farIdx >= 0 && farDist > evictMinDist && farDist > dist + evictMargin) {
+        evict.push(pool[farIdx].car)
+        pool.splice(farIdx, 1)
+      } else {
+        break
+      }
+    }
+    inFlight++
+    wake.push(car)
+  }
+  return { wake, evict }
+}
+
 /** Where along a line a distance is, and which way it runs there. */
 function along(p: ArrayLike<number>, cum: ArrayLike<number>, s: number, into: { x: number; z: number; tx: number; tz: number }): number {
   const n = cum.length
@@ -2184,11 +2239,21 @@ export function street(o: {
    * `clear`), by where they are in that step, which the page learns only an answer later.
    */
   const SKY = 3000
+  const wakeParts = (m: Model, inside: boolean) => {
+    const outside = new Set(lods(m).map((x) => x.i))
+    return m.looks.map((l, i) => ({ l, i })).filter(({ l, i }) => l.per >= 4 && (inside || outside.has(i)))
+  }
+  /** Queues any unbuilt fine looks for `c` and returns whether all parts needed by `wake` are ready. */
+  const wakeReady = (c: Car, inside: boolean): boolean => {
+    if (!c.model.motor) return false
+    const parts = wakeParts(c.model, inside)
+    return parts.every(({ i }) => bornOf(c.model, c.paint, i) !== null)
+  }
   const wake = async (c: Car, o2: Waking): Promise<boolean> => {
     const motor = c.model.motor
     if (c.thing || c.waking || !motor) return !!c.thing
-    const m = c.model, outside = new Set(lods(m).map((x) => x.i))
-    const parts = m.looks.map((l, i) => ({ l, i })).filter(({ l, i }) => l.per >= 4 && (o2.inside || outside.has(i)))
+    const m = c.model
+    const parts = wakeParts(m, o2.inside)
     const made = parts.map(({ i }) => bornOf(m, c.paint, i))
     if (made.some((b) => !b)) return false
     c.waking = true
@@ -2213,7 +2278,7 @@ export function street(o: {
     // (Still drawn where it stood until its body is seen on the road, `landed`: the page sees it in the sky for an
     // answer or two yet, and put away now the car was not there at all for those frames.)
     c.landing = true
-    c.then = o2.then
+    c.then = o2.then ?? c.then
     living.add(c)
     return true
   }
@@ -2284,9 +2349,25 @@ export function street(o: {
       for (let k = 0; k < thrown.length - maxThrown; k++) sleep(thrown[k])
     }
     if (!feet || o.alive.riding) return
-    // The nearest three parked within a dozen metres come to life.
-    const near = [...parked.values()].filter((c) => !c.thing && !c.waking && Math.hypot(c.x - feet[0], c.z - feet[2]) < 120).sort((a, b) => Math.hypot(a.x - feet[0], a.z - feet[2]) - Math.hypot(b.x - feet[0], b.z - feet[2])).slice(0, 3)
-    for (const c of near) if ([...living].filter((l) => l.kind === 'parked').length < 4) void wake(c, { inside: true })
+    // The nearest parked cars within 16 m come to life in their own bounded pool (separate from distant crashed/thrown
+    // or driven-away vehicles), evicting farther unmoved parked cars behind the player when walking along a dense block.
+    const activeFoot: { car: Car; x: number; z: number }[] = []
+    for (const l of living) {
+      if (l.kind !== 'parked' || l.thrown || l.slot === undefined || !l.thing || l.thing === o.alive.riding) continue
+      const lw = o.alive.where(l.thing)
+      activeFoot.push({ car: l, x: lw ? lw.at[0] : l.x, z: lw ? lw.at[2] : l.z })
+    }
+    let wakingFoot = 0
+    for (const p of parked.values()) if (p.waking && !p.thrown) wakingFoot++
+    const nearbyUnwoken = [...parked.values()]
+      .filter((c) => !c.thing && !c.waking && !pending.has(c) && !!c.model.motor && Math.hypot(c.x - feet[0], c.z - feet[2]) < FOOT_PARKED_WAKE_RADIUS && Math.abs(c.y - feet[1]) < FOOT_PARKED_WAKE_Y)
+      .sort((a, b) => Math.hypot(a.x - feet[0], a.z - feet[2]) - Math.hypot(b.x - feet[0], b.z - feet[2]))
+      .slice(0, FOOT_PARKED_CAP)
+    // Queue worker face generation for all nearby candidates first, and only evict/spawn once a car's looks are ready.
+    const readyCandidates = nearbyUnwoken.filter((c) => wakeReady(c, true))
+    const plan = planParkedWakes(feet, activeFoot, readyCandidates, wakingFoot)
+    for (const c of plan.evict) sleep(c)
+    for (const c of plan.wake) void wake(c, { inside: true })
   }
 
   // ── Traffic ──
@@ -3977,25 +4058,37 @@ export function street(o: {
   const dropCue = () => { cue?.remove(); cue = null; beside?.(); beside = null }
   const offer = (feet: readonly number[] | null) => {
     const wheelOpen = document.documentElement.classList.contains('choosing')
-    let best: Car | null = null, bestDepot = false, far = 45
+    let best: Car | null = null, bestSource: 'none' | 'parked' | 'depot' | 'traffic' = 'none', far = 45
     if (on && feet && !o.alive.riding && !o.alive.near && !wheelOpen) {
+      for (const c of parked.values()) {
+        if (c.thing || !c.model.motor || Math.abs(c.y - feet[1]) > 25) continue
+        const d = Math.hypot(c.x - feet[0], c.z - feet[2]) - c.model.long / 2
+        if (d < Math.min(far, 35)) { far = d; best = c; bestSource = 'parked' }
+      }
       for (const c of depotCars) {
         if (!c.model.motor || Math.abs(c.y - feet[1]) > 25) continue
         const d = Math.hypot(c.x - feet[0], c.z - feet[2]) - c.model.long / 2
-        if (c.v < 25 && d < Math.min(far, 35)) { far = d; best = c; bestDepot = true }
+        if (c.v < 25 && d < Math.min(far, 35)) { far = d; best = c; bestSource = 'depot' }
       }
       for (const c of traffic) {
         if (!c.model.motor || Math.abs(c.y - feet[1]) > 25) continue
         const d = Math.hypot(c.x - feet[0], c.z - feet[2]) - c.model.long / 2
-        if (c.v < 25 && d < Math.min(far, 28)) { far = d; best = c; bestDepot = false }
+        if (c.v < 25 && d < Math.min(far, 28)) { far = d; best = c; bestSource = 'traffic' }
       }
     }
-    const useF = !bestDepot && !!document.documentElement.dataset.hud && !coarse.matches
+    const useF = bestSource === 'traffic' && !!document.documentElement.dataset.hud && !coarse.matches
     const key = useF ? 'KeyF' : 'KeyE'
     if (cue && (cue.car !== best || cue.key !== key)) dropCue()
     if (!best || cue) return
-    const car = best
+    const car = best, source = bestSource
     const takeIt = () => {
+      if (source === 'parked') {
+        if (car.thing?.alive) o.alive.mount(car.thing)
+        else if (car.waking) car.then = (thing) => o.alive.mount(thing)
+        else pending.set(car, { inside: true, then: (thing) => o.alive.mount(thing) })
+        dropCue()
+        return
+      }
       const ti = traffic.indexOf(car), di = depotCars.indexOf(car)
       if (ti < 0 && di < 0) return
       if (ti >= 0) traffic.splice(ti, 1)
@@ -4007,7 +4100,8 @@ export function street(o: {
       pending.set(car, { inside: true, then: (thing) => o.alive.mount(thing) })
       dropCue()
     }
-    const label = coarse.matches ? `Take the ${carName(car.model, car.paint)}` : `${useF ? 'F' : 'E'}  Take the ${carName(car.model, car.paint)}`
+    const action = source === 'parked' ? `Drive the ${carName(car.model, car.paint)}` : `Take the ${carName(car.model, car.paint)}`
+    const label = coarse.matches ? action : `${useF ? 'F' : 'E'}  ${action}`
     cue = { car, key, remove: o.hud.cue(label, () => [car.x, car.y + car.model.size[1] + 4, car.z], takeIt).remove }
     beside = o.input.push({ name: 'take', key: (code) => { if (code !== key) return false; takeIt(); return true } })
   }

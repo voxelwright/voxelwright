@@ -281,6 +281,8 @@ export function living(o: {
   ground(x: number, z: number): number
   /** Where the person's own body is when they are on foot (cells, at the height of their chest), or null: what is near is near that. */
   body?: () => [number, number, number] | null
+  /** Whether a solver body id belongs to a person's figure on foot (never dents cars or throws metal crash sparks). */
+  person?: (id: number) => boolean
   /** What a cell of the world is made of (0: nothing), as this page has it: for keeping the eye that rides out of what stands. */
   kind?: (x: number, y: number, z: number) => number
   /** In a shared world: the page's line to it, and the made things it knows. The world's own process moves every living thing; this page only says what a rider asks. */
@@ -938,14 +940,16 @@ export function living(o: {
       for (const s of told.struck) {
         struck.push(s)
         if (struck.length > 64) struck.shift()
-        if (riding && (s.a === riding.id || s.b === riding.id) && (s.flags & 3) !== 0 && s.speed > 18) {
+        // A person on foot (local figure or remote multiplayer ghost) bumping into a car must never dent bodywork or throw metallic sparks/crash debris.
+        const involvesPerson = (s.flags & 24) !== 0 || !!o.person?.(s.a) || (s.b !== 0 && !!o.person?.(s.b))
+        if (riding && (s.a === riding.id || s.b === riding.id) && (s.flags & 3) !== 0 && s.speed > 18 && !involvesPerson) {
           const hit = Math.min(1, s.speed / 120)
           cam.shake(hit * 0.032)
           if (inside) cabin.jolt('hit', hit)
           o.fx?.sparks(s.at, hit)
           o.input.pulse?.('crash', hit)
         }
-        if (s.speed < DENTS_FROM) continue
+        if (involvesPerson || s.speed < DENTS_FROM) continue
         for (const id of [s.a, s.b]) {
           const thing = id ? things.find((t) => t.id === id) : undefined
           if (!thing || (thing.controls ?? 'drive') !== 'drive' || (!looks.has(thing) && !thing.fine?.length && !thing.kept?.length)) continue
