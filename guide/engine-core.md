@@ -40,6 +40,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `bodies/hull.rs` | How two rolling vehicles meet and part, and where a vehicle put into another's place ends up. |
 | `ballistics.rs` | Ranged combat and blast physics: sub-stepped 3D Amanatides-Woo DDA projectiles (`Caliber` presets), `kinds.rs`-driven penetration and grazing ricochet with exact momentum transfer, swept-sphere shaped-charge rockets with optional proportional-navigation guidance, and occluded delayed shockwaves (`ShockwaveQueue`, 64-ray Fibonacci occlusion at 340 m/s plus directional shrapnel). |
 | `fire.rs`, `water.rs` | Fire spreading from cell to cell. Water as depths over columns, not cells. |
+| `beams.rs` | Continuous multi-bounce thermal laser and energy beams: 3D DDA raycast across voxels and dynamic proxies (`BeamTarget`), specular reflections off `POLISHED` steel and grazing-angle Fresnel splits off `GLASS`, and a sparse cooling `ThermalMap` that bores tunnels, ignites flammable cells, and emits `HeatGlow` records. |
 | `hash.rs` | Whole-number hashes and smooth noise that give the same result on every machine. |
 
 All lengths are in finest cells (10 cm). In San Francisco, x is east and z is south from a fixed UTM zone 10N origin, and y is up from the bay's water (`bay.rs`).

@@ -7,6 +7,7 @@
 
 pub mod ballistics;
 pub mod bay;
+pub mod beams;
 pub mod heroes;
 pub mod bodies;
 pub mod city;
