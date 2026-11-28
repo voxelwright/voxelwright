@@ -2250,7 +2250,7 @@ async function main() {
       w.onerror = () => { w.terminate(); resolve(ROBOTAXI_SERVICES.map(buildRobotaxiModel)) }
     }))
     const life = streetOf({
-      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, fine: (x, z) => !STREAM || holds(inner, x - 40, z - 40, x + 40, z + 40, 1), hour: () => hour ?? 11, rain: () => march.rain, lights: () => march.lights, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
+      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, fine: (x, z) => !STREAM || holds(inner, x - 40, z - 40, x + 40, z + 40, 1), hour: () => hour ?? 11, rain: () => march.rain, lights: () => march.lights, clock: () => folkClock.now(), shocks, taken: takenOff, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
       faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) },
       robotaxis,
       onNearMiss: (info) => {

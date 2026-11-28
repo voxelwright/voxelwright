@@ -180,6 +180,20 @@ The limiter's look-ahead is why a key on an instrument leaves the synthesiser 3 
 
 The world's own patches are in [kinds.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/kinds.ts): `HIT` and `BREAK` for each of the core's materials, and `WORLD` for sounds that are no material's (steps, the blast's crack and boom, tools, vehicle foley). A rule picks from a small kept set of words in [likes.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/likes.ts) (`bell`, `drum`, `horn`, `engine` and others), or sends a patch of its own. How a rule makes a sound, and its limits, is on [Engine plugins](/engine-plugins).
 
+## Combat, lightsabers, ballistics and tennis
+
+[combat.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/combat.ts) exports `COMBAT_PATCHES` (strict data patches validated by `patch.ts`) and `combatSound(voice)`, a self-contained foley controller that drives `dsp.ts` through the standard `Sound` interface without modifying the worklet:
+
+| System | Patches | Controller methods & behavior |
+| --- | --- | --- |
+| Melee clash & parry | `parryClash`, `parrySparks` | `parryClash({ impulse, size, at })`: inharmonic steel-blade flexural/torsional modal ring (low metal loss factor) layered with high-impulse spark crackle bursts |
+| Blade friction & blunt strikes | `bladeStab`, `bladeScrape`, `bluntHit` | `bladeStab({ force, dur, pullOut, material })` and `bladeScrape({ force, dur, speed })` drive noise-excited modal resonators (`how: 'rubbed'`); `bluntHit({ force, material })` plays a damped low-mid impact thud |
+| Lightsaber / plasma blade | `saberIgnite`, `saberRetract`, `saberHum`, `saberHumHarmonic`, `saberSwing`, `saberClash` | `saberIgnite()` plays snap-hiss ignition and holds a continuous dual-oscillator warm plasma hum (`saberHum` + detuned `saberHumHarmonic`); `saberUpdate(speed, angularSpeed, clashing, at)` (aliased `updateSaber`) bends both oscillators with velocity-driven Doppler pitch and filter-brightness sweeps, triggers fast-swing air sweeps, and fires high-voltage plasma clash crackles; `saberRetract()` releases the hum with a descending retraction whine |
+| Ranged ballistics & thermal laser | `bulletCrack`, `ricochet`, `shockwaveBoom`, `shockwaveCrack`, `shockwaveOccluded`, `laserSizzle`, `laserHum` | `bulletCrack({ speed })` plays a supersonic N-wave crack/whiz; `ricochet()` plays a fast downward-chirping metallic zing; `shockwaveBoom({ occluded })` layers an open-air shock crack with the boom or crossfades to a low-pass muffled sub-thump when occluded; `laserSizzle({ active, heat, dur })` and `laserStop()` run continuous or timed thermal laser hum and ablation sizzle |
+| Tennis mini-game | `tennisPop`, `tennisFrame`, `tennisBounce`, `tennisNet` | `tennisBounce({ surface, velocity })` pitches the hollow-sphere court bounce by surface (`hard` > `clay` > `grass`); `tennisPop({ velocity, sweetSpot })` blends tight stringbed resonance at the sweet spot with a duller off-center frame-hit clank near the rim; `tennisNet()` snaps the net cord |
+
+Every patch stays within `CEILING` (-1 dBFS) even when all systems fire together.
+
 ## Music
 
 The place's music is off unless the page has `?music=1` (the car radio below is separate). It follows the place the ears are in, and is composed as it plays. [music/](https://github.com/voxelwright/voxelwright/tree/main/engine/page/sound/music) has four parts:
@@ -323,12 +337,14 @@ node test/heard.mjs     # the installed Chrome
 node test/played.mjs    # the installed Chrome
 node test/sounded.mjs   # the real server and Chrome
 node test/radio.mjs     # Node, then the installed Chrome (--node-only for Node alone)
+node test/sound-combat.mjs # Node only: offline DSP checks for combat, lightsabers, ballistics, and tennis
 node test/listen.mjs --out clip.webm   # not a check: records picture and sound together
 ```
 
 | Check | What it proves |
 | --- | --- |
 | `sound` | patches do what their words say (steel rings longer than brick, a bigger piece is lower, strings are in tune), the form refuses what is not a patch, nothing passes the ceiling, and what a block costs |
+| `sound-combat` | every combat, lightsaber, ballistic, and tennis patch validates as strict data, renders non-silent output under `CEILING` with zero NaN/Inf, and hits its spectral/modulation checks (`parryClash` brighter than `bluntHit`/`shockwaveBoom`, `saberUpdate` Doppler pitch/brightness modulation, open vs occluded shockwave, sweet-spot vs rim tennis pop) |
 | `music` | the rules measure what they say, the search beats chance, every note is in the mood's scale, a handover leaves no hole and no click |
 | `judged` | the judge, above |
 | `heard` | the real page with its sound tapped as it leaves the synthesiser: what the page does makes the sound it should, when it should, as loud as it should |

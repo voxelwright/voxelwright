@@ -1,13 +1,17 @@
-// Fire, smoke and dust (#151): soft lumps that face the eye, drawn over the picture and tested
-// against its depth. A puff is hot or it is not: hot, it glows and adds its light; as it cools
-// it turns to smoke, which covers what is behind it, swells, rises and thins. They are only
-// for the eye. What burns, and what that does to the world, is the core's (fire.rs).
+// Fire, smoke and dust (#151, #166): soft lumps that face the eye, drawn over the picture and
+// tested against its depth. A puff is hot or it is not: hot, it glows and adds its light; as it
+// cools it turns to smoke, which covers what is behind it, swells, rises and thins. When a voxel
+// solidity sampler is attached (`setSolidSampler`), an internal 32^3 Eulerian `SmokeGrid` advects
+// buoyant indoor smoke beneath solid ceilings and vents it through broken openings.
 import { shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
 import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
 import { crashOpening } from './crash-opening.ts'
 import type { Piece } from './pieces.ts'
 import { deformPointCpu, type DeformState } from './deform.ts'
+import { SmokeGrid, SMOKE_CELL_SIZE, type SmokeBounds, type SolidSampler } from './smoke-grid.ts'
+
+export { SmokeGrid, SMOKE_CELL_SIZE, type SmokeBounds, type SolidSampler }
 
 type Point = [number, number, number]
 function rotate(point: Point, rotation: Piece['rot'], inverse = false): Point {
@@ -82,6 +86,8 @@ export function engineOut(piece: Piece): readonly [number, number, number] | und
 }
 
 const MOST = 3072
+/** Maximum advected smoke-grid cells rendered per frame alongside particle puffs. */
+const GRID_PUFFS_MAX = 384
 /** A puff that lives longer than this many seconds is one of the first KEPT. */
 const LASTS = 8, KEPT = 384
 /** Numbers a puff as the GPU is told it: where (finest cells from the anchor) and how big; its colour and how much it covers; how hot, its own number, how far through its life. */
@@ -215,6 +221,14 @@ export interface Puffs {
   crash(at: readonly [number, number, number], strength: number): void
   /** A struck engine under a vehicle's bonnet (#37, #92), for one frame of `dt` seconds: white steam from `level` 0.35, thick dark smoke from 0.7, and flames in it from 0.92. `out` is the nose's outward world direction. */
   engine(at: readonly [number, number, number], level: number, dt: number, out?: readonly [number, number, number]): void
+  /** Incandescent molten sparks and heat glow for lightsaber cuts, parry clashes, and plasma slag (#166). */
+  emitMoltenSparks(at: readonly [number, number, number], count?: number, dir?: readonly [number, number, number], colour?: readonly [number, number, number]): void
+  /** Attaches (or clears) a voxel solidity sampler to drive room-colliding 32^3 volumetric smoke advection (#166). */
+  setSolidSampler(isSolid: SolidSampler | null): void
+  /** Resamples obstacle cells in the volumetric smoke grid (e.g. after a blast opens a wall or window). */
+  refreshSmokeSolids(bounds?: SmokeBounds): void
+  /** Direct access to the internal 32^3 `SmokeGrid` when a solid sampler is attached (null otherwise). */
+  readonly smokeGrid: SmokeGrid | null
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -242,10 +256,33 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const size = new Float32Array(MOST), grow = new Float32Array(MOST), life = new Float32Array(MOST), span = new Float32Array(MOST)
   const heat = new Float32Array(MOST), cool = new Float32Array(MOST), rise = new Float32Array(MOST), drag = new Float32Array(MOST)
   const tone = new Float32Array(MOST * 4), seed = new Float32Array(MOST), late = new Float32Array(MOST), wind = new Float32Array(MOST)
-  const packed = new Float32Array(MOST * EACH), order = new Uint16Array(MOST), far = new Float32Array(MOST)
+  const packed = new Float32Array(MOST * EACH)
+  const order = new Uint16Array(MOST), far = new Float32Array(MOST)
+  // Scratch storage for sorting regular puffs + advected grid cells together back-to-front.
+  const gridX = new Float64Array(GRID_PUFFS_MAX), gridY = new Float64Array(GRID_PUFFS_MAX), gridZ = new Float64Array(GRID_PUFFS_MAX)
+  const gridSize = new Float32Array(GRID_PUFFS_MAX), gridDens = new Float32Array(GRID_PUFFS_MAX)
+  const gridHeat = new Float32Array(GRID_PUFFS_MAX), gridSeed = new Float32Array(GRID_PUFFS_MAX)
+  const allOrder = new Uint16Array(MOST), allFar = new Float32Array(MOST)
+
   let next = 0, lasting = 0, live = 0, flamePhase = 0, smokeAcc = 0
   let sun: readonly number[] = [0.52, 0.62, 0.59], sunLength = Math.hypot(sun[0], sun[1], sun[2]), day = 1
+  let solidSampler: SolidSampler | null = null
+  let grid: SmokeGrid | null = null
+
   const rnd = (lo: number, hi: number) => lo + Math.random() * (hi - lo)
+  const cellSeed = (wx: number, wy: number, wz: number): number => {
+    const cx = Math.floor(wx / SMOKE_CELL_SIZE) | 0
+    const cy = Math.floor(wy / SMOKE_CELL_SIZE) | 0
+    const cz = Math.floor(wz / SMOKE_CELL_SIZE) | 0
+    const h = Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663) ^ Math.imul(cz, 83492791)
+    return (h >>> 0) & 65535
+  }
+  const feedGrid = (at: readonly [number, number, number], density: number, temp: number, vy = 0) => {
+    if (!grid || !solidSampler) return
+    if (!grid.isInitialized) grid.recenter(at[0], at[1], at[2], solidSampler)
+    grid.inject(at[0], at[1], at[2], density, temp, 0, vy, 0)
+  }
+
   /** One puff. `out` is how fast it leaves `at`, in a direction of its own. */
   const puff = (at: readonly [number, number, number], spread: number, out: number, up: number, o: { size: number; grow: number; life: number; heat: number; cool: number; rise: number; drag: number; colour: readonly [number, number, number]; cover: number; /** How far through its life it has come before it shows at all. */ late?: number; /** How strongly world wind pushes this puff (default 1). */ wind?: number; /** Initial horizontal drift added to velocity. */ drift?: readonly [number, number, number] }) => {
     // What lasts has places of its own: a street on fire makes hundreds of flames a second, and they would take the
@@ -264,7 +301,19 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
   const fireX = new Float64Array(6), fireY = new Float64Array(6), fireZ = new Float64Array(6)
   const fireW = new Float32Array(6), fireHeat = new Float32Array(6), fireSize = new Float32Array(6)
   return {
-    get live() { return live },
+    get live() { return live + (grid ? grid.activeCount : 0) },
+    get smokeGrid() { return grid },
+    setSolidSampler(isSolid) {
+      solidSampler = isSolid
+      if (isSolid) {
+        if (!grid) grid = new SmokeGrid()
+      } else {
+        grid = null
+      }
+    },
+    refreshSmokeSolids(bounds) {
+      if (grid && solidSampler && grid.isInitialized) grid.refreshSolids(solidSampler, bounds)
+    },
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     lights(sink) {
       if (!live) return
@@ -341,6 +390,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         const pale = rnd(0.5, 0.62)
         puff(at, r * 1.2, rnd(4, 14), rnd(4, 10), { size: r * rnd(3, 4.4), grow: r * 0.12, life: rnd(70, 110), heat: 0, cool: 0, rise: 4, drag: 6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.3 })
       }
+      feedGrid(at, Math.min(2.4, 0.75 + r * 0.08), 2.2, 18)
     },
     dust(at, radius, count, colour) {
       // Thrown out along the ground more than up, and slow to clear: it hangs over where a thing came down for
@@ -371,6 +421,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       }
       // And its light on what is near: a dull glow round it, added to the picture.
       if (Math.random() < dt * 0.1) puff(at, 1, 0, 0, { size: rnd(14, 22), grow: 0, life: rnd(0.6, 1.0), heat: 0.11, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
+      feedGrid(at, dt * 1.6, 1.5, 10)
     },
     spray(at, dt) {
       if (Math.random() < dt * 0.9) puff(at, 3, rnd(8, 22), rnd(6, 16), { size: rnd(6, 11), grow: rnd(6, 10), life: rnd(0.9, 1.8), heat: 0, cool: 0, rise: 3, drag: 1.6, colour: [0.86, 0.9, 0.94], cover: 0.3 })
@@ -477,7 +528,42 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         puff(smokeAt, 0, rnd(0.35, 0.95), rnd(13, 18), { size: rnd(0.45, 0.64), grow: rnd(1.8, 2.7), life: rnd(1.25, 1.75), heat: 0, cool: 0, rise: 21, drag: 1.35, colour: [grey, grey, grey * 1.03], cover: 0.21, late: 0.0, wind: 0.12, drift: forward(rnd(3.2, 5.0)) })
       }
       // Redraw one attached flame while the engine burns. Smoke alone drifts away.
-      if (burning) puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
+      if (burning) {
+        puff(at, 0, 0, 0, { size: 1.64 + 0.24 * Math.sin(flamePhase), grow: 0, life: 2, heat: 0.60, cool: 0, rise: 0, drag: 0, colour: [0.06, 0.05, 0.04], cover: 0.22, late: -1 - flamePhase })
+        feedGrid(smokeAt, dt * 0.9, 1.3, 12)
+      }
+    },
+    emitMoltenSparks(at, count = 14, dir, colour) {
+      // Intense white-hot clash/cut core glow (pure emissive, triggers bloom).
+      const plasmaTone: readonly [number, number, number] = colour ?? [1.0, 0.56, 0.14]
+      puff(at, 0.15, 0, 0, { size: rnd(2.2, 3.6), grow: rnd(6, 10), life: 0.14, heat: 1.0, cool: 4.5, rise: 0, drag: 0, colour: plasmaTone, cover: 0 })
+      const hasDir = !!dir && Math.hypot(dir[0], dir[1], dir[2]) > 1e-4
+      const dLen = hasDir ? Math.hypot(dir[0], dir[1], dir[2]) : 1
+      const dx0 = hasDir ? dir[0] / dLen : 0
+      const dy0 = hasDir ? dir[1] / dLen : 0.4
+      const dz0 = hasDir ? dir[2] / dLen : 0
+      const n = Math.max(1, Math.min(48, Math.round(count)))
+      for (let k = 0; k < n; k++) {
+        const speed = rnd(24, 68)
+        const drift: readonly [number, number, number] = hasDir
+          ? [dx0 * speed, dy0 * speed, dz0 * speed]
+          : [0, rnd(8, 22), 0]
+        puff(at, 0.45, hasDir ? speed * 0.55 : speed, hasDir ? 4 : 14, {
+          size: rnd(0.55, 1.15),
+          grow: -rnd(0.6, 1.2),
+          life: rnd(0.18, 0.52),
+          heat: rnd(0.82, 1.0),
+          cool: rnd(1.5, 2.8),
+          rise: -48,
+          drag: rnd(1.4, 2.6),
+          colour: plasmaTone,
+          cover: 0,
+          wind: 0.15,
+          drift,
+        })
+      }
+      // Faint hot vapour wisp from the cut/clash into the smoke grid when attached.
+      feedGrid(at, 0.14, 1.1, 8)
     },
     step(dt) {
       flamePhase = (flamePhase + 11 * dt) % (200 * Math.PI)
@@ -493,12 +579,15 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         v[i * 3 + 1] = v[i * 3 + 1] * slow + rise[i] * dt
         v[i * 3 + 2] *= slow
         for (let a = 0; a < 3; a++) p[i * 3 + a] += v[i * 3 + a] * dt
-        size[i] += grow[i] * dt
+        size[i] = Math.max(0.05, size[i] + grow[i] * dt)
         heat[i] = Math.max(0, heat[i] - cool[i] * dt)
       }
+      if (grid && solidSampler) grid.step(dt, 6, 0)
     },
     draw(encoder, to, view) {
-      if (!live) return
+      if (grid && solidSampler) grid.recenter(view.eye[0], view.eye[1], view.eye[2], solidSampler)
+      const gridActive = !!grid && grid.activeCount > 0
+      if (!live && !gridActive) return
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64)
       // The furthest first: each covers what is behind it.
       let n = 0
@@ -507,14 +596,62 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         far[i] = (p[i * 3] - view.eye[0]) * view.forward[0] + (p[i * 3 + 1] - view.eye[1]) * view.forward[1] + (p[i * 3 + 2] - view.eye[2]) * view.forward[2]
         order[n++] = i
       }
-      const sorted = order.subarray(0, n).sort((a, b) => far[b] - far[a])
-      for (let k = 0; k < n; k++) {
-        const i = sorted[k], o = k * EACH
-        packed[o] = p[i * 3] - anchor[0]; packed[o + 1] = p[i * 3 + 1] - anchor[1]; packed[o + 2] = p[i * 3 + 2] - anchor[2]; packed[o + 3] = size[i]
-        packed[o + 4] = tone[i * 4]; packed[o + 5] = tone[i * 4 + 1]; packed[o + 6] = tone[i * 4 + 2]; packed[o + 7] = tone[i * 4 + 3]
-        packed[o + 8] = heat[i]; packed[o + 9] = seed[i]; packed[o + 10] = 1 - life[i] / span[i]; packed[o + 11] = late[i]
+
+      if (!gridActive) {
+        const sorted = order.subarray(0, n).sort((a, b) => far[b] - far[a])
+        for (let k = 0; k < n; k++) {
+          const i = sorted[k], o = k * EACH
+          packed[o] = p[i * 3] - anchor[0]; packed[o + 1] = p[i * 3 + 1] - anchor[1]; packed[o + 2] = p[i * 3 + 2] - anchor[2]; packed[o + 3] = size[i]
+          packed[o + 4] = tone[i * 4]; packed[o + 5] = tone[i * 4 + 1]; packed[o + 6] = tone[i * 4 + 2]; packed[o + 7] = tone[i * 4 + 3]
+          packed[o + 8] = heat[i]; packed[o + 9] = seed[i]; packed[o + 10] = 1 - life[i] / span[i]; packed[o + 11] = late[i]
+        }
+        device.queue.writeBuffer(instances, 0, packed, 0, n * EACH)
+      } else {
+        const room = Math.min(GRID_PUFFS_MAX, MOST - n)
+        const samples = room > 0 ? grid!.samplePuffs(room) : []
+        const gCount = samples.length
+        for (let k = 0; k < n; k++) {
+          const i = order[k]
+          allOrder[k] = i
+          allFar[k] = far[i]
+        }
+        for (let g = 0; g < gCount; g++) {
+          const s = samples[g]
+          gridX[g] = s.x; gridY[g] = s.y; gridZ[g] = s.z
+          gridSize[g] = s.size; gridDens[g] = s.density
+          gridHeat[g] = Math.min(0.85, Math.max(0, (s.temp - 0.55) * 0.48))
+          gridSeed[g] = cellSeed(s.x, s.y, s.z)
+          const slot = n + g
+          allOrder[slot] = MOST + g
+          allFar[slot] = (s.x - view.eye[0]) * view.forward[0] + (s.y - view.eye[1]) * view.forward[1] + (s.z - view.eye[2]) * view.forward[2]
+        }
+        const total = n + gCount
+        // Pack index array 0..total-1 sorted back-to-front by allFar.
+        const sortIdx = order.subarray(0, total)
+        for (let k = 0; k < total; k++) sortIdx[k] = k
+        sortIdx.sort((a, b) => allFar[b] - allFar[a])
+        for (let k = 0; k < total; k++) {
+          const tag = allOrder[sortIdx[k]]
+          const o = k * EACH
+          if (tag < MOST) {
+            const i = tag
+            packed[o] = p[i * 3] - anchor[0]; packed[o + 1] = p[i * 3 + 1] - anchor[1]; packed[o + 2] = p[i * 3 + 2] - anchor[2]; packed[o + 3] = size[i]
+            packed[o + 4] = tone[i * 4]; packed[o + 5] = tone[i * 4 + 1]; packed[o + 6] = tone[i * 4 + 2]; packed[o + 7] = tone[i * 4 + 3]
+            packed[o + 8] = heat[i]; packed[o + 9] = seed[i]; packed[o + 10] = 1 - life[i] / span[i]; packed[o + 11] = late[i]
+          } else {
+            const g = tag - MOST
+            const dens = gridDens[g]
+            const grey = Math.max(0.16, 0.34 - Math.min(0.14, dens * 0.08))
+            packed[o] = gridX[g] - anchor[0]; packed[o + 1] = gridY[g] - anchor[1]; packed[o + 2] = gridZ[g] - anchor[2]; packed[o + 3] = gridSize[g]
+            packed[o + 4] = grey; packed[o + 5] = grey; packed[o + 6] = grey * 1.03; packed[o + 7] = Math.min(0.62, dens * 0.45)
+            packed[o + 8] = gridHeat[g]; packed[o + 9] = gridSeed[g]; packed[o + 10] = 0.28; packed[o + 11] = 0
+          }
+        }
+        n = total
+        device.queue.writeBuffer(instances, 0, packed, 0, n * EACH)
       }
-      device.queue.writeBuffer(instances, 0, packed, 0, n * EACH)
+
+      if (!n) return
       device.queue.writeBuffer(uniforms, 0, new Float32Array([
         view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf,
         ...view.right, to.size[0] / to.size[1], ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), day,
