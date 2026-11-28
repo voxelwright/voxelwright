@@ -100,6 +100,18 @@ node make/rules.mjs "a busker who plays when someone stops to listen" --world ht
 
 `--change id` changes a rule that is there. The ask bar reaches the same writer through the helper's `/rule`, `/imagine` and `/realm`. A realm may also keep a rule under the id `director` (`engine/make/director.mjs`), which watches how people play and stirs things up. The world lets it run only while the realm's record says `director: true` and someone's model answers for the world.
 
+## Classical AI runtime
+
+Alongside sandboxed rules, `engine/rules/` and `engine/make/` provide deterministic, zero-dependency building blocks for living-city NPC behavior:
+
+| Module | Role |
+| --- | --- |
+| `engine/rules/statetree.mjs` | Hierarchical StateTree (`createStateTree`) with event-driven transitions and scheduled per-state tick intervals for AI LOD, a typed per-actor Blackboard with dirty tracking, TTL expiry and bounded snapshots (`createBlackboard`), a Utility AI scorer with response curves and inertia (`evalCurve`, `selectUtility`), and `createCityNpcTree()` (`Routine`, `SmartActivity`, `WeatherShelter`, `ReactStimulus`, `Converse`). |
+| `engine/rules/smart-objects.mjs` | Tile-bucketed XZ Smart Object Registry (`createSmartObjectRegistry`) with reservation locks and lease expiry (`claim`, `release`, `sweepExpired`), MRU anti-repetition (`findBest`), city slot ingestion (`registerCitySlots`), player-made object registration (`registerMadeObject`), and geometric voxel scanning (`scanGeometricAffordances` for rain overhangs, waist-high cover and sittable ledges). |
+| `engine/make/affordances.mjs` | Pure-data affordance validator (`validateAffordances`, allowlisting `sit`, `shelter`, `browse`, `cover`, `spectacle`, `queue`, clamping coordinates inside bounds, capping at 8 slots and stripping unknown fields) and geometric + label auto-tagger (`inferAffordances`). |
+| `engine/rules/stimulus.mjs` | Spatial-hashed Acoustic & Visual Stimulus Event Bus (`createStimulusBus`) with propagation radius, voxel material wall attenuation (`rayAttenuation`), decay and deterministic divergent crowd reactions (`chooseReaction`: `flee`, `shelter`, `film`, `confront`, `call_help`, `glance`). |
+| `engine/rules/sight.mjs` | Line-of-sight engine (`sight`) with XZ spatial-hash bucketing, opt-in `actorToActor: true` NPC-to-NPC witness detection (default `false`), and per-actor LOD throttling (Ring 1 every `KEPT`, Ring 2 every `3 * KEPT`, Ring 3 skipped). |
+
 ## Realms
 
 One server keeps many worlds. Each realm is the same planet by the same rule, with its own file of what was done there, its own rules and people, a place where one arrives and a look of its own. Home is the world of `--world`, which `/world/…` and `?shared=1` mean.
@@ -169,4 +181,5 @@ node test/rules.mjs             # rules run, change while running, survive a res
 node test/rulewrite.mjs         # a rule written from words, with kept replies and no model
 node test/realms.mjs            # realms start, rest, survive a restart and stay apart
 node test/whole.mjs             # every event and want is still in the guide
+node test/ai-statetree.mjs      # StateTree, Smart Objects, affordances, stimulus bus and upgraded sight
 ```
