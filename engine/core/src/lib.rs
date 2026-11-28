@@ -440,6 +440,7 @@ pub extern "C" fn world_edit(after: i32) {
             b.stir_edit(&e);
             b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
+        b.invalidate_joint_world_anchors();
         let n_edits = b.ground.edits.len();
         i.nav.seen_edits = n_edits;
     })
@@ -693,6 +694,180 @@ pub extern "C" fn living_kick(id: u32, vx: f32, vy: f32, vz: f32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn bodies_passing(id: u32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).list.iter_mut().find(|b| b.id == id).map(|b| b.passing = true).is_some() as u32)
+}
+
+// ── Systemic body carving, environment, joints, ragdolls, ballistics, shockwaves & beams (#166) ──
+
+/// Carves a world-space sphere out of dynamic body `body_id`, updating or splitting it in place.
+/// Returns the number of output record words at `bodies_words` (`DUST`, `BROKE`, `BORN`/`GONE`).
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_carve_sphere(body_id: u32, x: f32, y: f32, z: f32, r: f32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.carve_sphere(body_id, [x, y, z], r);
+        b.out.len()
+    })
+}
+
+/// Carves a world-space swept capsule out of dynamic body `body_id`. Returns the `bodies_words` word count.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn bodies_carve_capsule(
+    body_id: u32,
+    ax: f32,
+    ay: f32,
+    az: f32,
+    bx: f32,
+    by: f32,
+    bz: f32,
+    r: f32,
+) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.carve_capsule(body_id, [ax, ay, az], [bx, by, bz], r);
+        b.out.len()
+    })
+}
+
+/// Slices dynamic body `body_id` along a world-space plane of kerf `thick`. Returns the `bodies_words` word count.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn bodies_carve_plane(
+    body_id: u32,
+    px: f32,
+    py: f32,
+    pz: f32,
+    nx: f32,
+    ny: f32,
+    nz: f32,
+    thick: f32,
+) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.carve_plane(body_id, [px, py, pz], [nx, ny, nz], thick);
+        b.out.len()
+    })
+}
+
+/// Configures global sea plane (`sea_on != 0` sets sea level to `sea_y`) and rain intensity (`0..=1`).
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_set_env(sea_on: i32, sea_y: f32, rain: f32) {
+    INSTANCE.with_borrow_mut(|i| {
+        moving(i).set_env(if sea_on != 0 { Some(sea_y) } else { None }, rain);
+    });
+}
+
+/// Adds a 1-DOF revolute hinge between bodies `a` and `b` (`0` = static world) at world pivot `(px, py, pz)`
+/// along world axis `(ax, ay, az)`, anchored to world cell `(wx, wy, wz)` when one side is static (`i32::MIN` = free).
+/// Returns the non-zero joint ID, or `0` if an endpoint body was not found.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn joints_add_hinge(
+    a: u32,
+    b: u32,
+    px: f32,
+    py: f32,
+    pz: f32,
+    ax: f32,
+    ay: f32,
+    az: f32,
+    wx: i32,
+    wy: i32,
+    wz: i32,
+) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).add_hinge(a, b, [px, py, pz], [ax, ay, az], [wx, wy, wz]))
+}
+
+/// Adds a unilateral rope/cable between `a` and `b` (`0` = static world) from world `(ax, ay, az)` to
+/// `(bx, by, bz)` with taut length `max_len` and optional `break_force` (`<= 0` = unbreakable). Returns joint ID or `0`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn joints_add_rope(
+    a: u32,
+    b: u32,
+    ax: f32,
+    ay: f32,
+    az: f32,
+    bx: f32,
+    by: f32,
+    bz: f32,
+    max_len: f32,
+    break_force: f32,
+) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).add_rope(a, b, [ax, ay, az], [bx, by, bz], max_len, break_force))
+}
+
+/// Sets the winch reel speed (cells/s; positive reels in, negative pays out) on a distance/rope joint. Returns 1 if set.
+#[unsafe(no_mangle)]
+pub extern "C" fn joints_set_winch(joint_id: u32, speed: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).set_winch(joint_id, speed) as u32)
+}
+
+/// Returns the number of currently active (unbroken) joints.
+#[unsafe(no_mangle)]
+pub extern "C" fn joints_count() -> usize {
+    INSTANCE.with_borrow(|i| i.bodies.as_ref().map_or(0, |b| b.joints.active_count()))
+}
+
+/// Spawns a standing 13-bone active ragdoll with feet at `(x, y, z)`. Returns its non-zero ID.
+#[unsafe(no_mangle)]
+pub extern "C" fn ragdoll_spawn(x: f32, y: f32, z: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ragdoll_spawn([x, y, z], 0.0))
+}
+
+/// Applies an impact impulse `(ix, iy, iz)` (`kg * cells/s`) and optional `cut_energy` (`> 0` enables Tier-A severing)
+/// to bone index `bone` (`0..13`) of ragdoll `id`. Returns 1 if applied.
+#[unsafe(no_mangle)]
+pub extern "C" fn ragdoll_hit(id: u32, bone: u32, ix: f32, iy: f32, iz: f32, cut_energy: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).ragdoll_hit(id, bone, [ix, iy, iz], cut_energy) as u32)
+}
+
+/// Returns the number of active ragdolls.
+#[unsafe(no_mangle)]
+pub extern "C" fn ragdoll_count() -> usize {
+    INSTANCE.with_borrow(|i| i.bodies.as_ref().map_or(0, |b| b.ragdolls.len()))
+}
+
+/// Fires a ballistic projectile of `caliber` (`0` = 9mm, `1` = 5.56mm, `2` = .50 cal, `3` = Shrapnel, `4` = Rocket)
+/// from `(ox, oy, oz)` along `(dx, dy, dz)`. Returns its projectile ID.
+#[unsafe(no_mangle)]
+pub extern "C" fn ballistics_fire(caliber: u32, ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32) -> u32 {
+    let cal = match caliber {
+        0 => ballistics::Caliber::Pistol9mm,
+        1 => ballistics::Caliber::Rifle556,
+        2 => ballistics::Caliber::Heavy50Cal,
+        3 => ballistics::Caliber::Shrapnel,
+        4 => ballistics::Caliber::Rocket,
+        _ => ballistics::Caliber::Rifle556,
+    };
+    INSTANCE.with_borrow_mut(|i| moving(i).ballistics_fire(cal, [ox, oy, oz], [dx, dy, dz]))
+}
+
+/// Spawns an occluded delayed blast shockwave and directional shrapnel at `(x, y, z)`.
+/// Returns the number of active shockwaves.
+#[unsafe(no_mangle)]
+pub extern "C" fn shockwave_blast(x: f32, y: f32, z: f32, radius: f32, pressure: f32, shrapnel: u32) -> usize {
+    INSTANCE.with_borrow_mut(|i| moving(i).shockwave_blast([x, y, z], radius, pressure, shrapnel))
+}
+
+/// Fires a continuous multi-bounce thermal laser/beam from `(ox, oy, oz)` along `(dx, dy, dz)` with `power` for `dt` s.
+/// Returns the number of traced beam segments.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn beams_fire(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    dx: f32,
+    dy: f32,
+    dz: f32,
+    power: f32,
+    dt: f32,
+) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).beams_fire([ox, oy, oz], [dx, dy, dz], power, dt))
 }
 
 /// Which way is down for a living thing (a way; all zero for the world's own), and whether it clings: walked at a
@@ -1477,5 +1652,87 @@ mod tests {
         }
         // The edits met: there were cells of finer cells, and edits refused where the switch was off.
         assert!(read > 8000 && marked > 20000 && refused > 500, "{read} edits read, {marked} cells of finer cells, {refused} refused");
+    }
+
+    /// End-to-end verification of every new systemic WASM `extern "C"` export:
+    /// carving, environment, hinges, ropes/winches, ragdolls + POSE output, ballistics, shockwaves, and laser beams.
+    #[test]
+    fn wasm_abi_systemic_exports_end_to_end() {
+        world_forget();
+        let g = ground_at(700, 4070);
+        let y0 = g + 90;
+
+        // 1. Environment switch (`bodies_set_env`).
+        bodies_set_env(1, (g + 40) as f32, 0.25);
+
+        // 2. Spawn a 6x6x6 wood block via `living_spawn` + `living_end` (or `bodies_throw`) and carve it.
+        let throw_words = bodies_throw(700.0, y0 as f32, 4070.0, 0.0, 0.0, 0.0, 3, kinds::kind(kinds::WOOD, kinds::OWN) as u32);
+        assert!(throw_words > 0);
+        // First body ID is 1.
+        let carve_s = bodies_carve_sphere(1, 700.0, y0 as f32, 4070.0, 1.5);
+        assert!(carve_s > 0, "bodies_carve_sphere must emit output records");
+        let carve_c = bodies_carve_capsule(1, 698.0, y0 as f32, 4070.0, 702.0, y0 as f32, 4070.0, 0.8);
+        assert!(carve_c > 0, "bodies_carve_capsule must emit output records");
+        let carve_p = bodies_carve_plane(1, 700.0, (y0 + 1) as f32, 4070.0, 0.0, 1.0, 0.0, 1.2);
+        assert!(carve_p > 0, "bodies_carve_plane must emit output records");
+
+        // 3. Joints: hinge, rope, winch, count, and world-edit anchor invalidation.
+        let edit_words = [1, 1, 710, 711, y0, 4070, kinds::kind(kinds::CONCRETE, kinds::OWN) as i32];
+        unsafe {
+            let ptr = edits_room(edit_words.len());
+            std::ptr::copy_nonoverlapping(edit_words.as_ptr(), ptr, edit_words.len());
+        }
+        world_edit(-1);
+        assert_ne!(world_kind(710, y0, 4070), 0);
+
+        let j_hinge = joints_add_hinge(0, 1, 700.0, y0 as f32, 4070.0, 0.0, 1.0, 0.0, 710, y0, 4070);
+        let j_rope = joints_add_rope(0, 1, 700.0, (y0 + 10) as f32, 4070.0, 700.0, y0 as f32, 4070.0, 12.0, 50_000.0);
+        assert_ne!(j_hinge, 0);
+        assert_ne!(j_rope, 0);
+        assert_eq!(joints_count(), 2);
+        assert_eq!(joints_set_winch(j_rope, 5.0), 1);
+        assert_eq!(joints_set_winch(j_hinge, 5.0), 0, "winch only applies to distance/rope joints");
+
+        // Clear the hinge's world voxel via `world_edit` -> hinge snaps immediately.
+        let clear_words = [1, 1, 710, 711, y0, 4070, 0];
+        unsafe {
+            let ptr = edits_room(clear_words.len());
+            std::ptr::copy_nonoverlapping(clear_words.as_ptr(), ptr, clear_words.len());
+        }
+        world_edit(-1);
+        assert_eq!(joints_count(), 1, "world_edit removing anchor cell must snap hinge");
+
+        // 4. Ragdoll spawn, hit, count, and POSE record emitted by `bodies_advance`.
+        let rid = ragdoll_spawn(720.0, y0 as f32, 4070.0);
+        assert_ne!(rid, 0);
+        assert_eq!(ragdoll_count(), 1);
+        assert_eq!(ragdoll_hit(rid, ragdoll::BoneId::Chest as u32, 120.0, 0.0, 0.0, 0.0), 1);
+
+        // 5. Ballistics, shockwave, and thermal beam exports.
+        let pid = ballistics_fire(1, 705.0, (y0 + 10) as f32, 4070.0, 1.0, 0.0, 0.0);
+        assert_ne!(pid, 0);
+        let waves = shockwave_blast(715.0, (y0 + 5) as f32, 4070.0, 20.0, 300.0, 8);
+        assert_eq!(waves, 1);
+        let segs = beams_fire(705.0, (y0 + 5) as f32, 4070.0, 1.0, 0.0, 0.0, 150.0, 0.05);
+        assert!(segs >= 1);
+
+        let n_words = bodies_advance(1.0 / 60.0);
+        assert!(n_words > 0);
+        let out = unsafe { std::slice::from_raw_parts(bodies_words(), n_words) };
+        let mut saw_pose = false;
+        let mut idx = 0;
+        while idx < out.len() {
+            let tag = out[idx];
+            let len = out[idx + 1] as usize;
+            if tag == bodies::POSE && len == 18 && out[idx + 2] == rid {
+                saw_pose = true;
+            }
+            idx += 2 + len;
+        }
+        assert!(saw_pose, "bodies_advance must stream POSE (tag 14) record via bodies_words()");
+
+        // Clean up global thread-local state so other tests remain isolated.
+        bodies_set_env(0, 0.0, 0.0);
+        world_forget();
     }
 }

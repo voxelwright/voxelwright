@@ -1041,6 +1041,70 @@ pub const LIVE: u32 = 11; // for each living thing awake: id, speed along its fr
 pub const FIGURE: u32 = 12; // someone's body is born (living.rs `figure`): id, size (3), middle of mass (3 floats). It is in MOVES as every body is, and is drawn by whoever draws people
 pub const TOOK: u32 = 13; // a ghost was struck (living.rs `ghost`): id, the speed the blow would have given it (3 floats, cells a second)
 pub const BURST: u32 = 9; // where (3, as floats), radius: a blast the solver set off itself (something went up), for its fire and smoke
+pub const POSE: u32 = 14; // ragdoll pose: ragdoll_id, followed by 17 u32 words packing the 67-byte ragdoll::pack_pose buffer (padded to 68 bytes)
+
+/// High-bit tag identifying a ragdoll bone target in `ballistics::DynamicTarget` / `beams::BeamTarget`.
+const RAGDOLL_TARGET_BIT: u32 = 1 << 31;
+
+#[inline]
+fn encode_ragdoll_target(ragdoll_id: u32, bone: crate::ragdoll::BoneId) -> u32 {
+    RAGDOLL_TARGET_BIT | ((ragdoll_id & 0x07FF_FFFF) << 4) | (bone.index() as u32 & 0xF)
+}
+
+#[inline]
+fn decode_ragdoll_target(target_id: u32) -> Option<(u32, crate::ragdoll::BoneId)> {
+    if target_id & RAGDOLL_TARGET_BIT == 0 {
+        return None;
+    }
+    let rid = (target_id & !RAGDOLL_TARGET_BIT) >> 4;
+    let bone = crate::ragdoll::BoneId::from_index((target_id & 0xF) as usize)?;
+    Some((rid, bone))
+}
+
+#[inline]
+fn pack_pose_words(id: u32, ragdoll: &crate::ragdoll::Ragdoll) -> [u32; 18] {
+    let bytes = ragdoll.pack_pose();
+    let mut padded = [0u8; 68];
+    padded[..crate::ragdoll::POSE_WIRE_BYTES].copy_from_slice(&bytes);
+    let mut words = [0u32; 18];
+    words[0] = id;
+    for k in 0..17 {
+        let o = k * 4;
+        words[1 + k] = u32::from_le_bytes([padded[o], padded[o + 1], padded[o + 2], padded[o + 3]]);
+    }
+    words
+}
+
+#[inline]
+fn face_tag(n: V) -> u8 {
+    let (ax, ay, az) = (n[0].abs(), n[1].abs(), n[2].abs());
+    if ax >= ay && ax >= az {
+        if n[0] >= 0.0 { 0 } else { 1 }
+    } else if ay >= az {
+        if n[1] >= 0.0 { 2 } else { 3 }
+    } else if n[2] >= 0.0 {
+        4
+    } else {
+        5
+    }
+}
+
+#[inline]
+fn contact_feature_key(local_ra: V, n: V) -> u64 {
+    let qx = (local_ra[0] * 2.0).round() as i32;
+    let qy = (local_ra[1] * 2.0).round() as i32;
+    let qz = (local_ra[2] * 2.0).round() as i32;
+    let pt_hash = hash3(qx, qy, qz, 0x4D41_4E49);
+    crate::solver::make_feature_key(pt_hash, face_tag(n))
+}
+
+/// One active articulated ragdoll tracked by `Bodies` with its stable non-zero ID
+/// and any severed independent limbs (`ragdoll::DetachedLimb`).
+pub struct ActiveRagdoll {
+    pub id: u32,
+    pub ragdoll: crate::ragdoll::Ragdoll,
+    pub detached: Vec<crate::ragdoll::DetachedLimb>,
+}
 
 pub struct Bodies {
     pub ground: Ground,
@@ -1091,6 +1155,33 @@ pub struct Bodies {
     /// Opt-in hybrid rest policy: when true, newly released/shattered bodies qualifying under
     /// `Body::qualifies_for_persist_sleep` sleep in place as oriented rigid bodies while brittle rubble pours.
     pub persist_debris: bool,
+    /// 6-DOF joints, hinges, motors, ropes, and winches (`joints.rs`, #166).
+    pub joints: crate::joints::JointSet,
+    /// Active 13-bone articulated ragdolls (`ragdoll.rs`, #166).
+    pub ragdolls: Vec<ActiveRagdoll>,
+    next_ragdoll: u32,
+    /// Active ballistic projectiles and guided shaped-charge rockets (`ballistics.rs`, #166).
+    pub ballistics: crate::ballistics::BallisticSim,
+    /// Active occluded blast shockwaves and directional shrapnel (`ballistics.rs`, #166).
+    pub shockwaves: crate::ballistics::ShockwaveQueue,
+    /// Continuous multi-bounce thermal laser/beam system (`beams.rs`, #166).
+    pub beams: crate::beams::BeamSystem,
+    /// Last traced beam result (segments, events, thermal glows) from `beams_fire`.
+    pub last_beam: crate::beams::BeamResult,
+    /// Incremental time-sliced structural support jobs (`support.rs`, #166).
+    pub support_jobs: Vec<crate::support::SupportJob>,
+    /// Active rain intensity in `0.0..=1.0` for extinguishing static and dynamic flames.
+    pub rain_intensity: f32,
+    /// Optional global sea-level plane Y in cells (`None` by default so dry-town tests are unaffected).
+    pub sea_level: Option<f32>,
+    /// Persistent contact manifold impulse cache for warm-starting resting rigid contacts (`solver.rs`, #166).
+    pub manifold_cache: crate::solver::ManifoldCache,
+    solver_step: u64,
+    /// Reusable per-step scratch buffers for joint and ballistic coupling.
+    joint_bodies_buf: Vec<crate::joints::SolverBody>,
+    ballistic_targets_buf: Vec<crate::ballistics::DynamicTarget>,
+    shock_targets_buf: Vec<crate::ballistics::DynamicTarget>,
+    ballistic_events_buf: Vec<crate::ballistics::BallisticEvent>,
 }
 
 /// A wide box that is to be asked what stands in it (`Bodies::far`): its low corner, how many seconds it still
@@ -1144,6 +1235,22 @@ impl Bodies {
             id_to_idx: Map::default(),
             next_island: 1,
             persist_debris: false,
+            joints: crate::joints::JointSet::new(),
+            ragdolls: Vec::new(),
+            next_ragdoll: 1,
+            ballistics: crate::ballistics::BallisticSim::new(),
+            shockwaves: crate::ballistics::ShockwaveQueue::new(),
+            beams: crate::beams::BeamSystem::new(),
+            last_beam: crate::beams::BeamResult::default(),
+            support_jobs: Vec::new(),
+            rain_intensity: 0.0,
+            sea_level: None,
+            manifold_cache: crate::solver::ManifoldCache::new(),
+            solver_step: 0,
+            joint_bodies_buf: Vec::new(),
+            ballistic_targets_buf: Vec::new(),
+            shock_targets_buf: Vec::new(),
+            ballistic_events_buf: Vec::new(),
         }
     }
 
@@ -1282,6 +1389,15 @@ impl Bodies {
                 self.islands.union(ia, ib);
             }
         }
+        if self.joints.active_count() > 0 {
+            for j in self.joints.joints() {
+                if !j.broken && j.body_a != 0 && j.body_b != 0 {
+                    if let (Some(&ia), Some(&ib)) = (self.id_to_idx.get(&j.body_a), self.id_to_idx.get(&j.body_b)) {
+                        self.islands.union(ia, ib);
+                    }
+                }
+            }
+        }
         let mut next_island = self.next_island;
         let islands = self.islands.build_islands(n);
         let mut slept_ids: Vec<u32> = Vec::new();
@@ -1351,10 +1467,394 @@ impl Bodies {
         }
     }
 
-    /// How many bodies move, and wide boxes still to be asked about: while it is not nothing the solver is to be
-    /// called on, for what a charge left standing may yet come loose.
+    /// How many bodies move, and wide boxes/jobs/ragdolls/projectiles still active: while it is not nothing the solver
+    /// is to be called on, for what a charge left standing may yet come loose.
     pub fn busy(&self) -> usize {
-        self.list.iter().filter(|b| !b.asleep).count() + self.far.len() + self.fuses.len()
+        self.list.iter().filter(|b| !b.asleep).count()
+            + self.far.len()
+            + self.fuses.len()
+            + self.support_jobs.len()
+            + self.ragdolls.len()
+            + self.ballistics.projectiles.len()
+            + self.ballistics.shockwaves.active_waves()
+            + self.ballistics.shockwaves.active_shrapnel()
+            + self.shockwaves.active_waves()
+            + self.shockwaves.active_shrapnel()
+    }
+
+    /// Configures environment sea level (`None` disables global sea plane) and rain intensity (`0..=1`).
+    pub fn set_env(&mut self, sea_level: Option<f32>, rain_intensity: f32) {
+        self.sea_level = sea_level.filter(|v| v.is_finite());
+        self.rain_intensity = if rain_intensity.is_finite() { rain_intensity.clamp(0.0, 1.0) } else { 0.0 };
+    }
+
+    /// Enqueues an incremental time-sliced `SupportJob` covering `[low, low + size)`.
+    pub fn enqueue_support_job(&mut self, low: [i32; 3], size: [usize; 3], shove: Option<([i32; 3], i32)>) {
+        let region = self.ground.region(low, size);
+        self.support_jobs.push(crate::support::SupportJob::new(region, shove));
+    }
+
+    /// Wakes a body by ID along with its entire sleeping simulation island.
+    pub fn wake_body_id(&mut self, body_id: u32) {
+        if body_id == 0 {
+            return;
+        }
+        if let Some(idx) = self.list.iter().position(|b| b.id == body_id) {
+            self.wake_body_and_island(idx);
+        }
+    }
+
+    fn wake_joint_bodies(&mut self, joint_ids: &[u32]) {
+        if joint_ids.is_empty() {
+            return;
+        }
+        let mut to_wake: Vec<u32> = Vec::with_capacity(joint_ids.len() * 2);
+        for &jid in joint_ids {
+            if let Some(j) = self.joints.get(jid) {
+                if j.body_a != 0 {
+                    to_wake.push(j.body_a);
+                }
+                if j.body_b != 0 {
+                    to_wake.push(j.body_b);
+                }
+            }
+        }
+        for bid in to_wake {
+            self.wake_body_id(bid);
+        }
+    }
+
+    /// Cleans up dynamic fire and active joints referencing a body that broke, settled, or was destroyed.
+    fn detach_removed_body(&mut self, body_id: u32) {
+        self.fire.remove_body(body_id);
+        if self.joints.active_count() == 0 {
+            return;
+        }
+        let mut snapped = self.joints.invalidate_body_cells(body_id, |_| false);
+        let mut partners: Vec<u32> = Vec::new();
+        for j in self.joints.joints() {
+            if !j.broken && (j.body_a == body_id || j.body_b == body_id) {
+                snapped.push(j.id);
+                let other = if j.body_a == body_id { j.body_b } else { j.body_a };
+                if other != 0 {
+                    partners.push(other);
+                }
+            }
+        }
+        for &jid in &snapped {
+            if let Some(j) = self.joints.get_mut(jid) {
+                j.broken = true;
+            }
+        }
+        self.wake_joint_bodies(&snapped);
+        for other in partners {
+            self.wake_body_id(other);
+        }
+    }
+
+    /// Checks all active world-cell joint anchors against `self.ground` and wakes any coupled bodies
+    /// whose joint snapped. Returns the snapped joint IDs.
+    pub fn invalidate_joint_world_anchors(&mut self) -> Vec<u32> {
+        if self.joints.active_count() == 0 {
+            return Vec::new();
+        }
+        let mut checked: Vec<([i32; 3], bool)> = Vec::new();
+        for j in self.joints.joints() {
+            if j.broken {
+                continue;
+            }
+            for anchor in [j.anchor_a, j.anchor_b] {
+                if let crate::joints::VoxelAnchorKind::WorldCell(c) = anchor.kind {
+                    if !checked.iter().any(|&(p, _)| p == c) {
+                        let solid = self.ground.solid(c[0], c[1], c[2]);
+                        checked.push((c, solid));
+                    }
+                }
+            }
+        }
+        if checked.is_empty() || checked.iter().all(|&(_, s)| s) {
+            return Vec::new();
+        }
+        let snapped = self.joints.invalidate_world_cells(|c| {
+            checked.iter().find(|&&(p, _)| p == c).is_none_or(|&(_, s)| s)
+        });
+        self.wake_joint_bodies(&snapped);
+        snapped
+    }
+
+    fn world_point_to_body_local(&self, body_id: u32, world: [f32; 3]) -> Option<[f32; 3]> {
+        if body_id == 0 {
+            return Some(world);
+        }
+        let b = self.list.iter().find(|b| b.id == body_id)?;
+        Some(back(b.rot, sub(world, b.pos)))
+    }
+
+    fn world_dir_to_body_local(&self, body_id: u32, dir: [f32; 3]) -> Option<[f32; 3]> {
+        let u = unit(dir);
+        if body_id == 0 {
+            return Some(u);
+        }
+        let b = self.list.iter().find(|b| b.id == body_id)?;
+        Some(unit(back(b.rot, u)))
+    }
+
+    /// Adds a 1-DOF revolute hinge between `a` and `b` (`0` = static world) at world `pivot` along world `axis`,
+    /// optionally anchored to `world_cell` (pass `[i32::MIN; 3]` for a free world anchor). Returns the joint ID or `0`.
+    pub fn add_hinge(
+        &mut self,
+        a: u32,
+        b: u32,
+        pivot: [f32; 3],
+        axis: [f32; 3],
+        world_cell: [i32; 3],
+    ) -> u32 {
+        if a == 0 && b == 0 {
+            return 0;
+        }
+        let Some(local_a) = self.world_point_to_body_local(a, pivot) else { return 0 };
+        let Some(local_b) = self.world_point_to_body_local(b, pivot) else { return 0 };
+        let Some(axis_a) = self.world_dir_to_body_local(a, axis) else { return 0 };
+        let Some(axis_b) = self.world_dir_to_body_local(b, axis) else { return 0 };
+        let mut joint = crate::joints::Joint::hinge(
+            a,
+            b,
+            local_a,
+            local_b,
+            crate::joints::HingeJoint::new(axis_a, axis_b),
+        );
+        if world_cell != [i32::MIN; 3] {
+            if a == 0 {
+                joint.anchor_a = crate::joints::VoxelAnchor::world_cell(world_cell);
+            } else if b == 0 {
+                joint.anchor_b = crate::joints::VoxelAnchor::world_cell(world_cell);
+            }
+        }
+        let id = self.joints.add(joint);
+        self.wake_body_id(a);
+        self.wake_body_id(b);
+        id
+    }
+
+    /// Adds a unilateral rope/cable between `a` and `b` (`0` = static world) anchored at world points
+    /// `world_a` and `world_b`, with taut length `max_len` (`<= 0` uses initial separation) and optional
+    /// `break_force` (`<= 0` or non-finite = unbreakable). Returns the joint ID or `0`.
+    pub fn add_rope(
+        &mut self,
+        a: u32,
+        b: u32,
+        world_a: [f32; 3],
+        world_b: [f32; 3],
+        max_len: f32,
+        break_force: f32,
+    ) -> u32 {
+        if a == 0 && b == 0 {
+            return 0;
+        }
+        let Some(local_a) = self.world_point_to_body_local(a, world_a) else { return 0 };
+        let Some(local_b) = self.world_point_to_body_local(b, world_b) else { return 0 };
+        let max_dist = if max_len.is_finite() && max_len > 0.0 {
+            max_len
+        } else {
+            let d = sub(world_b, world_a);
+            dot(d, d).sqrt().max(0.1)
+        };
+        let mut joint = crate::joints::Joint::rope(a, b, local_a, local_b, max_dist);
+        if break_force.is_finite() && break_force > 0.0 {
+            joint = joint.with_break(break_force, f32::INFINITY);
+        }
+        let id = self.joints.add(joint);
+        self.wake_body_id(a);
+        self.wake_body_id(b);
+        id
+    }
+
+    /// Sets the reel speed (cells/s; positive reels in, negative pays out) on a distance/rope joint.
+    /// Returns `true` if `joint_id` exists and is a distance/rope joint.
+    pub fn set_winch(&mut self, joint_id: u32, speed: f32) -> bool {
+        if !speed.is_finite() {
+            return false;
+        }
+        let bodies = match self.joints.get_mut(joint_id) {
+            Some(j) if !j.broken => match &mut j.kind {
+                crate::joints::JointKind::Distance(d) => {
+                    d.winch_speed = speed;
+                    (j.body_a, j.body_b)
+                }
+                _ => return false,
+            },
+            _ => return false,
+        };
+        self.wake_body_id(bodies.0);
+        self.wake_body_id(bodies.1);
+        true
+    }
+
+    /// Spawns an upright standing 13-bone active ragdoll at `feet_pos` facing `yaw`. Returns its non-zero ID.
+    pub fn ragdoll_spawn(&mut self, feet_pos: [f32; 3], yaw: f32) -> u32 {
+        let id = self.next_ragdoll;
+        self.next_ragdoll = self.next_ragdoll.wrapping_add(1).max(1);
+        let ragdoll = crate::ragdoll::Ragdoll::standing(feet_pos, yaw);
+        self.ragdolls.push(ActiveRagdoll { id, ragdoll, detached: Vec::new() });
+        id
+    }
+
+    /// Applies an impact impulse (`kg * cells/s`) and optional `cut_energy` (`> 0` enables Tier-A severing)
+    /// to bone index `bone` of ragdoll `id`. Returns `true` if the hit was applied.
+    pub fn ragdoll_hit(&mut self, id: u32, bone: u32, impulse: [f32; 3], cut_energy: f32) -> bool {
+        let Some(bone_id) = crate::ragdoll::BoneId::from_index(bone as usize) else { return false };
+        let Some(active) = self.ragdolls.iter_mut().find(|r| r.id == id) else { return false };
+        let world_pos = active.ragdoll.bones[bone_id.index()].pos;
+        let is_edged = cut_energy.is_finite() && cut_energy > 0.0;
+        let res = active.ragdoll.apply_hit(bone_id, world_pos, impulse, cut_energy.max(0.0), is_edged);
+        if let Some(limb) = res.detached {
+            active.detached.push(limb);
+        }
+        res.applied
+    }
+
+    /// Fires a ballistic projectile of `caliber` from `origin` along `dir`. Returns its projectile ID.
+    pub fn ballistics_fire(
+        &mut self,
+        caliber: crate::ballistics::Caliber,
+        origin: [f32; 3],
+        dir: [f32; 3],
+    ) -> u32 {
+        self.ballistics.spawn_projectile(caliber, origin, dir)
+    }
+
+    /// Spawns an occluded delayed blast shockwave and directional shrapnel against `self.ground`.
+    /// Returns the number of active shockwaves in `self.shockwaves`.
+    pub fn shockwave_blast(
+        &mut self,
+        center: [f32; 3],
+        radius: f32,
+        pressure: f32,
+        shrapnel: u32,
+    ) -> usize {
+        let (shockwaves, ground) = (&mut self.shockwaves, &mut self.ground);
+        shockwaves.spawn_blast(center, radius, pressure, shrapnel, |[x, y, z]| ground.kind(x, y, z));
+        self.shockwaves.active_waves()
+    }
+
+    /// Fires a continuous multi-bounce thermal beam from `origin` along `dir` with thermal `power` for `dt` seconds.
+    /// Applies voxel ignition (`Fire`), voxel melting (`EDIT`/`DUST`), and dynamic-body/ragdoll thermal burns.
+    /// Returns the number of traced beam segments.
+    pub fn beams_fire(
+        &mut self,
+        origin: [f32; 3],
+        dir: [f32; 3],
+        power: f32,
+        dt: f32,
+    ) -> u32 {
+        let spec = crate::beams::BeamSpec {
+            origin,
+            dir,
+            power,
+            max_range: 512.0,
+            max_bounces: crate::beams::MAX_BOUNCES,
+            color: 0xFF3322,
+        };
+        let mut targets: Vec<crate::beams::BeamTarget> =
+            Vec::with_capacity(self.list.len() + self.ragdolls.len() * crate::ragdoll::BONE_COUNT);
+        for b in &self.list {
+            if b.live.as_ref().is_some_and(|l| l.ghost) || b.count == 0 {
+                continue;
+            }
+            let half = [b.size[0] as f32 * 0.5, b.size[1] as f32 * 0.5, b.size[2] as f32 * 0.5];
+            let local_mid = [half[0] - b.com[0], half[1] - b.com[1], half[2] - b.com[2]];
+            let center = add(b.pos, turn(b.rot, local_mid));
+            let rep_kind = b
+                .cells
+                .iter()
+                .copied()
+                .find(|&k| k & crate::kinds::POLISHED != 0)
+                .unwrap_or_else(|| crate::kinds::kind(b.stuff, crate::kinds::OWN));
+            targets.push(crate::beams::BeamTarget::obb(b.id, center, half, b.rot, rep_kind));
+        }
+        for r in &self.ragdolls {
+            for bone in crate::ragdoll::BoneId::ALL {
+                if r.ragdoll.is_missing(bone) {
+                    continue;
+                }
+                let bs = &r.ragdoll.bones[bone.index()];
+                let (a, b_end) = bs.capsule_endpoints();
+                targets.push(crate::beams::BeamTarget::capsule(
+                    encode_ragdoll_target(r.id, bone),
+                    a,
+                    b_end,
+                    bs.radius,
+                ));
+            }
+        }
+        let result = {
+            let (beams, ground) = (&mut self.beams, &mut self.ground);
+            beams.fire_step(&spec, dt, |[x, y, z]| ground.kind(x, y, z), &targets)
+        };
+        let mut ignite_cells: Vec<[i32; 3]> = Vec::new();
+        let mut melted_runs: Vec<Run> = Vec::new();
+        let mut dyn_burns: Vec<(u32, [f32; 3], f32, f32)> = Vec::new();
+        for ev in &result.events {
+            match *ev {
+                crate::beams::BeamEvent::IgniteVoxel { cell } => {
+                    ignite_cells.push(cell);
+                }
+                crate::beams::BeamEvent::MeltedVoxel { cell, kind } => {
+                    melted_runs.push(Run { x0: cell[0], x1: cell[0] + 1, y: cell[1], z: cell[2], kind: 0 });
+                    self.record(
+                        DUST,
+                        &[
+                            (cell[0] as f32 + 0.5).to_bits(),
+                            (cell[1] as f32 + 0.5).to_bits(),
+                            (cell[2] as f32 + 0.5).to_bits(),
+                            kind as u32,
+                            2,
+                        ],
+                    );
+                }
+                crate::beams::BeamEvent::DynamicBurn { body_id, pos, energy_delta, sever_power, .. } => {
+                    dyn_burns.push((body_id, pos, energy_delta, sever_power));
+                }
+                crate::beams::BeamEvent::MirrorBounce { .. } => {}
+            }
+        }
+        if !melted_runs.is_empty() {
+            self.change(melted_runs);
+        }
+        if !ignite_cells.is_empty() {
+            self.ignite_ground_cells(&ignite_cells);
+        }
+        for (body_id, pos, energy_delta, sever_power) in dyn_burns {
+            if let Some((rid, bone)) = decode_ragdoll_target(body_id) {
+                if let Some(active) = self.ragdolls.iter_mut().find(|r| r.id == rid) {
+                    let cut = sever_power * dt.max(0.0);
+                    let hit = active.ragdoll.apply_hit(bone, pos, [0.0; 3], cut, true);
+                    if let Some(limb) = hit.detached {
+                        active.detached.push(limb);
+                    }
+                }
+            } else if let Some(idx) = self.list.iter().position(|b| b.id == body_id) {
+                let (cell, cell_kind, stuff) = {
+                    let b = &self.list[idx];
+                    let (c, _) = b.cell_at(pos);
+                    let k = if b.solid(c) {
+                        b.cells[b.at(c[0] as usize, c[1] as usize, c[2] as usize)]
+                    } else {
+                        0
+                    };
+                    (c, k, b.stuff)
+                };
+                if cell_kind != 0 && burns(material(cell_kind)).0 != 0 && energy_delta > 0.0 {
+                    self.fire.ignite_body(body_id, [cell[0] as usize, cell[1] as usize, cell[2] as usize], cell_kind);
+                }
+                if energy_delta >= crate::beams::melt_threshold(stuff) {
+                    self.carve_sphere(body_id, pos, 0.75);
+                }
+            }
+        }
+        let segs = result.segments.len() as u32;
+        self.last_beam = result;
+        segs
     }
 
     pub(crate) fn record(&mut self, tag: u32, words: &[u32]) {
@@ -1375,10 +1875,14 @@ impl Bodies {
         for r in &runs {
             words.extend_from_slice(&[r.x0 as u32, r.x1 as u32, r.y as u32, r.z as u32, r.kind as u32]);
         }
+        let emptied = runs.iter().any(|r| r.kind == 0);
         self.record(EDIT, &words);
         self.wake_in_aabb(lo.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
         self.stir(lo, hi);
         self.ground.push(Edit::Runs(runs), true, None);
+        if emptied && self.joints.active_count() > 0 {
+            self.invalidate_joint_world_anchors();
+        }
     }
 
     fn emit_born(&mut self, id: u32, count: usize, size: [usize; 3], com: V, born: [i32; 3], faces: Vec<u32>) {
@@ -1422,9 +1926,9 @@ impl Bodies {
         let Some(idx) = self.list.iter().position(|b| b.id == body_id) else {
             return 0;
         };
-        let (old_pos, old_rot, old_com, old_radius) = {
+        let (old_pos, old_rot, old_com, old_radius, old_born) = {
             let b = &self.list[idx];
-            (b.pos, b.rot, b.com, b.radius)
+            (b.pos, b.rot, b.com, b.radius, b.born)
         };
         let mut next = self.next;
         let report = f(&mut self.list[idx], &mut next);
@@ -1452,6 +1956,7 @@ impl Bodies {
 
         if report.destroyed {
             let body = self.list.swap_remove(idx);
+            self.detach_removed_body(body.id);
             let mut words = vec![body.id];
             words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
             self.record(GONE, &words);
@@ -1461,6 +1966,68 @@ impl Bodies {
         self.list[idx].asleep = false;
         self.list[idx].still = 0.0;
         carve::sync_hull_after_carve(&mut self.list[idx]);
+        if self.joints.active_count() > 0 {
+            let (new_born, new_com) = (self.list[idx].born, self.list[idx].com);
+            let born_delta = [new_born[0] - old_born[0], new_born[1] - old_born[1], new_born[2] - old_born[2]];
+            let com_shift = [
+                born_delta[0] as f32 + new_com[0] - old_com[0],
+                born_delta[1] as f32 + new_com[1] - old_com[1],
+                born_delta[2] as f32 + new_com[2] - old_com[2],
+            ];
+            let body_ref = &self.list[idx];
+            let snapped = self.joints.invalidate_body_cells(body_id, |c| {
+                let shifted = [
+                    c[0] as i32 - born_delta[0],
+                    c[1] as i32 - born_delta[1],
+                    c[2] as i32 - born_delta[2],
+                ];
+                body_ref.solid(shifted)
+            });
+            // Keep surviving joints anchored to the same physical voxels after tight cropping.
+            if born_delta != [0, 0, 0] || dot(com_shift, com_shift) > 1e-10 {
+                let mut active_ids: Vec<u32> = Vec::new();
+                for j in self.joints.joints() {
+                    if !j.broken && (j.body_a == body_id || j.body_b == body_id) {
+                        active_ids.push(j.id);
+                    }
+                }
+                for jid in active_ids {
+                    if let Some(j) = self.joints.get_mut(jid) {
+                        if j.body_a == body_id {
+                            j.local_a = sub(j.local_a, com_shift);
+                            if let crate::joints::VoxelAnchorKind::BodyCell { body_id: bid, cell } = j.anchor_a.kind {
+                                if bid == body_id {
+                                    j.anchor_a = crate::joints::VoxelAnchor::body_cell(
+                                        bid,
+                                        [
+                                            (cell[0] as i32 - born_delta[0]).max(0) as usize,
+                                            (cell[1] as i32 - born_delta[1]).max(0) as usize,
+                                            (cell[2] as i32 - born_delta[2]).max(0) as usize,
+                                        ],
+                                    );
+                                }
+                            }
+                        }
+                        if j.body_b == body_id {
+                            j.local_b = sub(j.local_b, com_shift);
+                            if let crate::joints::VoxelAnchorKind::BodyCell { body_id: bid, cell } = j.anchor_b.kind {
+                                if bid == body_id {
+                                    j.anchor_b = crate::joints::VoxelAnchor::body_cell(
+                                        bid,
+                                        [
+                                            (cell[0] as i32 - born_delta[0]).max(0) as usize,
+                                            (cell[1] as i32 - born_delta[1]).max(0) as usize,
+                                            (cell[2] as i32 - born_delta[2]).max(0) as usize,
+                                        ],
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            self.wake_joint_bodies(&snapped);
+        }
         self.record(BROKE, &[body_id]);
         let (id, count, size, com, born, faces) = {
             let b = &self.list[idx];
@@ -1669,6 +2236,7 @@ impl Bodies {
         #[cfg(test)]
         let t2 = std::time::Instant::now();
         self.caught(&before, at, radius);
+        self.invalidate_joint_world_anchors();
         self.wake_in_aabb(at.map(|c| (c - far) as f32), at.map(|c| (c + far + 1) as f32));
         self.shove(at, radius);
         let made = self.lumps(&before, &left, at, radius, usize::MAX);
@@ -1930,6 +2498,7 @@ impl Bodies {
             let near = (0..parts).min_by_key(|&k| (0..3).map(|a| (c[a] as i32 - seeds[k][a] as i32).pow(2)).sum::<i32>()).unwrap();
             shares[near].push(*c);
         }
+        self.detach_removed_body(whole.id);
         self.record(BROKE, &[whole.id]);
         let mut debris = self.list.iter().filter(|b| b.live.is_none()).count();
         for share in shares {
@@ -1988,6 +2557,14 @@ impl Bodies {
         self.steps = 0;
         self.tried = 0;
         self.paired = 0;
+        // One time-sliced structural support job advances per call with bounded work (`50_000` ops).
+        if !self.support_jobs.is_empty() {
+            if self.support_jobs[0].step(50_000) {
+                let job = self.support_jobs.remove(0);
+                let (_region, pieces, dust) = job.finish();
+                self.take(pieces, dust, None, MOST);
+            }
+        }
         // One wide box that has waited its time is asked about.
         for waiting in &mut self.far {
             waiting.wait -= dt;
@@ -2001,6 +2578,33 @@ impl Bodies {
             let (at, radius, _) = self.fuses.remove(due);
             self.went_off(at, radius);
         }
+        // Wake sleeping bodies attached to an active winch or motorized joint before stepping.
+        if self.joints.active_count() > 0 {
+            let mut wake_ids: Vec<u32> = Vec::new();
+            for j in self.joints.joints() {
+                if j.broken {
+                    continue;
+                }
+                let motorized = match j.kind {
+                    crate::joints::JointKind::Distance(d) => d.winch_speed != 0.0,
+                    crate::joints::JointKind::Hinge(h) => h.motor.max_effort > 0.0,
+                    crate::joints::JointKind::Slider(s) => s.motor.max_effort > 0.0,
+                    crate::joints::JointKind::Ball(b) => b.drive.is_some(),
+                    _ => false,
+                };
+                if motorized {
+                    if j.body_a != 0 {
+                        wake_ids.push(j.body_a);
+                    }
+                    if j.body_b != 0 {
+                        wake_ids.push(j.body_b);
+                    }
+                }
+            }
+            for bid in wake_ids {
+                self.wake_body_id(bid);
+            }
+        }
         while self.owed >= STEP && self.list.iter().any(|b| !b.asleep) {
             self.owed -= STEP;
             self.step(STEP);
@@ -2012,7 +2616,13 @@ impl Bodies {
         if !self.list.iter().any(|b| !b.asleep) {
             self.owed = 0.0;
         }
+        self.step_ballistics(dt);
+        self.step_ragdolls(dt);
+        if !self.beams.thermal.is_empty() {
+            self.beams.cool(dt);
+        }
         self.tell_struck();
+        self.step_dynamic_fire(dt);
         self.burn(dt);
         // A fire beside something that goes up sets it off: asked five times a second, of some of what burns, and only
         // once a sector has been made that holds any such thing.
@@ -2043,6 +2653,278 @@ impl Bodies {
         }
         self.record(MOVES, &words);
         self.tell_live();
+        if !self.ragdolls.is_empty() {
+            let poses: Vec<[u32; 18]> = self.ragdolls.iter().map(|r| pack_pose_words(r.id, &r.ragdoll)).collect();
+            for p in &poses {
+                self.record(POSE, p);
+            }
+        }
+    }
+
+    fn step_dynamic_fire(&mut self, dt: f32) {
+        let steam_kind = crate::kinds::kind(WATER, crate::kinds::WHITE) as u32;
+        if !self.fire.alight.is_empty()
+            && (self.sea_level.is_some() || self.water.wet() > 0 || self.rain_intensity > 0.0)
+        {
+            let steam = self.fire.extinguish_in_water(&self.water, self.sea_level, self.rain_intensity);
+            for p in steam {
+                self.record(DUST, &[p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), steam_kind, 3]);
+            }
+        }
+        if self.list.is_empty() {
+            if !self.fire.dynamic.is_empty() || !self.fire.dynamic_flames.is_empty() {
+                self.fire.dynamic.clear();
+                self.fire.dynamic_flames.clear();
+            }
+            return;
+        }
+        if self.fire.dynamic.is_empty() && self.fire.alight.is_empty() {
+            return;
+        }
+        let report = {
+            let views: Vec<crate::fire::DynamicFireBodyView<'_>> =
+                self.list.iter().map(crate::fire::DynamicFireBodyView::from_body).collect();
+            self.fire.step_dynamic_bodies(dt, &views, self.sea_level, &self.water, self.rain_intensity)
+        };
+        for p in &report.steam_puffs {
+            self.record(DUST, &[p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), steam_kind, 4]);
+        }
+        if !report.burnt_out.is_empty() {
+            let mut touched_bodies: Vec<u32> = Vec::new();
+            for burnt in &report.burnt_out {
+                if let Some(body) = self.list.iter_mut().find(|b| b.id == burnt.body_id) {
+                    if burnt.cell[0] < body.size[0]
+                        && burnt.cell[1] < body.size[1]
+                        && burnt.cell[2] < body.size[2]
+                    {
+                        let idx = body.at(burnt.cell[0], burnt.cell[1], burnt.cell[2]);
+                        let was_solid = body.cells[idx] != 0;
+                        body.cells[idx] = burnt.replacement;
+                        if was_solid && burnt.replacement == 0 && body.count > 0 {
+                            body.count -= 1;
+                        }
+                        if !touched_bodies.contains(&body.id) {
+                            touched_bodies.push(body.id);
+                        }
+                    }
+                }
+            }
+            if self.joints.active_count() > 0 {
+                for bid in touched_bodies {
+                    if let Some(body) = self.list.iter().find(|b| b.id == bid) {
+                        let snapped = self.joints.invalidate_body_cells(bid, |c| {
+                            body.solid([c[0] as i32, c[1] as i32, c[2] as i32])
+                        });
+                        self.wake_joint_bodies(&snapped);
+                    }
+                }
+            }
+        }
+        if !report.ignite_ground.is_empty() {
+            self.ignite_ground_cells(&report.ignite_ground);
+        }
+    }
+
+    fn step_ragdolls(&mut self, dt: f32) {
+        if self.ragdolls.is_empty() || dt <= 0.0 || !dt.is_finite() {
+            return;
+        }
+        let mut rem = dt.min(0.25);
+        while rem > 1e-6 {
+            let h = rem.min(1.0 / 30.0);
+            rem -= h;
+            let (ragdolls, ground) = (&mut self.ragdolls, &mut self.ground);
+            for active in ragdolls.iter_mut() {
+                active.ragdoll.step(h, |[x, y, z]| ground.solid(x, y, z));
+                for limb in &mut active.detached {
+                    limb.step(h, |[x, y, z]| ground.solid(x, y, z));
+                }
+            }
+            if ragdolls.len() > 1 {
+                for i in 0..ragdolls.len() {
+                    let (left, right) = ragdolls.split_at_mut(i + 1);
+                    for other in right.iter_mut() {
+                        crate::ragdoll::Ragdoll::collide_ragdolls(&mut left[i].ragdoll, &mut other.ragdoll);
+                    }
+                }
+            }
+        }
+    }
+
+    fn step_ballistics(&mut self, dt: f32) {
+        let has_projectiles = !self.ballistics.projectiles.is_empty();
+        let has_sim_waves = self.ballistics.shockwaves.active_waves() > 0
+            || self.ballistics.shockwaves.active_shrapnel() > 0;
+        let has_waves = self.shockwaves.active_waves() > 0 || self.shockwaves.active_shrapnel() > 0;
+        if !has_projectiles && !has_sim_waves && !has_waves && self.ballistics.events.is_empty() {
+            return;
+        }
+
+        let mut proj_targets = std::mem::take(&mut self.ballistic_targets_buf);
+        let mut shock_targets = std::mem::take(&mut self.shock_targets_buf);
+        let mut events = std::mem::take(&mut self.ballistic_events_buf);
+        proj_targets.clear();
+        shock_targets.clear();
+        events.clear();
+        events.extend(self.ballistics.events.drain(..));
+
+        for b in &self.list {
+            if b.live.as_ref().is_some_and(|l| l.ghost) || b.count == 0 {
+                continue;
+            }
+            let aabb = b.world_aabb();
+            let tgt = crate::ballistics::DynamicTarget {
+                id: b.id,
+                min: aabb.min,
+                max: aabb.max,
+                material: b.stuff,
+                mass: if b.inv_mass > 0.0 { 1.0 / b.inv_mass } else { 1e9 },
+            };
+            proj_targets.push(tgt);
+            shock_targets.push(tgt);
+        }
+        for r in &self.ragdolls {
+            let (rlo, rhi) = r.ragdoll.aabb();
+            shock_targets.push(crate::ballistics::DynamicTarget {
+                id: encode_ragdoll_target(r.id, crate::ragdoll::BoneId::Chest),
+                min: rlo,
+                max: rhi,
+                material: WOOD,
+                mass: r.ragdoll.active_mass().max(1.0),
+            });
+            for bone in crate::ragdoll::BoneId::ALL {
+                if r.ragdoll.is_missing(bone) {
+                    continue;
+                }
+                let bs = &r.ragdoll.bones[bone.index()];
+                let (min, max) = bs.aabb();
+                proj_targets.push(crate::ballistics::DynamicTarget {
+                    id: encode_ragdoll_target(r.id, bone),
+                    min,
+                    max,
+                    material: WOOD,
+                    mass: bs.mass,
+                });
+            }
+        }
+
+        let mut detonations: Vec<([f32; 3], crate::ballistics::ProjectileSpec)> = Vec::new();
+        if has_projectiles {
+            let (ballistics, ground) = (&mut self.ballistics, &mut self.ground);
+            for proj in &mut ballistics.projectiles {
+                if let Some(det) = crate::ballistics::step_projectile(
+                    proj,
+                    dt,
+                    &proj_targets,
+                    &mut |[x, y, z]| ground.kind(x, y, z),
+                    &mut events,
+                ) {
+                    detonations.push(det);
+                }
+            }
+            ballistics.projectiles.retain(|p| p.alive);
+        }
+        for (pos, spec) in detonations {
+            let (shockwaves, ground) = (&mut self.shockwaves, &mut self.ground);
+            shockwaves.spawn_blast(
+                pos,
+                spec.blast_radius,
+                spec.blast_pressure,
+                spec.blast_shrapnel,
+                |[x, y, z]| ground.kind(x, y, z),
+            );
+        }
+        if has_sim_waves {
+            self.ballistics.shockwaves.step(dt, &shock_targets, &mut events);
+        }
+        if self.shockwaves.active_waves() > 0 || self.shockwaves.active_shrapnel() > 0 {
+            self.shockwaves.step(dt, &shock_targets, &mut events);
+        }
+
+        let mut chip_runs: Vec<Run> = Vec::new();
+        for ev in events.drain(..) {
+            match ev {
+                crate::ballistics::BallisticEvent::VoxelChip { cell, kind, .. } => {
+                    chip_runs.push(Run { x0: cell[0], x1: cell[0] + 1, y: cell[1], z: cell[2], kind: 0 });
+                    self.record(
+                        DUST,
+                        &[
+                            (cell[0] as f32 + 0.5).to_bits(),
+                            (cell[1] as f32 + 0.5).to_bits(),
+                            (cell[2] as f32 + 0.5).to_bits(),
+                            kind as u32,
+                            1,
+                        ],
+                    );
+                }
+                crate::ballistics::BallisticEvent::Ricochet { pos, material, .. } => {
+                    self.record(
+                        DUST,
+                        &[pos[0].to_bits(), pos[1].to_bits(), pos[2].to_bits(), material as u32, 2],
+                    );
+                }
+                crate::ballistics::BallisticEvent::BodyHit { body_id, pos, impulse, .. } => {
+                    if let Some((rid, bone)) = decode_ragdoll_target(body_id) {
+                        if let Some(active) = self.ragdolls.iter_mut().find(|r| r.id == rid) {
+                            let res = active.ragdoll.apply_hit(bone, pos, impulse, 0.0, false);
+                            if let Some(limb) = res.detached {
+                                active.detached.push(limb);
+                            }
+                        }
+                    } else if let Some(idx) = self.list.iter().position(|b| b.id == body_id) {
+                        self.wake_body_and_island(idx);
+                        let b = &mut self.list[idx];
+                        if b.inv_mass > 0.0 {
+                            let r = sub(pos, b.pos);
+                            b.vel = add(b.vel, scale(impulse, b.inv_mass));
+                            b.spin = add(b.spin, b.turn_resist(cross(r, impulse)));
+                            b.still = 0.0;
+                        }
+                    }
+                }
+                crate::ballistics::BallisticEvent::RocketDetonate { pos, radius, jet_cells, .. } => {
+                    self.record(
+                        BURST,
+                        &[pos[0].to_bits(), pos[1].to_bits(), pos[2].to_bits(), radius.round() as u32],
+                    );
+                    for c in jet_cells {
+                        chip_runs.push(Run { x0: c[0], x1: c[0] + 1, y: c[1], z: c[2], kind: 0 });
+                    }
+                    self.wake_in_aabb(
+                        [pos[0] - radius, pos[1] - radius, pos[2] - radius],
+                        [pos[0] + radius, pos[1] + radius, pos[2] + radius],
+                    );
+                }
+                crate::ballistics::BallisticEvent::ShockwaveHit { target_id, impulse, .. } => {
+                    if let Some((rid, bone)) = decode_ragdoll_target(target_id) {
+                        if let Some(active) = self.ragdolls.iter_mut().find(|r| r.id == rid) {
+                            let hit_pos = active.ragdoll.bones[bone.index()].pos;
+                            let res = active.ragdoll.apply_hit(bone, hit_pos, impulse, 0.0, false);
+                            if let Some(limb) = res.detached {
+                                active.detached.push(limb);
+                            }
+                        }
+                    } else if let Some(idx) = self.list.iter().position(|b| b.id == target_id) {
+                        self.wake_body_and_island(idx);
+                        let b = &mut self.list[idx];
+                        if b.inv_mass > 0.0 {
+                            b.vel = add(b.vel, scale(impulse, b.inv_mass));
+                            b.still = 0.0;
+                        }
+                    }
+                }
+            }
+        }
+
+        if !chip_runs.is_empty() {
+            chip_runs.sort_unstable_by_key(|r| (r.y, r.z, r.x0));
+            chip_runs.dedup_by_key(|r| (r.x0, r.y, r.z));
+            self.change(chip_runs);
+        }
+
+        self.ballistic_targets_buf = proj_targets;
+        self.shock_targets_buf = shock_targets;
+        self.ballistic_events_buf = events;
     }
 
     fn step(&mut self, h: f32) {
@@ -2051,6 +2933,7 @@ impl Bodies {
         #[cfg(test)]
         let mut mark = |k: usize| { SPENT.with(|s| s.borrow_mut()[k] += lap.elapsed().as_secs_f64()); lap = std::time::Instant::now(); };
         // Propagate any external wake (direct `asleep = false`, `kick`, `drive`, `stir`, `shove`) to its entire island.
+        self.solver_step = self.solver_step.wrapping_add(1);
         self.propagate_wakes();
         self.recent_contacts.retain(|_, ttl| {
             *ttl = ttl.saturating_sub(1);
@@ -2060,6 +2943,7 @@ impl Bodies {
         self.motors(h);
         self.touches.clear();
         self.parted.clear();
+        let water_active = self.sea_level.is_some() || self.water.wet() > 0 || self.water.flowing();
         let mut found: Vec<(V, V, V, f32)> = Vec::new();
         let mut ploughed: Vec<[i32; 3]> = Vec::new();
         for i in 0..self.list.len() {
@@ -2070,6 +2954,29 @@ impl Bodies {
             }
             b.vel[1] -= G * h;
             b.spin = scale(b.spin, 1.0 - 0.4 * h);
+            if water_active && b.inv_mass > 0.0 {
+                let enclosed_air = if b.live.as_ref().is_some_and(|live| live.hull.is_some()) {
+                    let hollow = (b.size[0] * b.size[1] * b.size[2]).saturating_sub(b.count);
+                    (hollow / 3).min(b.count * 2)
+                } else {
+                    0
+                };
+                let buoy = self.water.compute_buoyancy(
+                    b.pos,
+                    b.rot,
+                    b.com,
+                    b.size,
+                    &b.cells,
+                    b.vel,
+                    b.spin,
+                    self.sea_level,
+                    enclosed_air,
+                );
+                if buoy.submerged_cells > 0 {
+                    b.vel = add(b.vel, scale(buoy.force, b.inv_mass * h));
+                    b.spin = add(b.spin, b.turn_resist(scale(buoy.torque, h)));
+                }
+            }
 
             b.age += h;
             b.apart += h;
@@ -2236,6 +3143,48 @@ impl Bodies {
             });
             (ds, weights, spins_a, spins_b)
         }).collect();
+        // Warm-start persistent resting rigid contacts from `solver::ManifoldCache` (#166).
+        let mut manifold_keys: Vec<Option<crate::solver::ManifoldKey>> = Vec::with_capacity(self.touches.len());
+        let has_cache = !self.manifold_cache.is_empty();
+        for (t_idx, t) in self.touches.iter_mut().enumerate() {
+            let live_a = self.list[t.a].live.as_ref();
+            let live_b = if t.b != NONE { self.list[t.b].live.as_ref() } else { None };
+            let eligible = live_a.is_none() && live_b.is_none();
+            if !eligible {
+                manifold_keys.push(None);
+                continue;
+            }
+            let id_a = self.list[t.a].id;
+            let id_b = if t.b == NONE { crate::solver::WORLD_BODY_ID } else { self.list[t.b].id };
+            let local_ra = back(self.list[t.a].rot, t.ra);
+            let key = crate::solver::ManifoldKey::new(id_a, id_b, contact_feature_key(local_ra, t.n));
+            manifold_keys.push(Some(key));
+            if has_cache && t.closing > -40.0 {
+                if let Some(cached) = self.manifold_cache.get(key) {
+                    let s = crate::solver::DEFAULT_WARM_START_SCALE;
+                    let jn = (cached.jn * s).max(0.0);
+                    let (ds, _, spins_a, spins_b) = &ways[t_idx];
+                    let jt_world = add(scale(cached.t1, cached.jt1), scale(cached.t2, cached.jt2));
+                    let max_f = rubs[t_idx] * jn;
+                    let jt1 = (dot(jt_world, ds[1]) * s).clamp(-max_f, max_f);
+                    let jt2 = (dot(jt_world, ds[2]) * s).clamp(-max_f, max_f);
+                    t.pushed = jn;
+                    t.rubbed = [jt1, jt2];
+                    let (a, b) = (t.a, t.b);
+                    for (k, by) in [(0usize, jn), (1usize, jt1), (2usize, jt2)] {
+                        if by == 0.0 {
+                            continue;
+                        }
+                        self.list[a].vel = add(self.list[a].vel, scale(ds[k], by * self.list[a].inv_mass));
+                        self.list[a].spin = add(self.list[a].spin, scale(spins_a[k], by));
+                        if b != NONE {
+                            self.list[b].vel = sub(self.list[b].vel, scale(ds[k], by * self.list[b].inv_mass));
+                            self.list[b].spin = sub(self.list[b].spin, scale(spins_b[k], by));
+                        }
+                    }
+                }
+            }
+        }
         for round in 0..8 {
             for t in 0..self.touches.len() {
                 let (a, b, ra, rb, n) = { let t = &self.touches[t]; (t.a, t.b, t.ra, t.rb, t.n) };
@@ -2289,6 +3238,29 @@ impl Bodies {
                     push(&mut self.list, k + 1, now - was);
                 }
             }
+        }
+        // Persist solved contact impulses into `solver::ManifoldCache` and evict stale contacts.
+        for (t_idx, key_opt) in manifold_keys.into_iter().enumerate() {
+            if let Some(key) = key_opt {
+                let t = &self.touches[t_idx];
+                if t.pushed > 0.0 {
+                    let (ds, _, _, _) = &ways[t_idx];
+                    self.manifold_cache.store(
+                        key,
+                        crate::solver::CachedImpulse {
+                            jn: t.pushed,
+                            jt1: t.rubbed[0],
+                            jt2: t.rubbed[1],
+                            t1: ds[1],
+                            t2: ds[2],
+                            last_step: self.solver_step,
+                        },
+                    );
+                }
+            }
+        }
+        if !self.manifold_cache.is_empty() {
+            self.manifold_cache.evict_stale(self.solver_step);
         }
         #[cfg(test)]
         mark(2);
@@ -2382,6 +3354,65 @@ impl Bodies {
         }
         #[cfg(test)]
         mark(4);
+        // Solve 6-DOF joints velocity phase before integrating positions (`joints.rs`, #166).
+        let joint_cfg = crate::joints::SolverConfig::default();
+        let mut joint_bodies = std::mem::take(&mut self.joint_bodies_buf);
+        joint_bodies.clear();
+        if self.joints.active_count() > 0 {
+            self.invalidate_joint_world_anchors();
+            if self.joints.active_count() > 0 {
+                let mut ref_ids: Vec<u32> = Vec::new();
+                for j in self.joints.joints() {
+                    if j.broken {
+                        continue;
+                    }
+                    if j.body_a != 0 && !ref_ids.contains(&j.body_a) {
+                        ref_ids.push(j.body_a);
+                    }
+                    if j.body_b != 0 && !ref_ids.contains(&j.body_b) {
+                        ref_ids.push(j.body_b);
+                    }
+                }
+                for &bid in &ref_ids {
+                    if let Some(b) = self.list.iter().find(|b| b.id == bid) {
+                        joint_bodies.push(crate::joints::SolverBody::from_local_inertia(
+                            b.id,
+                            b.pos,
+                            b.rot,
+                            b.vel,
+                            b.spin,
+                            b.inv_mass,
+                            b.inv_inertia,
+                            b.asleep,
+                        ));
+                    }
+                }
+                if !joint_bodies.is_empty() {
+                    let events = self.joints.solve_velocities(&mut joint_bodies, h, &joint_cfg);
+                    let mut woken_ids: Vec<u32> = Vec::new();
+                    for sb in &joint_bodies {
+                        if let Some(b) = self.list.iter_mut().find(|b| b.id == sb.id) {
+                            let woke = b.asleep && !sb.asleep;
+                            b.vel = sb.vel;
+                            b.spin = sb.spin;
+                            if woke {
+                                woken_ids.push(b.id);
+                            }
+                        }
+                    }
+                    for bid in woken_ids {
+                        self.wake_body_id(bid);
+                    }
+                    if !events.is_empty() {
+                        let broken_ids: Vec<u32> = events
+                            .iter()
+                            .map(|&crate::joints::JointEvent::Broken { id, .. }| id)
+                            .collect();
+                        self.wake_joint_bodies(&broken_ids);
+                    }
+                }
+            }
+        }
         // On they go; what has lain still long enough is cells again.
         let mut i = 0;
         while i < self.list.len() {
@@ -2425,10 +3456,12 @@ impl Bodies {
             b.still = if slow && b.apart < 0.1 && (over || (!b.persist_sleep && b.age > OLD)) { b.still + h } else { 0.0 };
             // Old and still on its way (a chimney going over takes its time) is left to it, up to a point.
             let stuck = !b.persist_sleep && b.age >= OLD && dot(b.vel, b.vel) < 400.0 && dot(b.spin, b.spin) < 0.25;
+            let jointed = !joint_bodies.is_empty()
+                && self.joints.joints().iter().any(|j| !j.broken && (j.body_a == b.id || j.body_b == b.id));
             if b.live.is_some() {
                 Self::drowse(b, h);
                 i += 1;
-            } else if b.persist_sleep {
+            } else if b.persist_sleep || jointed {
                 i += 1;
             } else if b.still >= STILL_FOR || stuck || b.age >= OLD * 3.0 {
                 let body = self.list.swap_remove(i);
@@ -2438,6 +3471,29 @@ impl Bodies {
                 i += 1;
             }
         }
+        // Post-integration XPBD position projection & zero-bias velocity relaxation for active joints.
+        if !joint_bodies.is_empty() && self.joints.active_count() > 0 {
+            for sb in &mut joint_bodies {
+                if let Some(b) = self.list.iter().find(|b| b.id == sb.id) {
+                    sb.pos = b.pos;
+                    sb.rot = b.rot;
+                    sb.vel = b.vel;
+                    sb.spin = b.spin;
+                    sb.asleep = b.asleep;
+                    sb.refresh_world_inertia(b.inv_inertia);
+                }
+            }
+            self.joints.solve_positions(&mut joint_bodies, h, &joint_cfg);
+            for sb in &joint_bodies {
+                if let Some(b) = self.list.iter_mut().find(|b| b.id == sb.id) {
+                    b.pos = sb.pos;
+                    b.rot = sb.rot;
+                    b.vel = sb.vel;
+                    b.spin = sb.spin;
+                }
+            }
+        }
+        self.joint_bodies_buf = joint_bodies;
         self.settle_islands();
         self.broadphase_stale = true;
         #[cfg(test)]
@@ -2447,6 +3503,7 @@ impl Bodies {
     /// A body that has come to rest is cells of the world again, as it lies. One lying nearly square to the world is
     /// put down square, cell for cell; one lying askew is cut along the world's cells, which changes how many it is.
     fn rest(&mut self, mut body: Body) {
+        self.detach_removed_body(body.id);
         // What passes leaves nothing where it stops but a little dust.
         if body.passing {
             let mut words = vec![body.id];
@@ -3754,5 +4811,326 @@ mod tests {
         let inv_dir = [1.0, f32::INFINITY, f32::INFINITY];
         bodies.broadphase_raycast(origin, inv_dir, 100.0, &mut hits);
         assert_eq!(hits, vec![0, 1], "horizontal +X ray must hit bodies 0 and 1 and skip elevated body 2");
+    }
+
+    #[test]
+    fn systemic_hinge_anchor_destruction_drops_door() {
+        let ground = city::ground(X, Z);
+        let y0 = ground + 90;
+        let mut bodies = Bodies::new();
+
+        // Build a solid concrete doorframe post high above the street so the door hangs over open air.
+        let post: Vec<Run> = (y0..y0 + 16)
+            .map(|y| Run { x0: X, x1: X + 1, y, z: Z, kind: kind(CONCRETE, OWN) })
+            .collect();
+        bodies.ground.push(Edit::Runs(post), false, None);
+        assert!(bodies.ground.solid(X, y0 + 8, Z), "anchor voxel must start solid");
+
+        // Spawn a wooden door panel beside the post with open air underneath it.
+        let door_size = [8, 12, 2];
+        let door = Body::new(1, block(door_size, kind(WOOD, OWN)), door_size, [X + 2, y0 + 2, Z]);
+        let initial_y = door.pos[1];
+        bodies.list.push(door);
+        bodies.next = 2;
+
+        // Hinge the door to the world doorframe voxel `(X, y0 + 8, Z)`.
+        let pivot = [(X + 2) as f32, (y0 + 8) as f32, Z as f32 + 1.0];
+        let jid = bodies.add_hinge(0, 1, pivot, [0.0, 1.0, 0.0], [X, y0 + 8, Z]);
+        assert_ne!(jid, 0, "hinge creation must return a non-zero joint id");
+        assert_eq!(bodies.joints.active_count(), 1);
+
+        // Hold for 0.6 s: the hinge supports the door against gravity and prevents solidification.
+        for _ in 0..36 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        assert_eq!(bodies.joints.active_count(), 1, "hinge must stay intact while its world voxel stands");
+        assert_eq!(bodies.list.len(), 1, "hinged door must remain a dynamic body");
+        let y_held = bodies.list[0].pos[1];
+        assert!(
+            (y_held - initial_y).abs() < 1.5,
+            "hinged door must stay suspended near initial_y={initial_y:.2} (got {y_held:.2})"
+        );
+
+        // Destroy the world voxel anchoring the hinge via `blast`: the joint must snap automatically.
+        bodies.blast([X, y0 + 8, Z], 4, None, false);
+        assert!(!bodies.ground.solid(X, y0 + 8, Z), "blast must clear the hinge anchor voxel");
+        assert_eq!(bodies.joints.active_count(), 0, "destroying the anchor voxel must snap the hinge automatically");
+
+        // Step another 0.5 s: the unhinged door falls freely under gravity.
+        for _ in 0..30 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+        }
+        let door_after = bodies.list.iter().find(|b| b.id == 1).expect("door should still be falling in air");
+        assert!(
+            door_after.pos[1] < initial_y - 6.0 && door_after.vel[1] < -20.0,
+            "unhinged door must fall under gravity (initial_y={initial_y:.2}, pos_y={:.2}, vel_y={:.2})",
+            door_after.pos[1],
+            door_after.vel[1]
+        );
+    }
+
+    #[test]
+    fn systemic_burning_wood_floats_and_extinguishes_in_water() {
+        let ground = city::ground(X, Z);
+        let sea_y = (ground + 70) as f32;
+        let mut bodies = Bodies::new();
+        bodies.set_env(Some(sea_y), 0.0);
+
+        // Drop a burning wooden crate from above the sea plane so it plunges underwater,
+        // quenches with steam puffs, and floats near its hydrostatic equilibrium waterline.
+        let wood = kind(WOOD, OWN);
+        let size = [6, 4, 6];
+        let mut crate_body = Body::new(1, block(size, wood), size, [X, sea_y as i32 + 10, Z]);
+        crate_body.persist_sleep = true;
+        bodies.list.push(crate_body);
+        bodies.next = 2;
+
+        // Ignite bottom and middle cells of the wooden crate.
+        assert!(bodies.fire.ignite_body(1, [2, 0, 2], wood));
+        assert!(bodies.fire.ignite_body(1, [3, 1, 3], wood));
+        assert!(bodies.fire.ignite_body(1, [2, 2, 2], wood));
+        assert!(bodies.fire.dynamic_cell_count() >= 3);
+
+        let steam_kind = kind(WATER, crate::kinds::WHITE) as u32;
+        let mut saw_steam = false;
+        let mut min_y = f32::MAX;
+        for _ in 0..240 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            if let Some(b) = bodies.list.iter().find(|b| b.id == 1) {
+                min_y = min_y.min(b.pos[1]);
+            }
+            let mut i = 0;
+            while i < bodies.out.len() {
+                let tag = bodies.out[i];
+                let len = bodies.out[i + 1] as usize;
+                if tag == DUST && len >= 5 && bodies.out[i + 5] == steam_kind {
+                    saw_steam = true;
+                }
+                i += 2 + len;
+            }
+        }
+
+        let b = bodies.list.iter().find(|b| b.id == 1).expect("wooden body must remain afloat");
+        assert!(saw_steam, "water quenching dynamic fire must emit steam DUST puffs");
+        assert_eq!(
+            bodies.fire.dynamic_cell_count(),
+            0,
+            "plunging burning wood into water must extinguish its flames"
+        );
+        // Equilibrium COM of a 4-cell wood block (rho=0.6 vs 1.025) sits ~0.34 cells below sea_y.
+        assert!(
+            b.pos[1] > sea_y - 3.0 && b.pos[1] < sea_y + 3.0,
+            "wooden crate must float near sea_y={sea_y:.1} (got pos_y={:.2}, min_y={min_y:.2}, ground={ground})",
+            b.pos[1]
+        );
+    }
+
+    #[test]
+    fn systemic_bullet_penetrates_wood_and_hits_ragdoll() {
+        use crate::ragdoll::{BoneId, POSE_WIRE_BYTES, RagdollMode, unpack_pose};
+
+        let ground = city::ground(X, Z);
+        let base_y = ground + 90;
+        let mut bodies = Bodies::new();
+
+        // Build a concrete floor platform and a 1-cell wooden wall panel in front of the ragdoll.
+        let mut runs: Vec<Run> = Vec::new();
+        for z in Z - 12..=Z + 12 {
+            runs.push(Run { x0: X - 10, x1: X + 40, y: base_y - 1, z, kind: kind(CONCRETE, OWN) });
+        }
+        for y in base_y..base_y + 22 {
+            for z in Z - 6..=Z + 6 {
+                runs.push(Run { x0: X + 10, x1: X + 11, y, z, kind: kind(WOOD, OWN) });
+            }
+        }
+        bodies.ground.push(Edit::Runs(runs), false, None);
+
+        // Spawn a standing active ragdoll behind the wood wall.
+        let rid = bodies.ragdoll_spawn([(X + 22) as f32, base_y as f32, Z as f32], 0.0);
+        assert_eq!(bodies.ragdolls.len(), 1);
+        assert_eq!(bodies.ragdolls[0].ragdoll.mode, RagdollMode::Locomotion);
+
+        let chest = bodies.ragdolls[0].ragdoll.bones[BoneId::Chest.index()].pos;
+        let panel_cell = [X + 10, chest[1].floor() as i32, chest[2].floor() as i32];
+        assert!(bodies.ground.solid(panel_cell[0], panel_cell[1], panel_cell[2]), "wood panel must stand before shot");
+
+        // Fire a 5.56mm rifle bullet straight through the wood panel into the ragdoll's chest.
+        let pid = bodies.ballistics_fire(
+            crate::ballistics::Caliber::Rifle556,
+            [(X + 2) as f32, chest[1], chest[2]],
+            [1.0, 0.0, 0.0],
+        );
+        assert_ne!(pid, 0);
+
+        bodies.out.clear();
+        bodies.advance(1.0 / 60.0);
+
+        // 1. Wood panel was penetrated and chipped out.
+        assert!(
+            !bodies.ground.solid(panel_cell[0], panel_cell[1], panel_cell[2]),
+            "rifle bullet must punch through and chip wood panel cell {panel_cell:?}"
+        );
+        // 2. Ragdoll behind panel took the chest impact and entered HitReaction.
+        assert_eq!(
+            bodies.ragdolls[0].ragdoll.mode,
+            RagdollMode::HitReaction,
+            "penetrating rifle bullet must trigger ragdoll HitReaction"
+        );
+        assert!(
+            bodies.ragdolls[0].ragdoll.bones[BoneId::Chest.index()].vel[0] > 0.1,
+            "chest bone must gain forward +X velocity from bullet momentum transfer"
+        );
+
+        // 3. `POSE` (tag 14) record emitted with 1 + 17 = 18 payload words unpacking cleanly to 67 bytes.
+        let mut unpacked_pose = None;
+        let mut i = 0;
+        while i < bodies.out.len() {
+            let tag = bodies.out[i];
+            let len = bodies.out[i + 1] as usize;
+            if tag == POSE {
+                assert_eq!(len, 18, "POSE record payload must be ragdoll_id + 17 packed u32 words");
+                assert_eq!(bodies.out[i + 2], rid);
+                let mut padded = [0u8; 68];
+                for k in 0..17 {
+                    padded[k * 4..k * 4 + 4].copy_from_slice(&bodies.out[i + 3 + k].to_le_bytes());
+                }
+                let raw: [u8; POSE_WIRE_BYTES] = padded[..POSE_WIRE_BYTES].try_into().unwrap();
+                unpacked_pose = Some(unpack_pose(&raw));
+            }
+            i += 2 + len;
+        }
+        let pose = unpacked_pose.expect("Bodies::advance must emit a POSE (tag 14) wire record");
+        assert_eq!(pose.mode, RagdollMode::HitReaction);
+        assert!(pose.pelvis_pos.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn systemic_mirror_laser_ignites_wood_around_corner() {
+        let ground = city::ground(X, Z);
+        let y0 = ground + 95;
+        let mut bodies = Bodies::new();
+
+        // Build:
+        // - A concrete baffle wall between `(X, y0, Z)` and `(X + 40, y0, Z)` blocking direct sight.
+        // - A `POLISHED | STEEL` mirror wall at `z = Z + 20` (facing `-Z`).
+        // - A flammable `WOOD` wall around the corner at `x = X + 40`.
+        let mut runs: Vec<Run> = Vec::new();
+        for y in y0 - 2..=y0 + 2 {
+            for z in Z - 5..=Z + 5 {
+                runs.push(Run { x0: X + 20, x1: X + 21, y, z, kind: kind(CONCRETE, OWN) });
+                runs.push(Run { x0: X + 40, x1: X + 41, y, z, kind: kind(WOOD, OWN) });
+            }
+            runs.push(Run {
+                x0: X + 14,
+                x1: X + 28,
+                y,
+                z: Z + 20,
+                kind: kind(crate::kinds::STEEL, OWN) | crate::kinds::POLISHED,
+            });
+        }
+        bodies.ground.push(Edit::Runs(runs), false, None);
+
+        // Fire a 45-degree laser toward `(1, 0, 1)`: bounces off the polished mirror at `z = Z + 20`
+        // into `(1, 0, -1)` around the concrete corner and strikes the wood wall at `x = X + 40`.
+        let origin = [X as f32 + 0.5, y0 as f32 + 0.5, Z as f32 + 0.5];
+        let segs = bodies.beams_fire(origin, [1.0, 0.0, 1.0], 200.0, 0.1);
+        assert!(segs >= 2, "laser must bounce off the POLISHED mirror (segments={segs})");
+        assert!(
+            bodies
+                .last_beam
+                .events
+                .iter()
+                .any(|e| matches!(e, crate::beams::BeamEvent::MirrorBounce { .. })),
+            "expected a MirrorBounce event off POLISHED steel"
+        );
+        assert!(
+            bodies
+                .last_beam
+                .events
+                .iter()
+                .any(|e| matches!(e, crate::beams::BeamEvent::IgniteVoxel { cell } if cell[0] == X + 40)),
+            "expected reflected beam to ignite the wood wall at x={} (events={:?})",
+            X + 40,
+            bodies.last_beam.events
+        );
+        assert!(
+            !bodies.fire.alight.is_empty(),
+            "ignited wood voxel around the corner must be live in `Bodies.fire.alight`"
+        );
+        assert!(
+            bodies.fire.alight.keys().any(|c| c[0] == X + 40),
+            "alight cell must lie on the around-the-corner wood wall"
+        );
+
+        // Advance simulation: fire emits `FIRE` record and thermal map cools smoothly.
+        bodies.out.clear();
+        bodies.advance(0.1);
+        let mut saw_fire = false;
+        let mut i = 0;
+        while i < bodies.out.len() {
+            if bodies.out[i] == FIRE {
+                saw_fire = true;
+            }
+            i += 2 + bodies.out[i + 1] as usize;
+        }
+        assert!(saw_fire, "burning wood wall ignited by reflected laser must emit FIRE output");
+    }
+
+    #[test]
+    fn systemic_timesliced_support_job_no_stall() {
+        let ground = city::ground(X, Z);
+        let y0 = ground + 80;
+        let mut bodies = Bodies::new();
+
+        // Place an unsupported 10x6x10 (600 cells >= SMALL) floating brick slab well inside a 160x128x160 box.
+        let mut runs: Vec<Run> = Vec::new();
+        for y in y0..y0 + 6 {
+            for z in Z - 5..Z + 5 {
+                runs.push(Run { x0: X - 5, x1: X + 5, y, z, kind: kind(BRICK, OWN) });
+            }
+        }
+        bodies.ground.push(Edit::Runs(runs), false, None);
+        assert!(bodies.ground.solid(X, y0 + 2, Z));
+
+        // Enqueue a time-sliced SupportJob onto Bodies.
+        bodies.enqueue_support_job([X - 80, y0 - 32, Z - 80], [160, 128, 160], None);
+        assert_eq!(bodies.support_jobs.len(), 1);
+
+        let mut slices = 0usize;
+        let mut prev_progress = 0.0f32;
+        let mut max_slice_ms = 0.0f64;
+        while !bodies.support_jobs.is_empty() && slices < 500 {
+            let p = bodies.support_jobs[0].progress();
+            assert!(p >= prev_progress - 1e-6, "SupportJob progress must be monotonic ({p} < {prev_progress})");
+            prev_progress = p;
+            bodies.out.clear();
+            let t0 = std::time::Instant::now();
+            bodies.advance(1.0 / 60.0);
+            let ms = t0.elapsed().as_secs_f64() * 1000.0;
+            max_slice_ms = max_slice_ms.max(ms);
+            slices += 1;
+        }
+        eprintln!(
+            "systemic SupportJob(160x128x160, budget=50_000): {slices} slices, max_slice={max_slice_ms:.2} ms, spawned_bodies={}",
+            bodies.list.len()
+        );
+        assert!(bodies.support_jobs.is_empty(), "SupportJob must finish within 500 slices");
+        assert!(slices > 1, "160x128x160 SupportJob must advance incrementally across multiple frames (slices={slices})");
+        assert!(
+            !bodies.ground.solid(X, y0 + 2, Z),
+            "finished SupportJob must remove unsupported slab cells from Ground"
+        );
+        assert!(
+            !bodies.list.is_empty() && bodies.list.iter().map(|b| b.count).sum::<usize>() == 600,
+            "finished SupportJob must spawn the 600-cell unsupported slab as a dynamic body via `take()`"
+        );
+        #[cfg(not(debug_assertions))]
+        assert!(
+            max_slice_ms < 25.0,
+            "time-sliced SupportJob per-frame step must stay bounded (got max={max_slice_ms:.2} ms)"
+        );
     }
 }
