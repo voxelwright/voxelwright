@@ -19,7 +19,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 - **Scratch** (`engine/core/src/scratch.rs`). The dense 64³ array a sector is built in before it is encoded.
 - **Edit** (`Edit` in `engine/core/src/lib.rs`). `Ball`, `Runs`, `Rows` or `Fine`. `fill_of` makes a sector by running the place's rules (`city::make`), then applying the edits that reach it in order.
 - **Level** (`lod` in the code). The core makes a sector at any coarseness. At level `lod` a cell stands for 2^lod finest cells each way.
-- **Bodies** (`engine/core/src/bodies.rs`). Boxes of cells that came loose. They fall, collide and turn back into world cells when they come to rest. Living things and people's bodies are bodies with a motor (`engine/core/src/bodies/living.rs`).
+- **Bodies** (`engine/core/src/bodies.rs`). Boxes of cells that came loose. They fall, collide and turn back into world cells when they come to rest. Living things and people's bodies are bodies with a motor (`engine/core/src/bodies/living.rs`). Moving bodies can also be carved and sliced voxel-by-voxel in place (`engine/core/src/bodies/carve.rs`).
 - **Hull** (`engine/core/src/bodies/hull.rs`). What one rolling vehicle is to another: the rectangle round its cells at each height, so the cabin and the boot are in it and the air over the bonnet is not. Other pairs of bodies meet cell by cell. A car is a hollow shell, so two cars meet as hulls and are pushed apart one way: the way their boxes overlap least, or, when one is more than 0.5 m inside the other (`INSIDE`), back the way it came in. Up and down only when they share under 40% of the lower one's height (`OVER`), so a car is not lifted onto the one it rear-ends.
 
 ## Modules
@@ -36,6 +36,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `support.rs` | What stands and what falls after an edit (reusing thread-local solver scratch and sparse resets). |
 | `fine.rs` | Fine-voxel meshing (`faces`, `facesWithSmooth` with octahedral smooth normals and AO via `wasm32` SIMD 3D prefix sums), RLE/base64 codec, shell-preserving `coarser` + leak sealing, and procedural vehicle sculptors (`sculptCoupe`, `sculptKart`, `sculptOjai`). |
 | `bodies.rs`, `bodies/living.rs` | Loose bodies, living things, people's bodies. |
+| `bodies/carve.rs` | Mutable voxel carving and slicing of dynamic bodies (`carve_sphere`, `carve_capsule`, `carve_plane`), fast bit-packed 6-connected component splitting with tight cropping, world-space position and momentum conservation, face mesh rebuilds, and vehicle hull sync. |
 | `bodies/hull.rs` | How two rolling vehicles meet and part, and where a vehicle put into another's place ends up. |
 | `fire.rs`, `water.rs` | Fire spreading from cell to cell. Water as depths over columns, not cells. |
 | `beams.rs` | Continuous multi-bounce thermal laser and energy beams: 3D DDA raycast across voxels and dynamic proxies (`BeamTarget`), specular reflections off `POLISHED` steel and grazing-angle Fresnel splits off `GLASS`, and a sparse cooling `ThermalMap` that bores tunnels, ignites flammable cells, and emits `HeatGlow` records. |
