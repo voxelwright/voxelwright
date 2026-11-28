@@ -54,7 +54,36 @@ import {
 } from './traffic-ai.ts'
 
 /** What street life asks of the land (the core's exports). */
-export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; top_at?(x: number, z: number): number }
+export interface Ground {
+  feet_at(x: number, z: number): number
+  ground_at(x: number, z: number): number
+  world_kind(x: number, y: number, z: number): number
+  world_under?(x: number, y: number, z: number, depth: number): number
+  top_at?(x: number, z: number): number
+  memory?: WebAssembly.Memory
+  nav_bake_area?(fx: number, fz: number, radius_tiles: number, max_tiles: number): number
+  nav_rebake_budget?(fx: number, fz: number, max_tiles: number): number
+  nav_dirty_count?(): number
+  nav_flow_clear?(): void
+  nav_flow_add_threat?(x: number, y: number, z: number, radius: number): void
+  nav_flow_build?(): number
+  nav_flow_sample?(x: number, y: number, z: number): number
+  nav_flow_vec_ptr?(): number
+  crowd_reset?(): void
+  crowd_clear_obstacles?(): void
+  crowd_agents_ptr?(): number
+  crowd_step?(count: number, dt: number, time_horizon: number): number
+  crowd_capacity?(): number
+}
+
+/** Crowd AI telemetry counters for WASM RVO2 avoidance, panic flow fields & rain shelter (#164). */
+export interface CrowdAiStats {
+  rvoAgents: number
+  rvoStepMs: number
+  flowActive: boolean
+  panicRoles: { flee: number; shelter: number; film: number; glance: number }
+  rainSheltered: number
+}
 
 type Ring = Float64Array
 interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number; railShift?: number }
@@ -395,6 +424,8 @@ export interface Street {
   snapshot(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; name: string; x: number; y: number; z: number; heading: number; v: number; long: number; wide: number; road: string; lane: number; s: number; wait: string; stuck: number; blocked: boolean; living: boolean; emergency?: EmergencyKind; archetype?: string; laneShift?: number; sirenYieldShift?: number }[]
   /** Traffic AI telemetry counters (#164 Phase 3A). */
   trafficAiStats(): TrafficAiStats
+  /** Crowd AI telemetry counters (WASM ORCA/RVO2, panic flow fields, divergent roles & rain shelter, #164). */
+  crowdAiStats(): CrowdAiStats
   /** Spawns an emergency vehicle (`police` | `ambulance`) with active siren cone and roof flashers (#164 Phase 3A). */
   spawnEmergency(opts?: { kind?: EmergencyKind; at?: readonly [number, number]; siren?: boolean; roadKey?: string; lane?: number; s?: number }): { id: number; kind: EmergencyKind; x: number; y: number; z: number; heading: number; road: string; sirenActive: boolean } | null
   /** Recent pedestrian near-miss reaction cues readable by street/HUD/sound (#164 Phase 3A). */
@@ -640,6 +671,136 @@ export function street(o: {
   }
   const shown: Person[] = [], held = new Map<number, { x: number; z: number; at: number }>()
   const watching = new Map<number, { car: number; when: number; seen: number; left?: number }>()
+  // ── WASM ORCA/RVO2 Crowd Avoidance, Panic Flow Fields & Rain-Awning Shelter (#164) ──
+  const CROWD_FLAG_STATIC = 1 << 0
+  const CROWD_FLAG_IGNORE_WORLD = 1 << 2
+  const CROWD_POS_X = 0, CROWD_POS_Z = 1, CROWD_POS_Y = 2
+  const CROWD_VEL_X = 3, CROWD_VEL_Z = 4
+  const CROWD_PREF_VX = 5, CROWD_PREF_VZ = 6
+  const CROWD_RADIUS = 7, CROWD_MAX_SPEED = 8, CROWD_FLAGS = 9
+  const PED_RVO_RADIUS = 3.05
+  type PanicRole = 'flee' | 'shelter' | 'film' | 'glance'
+  interface CrowdAgentState {
+    x: number
+    z: number
+    y: number
+    vx: number
+    vz: number
+    seen: number
+    mode: 'walk' | PanicRole | 'rain'
+    rainSpot?: { x: number; z: number; y: number } | null
+    coverSpot?: { x: number; z: number; y: number } | null
+    panicAt?: number
+  }
+  interface ActiveThreat { x: number; y: number; z: number; radius: number; age: number; crash: boolean }
+  const crowdAgents = new Map<number, CrowdAgentState>()
+  const awningCache = new Map<number, { x: number; z: number; y: number } | null>()
+  let lastFlowSig = '', flowSpansActive = 0, lastAwningShockLen = 0
+  const crowdStats: CrowdAiStats = {
+    rvoAgents: 0,
+    rvoStepMs: 0,
+    flowActive: false,
+    panicRoles: { flee: 0, shelter: 0, film: 0, glance: 0 },
+    rainSheltered: 0,
+  }
+  const hasWasmCrowd = (): boolean => !!(o.land.memory && o.land.crowd_step && o.land.crowd_agents_ptr)
+  const hasWasmFlow = (): boolean => !!(o.land.memory && o.land.nav_flow_clear && o.land.nav_flow_add_threat && o.land.nav_flow_build && o.land.nav_flow_sample && o.land.nav_flow_vec_ptr)
+  const hasAwningAt = (cx: number, cz: number, baseY: number): number | null => {
+    const ix = Math.round(cx), iz = Math.round(cz), fy = feetAt(ix, iz)
+    if (Math.abs(fy - baseY) > 10) return null
+    if (o.land.world_kind(ix, fy + 4, iz) !== 0 || o.land.world_kind(ix, fy + 14, iz) !== 0) return null
+    for (let oy = 20; oy <= 56; oy += 4) {
+      if (o.land.world_kind(ix, fy + oy, iz) !== 0) return fy
+    }
+    return null
+  }
+  const AWNING_DIRS: readonly (readonly [number, number])[] = [
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [0.7071, 0.7071], [-0.7071, 0.7071], [0.7071, -0.7071], [-0.7071, -0.7071],
+  ]
+  const findAwningNear = (bx: number, by: number, bz: number): { x: number; z: number; y: number } | null => {
+    const key = ((bx >> 3) * 100003) ^ (bz >> 3)
+    const cached = awningCache.get(key)
+    if (cached !== undefined) return cached
+    if (awningCache.size >= 2048) awningCache.clear()
+    let found: { x: number; z: number; y: number } | null = null
+    if (!inLane(bx, bz, 6)) {
+      const y0 = hasAwningAt(bx, bz, by)
+      if (y0 !== null) found = { x: bx, z: bz, y: y0 }
+    }
+    if (!found) {
+      outer: for (const r of [12, 24, 38, 52]) {
+        for (let di = 0; di < AWNING_DIRS.length; di++) {
+          const tx = Math.round(bx + AWNING_DIRS[di][0] * r)
+          const tz = Math.round(bz + AWNING_DIRS[di][1] * r)
+          if (inLane(tx, tz, 6)) continue
+          const fy = hasAwningAt(tx, tz, by)
+          if (fy !== null) {
+            found = { x: tx, z: tz, y: fy }
+            break outer
+          }
+        }
+      }
+    }
+    awningCache.set(key, found)
+    return found
+  }
+  const syncPanicFlow = (eye: readonly number[], t: number): ActiveThreat[] => {
+    const active: ActiveThreat[] = []
+    const collect = (list: readonly Shock[], crash: boolean) => {
+      const maxAge = crash ? 12 : 22
+      const maxEyeDist = crash ? REACH + 300 : REACH + 450
+      for (let i = list.length - 1; i >= 0 && active.length < 8; i--) {
+        const s = list[i], age = t - s.t
+        if (age < 0 || age > maxAge) continue
+        if (Math.hypot(s.at[0] - eye[0], s.at[2] - eye[2]) > maxEyeDist) continue
+        const radius = crash
+          ? Math.max(160, Math.min(300, s.radius * 6 + 120))
+          : Math.max(220, Math.min(480, s.radius * 10 + 160))
+        active.push({ x: s.at[0], y: s.at[1], z: s.at[2], radius, age, crash })
+      }
+    }
+    collect(o.shocks, false)
+    collect(crashShocks, true)
+    let sig = ''
+    for (let i = 0; i < active.length; i++) {
+      const a = active[i]
+      sig += `${Math.round(a.x)},${Math.round(a.z)},${Math.round(a.radius)},${a.crash ? 1 : 0};`
+    }
+    if (sig !== lastFlowSig) {
+      lastFlowSig = sig
+      if (hasWasmFlow()) {
+        o.land.nav_flow_clear!()
+        if (active.length) {
+          if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
+            o.land.nav_rebake_budget(active[0].x, active[0].z, 4)
+          }
+          for (let i = 0; i < active.length; i++) {
+            const a = active[i]
+            o.land.nav_flow_add_threat!(a.x, a.y, a.z, a.radius)
+          }
+          flowSpansActive = o.land.nav_flow_build!()
+        } else {
+          flowSpansActive = 0
+        }
+      } else {
+        flowSpansActive = active.length ? 1 : 0
+      }
+    }
+    return active
+  }
+  const sampleFlow = (x: number, y: number, z: number, th: ActiveThreat): [number, number] => {
+    if (flowSpansActive > 0 && hasWasmFlow()) {
+      if (o.land.nav_flow_sample!(x, y, z) === 1) {
+        const v = new Float32Array(o.land.memory!.buffer, o.land.nav_flow_vec_ptr!(), 2)
+        if (Number.isFinite(v[0]) && Number.isFinite(v[1]) && Math.hypot(v[0], v[1]) > 0.1) {
+          return [v[0], v[1]]
+        }
+      }
+    }
+    const dx = x - th.x, dz = z - th.z, d = Math.hypot(dx, dz) || 1
+    return [dx / d, dz / d]
+  }
   let lastSeconds = 0
   let lastLod: LodStats = { ring1: 0, ring2: 0, ring3: 0, total: 0, capped: 0, suppressedTaken: 0, caps: { ...DEFAULT_RING_CAPS } }
   let macroAt = -99, macroRing3 = 0
@@ -664,6 +825,14 @@ export function street(o: {
     const dt = Math.max(0, Math.min(0.1, seconds - lastSeconds))
     lastSeconds = seconds
     wanted(eye)
+    if (o.shocks.length !== lastAwningShockLen) {
+      awningCache.clear()
+      lastAwningShockLen = o.shocks.length
+    }
+    if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
+      o.land.nav_rebake_budget(eye[0], eye[2], 2)
+    }
+    const activeThreats = syncPanicFlow(eye, t)
     const nowPerf = performance.now() / 1000
     const activeHorn = hornPulse && nowPerf - hornPulse.t < 2.6 ? hornPulse : null
     if (hornPulse && !activeHorn) hornPulse = null
@@ -706,18 +875,18 @@ export function street(o: {
       const l2 = dx * dx + dz * dz
       if (l2 > 16) {
         for (const c of nearCars) {
-          const t = ((c.x - eye[0]) * dx + (c.z - eye[2]) * dz) / l2
-          if (t <= 0.04 || t >= 0.96) continue
-          const perp = Math.hypot(c.x - (eye[0] + dx * t), c.z - (eye[2] + dz * t))
+          const tc = ((c.x - eye[0]) * dx + (c.z - eye[2]) * dz) / l2
+          if (tc <= 0.04 || tc >= 0.96) continue
+          const perp = Math.hypot(c.x - (eye[0] + dx * tc), c.z - (eye[2] + dz * tc))
           const rad = Math.max(c.model.long, c.model.wide) * 0.58 + 7
-          const rayY = eye[1] + (py + 19 - eye[1]) * t
+          const rayY = eye[1] + (py + 19 - eye[1]) * tc
           if (perp < rad && rayY < c.y + c.model.size[1] + 10) return null
         }
         // Also avoid signal-light posts standing directly between the eye and the speech pill (signal heads are pieces, not world_kind!).
         for (const h of headsShown) {
-          const t = ((h.x - eye[0]) * dx + (h.z - eye[2]) * dz) / l2
-          if (t <= 0.04 || t >= 0.96) continue
-          const perp = Math.hypot(h.x - (eye[0] + dx * t), h.z - (eye[2] + dz * t))
+          const th = ((h.x - eye[0]) * dx + (h.z - eye[2]) * dz) / l2
+          if (th <= 0.04 || th >= 0.96) continue
+          const perp = Math.hypot(h.x - (eye[0] + dx * th), h.z - (eye[2] + dz * th))
           if (perp < 11) return null
         }
       }
@@ -786,24 +955,47 @@ export function street(o: {
     }
     lastLod = { ...queried.stats, ring3: Math.max(queried.stats.ring3, macroRing3), total: queried.stats.ring1 + queried.stats.ring2 + Math.max(queried.stats.ring3, macroRing3) }
 
-    let filmersNow = 0, yellersNow = 0
-    let n = 0
-    crossing.length = 0
-    nearPeds.length = 0
+    const wasmRvo = hasWasmCrowd()
+    const rvoDt = dt > 1e-4 ? dt : 0.016
+    interface PedPrep {
+      ev: (typeof queried.people)[number]
+      st: CrowdAgentState | null
+      x: number; y: number; z: number; yaw: number
+      nomX: number; nomZ: number
+      prefVx: number; prefVz: number; maxSpeed: number; flags: number
+      mode: 'walk' | PanicRole | 'rain'
+      panicRole: PanicRole | null
+      panicThreat: ActiveThreat | null
+      panicEnv: number
+      crouched: boolean
+      rainSheltered: boolean
+      hornFlinch: number; hornTurn: number; hornToward: number; hornGlance: number
+      rtReact: { car: Car; env: number; toward: number; dist: number } | null
+      glance: number
+      rvoSlot: number
+    }
+    const preps: PedPrep[] = []
+    const rvoIndices: number[] = []
+    const cap = wasmRvo ? (o.land.crowd_capacity?.() ?? 512) : 0
+    const maxRvoPeds = wasmRvo ? Math.max(0, cap - 32) : 0
+    const panicCounts = { flee: 0, shelter: 0, film: 0, glance: 0 }
+    let rainShelteredNow = 0
+
+    // Pass 1: per-pedestrian micro-reactions, divergent blast roles, rain-awning shelter, and RVO preferred velocities.
     for (let idx = 0; idx < queried.people.length; idx++) {
       const ev = queried.people[idx]
-      const { seed, down, flinch, turned, frozen, lod } = ev
+      const { seed, down, flinch, turned, lod } = ev
       let x = ev.x, z = ev.z, y = ev.at[1], yaw = ev.yaw
       const hx = ev.hx, hz = ev.hz
       let hornFlinch = 0, hornTurn = 0, hornToward = 0, hornGlance = 0
       let rtReact: { car: Car; env: number; toward: number; dist: number } | null = null
-      let glance = 0
+      let hdx = 0, hdz = 0, rtdx = 0, rtdz = 0
+      let want = 0
 
-      // Ring 1 (<= 35 m): full detail — obstacle avoidance, horn & robotaxi micro-reactions, and head-turn gaze.
+      // Ring 1 (<= 35 m): horn, near-miss, stuck-robotaxi micro-reactions (and fallback `aside` when WASM RVO is absent).
       if (lod === 1) {
         const high = feetAt(x, z)
-        const want = bodies.length && !down ? aside(x, z, high, hx, hz, bodies) : 0
-        let hdx = 0, hdz = 0
+        if (!wasmRvo) want = bodies.length && !down ? aside(x, z, high, hx, hz, bodies) : 0
         if (activeHorn && !down) {
           const dx = x - activeHorn.x, dz = z - activeHorn.z, d = Math.hypot(dx, dz)
           if (d < 140 && Math.abs(high - activeHorn.y) < 30) {
@@ -845,9 +1037,7 @@ export function street(o: {
           }
         }
         // Crowd reaction to a stuck robotaxi blocking an intersection or narrow street:
-        // Sidewalk pedestrians within 28 m step out from shaded storefronts/awnings to the open curb edge, turn toward it, film with phones, or gesture & yell!
-        let rtdx = 0, rtdz = 0
-        if (stuckRT.length && !down && !flinch && !ev.crossing) {
+        if (stuckRT.length && !down && !flinch && !ev.crossing && !activeThreats.length) {
           let bestD = 280, bestC: Car | null = null
           for (const sc of stuckRT) {
             const d = Math.hypot(sc.x - x, sc.z - z)
@@ -868,7 +1058,6 @@ export function street(o: {
                 if (inLane(tx, tz, 12)) return false
                 const ix = Math.round(tx), iz = Math.round(tz), fy = feetAt(tx, tz)
                 if (Math.abs(fy - high) > 8) return false
-                // Check the actual pavement voxel UNDER their shoes (not top_at, which hits overhead awnings!).
                 const groundMat = o.land.world_kind(ix, fy - 1, iz) & 15
                 if (groundMat === 6 || groundMat === 12 || groundMat === 4) return false
                 return o.land.world_kind(ix, fy + 10, iz) === 0
@@ -893,16 +1082,325 @@ export function street(o: {
             }
           }
         }
-        let a = held.get(seed)
-        if (want || hdx || hdz || rtdx || rtdz || a) {
-          if (!a) held.set(seed, a = { x: 0, z: 0, at: seconds })
-          if (seconds - a.at > 1) { a.x = 0; a.z = 0 }
-          const tx = -hz * want + hdx + rtdx, tz = hx * want + hdz + rtdz, k = 1 - Math.exp(-dt * 9), dx = (tx - a.x) * k, dz = (tz - a.z) * k, d = Math.hypot(dx, dz), most = (hdx || hdz || rtdx || rtdz ? 18 : 11) * dt
-          a.x += d > most ? (dx * most) / d : dx; a.z += d > most ? (dz * most) / d : dz; a.at = seconds
-          x += a.x; z += a.z
-          y = (feetAt(x + hx * 2, z + hz * 2) + feetAt(x - hx * 2, z - hz * 2) + feetAt(x, z)) / 3
-          if (!want && !hdx && !hdz && !rtdx && !rtdz && Math.abs(a.x) + Math.abs(a.z) < 0.05) held.delete(seed)
+      }
+
+      const nomX = x + hdx + rtdx
+      const nomZ = z + hdz + rtdz
+      let st: CrowdAgentState | null = null
+      let mode: 'walk' | PanicRole | 'rain' = 'walk'
+      let panicRole: PanicRole | null = null
+      let panicThreat: ActiveThreat | null = null
+      let panicEnv = 0
+      let crouched = false
+      let rainSheltered = false
+      let prefVx = 0, prefVz = 0, maxSpeed = Math.max(16, ev.speed * 1.35)
+      let flags = CROWD_FLAG_IGNORE_WORLD
+      let rvoSlot = -1
+
+      // Ring 1 & Ring 2: persistent crowd state for WASM RVO2 avoidance, panic flow fields, divergent reactions & rain-awning shelter.
+      if (lod <= 2) {
+        st = crowdAgents.get(seed) ?? null
+        const stale = !st || seconds - st.seen > 1.5 || seconds < st.seen - 0.5 || Math.hypot(st.x - nomX, st.z - nomZ) > 450
+        if (stale) {
+          st = {
+            x: nomX,
+            z: nomZ,
+            y,
+            vx: ev.walking > 0.1 ? hx * ev.speed : 0,
+            vz: ev.walking > 0.1 ? hz * ev.speed : 0,
+            seen: seconds,
+            mode: 'walk',
+          }
+          crowdAgents.set(seed, st)
+        } else {
+          st!.seen = seconds
         }
+
+        // Check active nearby blast/crash threat for divergent crowd reactions.
+        if (activeThreats.length && down <= 0.3) {
+          let bestTh: ActiveThreat | null = null, bestRatio = 1
+          for (let ti = 0; ti < activeThreats.length; ti++) {
+            const th = activeThreats[ti]
+            const d = Math.hypot(st!.x - th.x, st!.z - th.z)
+            if (d < th.radius && Math.abs(st!.y - th.y) < 80) {
+              const ratio = d / th.radius
+              if (ratio < bestRatio) { bestRatio = ratio; bestTh = th }
+            }
+          }
+          if (bestTh) {
+            panicThreat = bestTh
+            const maxAge = bestTh.crash ? 12 : 22
+            panicEnv = ease(bestTh.age / 0.25) * (1 - ease((bestTh.age - (maxAge - 3)) / 3))
+            const u = chance(seed, 513)
+            panicRole = u < 0.45 ? 'flee' : u < 0.65 ? 'shelter' : u < 0.90 ? 'film' : 'glance'
+            mode = panicRole
+            panicCounts[panicRole]++
+            st!.panicAt ??= seconds
+
+            if (panicRole === 'flee') {
+              const [fx, fz] = sampleFlow(st!.x, st!.y, st!.z, bestTh)
+              maxSpeed = Math.max(25, ev.speed * 1.7)
+              prefVx = fx * maxSpeed
+              prefVz = fz * maxSpeed
+              // Use cached NavTile wall/crater awareness while fleeing blasts.
+              flags = flowSpansActive > 0 ? 0 : CROWD_FLAG_IGNORE_WORLD
+            } else if (panicRole === 'shelter') {
+              if (st!.coverSpot === undefined) {
+                st!.coverSpot = findAwningNear(Math.round(st!.x), Math.round(st!.y), Math.round(st!.z))
+              }
+              if (st!.coverSpot) {
+                const cdx = st!.coverSpot.x - st!.x, cdz = st!.coverSpot.z - st!.z, cd = Math.hypot(cdx, cdz)
+                if (cd > 5) {
+                  maxSpeed = Math.max(20, ev.speed * 1.4)
+                  const spd = Math.min(maxSpeed, cd / rvoDt)
+                  prefVx = (cdx / cd) * spd
+                  prefVz = (cdz / cd) * spd
+                } else {
+                  prefVx = 0; prefVz = 0; maxSpeed = 10; crouched = true
+                }
+              } else {
+                prefVx = 0; prefVz = 0; maxSpeed = 10; crouched = true
+              }
+            } else if (panicRole === 'film') {
+              const fdx = st!.x - bestTh.x, fdz = st!.z - bestTh.z, fd = Math.hypot(fdx, fdz) || 1
+              if (fd < 72) {
+                maxSpeed = 18
+                prefVx = (fdx / fd) * 16
+                prefVz = (fdz / fd) * 16
+              } else {
+                prefVx = 0; prefVz = 0; maxSpeed = 10
+              }
+            } else {
+              // 'glance': startle/freeze briefly for 3.5s, then resume walking while glancing back.
+              if (bestTh.age < 3.5) {
+                prefVx = 0; prefVz = 0; maxSpeed = 10
+              } else {
+                const routeVx = !ev.frozen && ev.walking > 0.05 ? hx * ev.speed : 0
+                const routeVz = !ev.frozen && ev.walking > 0.05 ? hz * ev.speed : 0
+                prefVx = routeVx + (nomX - st!.x) * 2.5
+                prefVz = routeVz + (nomZ - st!.z) * 2.5
+              }
+            }
+          } else {
+            st!.coverSpot = undefined
+            st!.panicAt = undefined
+          }
+        } else {
+          st!.coverSpot = undefined
+          st!.panicAt = undefined
+        }
+
+        // Rain-awning shelter seeking when rain > 0.3 (Ring 1 & Ring 2, non-panicking, off crosswalks).
+        if (!panicRole && rain > 0.3 && down <= 0.3 && !ev.crossing && ev.kind !== 1 && !rtReact && chance(seed, 521) < 0.82) {
+          if (st!.rainSpot === undefined) {
+            const baseAwning = findAwningNear(Math.round(nomX), Math.round(y), Math.round(nomZ))
+            if (baseAwning) {
+              // Deterministic small spread under wide awnings so sheltering crowds distribute naturally.
+              const ang = chance(seed, 523) * Math.PI * 2
+              const offR = 3 + chance(seed, 524) * 7
+              const sx = Math.round(baseAwning.x + Math.cos(ang) * offR)
+              const sz = Math.round(baseAwning.z + Math.sin(ang) * offR)
+              const sy = !inLane(sx, sz, 6) ? hasAwningAt(sx, sz, baseAwning.y) : null
+              st!.rainSpot = sy !== null ? { x: sx, z: sz, y: sy } : baseAwning
+            } else {
+              st!.rainSpot = null
+            }
+          }
+          if (st!.rainSpot) {
+            mode = 'rain'
+            const adx = st!.rainSpot.x - st!.x, adz = st!.rainSpot.z - st!.z, ad = Math.hypot(adx, adz)
+            if (ad > 6 && hasAwningAt(st!.x, st!.z, st!.y) === null) {
+              maxSpeed = Math.max(16, ev.speed * 1.25)
+              const spd = Math.min(maxSpeed, ad / rvoDt)
+              prefVx = (adx / ad) * spd
+              prefVz = (adz / ad) * spd
+            } else {
+              prefVx = 0; prefVz = 0; maxSpeed = 10
+              rainSheltered = true
+              rainShelteredNow++
+            }
+          }
+        } else if (rain <= 0.3) {
+          st!.rainSpot = undefined
+        }
+
+        // Standard route tracking with smooth pull back onto sidewalk after local avoidance.
+        if (mode === 'walk') {
+          if (down > 0.3) {
+            prefVx = 0; prefVz = 0; maxSpeed = 0; flags = CROWD_FLAG_STATIC
+          } else {
+            const routeVx = !ev.frozen && !rtReact && ev.walking > 0.05 ? hx * ev.speed : 0
+            const routeVz = !ev.frozen && !rtReact && ev.walking > 0.05 ? hz * ev.speed : 0
+            const pull = ev.crossing || ev.kind === 1 ? 5.0 : 3.2
+            prefVx = routeVx + (nomX - st!.x) * pull
+            prefVz = routeVz + (nomZ - st!.z) * pull
+            maxSpeed = Math.max(16, ev.speed * 1.4)
+          }
+        }
+
+        // When frame dt == 0 (static snapshot), zero preferred velocity so RVO still resolves overlaps without forward drift.
+        if (dt <= 1e-4 && (flags & CROWD_FLAG_STATIC) === 0) {
+          prefVx = 0; prefVz = 0
+        }
+
+        st!.mode = mode
+        if (wasmRvo && rvoIndices.length < maxRvoPeds) {
+          rvoSlot = rvoIndices.length
+          rvoIndices.push(preps.length)
+        } else if (!wasmRvo) {
+          // Graceful non-WASM fallback: smooth kinematic integration for panic/rain, existing `held` smoothing for normal walk.
+          if (mode !== 'walk') {
+            if (dt > 1e-4) {
+              const pLen = Math.hypot(prefVx, prefVz)
+              const clamped = pLen > maxSpeed && pLen > 1e-4 ? maxSpeed / pLen : 1
+              st!.vx = prefVx * clamped; st!.vz = prefVz * clamped
+              st!.x += st!.vx * dt; st!.z += st!.vz * dt
+              st!.y = feetAt(st!.x, st!.z)
+            }
+            x = st!.x; z = st!.z; y = st!.y
+          } else if (lod === 1) {
+            let a = held.get(seed)
+            if (want || hdx || hdz || rtdx || rtdz || a) {
+              if (!a) held.set(seed, a = { x: 0, z: 0, at: seconds })
+              if (seconds - a.at > 1) { a.x = 0; a.z = 0 }
+              const tx = -hz * want + hdx + rtdx, tz = hx * want + hdz + rtdz, k = 1 - Math.exp(-dt * 9), dx = (tx - a.x) * k, dz = (tz - a.z) * k, d = Math.hypot(dx, dz), most = (hdx || hdz || rtdx || rtdz ? 18 : 11) * dt
+              a.x += d > most ? (dx * most) / d : dx; a.z += d > most ? (dz * most) / d : dz; a.at = seconds
+              x += a.x; z += a.z
+              y = (feetAt(x + hx * 2, z + hz * 2) + feetAt(x - hx * 2, z - hz * 2) + feetAt(x, z)) / 3
+              if (!want && !hdx && !hdz && !rtdx && !rtdz && Math.abs(a.x) + Math.abs(a.z) < 0.05) held.delete(seed)
+            }
+            st!.x = x; st!.z = z; st!.y = y
+          } else {
+            st!.x = x; st!.z = z; st!.y = y
+          }
+        }
+      }
+
+      preps.push({
+        ev, st, x, y, z, yaw, nomX, nomZ, prefVx, prefVz, maxSpeed, flags,
+        mode, panicRole, panicThreat, panicEnv, crouched, rainSheltered,
+        hornFlinch, hornTurn, hornToward, hornGlance, rtReact, glance: 0, rvoSlot,
+      })
+    }
+
+    // Batched WASM ORCA/RVO2 step across all Ring 1 & Ring 2 pedestrians + player/vehicle static obstacle agents.
+    let rvoStepMs = 0
+    const rvoPedCount = rvoIndices.length
+    if (wasmRvo && rvoPedCount > 0) {
+      o.land.crowd_clear_obstacles?.()
+      const mem = o.land.memory!
+      const ptr = o.land.crowd_agents_ptr!()
+      let soa = new Float32Array(mem.buffer, ptr, cap * 10)
+      for (let i = 0; i < rvoPedCount; i++) {
+        const pr = preps[rvoIndices[i]], st = pr.st!
+        soa[CROWD_POS_X * cap + i] = st.x
+        soa[CROWD_POS_Z * cap + i] = st.z
+        soa[CROWD_POS_Y * cap + i] = st.y
+        soa[CROWD_VEL_X * cap + i] = st.vx
+        soa[CROWD_VEL_Z * cap + i] = st.vz
+        soa[CROWD_PREF_VX * cap + i] = pr.prefVx
+        soa[CROWD_PREF_VZ * cap + i] = pr.prefVz
+        soa[CROWD_RADIUS * cap + i] = PED_RVO_RADIUS
+        soa[CROWD_MAX_SPEED * cap + i] = pr.maxSpeed
+        soa[CROWD_FLAGS * cap + i] = pr.flags
+      }
+      let totalSlots = rvoPedCount
+      // Include player & world bodies as kinematic/static obstacle agents so pedestrians glide cleanly around them.
+      for (let bi = 0; bi < bodies.length && totalSlots < cap; bi++) {
+        const b = bodies[bi]
+        if (Math.hypot(b[0] - eye[0], b[2] - eye[2]) > 1160) continue
+        soa[CROWD_POS_X * cap + totalSlots] = b[0]
+        soa[CROWD_POS_Z * cap + totalSlots] = b[2]
+        soa[CROWD_POS_Y * cap + totalSlots] = b[1]
+        soa[CROWD_VEL_X * cap + totalSlots] = 0
+        soa[CROWD_VEL_Z * cap + totalSlots] = 0
+        soa[CROWD_PREF_VX * cap + totalSlots] = 0
+        soa[CROWD_PREF_VZ * cap + totalSlots] = 0
+        soa[CROWD_RADIUS * cap + totalSlots] = 3.6
+        soa[CROWD_MAX_SPEED * cap + totalSlots] = 0
+        soa[CROWD_FLAGS * cap + totalSlots] = CROWD_FLAG_STATIC
+        totalSlots++
+      }
+      // Include nearby vehicles as static/kinematic obstacle agents within Ring 1 + margin.
+      const addCarObst = (c: Car) => {
+        if (totalSlots >= cap) return
+        if (Math.hypot(c.x - eye[0], c.z - eye[2]) > 430) return
+        soa[CROWD_POS_X * cap + totalSlots] = c.x
+        soa[CROWD_POS_Z * cap + totalSlots] = c.z
+        soa[CROWD_POS_Y * cap + totalSlots] = c.y
+        soa[CROWD_VEL_X * cap + totalSlots] = Math.cos(c.heading) * c.v
+        soa[CROWD_VEL_Z * cap + totalSlots] = Math.sin(c.heading) * c.v
+        soa[CROWD_PREF_VX * cap + totalSlots] = 0
+        soa[CROWD_PREF_VZ * cap + totalSlots] = 0
+        soa[CROWD_RADIUS * cap + totalSlots] = Math.max(8, c.model.wide * 0.52)
+        soa[CROWD_MAX_SPEED * cap + totalSlots] = 0
+        soa[CROWD_FLAGS * cap + totalSlots] = CROWD_FLAG_STATIC
+        totalSlots++
+      }
+      for (let ci = 0; ci < traffic.length && totalSlots < cap; ci++) addCarObst(traffic[ci])
+      for (const pc of parked.values()) { if (totalSlots >= cap) break; addCarObst(pc) }
+
+      const tRvo0 = performance.now()
+      o.land.crowd_step!(totalSlots, rvoDt, 1.4)
+      rvoStepMs = performance.now() - tRvo0
+
+      soa = new Float32Array(mem.buffer, o.land.crowd_agents_ptr!(), cap * 10)
+      for (let i = 0; i < rvoPedCount; i++) {
+        const pr = preps[rvoIndices[i]], st = pr.st!
+        const nx = soa[CROWD_POS_X * cap + i], nz = soa[CROWD_POS_Z * cap + i]
+        const vx = soa[CROWD_VEL_X * cap + i], vz = soa[CROWD_VEL_Z * cap + i]
+        if (Number.isFinite(nx) && Number.isFinite(nz)) {
+          st.x = nx; st.z = nz
+          st.vx = Number.isFinite(vx) ? vx : 0
+          st.vz = Number.isFinite(vz) ? vz : 0
+          st.y = feetAt(st.x, st.z)
+        }
+        pr.x = st.x; pr.z = st.z
+        pr.y = pr.ev.lod === 1
+          ? (feetAt(pr.x + pr.ev.hx * 2, pr.z + pr.ev.hz * 2) + feetAt(pr.x - pr.ev.hx * 2, pr.z - pr.ev.hz * 2) + st.y) / 3
+          : st.y
+        if (pr.mode === 'rain' && !pr.rainSheltered && st.rainSpot && Math.hypot(st.rainSpot.x - st.x, st.rainSpot.z - st.z) <= 6) {
+          pr.rainSheltered = true
+          rainShelteredNow++
+        }
+      }
+    }
+
+    crowdStats.rvoAgents = rvoPedCount
+    crowdStats.rvoStepMs = rvoStepMs
+    crowdStats.flowActive = flowSpansActive > 0 && activeThreats.length > 0
+    crowdStats.panicRoles = panicCounts
+    crowdStats.rainSheltered = rainShelteredNow
+
+    // Pass 2: finalize orientation, gaze, animation state, and emit Person records.
+    let filmersNow = 0, yellersNow = 0
+    let n = 0
+    crossing.length = 0
+    nearPeds.length = 0
+    for (let idx = 0; idx < preps.length; idx++) {
+      const pr = preps[idx]
+      const ev = pr.ev
+      const { seed, down, flinch, turned, frozen, lod } = ev
+      const { x, y, z, rtReact, hornFlinch, hornTurn, hornToward, hornGlance, panicRole, panicThreat, panicEnv } = pr
+      let yaw = pr.yaw
+      let glance = 0
+
+      if (panicRole && panicThreat) {
+        const towardThreat = Math.atan2(panicThreat.x - x, -(panicThreat.z - z))
+        if (panicRole === 'flee' && pr.st && Math.hypot(pr.st.vx, pr.st.vz) > 1.5) {
+          yaw = Math.atan2(pr.st.vx, -pr.st.vz)
+        } else if (panicRole === 'film') {
+          let by = towardThreat - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2
+          yaw += by * Math.min(1, panicEnv * 1.15)
+        } else if (panicRole === 'shelter' && pr.st && Math.hypot(pr.st.vx, pr.st.vz) > 1.5) {
+          yaw = Math.atan2(pr.st.vx, -pr.st.vz)
+        } else if (panicRole === 'glance') {
+          let to = towardThreat - yaw; to -= Math.round(to / (Math.PI * 2)) * Math.PI * 2
+          glance = Math.max(-1, Math.min(1, to)) * panicEnv
+        }
+      } else if (pr.mode === 'rain' && pr.st && Math.hypot(pr.st.vx, pr.st.vz) > 1.5) {
+        yaw = Math.atan2(pr.st.vx, -pr.st.vz)
+      } else if (lod === 1) {
         if (!turned) {
           if (rtReact) { let by = rtReact.toward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * Math.min(1, rtReact.env * 1.15) }
           else if (hornTurn) { let by = hornToward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * hornTurn }
@@ -925,22 +1423,44 @@ export function street(o: {
         }
       }
 
+      const actualSpeed = pr.st ? Math.hypot(pr.st.vx, pr.st.vz) : ev.speed
       const p = (shown[n] ??= { at: [0, 0, 0], yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }
       const at = (p.at as [number, number, number])
       at[0] = x; at[1] = y; at[2] = z
       p.yaw = yaw; p.seed = seed
       p.stride = ev.stride
-      p.walking = frozen || rtReact ? 0 : ev.walking
-      p.pace = ev.speed
-      p.running = ev.speed > 16.5 ? Math.min(1, (ev.speed - 16.5) / 8) : 0
+      let walkingVal = frozen || rtReact ? 0 : ev.walking
+      let paceVal = ev.speed
+      let activityVal = ev.activity
+      if (panicRole === 'flee') {
+        walkingVal = 1
+        paceVal = Math.max(24, actualSpeed)
+        activityVal = 'fleeing'
+      } else if (panicRole === 'shelter') {
+        walkingVal = pr.crouched ? 0 : (actualSpeed > 2 ? 1 : 0)
+        paceVal = Math.max(ev.speed, actualSpeed)
+        activityVal = 'sheltering'
+      } else if (panicRole === 'film') {
+        walkingVal = actualSpeed > 2 ? 0.6 : 0
+        activityVal = 'filming_incident'
+      } else if (panicRole === 'glance') {
+        walkingVal = panicThreat && panicThreat.age < 3.5 ? 0 : ev.walking
+        activityVal = 'startled'
+      } else if (pr.mode === 'rain') {
+        walkingVal = pr.rainSheltered ? 0 : (actualSpeed > 1.5 ? 1 : 0)
+        activityVal = pr.rainSheltered ? 'sheltering' : 'seeking_shelter'
+      }
+      p.walking = walkingVal
+      p.pace = paceVal
+      p.running = paceVal > 16.5 && walkingVal > 0.2 ? Math.min(1, (paceVal - 16.5) / 8) : 0
       // Ring 3 skips phone reading & micro-animations; Ring 1 & 2 show posture/reading/umbrella cleanly.
-      p.reading = lod <= 2 && !rtReact && ev.still && ev.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((ev.stood - 2.5) / 1.2) : 0
-      p.filming = 0
+      p.reading = lod <= 2 && !rtReact && !panicRole && ev.still && ev.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((ev.stood - 2.5) / 1.2) : 0
+      p.filming = panicRole === 'film' ? panicEnv : 0
       p.robotaxiId = rtReact?.car.id
-      p.move = undefined
+      p.move = panicRole === 'shelter' && pr.crouched ? { move: NAMED_MOVES.duck, t: Math.max(0.2, seconds - (pr.st?.panicAt ?? seconds)) } : undefined
       p.name = undefined
       p.says = undefined
-      if (rtReact) {
+      if (rtReact && !panicRole) {
         const svc = serviceOf(rtReact.car)
         const isFilmer = chance(seed, 71) < 0.46
         const phaseIdx = Math.floor((nowPerf + chance(seed, 72) * 10) / 5.5)
@@ -973,11 +1493,18 @@ export function street(o: {
           }
         }
       }
-      p.umbrella = ev.umbrella; p.time = seconds; p.flinch = Math.max(flinch, hornFlinch); p.down = down
+      // Fold umbrella while dryly sheltered under a geometric overhead awning.
+      p.umbrella = pr.rainSheltered ? false : ev.umbrella
+      p.time = seconds
+      const panicFlinch = panicRole === 'shelter' ? 0.75 * panicEnv : panicRole === 'glance' ? 0.65 * panicEnv : panicRole === 'flee' ? 0.35 * panicEnv : 0
+      p.flinch = Math.max(flinch, hornFlinch, panicFlinch)
+      p.down = down
       p.glance = glance
-      const q = p as { waiting?: boolean; sig?: number; cdx?: number; cdz?: number; lod?: number; archetype?: string; activity?: string; phase?: string }
+      const q = p as { waiting?: boolean; sig?: number; cdx?: number; cdz?: number; lod?: number; archetype?: string; activity?: string; phase?: string; panicRole?: PanicRole; sheltered?: boolean }
       q.waiting = ev.waiting; q.sig = ev.sig; q.cdx = ev.cdx; q.cdz = ev.cdz
-      q.lod = lod; q.archetype = ev.archetype; q.activity = ev.activity; q.phase = ev.phase
+      q.lod = lod; q.archetype = ev.archetype; q.activity = activityVal; q.phase = ev.phase
+      q.panicRole = panicRole ?? undefined
+      q.sheltered = pr.rainSheltered || undefined
       if (ev.crossing || ev.kind === 1) crossing.push([x, z])
       else if (lod === 1 && !down) nearPeds.push([x, z])
       n++
@@ -986,6 +1513,7 @@ export function street(o: {
     rtFilmersStat = filmersNow
     rtYellersStat = yellersNow
     if (held.size > 600) for (const [seed, a] of held) if (seconds - a.at > 5) held.delete(seed)
+    if (crowdAgents.size > 400) for (const [seed, st] of crowdAgents) if (seconds - st.seen > 4) crowdAgents.delete(seed)
     for (const [seed, watch] of watching) if (seconds - watch.seen > 5) watching.delete(seed)
     peopleMs += (performance.now() - t0 - peopleMs) * 0.1
     return shown
@@ -3690,7 +4218,10 @@ export function street(o: {
       simTime = 0
       aiStats.laneChanges = 0; aiStats.detours = 0; aiStats.sirenYields = 0; aiStats.activeEmergency = 0; aiStats.deadlocksResolved = 0
       detourCache.map.clear(); nearMissCues.length = 0; pedNearMissCool.clear(); activeCongested.clear(); activeBlockedSig = ''
-      watching.clear()
+      watching.clear(); crowdAgents.clear(); awningCache.clear(); lastFlowSig = ''; flowSpansActive = 0; lastAwningShockLen = o.shocks.length
+      crowdStats.rvoAgents = 0; crowdStats.rvoStepMs = 0; crowdStats.flowActive = false
+      crowdStats.panicRoles = { flee: 0, shelter: 0, film: 0, glance: 0 }; crowdStats.rainSheltered = 0
+      if (o.land.nav_flow_clear) o.land.nav_flow_clear()
       for (const depot of depots) { depot.inGateLift = 0; depot.outGateLift = 0; depot.lastSpawn = -99; depot.arrivals = 0; depot.departures = 0 }
       crashCountStat = 0; nearMissCountStat = 0; hornResponsesStat = 0; sentAwayStat = 0; brokeStat = 0
       for (const c of living) hide(c)
@@ -3871,6 +4402,15 @@ export function street(o: {
         sirenYields: aiStats.sirenYields,
         activeEmergency: traffic.filter((c) => !!(c.emergency && c.sirenActive)).length,
         deadlocksResolved: aiStats.deadlocksResolved,
+      }
+    },
+    crowdAiStats() {
+      return {
+        rvoAgents: crowdStats.rvoAgents,
+        rvoStepMs: Math.round(crowdStats.rvoStepMs * 1000) / 1000,
+        flowActive: crowdStats.flowActive,
+        panicRoles: { ...crowdStats.panicRoles },
+        rainSheltered: crowdStats.rainSheltered,
       }
     },
     spawnEmergency(opts = {}) {
