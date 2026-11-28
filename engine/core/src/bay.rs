@@ -8,6 +8,7 @@
 //! The frame: a cell is 10 cm; x is east and z is south from 500,000 m east, 4,250,000 m north of UTM zone 10N;
 //! y is up from the bay's water. Sources and licences: .agents/skills/bay-sources.
 
+use crate::bridges::{self, BridgePier, BridgeSegEval, Bridges, ColumnBridges};
 use crate::hash::{hash, hash3};
 use crate::heroes;
 use crate::kinds::*;
@@ -24,6 +25,7 @@ thread_local! {
     static LANDMARKS: Cell<bool> = const { Cell::new(true) };
     static MARKS: RefCell<Marks> = RefCell::new(Marks::default());
     static KERBS: RefCell<Kerbs> = RefCell::new(Kerbs::default());
+    static BRIDGES: RefCell<Bridges> = RefCell::new(Bridges::default());
     static SECTOR_COLS: RefCell<SectorColCache> = RefCell::new(SectorColCache::default());
     static SOLID_CACHE: RefCell<Box<[SolidEntry; 512]>> = RefCell::new(Box::new([SolidEntry::EMPTY; 512]));
     static FOOTING_CACHE: RefCell<Box<[FootingEntry; 1024]>> = RefCell::new(Box::new([FootingEntry::EMPTY; 1024]));
@@ -72,6 +74,8 @@ struct SectorColCache {
     epoch: u32,
     cols: Vec<OwnedColumn>,
     kerbs: Vec<KerbEval>,
+    bridges: Vec<BridgeSegEval>,
+    piers: Vec<BridgePier>,
 }
 
 /// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
@@ -581,6 +585,24 @@ pub fn kerbs() -> i32 {
     n_polys as i32
 }
 
+/// Takes surveyed elevated bridges, viaducts, ramps and concrete piers in the room (`room`; sf/bridges.mjs, #228).
+/// Returns span count, or -1 on invalid bytes (leaving any previously loaded bridges intact).
+pub fn bridges() -> i32 {
+    let bytes = ROOM.with_borrow_mut(std::mem::take);
+    let Some(parsed) = Bridges::parse(&bytes) else {
+        return -1;
+    };
+    let n = parsed.span_count() as i32;
+    BRIDGES.with_borrow_mut(|held| *held = parsed);
+    bump_gen();
+    n
+}
+
+/// Elevated bridge deck top cell (`top_g + 1`, matching `feet_at`) at `(x, z)` for OSM `layer`, or `i32::MIN`.
+pub fn bridge_y(x: i32, z: i32, layer: i32) -> i32 {
+    BRIDGES.with_borrow(|b| b.deck_y_for_layer(x, z, layer))
+}
+
 /// A landmark (#423, heroes.rs) standing in the world: which rule, where its frame's middle and foot are in cells,
 /// which way its `u` runs in the world's x and z, and the square of the world's cells it keeps within. The page says
 /// where each stands (#450, `hero`), every core alike, so that no tile is cut again for one.
@@ -816,6 +838,7 @@ pub fn least_step(size: i32) -> i32 {
 pub fn clear() {
     PACKS.with_borrow_mut(|p| p.clear());
     KERBS.with_borrow_mut(|k| *k = Kerbs::default());
+    BRIDGES.with_borrow_mut(|b| *b = Bridges::default());
     ON.set(false);
     bump_gen();
 }
@@ -2135,6 +2158,30 @@ impl Pack {
         a + (b - a) * u + (c + (d - c) * u - (a + (b - a) * u)) * v
     }
 
+    /// Local squared terrain slope `(dz/dx)^2 + (dz/dy)^2` from the 1 m bare-earth DEM grid, used to prevent
+    /// steep highway cut-slopes & bridge abutment cliffs (>45% grade) from rendering as melted asphalt or bright white yard concrete.
+    #[inline]
+    fn ground_slope_sq(&self, x: i32, z: i32) -> f32 {
+        if self.gstep <= 0 || self.gstep > 20 || self.gw < 3 {
+            return 0.0;
+        }
+        let i = ((x - self.gx0) / self.gstep).clamp(1, self.gw - 2);
+        let j = ((z - self.gz0) / self.gstep).clamp(1, self.gw - 2);
+        let w = self.gw as usize;
+        let idx = j as usize * w + i as usize;
+        let l = self.ground[idx - 1] as f32;
+        let r = self.ground[idx + 1] as f32;
+        let u = self.ground[idx - w] as f32;
+        let d = self.ground[idx + w] as f32;
+        if l <= BED as f32 || r <= BED as f32 || u <= BED as f32 || d <= BED as f32 {
+            return 0.0;
+        }
+        let span = (2 * self.gstep) as f32;
+        let gx = (r - l) / span;
+        let gz = (d - u) / span;
+        gx * gx + gz * gz
+    }
+
     /// The sample of what stands that a column is in.
     fn cell(&self, x: i32, z: i32) -> Option<usize> {
         if self.tstep == 0 {
@@ -2971,6 +3018,7 @@ struct OwnedColumn {
     fixtures: Vec<FixtureSpan>,
     heroes: [Option<(Hero, f32, f32)>; 2],
     hero_n: u8,
+    bridges: ColumnBridges,
 }
 
 enum OwnedWhat {
@@ -3001,6 +3049,7 @@ impl OwnedColumn {
             fixtures: Vec::new(),
             heroes: self.heroes,
             hero_n: self.hero_n,
+            bridges: self.bridges,
         }
     }
 }
@@ -3030,12 +3079,55 @@ fn heroes_from_slice(heroes: &[Hero], x: i32, z: i32, size: i32) -> ([Option<(He
     (out, n)
 }
 
-fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], marks: &[[i32; 4]], kerbs: &[KerbEval], x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
+/// Reclassify unnavigable steep highway embankments & bridge abutment cliffs (>45% DEM slope) within motorway
+/// bridge/viaduct corridors so sheer cut-slopes render cleanly as weathered architectural concrete retaining walls
+/// instead of melted asphalt, glaring white yard concrete, or patchy earth flecks — while leaving city neighborhood
+/// hills (Telegraph Hill, Nob Hill, Russian Hill) and their smooth quarter-cell ramps completely untouched (#228).
+#[inline]
+fn apply_steep_slope(p: &Pack, x: i32, z: i32, class: u8, kerb_sdf: Option<f32>, near_motorway: bool, ground: &mut Kind, kerb: &mut i32) {
+    if !near_motorway {
+        return;
+    }
+    let slope_sq = p.ground_slope_sq(x, z);
+    if slope_sq > 0.2025 {
+        match class & 7 {
+            ROAD if kerb_sdf.is_none() => {
+                *ground = kind(CONCRETE, grey(7));
+                *kerb = 0;
+                return;
+            }
+            YARD | PAVEMENT if kerb_sdf.is_none() && slope_sq > 0.2304 => {
+                *ground = kind(CONCRETE, grey(6));
+                *kerb = 0;
+                return;
+            }
+            _ => {}
+        }
+    }
+    // Unkerbed `YARD` strips directly abutting `ROAD` in motorway corridors (e.g. grounded I-280/US-101 shoulders & medians):
+    // tone raw bright aerial tint down to weathered highway shoulder concrete (`grey(8)`), leaving courtyards & plazas untouched.
+    if (class & 7) == YARD && kerb_sdf.is_none() && p.tstep > 0 && p.tstep <= 10 {
+        let mut adj_road = false;
+        let mut adj_pave = false;
+        for (ox, oz) in [(35, 0), (-35, 0), (0, 35), (0, -35), (70, 0), (-70, 0), (0, 70), (0, -70)] {
+            let c = p.surface(x + ox, z + oz).0 & 7;
+            if c == ROAD { adj_road = true; }
+            else if c == PAVEMENT { adj_pave = true; }
+        }
+        if adj_road && !adj_pave {
+            *ground = kind(CONCRETE, grey(8));
+        }
+    }
+}
+
+fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], marks: &[[i32; 4]], kerbs: &[KerbEval], bridges_slice: &[BridgeSegEval], piers_slice: &[BridgePier], near_motorway: bool, x: i32, z: i32, size: i32, least: i32) -> OwnedColumn {
     let (heroes, hero_n) = heroes_from_slice(heroes_slice, x, z, size);
+    let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+    let bridges = bridges::eval_slice(bridges_slice, piers_slice, x as f32 + half, z as f32 + half, size);
     let picked = pack_indices.iter().copied().find(|&pi| packs[pi].gstep >= least && packs[pi].holds(x, z))
         .or_else(|| pack_indices.iter().copied().find(|&pi| packs[pi].holds(x, z)));
     let Some(pi) = picked else {
-        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, curb: None, fixtures: Vec::new(), what: OwnedWhat::Open, heroes, hero_n };
+        return OwnedColumn { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, curb: None, fixtures: Vec::new(), what: OwnedWhat::Open, heroes, hero_n, bridges };
     };
     let p = &packs[pi];
     let tread = tread_ground(&heroes[..hero_n as usize]);
@@ -3074,6 +3166,9 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
     };
+    if tread.is_none() && hero_n == 0 {
+        apply_steep_slope(p, x, z, class, kerb_sdf, near_motorway, &mut ground, &mut kerb);
+    }
     let what = match p.building_idx(x, z) {
         Some((bi, probe)) if probe.inside => {
             let b = &p.buildings[bi];
@@ -3189,9 +3284,25 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
         },
         _ => OwnedWhat::Open,
     };
+    let what = match what {
+        // Clip ground tree crowns & trunks so foliage never pokes up through an elevated highway bridge deck (#228).
+        OwnedWhat::Crown { foot, top, trunk, tint, edge } if bridges.has_deck() => {
+            if let Some(soffit) = bridges.lowest_soffit_above(g) {
+                let cap = soffit - 4;
+                if foot >= cap || cap <= g + 6 {
+                    OwnedWhat::Open
+                } else {
+                    OwnedWhat::Crown { foot, top: top.min(cap), trunk: trunk.map(|tr| tr.min(cap)), tint, edge }
+                }
+            } else {
+                OwnedWhat::Open
+            }
+        }
+        other => other,
+    };
     let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(.., false) | OwnedWhat::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
-    let curb = if ramped {
+    let curb = if ramped && !bridges.has_deck() {
         kerb_sdf.filter(|&d| d.abs() < 0.78).map(|_| {
             let base_top4 = ((ground_height + 1.0) * 4.0).round() as i32;
             let road_kind = kind(ASPHALT, asphalt.or_else(|| p.nearby_asphalt(x, z).map(road_grey)).unwrap_or(OWN));
@@ -3200,7 +3311,11 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
     } else {
         None
     };
-    OwnedColumn { g, road_top4, ground, kerb, curb, fixtures: p.fixture_spans(x, z, size), what, heroes, hero_n }
+    let mut fixtures = p.fixture_spans(x, z, size);
+    if let Some(soffit) = bridges.lowest_soffit_above(g) {
+        fixtures.retain(|f| f.high < soffit - 2);
+    }
+    OwnedColumn { g, road_top4, ground, kerb, curb, fixtures, what, heroes, hero_n, bridges }
 }
 
 /// Fast single-cell kind query for unedited Bay columns (#73). Uses a 512-entry direct-mapped cache for simple open columns,
@@ -3223,7 +3338,7 @@ pub fn kind_single(x: i32, y: i32, z: i32) -> Kind {
     }
     PACKS.with_borrow(|packs| {
         let (c, skipped_kerbs) = column_for_min_y(packs, x, z, 1, Some(y));
-        if !skipped_kerbs && matches!(c.what, What::Open) && c.hero_n == 0 {
+        if !skipped_kerbs && matches!(c.what, What::Open) && c.hero_n == 0 && c.bridges.is_empty() {
             let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
             SOLID_CACHE.with_borrow_mut(|cache| {
                 cache[idx] = SolidEntry { x, z, epoch, top: c.g + c.kerb, g: c.g, ground: c.ground, ceil };
@@ -3262,7 +3377,7 @@ pub(crate) fn nav_barrier_column(x: i32, z: i32, y_hi: i32) -> u8 {
     }
     PACKS.with_borrow(|packs| {
         let (c, skipped_kerbs) = column_for_min_y(packs, x, z, 1, Some(y_hi + 3));
-        if matches!(c.what, What::Open) && c.hero_n == 0 {
+        if matches!(c.what, What::Open) && c.hero_n == 0 && c.bridges.is_empty() {
             let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
             let top = c.g + c.kerb;
             if !skipped_kerbs {
@@ -3332,7 +3447,7 @@ pub fn under(x: i32, y: i32, z: i32, depth: i32) -> i32 {
     }
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
-        if matches!(c.what, What::Open) && c.hero_n == 0 {
+        if matches!(c.what, What::Open) && c.hero_n == 0 && c.bridges.is_empty() {
             let top = c.g + c.kerb;
             let ceil = c.fixtures.iter().map(|f| f.low).min().unwrap_or(i32::MAX);
             SOLID_CACHE.with_borrow_mut(|cache| {
@@ -3367,6 +3482,7 @@ struct Column<'a> {
     /// column's middle in its frame (u, w, in metres).
     heroes: [Option<(Hero, f32, f32)>; 2],
     hero_n: u8,
+    bridges: ColumnBridges,
 }
 
 enum What<'a> {
@@ -3424,8 +3540,10 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
 
 fn column_for_min_y<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32, min_y: Option<i32>) -> (Column<'a>, bool) {
     let (heroes, hero_n) = heroes_at(x, z, size);
+    let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+    let (bridges, near_motorway) = BRIDGES.with_borrow(|b| (b.eval_point(x as f32 + half, z as f32 + half, size), b.near_motorway(x, z)));
     let Some(p) = pick(packs, x, z, size) else {
-        return (Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, heroes, hero_n }, false);
+        return (Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, heroes, hero_n, bridges }, false);
     };
     let tread = tread_ground(&heroes[..hero_n as usize]);
     let ground_height = tread.unwrap_or_else(|| p.ground_height(x, z));
@@ -3478,6 +3596,9 @@ fn column_for_min_y<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32, min_y: Opt
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
     };
+    if tread.is_none() && hero_n == 0 {
+        apply_steep_slope(p, x, z, class, kerb_sdf, near_motorway, &mut ground, &mut kerb);
+    }
     let what = match p.building_idx(x, z) {
         Some((bi, probe)) if probe.inside => {
             let b = &p.buildings[bi];
@@ -3606,12 +3727,31 @@ fn column_for_min_y<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32, min_y: Opt
         },
         _ => What::Open,
     };
+    let what = match what {
+        What::Crown { foot, top, trunk, tint, edge } if bridges.has_deck() => {
+            if let Some(soffit) = bridges.lowest_soffit_above(g) {
+                let cap = soffit - 4;
+                if foot >= cap || cap <= g + 6 {
+                    What::Open
+                } else {
+                    What::Crown { foot, top: top.min(cap), trunk: trunk.map(|tr| tr.min(cap)), tint, edge }
+                }
+            } else {
+                What::Open
+            }
+        }
+        other => other,
+    };
     // The ground's top in quarter cells, for the finest cells' ramp (`grade_rows`): a road's, a pavement's (over its
     // kerb, so the kerb keeps its height up a hill) and a bank's, wherever the ground is open to the sky. Only the
     // measured asphalt had it, and every pavement and bank up Nob Hill and Telegraph Hill was a stair of 10 cm (#450).
     let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, What::In(.., false) | What::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
-    (Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, heroes, hero_n }, skipped_kerbs)
+    let mut fixtures = p.fixture_spans(x, z, size);
+    if let Some(soffit) = bridges.lowest_soffit_above(g) {
+        fixtures.retain(|f| f.high < soffit - 2);
+    }
+    (Column { g, road_top4, ground, kerb, fixtures, what, heroes, hero_n, bridges }, skipped_kerbs)
 }
 
 /// Shared tree crown envelope for both `owned_column` and `column`: anchors the ellipsoid underside to the trunk's
@@ -3756,6 +3896,13 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     }
     if owned_air {
         return 0;
+    }
+    // Surveyed elevated highway bridges, viaducts, overpass ramps, and concrete piers (#228).
+    if !c.bridges.is_empty() {
+        let br = bridges::kind_at(&c.bridges, c.g, mid, size);
+        if br != 0 {
+            return br;
+        }
     }
     for fixture in &c.fixtures {
         if mid >= fixture.low && mid <= fixture.high { return fixture.rod[7] as Kind; }
@@ -4008,14 +4155,20 @@ fn footing_uncached(packs: &[Pack], x: i32, z: i32) -> (i32, bool) {
         }
     }
     let sort = class & 7;
-    if sort == ROAD {
-        let steel_rail = class & 64 != 0 && !marked_place(x, z);
-        return (g + 1, !steel_rail);
+    let (mut ground, mut kerb) = match sort {
+        ROAD if class & 64 != 0 && !marked_place(x, z) => (kind(STEEL, grey(8)), 0),
+        ROAD => (kind(ASPHALT, OWN), 0),
+        PAVEMENT => (kind(CONCRETE, grey(5)), 1),
+        YARD => (kind(CONCRETE, OWN), 0),
+        _ => (kind(EARTH, OWN), 0),
+    };
+    if hero_n == 0 {
+        let near_motorway = BRIDGES.with_borrow(|b| b.near_motorway(x, z));
+        if near_motorway {
+            apply_steep_slope(p, x, z, class, kerb_sdf, true, &mut ground, &mut kerb);
+        }
     }
-    if sort == PAVEMENT {
-        return (g + 2, true);
-    }
-    (g + 1, sort == YARD)
+    (g + 1 + kerb, matches!(material(ground), CONCRETE | ASPHALT))
 }
 
 /// Fast direct 16×16 walkable heightfield span extraction for an unedited Bay nav tile `(tx, tz)`.
@@ -4039,7 +4192,7 @@ pub(crate) fn extract_nav_spans(
                 let wx = col_center(tx, cx);
                 let cidx = col_index(cx, cz);
                 let c = column(packs, wx, wz, 1);
-                if c.hero_n == 0 && c.fixtures.is_empty() {
+                if c.hero_n == 0 && c.fixtures.is_empty() && c.bridges.is_empty() {
                     let solid_top: Option<(i32, Kind)> = match &c.what {
                         What::Open => Some((c.g + c.kerb, c.ground)),
                         What::In(b, p, roof, _, _, _, step_below, _, false)
@@ -4201,6 +4354,13 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
                     lo = lo.min(h.at[1] + (r[1] * 10.0) as i32);
                     hi = hi.max(h.at[1] + (r[4] * 10.0) as i32);
                 }
+            }
+        });
+        // Elevated highway viaducts & flyover ramps rise well above the bare-earth DEM (#228).
+        BRIDGES.with_borrow(|br| {
+            let b_hi = br.max_y_in(x0, z0, x1, z1);
+            if b_hi > hi {
+                hi = b_hi;
             }
         });
         (lo, hi)
@@ -4375,13 +4535,16 @@ pub fn make(s: &mut Scratch) {
                 } else {
                     Vec::new()
                 };
+                let ((b_segs, b_piers), near_mw) = BRIDGES.with_borrow(|br| (br.for_box(x_min, z_min, x_max, z_max), br.near_motorway_box(x_min, z_min, x_max, z_max)));
+                cache.bridges = b_segs;
+                cache.piers = b_piers;
                 cache.cols.clear();
                 cache.cols.reserve(SIDE * SIDE);
                 for cz in 0..side {
                     let z = ((s.low[2] + cz) << k) + size / 2;
                     for cx in 0..side {
                         let x = ((s.low[0] + cx) << k) + size / 2;
-                        cache.cols.push(owned_column(packs, &sector_packs, &sector_heroes, &sector_marks, &cache.kerbs, x, z, size, least));
+                        cache.cols.push(owned_column(packs, &sector_packs, &sector_heroes, &sector_marks, &cache.kerbs, &cache.bridges, &cache.piers, near_mw, x, z, size, least));
                     }
                 }
                 cache.low_x = s.low[0];
@@ -4411,6 +4574,9 @@ pub fn make(s: &mut Scratch) {
                             if has_fixtures { c.fixtures = oc.fixtures.clone(); }
                             grade_rows(&c, x, z, s.low[1], &mut road);
                         }
+                        if oc.bridges.has_deck() {
+                            bridges::grade_rows(&oc.bridges, oc.g, x, z, s.low[1], &mut road);
+                        }
                     }
                     if fine_cables && has_fixtures {
                         for fixture in &oc.fixtures {
@@ -4424,7 +4590,7 @@ pub fn make(s: &mut Scratch) {
                     } else {
                         has_fixtures
                     };
-                    if matches!(oc.what, OwnedWhat::Open) && oc.hero_n == 0 && !has_solid_fixture {
+                    if matches!(oc.what, OwnedWhat::Open) && oc.hero_n == 0 && !has_solid_fixture && oc.bridges.is_empty() {
                         let top = if size == 1 { oc.g + oc.kerb } else { oc.g };
                         let min_mid = low_y + half;
                         if min_mid > top {
@@ -4446,12 +4612,15 @@ pub fn make(s: &mut Scratch) {
                         continue;
                     }
                     let cy_end = if oc.hero_n == 0 && !has_solid_fixture {
-                        let max_mid = match oc.what {
+                        let mut max_mid = match oc.what {
                             OwnedWhat::Open => if size == 1 { oc.g + oc.kerb } else { oc.g },
                             OwnedWhat::In(_, _, _, roof, ..) | OwnedWhat::Mass(roof, _, _) => roof.max(oc.g),
                             OwnedWhat::By(_, _, _, roof, _) => (roof + 3).max(oc.g + oc.kerb),
                             OwnedWhat::Crown { top, .. } => top.max(oc.g + oc.kerb),
                         };
+                        if !oc.bridges.is_empty() {
+                            max_mid = max_mid.max(oc.bridges.max_y(oc.g));
+                        }
                         let min_mid = low_y + half;
                         if min_mid > max_mid { continue; }
                         (((max_mid - min_mid) >> k) + 1).min(side)
@@ -4627,7 +4796,7 @@ mod tests {
     fn measured_crowns_have_openings_and_keep_the_trunk() {
         let tint = colour(6, 5);
         let mut c = Column { g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
-            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), heroes: [None, None], hero_n: 0 };
+            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), heroes: [None, None], hero_n: 0, bridges: ColumnBridges::EMPTY };
         let mut gaps = 0;
         let mut leaves = 0;
         for x in 0..90 {
@@ -4648,7 +4817,7 @@ mod tests {
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
         let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
-            what: What::Open, fixtures: Vec::new(), heroes: [None, None], hero_n: 0 };
+            what: What::Open, fixtures: Vec::new(), heroes: [None, None], hero_n: 0, bridges: ColumnBridges::EMPTY };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
         assert_eq!(rows.len(), 4);
@@ -4967,13 +5136,13 @@ mod tests {
         let p_by = Probe { inside: false, far: 3.0, along: 10.0, round: 10.0, long: 20.0, looks: 3 | (2 << 24), side: 1, on: [10.0, 0.0] };
         let c_stepped = Column {
             g: 100, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
-            what: What::By(&b, p_by, 140, true), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::By(&b, p_by, 140, true), fixtures: Vec::new(), heroes: [None, None], hero_n: 0, bridges: ColumnBridges::EMPTY,
         };
         assert_eq!(kind_at(&c_stepped, 10, 141, -3, 1), 0, "stepped roof must not float cornice mid-wall");
         // Living green roofs and glass roofs render as GRASS / GLASS rather than grey ROOFING shingles.
         let c_green = Column {
             g: 100, road_top4: None, ground: kind(GRASS, OWN), kerb: 0,
-            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9, false), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9, false), fixtures: Vec::new(), heroes: [None, None], hero_n: 0, bridges: ColumnBridges::EMPTY,
         };
         assert_eq!(material(kind_at(&c_green, 10, 180, 10, 1)), GRASS);
         // 2-story Outer Sunset house (5.9 m tall, storey 34): floor 1 must get real GLASS windows below its cornice,
@@ -4990,7 +5159,7 @@ mod tests {
         let p_setback = Probe { inside: true, far: 18.0, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
         let c_setback = Column {
             g: 585, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
-            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6, false), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6, false), fixtures: Vec::new(), heroes: [None, None], hero_n: 0, bridges: ColumnBridges::EMPTY,
         };
         let setback_glass = (619..643).filter(|&y| material(kind_at(&c_setback, 22, y, 18, 1)) == GLASS).count();
         assert!(setback_glass >= 8, "stepped-back 2nd floor behind wing should have windows, got {setback_glass}");
@@ -5691,6 +5860,78 @@ mod tests {
         // 4. Normal 5 m wide house beside road (325, 90): solid down to ground, footing on roof.
         assert_ne!(kind_single(325, 35, 90), 0, "normal narrow house must remain solid at ground floor");
         assert_eq!(footing(325, 90).0, 91, "normal narrow house footing must stay on roof");
+        clear();
+    }
+
+    #[test]
+    fn elevated_bridge_supports_vehicles_above_and_underneath_and_reclassifies_steep_cliffs() {
+        // Build a pack with flat ground at y=100 on left half and a sheer 120% embankment cliff on right half (x=400..500)
+        let mut bytes = Vec::new();
+        let (gw, tw, gstep, tstep) = (65i32, 128i32, 10i32, 5i32);
+        for v in [0x3159_4142i32, 0, 0, 640, gstep, gw, 0, 0, tstep, tw, 0, 0, 0, 0, 0, 0] {
+            bytes.extend(v.to_le_bytes());
+        }
+        for _ in 0..gw {
+            for i in 0..gw {
+                // Flat y=100 for i<=40, then sheer 12 cells/m (120% slope) cliff rising to y=220 for i=40..50
+                let h = if i <= 40 { 100 } else if i <= 50 { 100 + (i - 40) * 12 } else { 220 };
+                bytes.extend((h as i16).to_le_bytes());
+            }
+        }
+        bytes.extend(vec![NONE; (tw * tw) as usize].into_iter().flat_map(|v| v.to_le_bytes()));
+        bytes.extend(vec![ROAD; (tw * tw) as usize]);
+        bytes.extend(vec![8u8; (tw * tw) as usize]);
+        clear();
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()) };
+        assert_eq!(load(), 1);
+
+        // 1. Without any motorway bridge nearby, even a steep city hill street stays smooth ASPHALT (never regressing Telegraph Hill!)
+        assert_eq!(material(kind_single(450, 160, 200)), ASPHALT, "steep non-motorway city hill stays asphalt");
+        assert_eq!(material(kind_single(200, 100, 200)), ASPHALT, "flat street stays asphalt");
+
+        // 2. Load a 1-span elevated motorway viaduct along x=[80..360], z=200 at y=200 (10 m above ground y=100)
+        let flags: u16 = bridges::FLAG_MOTORWAY | bridges::FLAG_BARRIER_L | bridges::FLAG_BARRIER_R | (3 << 6) | (3 << 9); // layer=1
+        let mut br = Vec::new();
+        for w in [0x4744_5242i32, 1, 1, 2, 1] { br.extend(w.to_le_bytes()); }
+        br.extend(flags.to_le_bytes());
+        br.push(14); br.push(0);
+        br.extend(2u16.to_le_bytes()); br.extend(0u16.to_le_bytes());
+        // v0: (80, 200, y4=800 -> y=200), hl=50, hr=50
+        for w in [80i32, 200, 800] { br.extend(w.to_le_bytes()); }
+        br.extend([50u8, 50, 0, 0]);
+        // v1: dx=280, dz=0, dy4=0
+        for w in [280i16, 0, 0] { br.extend(w.to_le_bytes()); }
+        br.extend([50u8, 50, 0, 0]);
+        // 1 pier at (260, 200), y_top=187, y_bot=90, rad=9
+        for w in [260i32, 200] { br.extend(w.to_le_bytes()); }
+        for w in [187i16, 90] { br.extend(w.to_le_bytes()); }
+        br.extend([9u8, 0, 127, 0, 35, 35, 0, 0]);
+        unsafe { std::ptr::copy_nonoverlapping(br.as_ptr(), room(br.len()), br.len()) };
+        assert_eq!(bridges(), 1);
+
+        // 3. Inside the motorway corridor, the sheer 120% embankment cliff at x=450 becomes CONCRETE retaining wall!
+        assert_eq!(material(kind_single(450, 160, 200)), CONCRETE, "sheer highway cliff near motorway becomes concrete retaining wall");
+        assert_eq!(material(kind_single(200, 100, 200)), ASPHALT, "flat road under motorway stays asphalt");
+
+        // Sector span reaches up above the bridge barrier (y >= 209)
+        let (_, hi_s) = span(3, 3, 0);
+        assert!(hi_s >= 3, "sector span must include elevated bridge deck at y=200 (sector sy=3)");
+
+        // Car driving ON TOP of bridge: `under` from y=215 hits deck top (201)
+        assert_eq!(under(180, 215, 200, 40), 201, "wheel ray above bridge must land on bridge deck");
+        // Car driving UNDERNEATH bridge: open air at y=140, `under` from y=140 hits ground street (101)
+        assert!(!solid_single(180, 140, 200), "open air underneath bridge deck");
+        assert_eq!(under(180, 140, 200, 60), 101, "wheel ray under bridge must land on lower road");
+        // Sector make matches kind_single across deck, barrier, and open air
+        let mut s = Scratch::new();
+        s.start(2, 3, 3, 0); // x=[128..192), y=[192..256), z=[192..256)
+        make(&mut s);
+        for ly in [0usize, 8, 12, 20] {
+            let expected = s.cells[at(52, ly, 8)]; // x=180, z=200
+            assert_eq!(kind_single(180, 192 + ly as i32, 200), expected, "sector/single mismatch at ly={ly}");
+        }
+        assert_eq!(bridge_y(180, 200, 1), 201);
+        assert_eq!(bridge_y(180, 200, 0), i32::MIN);
         clear();
     }
 

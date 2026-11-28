@@ -51,7 +51,7 @@ flowchart LR
 | Page | `engine/page` | The frame loop, the boxes of sectors, the ray marcher and everything drawn over the world. |
 | Sector makers | `engine/page/worker.ts` | A pool of workers. Each holds its own core instance and turns an ask for a column of sectors into trees. |
 | Mover | `engine/page/mover.ts` | One worker with one core that moves what has come loose, when the page is not in a shared world. |
-| World process | `engine/world.mjs` | A Node worker thread started by `engine/serve.mjs` with `--world`. It runs the core for everyone in a shared world and decides the order of every change. |
+| World process | `engine/world.mjs` | A Node worker thread started by `engine/serve.mjs` with `--world`. It runs the core for everyone in a shared world (loading San Francisco packs and sidecars like `kerbs.bin` and `bridges.bin` via `engine/ground.mjs`) and decides the order of every change. |
 | Rules | `engine/rules` | Run each rule in a thread and a QuickJS interpreter of its own. |
 | Plugins | `engine/plugins` | Folders of trusted engine code that a running world loads while it runs. |
 
