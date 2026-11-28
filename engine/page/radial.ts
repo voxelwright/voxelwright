@@ -4,6 +4,9 @@
 // caller's (play-hud.ts). A direction picks: from the middle, past the ring, anywhere on the screen.
 const SVG = 'http://www.w3.org/2000/svg'
 
+/** The Cleave (#226): a stroke of light drawn across the picture, sharp at both ends, a second edge under it, and the glint of the point that drew it. */
+const CLEAVE = '<path d="M3 29C22 27 45 17 61 2C50 21 27 31 3 29z"/><path d="M12 31.2C27 30.6 43 25 55 15.5C44.5 26.5 28 32 12 31.2z" fill-opacity=".45"/><path d="M14 3l1.9 5.1L21 10l-5.1 1.9L14 17l-1.9-5.1L7 10l5.1-1.9z"/>'
+
 /** White pictures, 64 by 32, for the realm's tools by name. An entry with none shows its first letter. */
 export const TOOL_ICONS: Record<string, string> = {
   Hammer: '<rect x="15" y="13.5" width="45" height="5" rx="2.5"/><path d="M6 4h10v24H6z"/><rect x="2" y="9" width="5" height="14" rx="1"/>',
@@ -11,7 +14,9 @@ export const TOOL_ICONS: Record<string, string> = {
   'Big charge': '<rect x="6" y="3" width="38" height="8" rx="2.5"/><rect x="6" y="12" width="38" height="8" rx="2.5"/><rect x="6" y="21" width="38" height="8" rx="2.5"/><rect x="21" y="1" width="6" height="30" rx="1" fill-opacity=".55"/><path d="M44 16c5 0 8-3 9-8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M55 1l1.4 3.6L60 6l-3.6 1.4L55 11l-1.4-3.6L50 6l3.6-1.4z"/>',
   Cannon: '<path d="M6 9.5L50 6h6v12h-6L6 20.5a5.5 5.5 0 0 1 0-11z"/><path fill-rule="evenodd" d="M24 14a9 9 0 1 1 0 18a9 9 0 0 1 0-18zm0 6a3 3 0 1 0 0 6a3 3 0 0 0 0-6z"/><path d="M33 26h18v4H31z"/>',
   Torch: '<rect x="4" y="9" width="17" height="21" rx="5"/><rect x="9" y="5" width="7" height="5" rx="1"/><path d="M21 13h15l3 2v3l-3 2H21z"/><path d="M40 16.5C46 9 56 8 62 16.5C56 25 46 24 40 16.5z"/><path d="M44 16.5c3-3 7-3.5 10 0c-3 3.5-7 3-10 0z" fill-opacity=".45"/>',
-  Cutter: '<path d="M4 14a3 3 0 0 1 3-3h29v11H7a3 3 0 0 1-3-3z"/><path d="M37 11h22l-9 11H37z"/><rect x="14" y="7" width="8" height="5" rx="1.5"/>',
+  Cleave: CLEAVE,
+  // The cutter the Cleave replaces: the same picture, for whoever still names tool 6 so.
+  Cutter: CLEAVE,
   Brick: '<rect x="4" y="5" width="26" height="10" rx="1.5"/><rect x="33" y="5" width="27" height="10" rx="1.5"/><rect x="4" y="18" width="12" height="10" rx="1.5"/><rect x="19" y="18" width="26" height="10" rx="1.5"/><rect x="48" y="18" width="12" height="10" rx="1.5"/>',
   Wand: '<path d="M8 28L40 10" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><path d="M47 1l2.2 5.8L55 9l-5.8 2.2L47 17l-2.2-5.8L39 9l5.8-2.2z"/><path d="M58 17l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z"/><path d="M34 2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
 }
