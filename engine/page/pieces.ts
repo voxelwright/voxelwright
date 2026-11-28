@@ -1132,7 +1132,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       f[12] = fx; f[13] = fy; f[14] = fz; f[15] = 0
       f[16] = sun[0]; f[17] = sun[1]; f[18] = sun[2]; f[19] = 0
 
-      const stageGpuCull = culler !== null && (encoder !== undefined || n >= CULLER_BATCH_THRESHOLD)
+      const stageGpuCull = culler !== null && encoder !== undefined && n >= CULLER_BATCH_THRESHOLD
       const maxCullSlots = culler ? culler.maxInstances : 0
       let staged = 0
       let activeTotal = 0

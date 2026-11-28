@@ -188,12 +188,14 @@ impl VoxelSource for Ground {
         let (sy_lo, sy_hi) = city::span(tx, tz, 0);
         let mut y_lo = (g_min - 14).max(sy_lo * TILE_CELLS).max(-1);
         // Cap untouched tall blocks to 12.8 m above local ground (covers all 2–4 storey houses,
-        // roofs, and overpasses) unless edits extend higher, keeping single-tile rebakes < 0.5 ms.
+        // roofs, and overpasses), and bound edit expansion to walkable pedestrian elevation (+16 m /
+        // -9.6 m craters) so high-altitude skyscraper blasts never force scanning 9–30 vertical sectors.
         let span_hi = (sy_hi + 1) * TILE_CELLS + AGENT_TALL;
+        let walk_hi = g_max + 160 + AGENT_TALL;
         let mut y_hi = span_hi.min(g_max + 128 + AGENT_TALL);
         if let Some((ey0, ey1)) = edit_y {
-            y_lo = y_lo.min(ey0 - 4).max(-1);
-            y_hi = y_hi.max(ey1 + AGENT_TALL + 4);
+            y_lo = y_lo.min(ey0 - 4).max(g_min - 96).max(-1);
+            y_hi = y_hi.max((ey1 + AGENT_TALL + 4).min(walk_hi));
         }
         if y_hi < y_lo + AGENT_TALL + 4 {
             y_hi = y_lo + AGENT_TALL + 4;

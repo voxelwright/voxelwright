@@ -202,7 +202,7 @@ async function main() {
     // had the page ask that master and join that server with no click. It asks first now, and says whose it is;
     // until the visitor agrees nothing is sent to either, and the door's code is not fetched.)
     : query.has('lobby') && MASTER && RULES.lobbies === 'preview' && agreed('join') ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
-  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; world_memory_budget?(keeps: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // Open GPU and the page's WASM core in parallel so core compilation overlaps adapter/device creation (#83).
   const [gpu, innerInit] = await Promise.all([openGpu(), open<Core>(new URL('./core.wasm', import.meta.url).href)])
   useFineCore(innerInit)
@@ -229,6 +229,10 @@ async function main() {
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
   let inner = innerInit
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
+  // Bound main-thread and mover WASM sector caches by device tier so blasting tall buildings never hits mobile Jetsam limits.
+  const MAIN_KEEPS = phone ? 16 : 32
+  const MOVER_KEEPS = BUDGET.pool <= 80 ? 36 : BUDGET.pool <= 192 ? 48 : 64
+  core.world_memory_budget?.(MAIN_KEEPS)
   // Start on land, a little above a street — resolve arrival coordinates early so tile & release fetches overlap GPU pipeline creation (#83).
   const upright = innerHeight > innerWidth && !query.has('look') ? LOCAL?.upright : undefined
   const directLL = query.has('ll') && !!BAY_START
@@ -1566,6 +1570,7 @@ async function main() {
   let moverAge = 0
   const hireMover = () => {
     const w = share(new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' }))
+    w.postMessage({ budget: MOVER_KEEPS })
     w.onmessage = (e: MessageEvent<Answer>) => heed.message?.(e)
     w.onerror = (e) => { e.preventDefault(); heed.error?.(e); loseMover(w) }
     return w
@@ -1910,9 +1915,10 @@ async function main() {
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
-    // A body that is cells again is drawn until those cells are in the picture.
-    const made = world.stats.stale === 0 && world.stats.wanted === 0
-    lying = lying.filter((l) => { if (++l.shown > 2 && made) { l.piece.destroy(); return false } return true })
+    // A body that is cells again is drawn until edited sectors (`stale`) finish rebuilding, without waiting on
+    // distant unstreamed sectors (`wanted`) and with a hard frame cap so settled pieces never leak GPU buffers.
+    const made = world.stats.stale === 0
+    lying = lying.filter((l) => { if ((++l.shown > 2 && made) || l.shown > 90) { l.piece.destroy(); return false } return true })
   }
 
   /** Breaks what is straight ahead. What it is made of decides how far the break goes (the core's kinds), and what that leaves unheld falls. Returns where, or null for sky. */
@@ -1961,6 +1967,7 @@ async function main() {
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.
   const shadow = far ? share(new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' })) : null
+  if (shadow) shadow.postMessage({ budget: MAIN_KEEPS })
   const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   // The residents go round this person's own body when it is on its feet, and round everyone else who is here.
   const waysFull: (readonly [number, number, number])[] = []
@@ -2499,6 +2506,7 @@ async function main() {
   const recore = async (url: string) => {
     const began = performance.now()
     inner = await open<Core>(url)
+    core.world_memory_budget?.(MAIN_KEEPS)
     world.recore(url)
     if (shadow) {
       const on = me.on, held = on ? ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].filter((code) => controls.held(code)) : []
