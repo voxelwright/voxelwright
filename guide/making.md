@@ -141,6 +141,12 @@ A model writes text, and nothing more. Each boundary below is enforced by code, 
 
 **The edit.** The thing reaches a world as one edit of rows through `POST /world/ask`. The world takes it whole or refuses it whole, and it is undone the same way (`undo` in `maker.mjs`).
 
+## Affordances and the living city
+
+When the maker finalises a static creation (`attachAffordances` in `engine/make/maker.mjs`), it preserves any model-provided `affordances` after strict data validation (`validateAffordances` in `engine/make/affordances.mjs`) and otherwise infers Smart Object slots (`sit`, `shelter`, `browse`, `cover`, `spectacle`, `queue`) from its voxel geometry and name (`inferAffordances`). Validated slots are attached as data under `record.behaviour.affordances` only when specific affordances apply, leaving generic blocks and living vehicles unchanged on the wire.
+
+The unified living-city coordinator (`createLivingCity` in `engine/rules/living-city.mjs`) registers those player-made affordances alongside city slots and geometric overhangs, composes StateTrees, Stimulus Bus, LOD Sight, localized memory/gossip, non-omniscient witness chains, 0 ms contextual barks, and the `engine/mind` Blackboard bridge, and emits a bounded `directorSummary()`. `directorCityBrief` in `engine/make/director.mjs` formats that telemetry into a sanitized plain-text block so realm directors can turn street heat, witness alerts, crowd mood, and player-built objects into organic plot beats.
+
 ## Choosing a visitor's model
 
 When a visitor connects a key (`engine/page/connect.ts`), the page lists the models that key can use and offers one first (`models` and `preferred` in `engine/page/models.ts`). The ranking is by the model's id alone, so it needs no list kept by hand:
@@ -183,6 +189,7 @@ node test/models.mjs         # the browser's provider requests and model ranking
 node test/words.mjs          # what typed words mean of the shelf
 node test/drawn.mjs          # a drawn thing, with stand-ins for fal and the model
 node test/fine.mjs           # programs and finer cells, with kept programs
+node test/living-city-hybrid.mjs  # maker affordances, living-city coordinator, mind bridge and director telemetry
 ```
 
 `--reply FILE` stands in a saved reply for the model, on `make.mjs` and on the helper. A check that passes with a saved reply proves the pipeline, not a model. Say which one you ran.
