@@ -808,6 +808,114 @@ pub extern "C" fn joints_set_winch(joint_id: u32, speed: f32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).set_winch(joint_id, speed) as u32)
 }
 
+/// Adds a breakable weld between `a` and `b` (`0` = static world) anchored at world points `(lax, lay, laz)` on `a`
+/// and `(lbx, lby, lbz)` on `b`, holding them as they are turned now. `break_force` / `break_torque` (`<= 0` =
+/// unbreakable); `yield_torque > 0` makes it plastic (it bends past it and stays bent) and `break_bend > 0` is how far
+/// (radians) it bends before it snaps. Returns the non-zero joint ID, or `0` if an endpoint body was not found.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn joints_add_fixed(
+    body_a: u32,
+    body_b: u32,
+    lax: f32,
+    lay: f32,
+    laz: f32,
+    lbx: f32,
+    lby: f32,
+    lbz: f32,
+    break_force: f32,
+    break_torque: f32,
+    yield_torque: f32,
+    break_bend: f32,
+) -> u32 {
+    INSTANCE.with_borrow_mut(|i| {
+        moving(i).add_fixed(body_a, body_b, [lax, lay, laz], [lbx, lby, lbz], break_force, break_torque, yield_torque, break_bend)
+    })
+}
+
+/// How far weld `id` has bent for good (radians), or `-1` if it is gone, broken, or not a weld.
+#[unsafe(no_mangle)]
+pub extern "C" fn joints_bend(id: u32) -> f32 {
+    INSTANCE.with_borrow(|i| i.bodies.as_ref().map_or(-1.0, |b| b.joint_bend(id)))
+}
+
+/// The Cleave: cuts everything in the wedge of the sheet through the eye `(ex, ey, ez)` with normal `(nx, ny, nz)`,
+/// from the way `e1` turned `theta` radians toward `e2`, within `reach` cells; what it lifts off the cut hangs, then
+/// slides along `(sx, sy, sz)` and tips (move it on with `bodies_hang_tick`). Returns how many words tell it, at
+/// `bodies_words` (`EDIT`, `DUST`, `BROKE`/`BORN`).
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn bodies_cleave(
+    ex: f32,
+    ey: f32,
+    ez: f32,
+    nx: f32,
+    ny: f32,
+    nz: f32,
+    e1x: f32,
+    e1y: f32,
+    e1z: f32,
+    e2x: f32,
+    e2y: f32,
+    e2z: f32,
+    theta: f32,
+    reach: f32,
+    sx: f32,
+    sy: f32,
+    sz: f32,
+) -> i32 {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.cleave_wedge([ex, ey, ez], [nx, ny, nz], [e1x, e1y, e1z], [e2x, e2y, e2z], theta, reach, [sx, sy, sz]);
+        b.out.len() as i32
+    })
+}
+
+/// Moves what the Cleave holds (and what is held in orbit) on by `real_dt` seconds of real time, whatever pace the
+/// world goes at. Returns how many bodies still hang; their poses are told by `bodies_advance`'s `MOVES`.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_hang_tick(real_dt: f32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).hang_tick(real_dt) as i32)
+}
+
+/// Puts body `id` where it was (a rewind resumed): place, turn (quaternion x, y, z, w), velocity and spin, awake.
+/// Returns 1 if there is such a body.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn bodies_set_pose(
+    id: u32,
+    px: f32,
+    py: f32,
+    pz: f32,
+    rx: f32,
+    ry: f32,
+    rz: f32,
+    rw: f32,
+    vx: f32,
+    vy: f32,
+    vz: f32,
+    wx: f32,
+    wy: f32,
+    wz: f32,
+) -> i32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).set_pose(id, [px, py, pz], [rx, ry, rz, rw], [vx, vy, vz], [wx, wy, wz]) as i32)
+}
+
+/// Takes hold of up to `max_count` loose bodies within `radius` of `(cx, cy, cz)`, the nearest first (at most
+/// `bodies::HOLD` held in all), and carries them round it. Returns how many were taken.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_capture_orbit(cx: f32, cy: f32, cz: f32, radius: f32, max_count: i32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).capture_orbit([cx, cy, cz], radius, max_count.max(0) as usize) as i32)
+}
+
+/// Flings what is held in orbit out from its middle (and along `(dx, dy, dz)`) at about `speed` cells a second, let go
+/// `bodies::OUT` a call of `bodies_advance`, the outermost first. Returns how many were flung.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_capture_fling(dx: f32, dy: f32, dz: f32, speed: f32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).capture_fling([dx, dy, dz], speed) as i32)
+}
+
 /// Returns the number of currently active (unbroken) joints.
 #[unsafe(no_mangle)]
 pub extern "C" fn joints_count() -> usize {
@@ -1822,6 +1930,54 @@ mod tests {
         }
         // The edits met: there were cells of finer cells, and edits refused where the switch was off.
         assert!(read > 8000 && marked > 20000 && refused > 500, "{read} edits read, {marked} cells of finer cells, {refused} refused");
+    }
+
+    /// The Cleave, holding and letting go, poses and plastic welds through the wasm exports (#226).
+    #[test]
+    fn wasm_abi_cleave_capture_pose_and_plastic_weld_exports() {
+        world_forget();
+        let g = ground_at(700, 4070);
+        let y0 = (g + 120) as f32;
+        let wood = kinds::kind(kinds::WOOD, kinds::OWN) as u32;
+        assert!(bodies_throw(700.0, y0, 4070.0, 0.0, 0.0, 0.0, 3, wood) > 0);
+        assert!(bodies_throw(760.0, y0, 4070.0, 0.0, 0.0, 0.0, 3, wood) > 0);
+        // Body 1 welded to the world five cells to its side, with a tiny yield: its own weight bends it.
+        let (pos, _) = INSTANCE.with_borrow(|i| {
+            let b = i.bodies.as_ref().unwrap().list.iter().find(|b| b.id == 1).unwrap();
+            (b.pos, b.rot)
+        });
+        let anchor = [pos[0] - 5.0, pos[1], pos[2]];
+        let weld = joints_add_fixed(0, 1, anchor[0], anchor[1], anchor[2], anchor[0], anchor[1], anchor[2], 0.0, 0.0, 1.0, 0.0);
+        assert!(weld > 0);
+        assert_eq!(joints_add_fixed(0, 999, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 0, "a missing body makes no weld");
+        assert_eq!(joints_bend(weld), 0.0);
+        for _ in 0..20 {
+            bodies_advance(1.0 / 60.0);
+        }
+        assert!(joints_bend(weld) > 0.01, "the live solver must bend a plastic weld past its yield: {}", joints_bend(weld));
+        assert_eq!(joints_bend(9999), -1.0);
+
+        // Body 2 is taken and flung; the jointed one is left alone.
+        assert_eq!(bodies_capture_orbit(730.0, y0, 4070.0, 100.0, 10), 1);
+        assert_eq!(bodies_hang_tick(0.1), 0, "nothing hangs from a Cleave yet");
+        assert_eq!(bodies_capture_fling(0.0, 0.0, 0.0, 40.0), 1);
+        bodies_advance(1.0 / 60.0);
+        let v = INSTANCE.with_borrow(|i| i.bodies.as_ref().unwrap().list.iter().find(|b| b.id == 2).unwrap().vel);
+        assert!(v[0].abs() + v[2].abs() > 10.0, "a flung body is let go moving: {v:?}");
+
+        // A pose put from outside.
+        assert_eq!(bodies_set_pose(2, 760.0, y0 + 10.0, 4070.0, 0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0), 1);
+        assert_eq!(bodies_set_pose(999, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 0);
+        let b2 = INSTANCE.with_borrow(|i| {
+            let b = i.bodies.as_ref().unwrap().list.iter().find(|b| b.id == 2).unwrap();
+            (b.pos, b.vel, b.asleep)
+        });
+        assert_eq!(b2, ([760.0, y0 + 10.0, 4070.0], [1.0, 2.0, 3.0], false));
+
+        // A cut through the empty air high over the street cuts nothing and lifts nothing.
+        let words = bodies_cleave(700.0, y0 + 300.0, 4070.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.5, 40.0, 1.0, 0.0, 0.0);
+        assert_eq!(words, 0);
+        world_forget();
     }
 
     /// End-to-end verification of every new systemic WASM `extern "C"` export:
