@@ -7,8 +7,10 @@
 
 pub mod ballistics;
 pub mod bay;
+pub mod beams;
 pub mod heroes;
 pub mod bodies;
+pub mod broadphase;
 pub mod city;
 pub mod fine;
 pub mod fire;
@@ -17,6 +19,7 @@ pub mod joints;
 pub mod kinds;
 pub mod land;
 pub mod scratch;
+pub mod sports;
 pub mod support;
 pub mod tree;
 pub mod water;
@@ -134,10 +137,12 @@ struct Instance {
     finer_of: Option<[i32; 3]>,
     /// Reusable scratch for fine-voxel meshing, RLE, coarsening and procedural vehicle sculpts (#139).
     fine_buf: fine::FineBuf,
+    /// Precision 480 Hz sports/tennis physics & deterministic rollback state (#166).
+    sports: Option<Box<sports::SportsWorld>>,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new() });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new(), sports: None });
 }
 
 /// What a cell of a material weighs against water, set from outside while the core runs (#264: a kernel table as
@@ -420,6 +425,8 @@ pub extern "C" fn world_edit(after: i32) {
         let b = moving(i);
         for e in edits {
             // Whatever sleeps where the world has changed is stepped again, and sleeps again if nothing reached it.
+            let (lo, hi) = bodies::reach(&e);
+            b.wake_in_aabb(lo.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
             b.stir_edit(&e);
             b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
@@ -797,6 +804,146 @@ pub extern "C" fn fine_sculpt_kart(paint: u32, per: f64) -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn fine_sculpt_ojai() -> usize {
     INSTANCE.with_borrow_mut(|i| fine::sculpt_ojai(&mut i.fine_buf))
+}
+
+// ── Precision 480 Hz sports physics & deterministic rollback (sports.rs, #166) ──
+
+fn sports_world(i: &mut Instance) -> &mut sports::SportsWorld {
+    i.sports.get_or_insert_with(|| Box::new(sports::SportsWorld::new()))
+}
+
+/// Clears all active sports balls, queued racket swings, and resets the sports tick counter to 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_reset() {
+    INSTANCE.with_borrow_mut(|i| sports_world(i).reset());
+}
+
+/// Configures the sports court surface (`0` = Hard, `1` = Clay, `2` = Grass) and optional analytical
+/// ITF court plane at `ground_y` with regulation net at `net_z` (`enabled != 0`).
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_set_court(surface: u32, ground_y: f32, net_z: f32, enabled: u32) {
+    INSTANCE.with_borrow_mut(|i| {
+        sports_world(i).set_court(sports::CourtSurface::from_u32(surface), ground_y, net_z, enabled != 0);
+    });
+}
+
+/// Spawns a regulation tennis ball at `(x, y, z)` cells with velocity `(vx, vy, vz)` cells/s and
+/// spin `(wx, wy, wz)` rad/s. Returns its non-zero id.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_spawn(
+    x: f32,
+    y: f32,
+    z: f32,
+    vx: f32,
+    vy: f32,
+    vz: f32,
+    wx: f32,
+    wy: f32,
+    wz: f32,
+) -> u32 {
+    INSTANCE.with_borrow_mut(|i| sports_world(i).spawn([x, y, z], [vx, vy, vz], [wx, wy, wz]))
+}
+
+/// Removes a sports ball by id. Returns 1 if removed, 0 if not found.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_remove(id: u32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| sports_world(i).remove(id) as u32)
+}
+
+/// Number of currently active sports balls.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_count() -> usize {
+    INSTANCE.with_borrow(|i| i.sports.as_ref().map_or(0, |s| s.count()))
+}
+
+/// Queues a swept elliptic racket motion (`prev` -> `curr` pose in cells + unit quaternion)
+/// for the next `sports_step` tick.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "C" fn sports_racket_swing(
+    p0x: f32,
+    p0y: f32,
+    p0z: f32,
+    q0x: f32,
+    q0y: f32,
+    q0z: f32,
+    q0w: f32,
+    p1x: f32,
+    p1y: f32,
+    p1z: f32,
+    q1x: f32,
+    q1y: f32,
+    q1z: f32,
+    q1w: f32,
+) {
+    INSTANCE.with_borrow_mut(|i| {
+        let prev = sports::RacketPose::new([p0x, p0y, p0z], [q0x, q0y, q0z, q0w]);
+        let curr = sports::RacketPose::new([p1x, p1y, p1z], [q1x, q1y, q1z, q1w]);
+        sports_world(i).queue_racket(sports::RacketSwing::new(prev, curr));
+    });
+}
+
+/// Advances all active sports balls by `ticks` fixed `1/120 s` ticks (`4` × 480 Hz substeps each).
+/// When `use_world != 0`, swept-sphere CCD also collides against the solver's 10 cm voxel world
+/// with coplanar face normal welding. Returns the new simulation tick.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_step(ticks: u32, use_world: u32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let sw = i.sports.get_or_insert_with(|| Box::new(sports::SportsWorld::new()));
+        if use_world != 0 {
+            let b = i.bodies.get_or_insert_with(|| {
+                let mut b = Box::new(bodies::Bodies::new());
+                b.ground.scratch.finer = finer;
+                b
+            });
+            sw.step(ticks, true, |[x, y, z]| b.ground.kind(x, y, z) != 0)
+        } else {
+            sw.step(ticks, false, |_| false)
+        }
+    })
+}
+
+/// Writes `[px, py, pz, vx, vy, vz, wx, wy, wz]` (9 `f32` values) for ball `id` and returns its
+/// pointer in linear memory, or null if not found.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_ball_read(id: u32) -> *const f32 {
+    INSTANCE.with_borrow_mut(|i| sports_world(i).read_ball(id).unwrap_or(core::ptr::null()))
+}
+
+/// Encodes ball `id`'s current state into a compact 32-byte deterministic wire snapshot and
+/// returns its pointer in linear memory, or null if not found.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_snapshot_write(id: u32) -> *const u8 {
+    INSTANCE.with_borrow_mut(|i| sports_world(i).write_snapshot(id).unwrap_or(core::ptr::null()))
+}
+
+/// Returns a mutable pointer to the 32-byte snapshot buffer for writing an incoming server
+/// snapshot before calling `sports_rollback`.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_snapshot_room() -> *mut u8 {
+    INSTANCE.with_borrow_mut(|i| sports_world(i).snap_buf.as_mut_ptr())
+}
+
+/// Reconciles ball `id` against the 32-byte authoritative snapshot written at `sports_snapshot_room`.
+/// Returns `0` if matched, `> 0` for the number of replayed ticks after rewind, or `-1` if the
+/// ball is missing or the server tick lies outside the rollback window.
+#[unsafe(no_mangle)]
+pub extern "C" fn sports_rollback(id: u32, use_world: u32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let sw = i.sports.get_or_insert_with(|| Box::new(sports::SportsWorld::new()));
+        if use_world != 0 {
+            let b = i.bodies.get_or_insert_with(|| {
+                let mut b = Box::new(bodies::Bodies::new());
+                b.ground.scratch.finer = finer;
+                b
+            });
+            sw.rollback_from_buf(id, true, |[x, y, z]| b.ground.kind(x, y, z) != 0)
+        } else {
+            sw.rollback_from_buf(id, false, |_| false)
+        }
+    })
 }
 
 #[cfg(test)]
