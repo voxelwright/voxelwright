@@ -310,6 +310,9 @@ export function realmControls(page: RealmPage) {
   const panel = $<HTMLElement>('.sky'), fold = $<HTMLButtonElement>('.fold')
   const stick = $<HTMLElement>('.stick'), cap = $<HTMLElement>('.stick .cap')
   const coarse = matchMedia('(pointer: coarse)')
+  // The kit's voxels, once the world is drawing: the page is plain until they come, and stays so with ?kit=plain.
+  // Declared before syncInstall() so an early beforeinstallprompt does not hit kit's TDZ on mount.
+  let kit: { adopt(root?: Element): void; refresh?(el: Element): void } | null = null
 
   // A control used by the hand gives the keys back to the world as it is let go: a focused radio or fader would
   // take the letters (input.ts leaves keys typed into a field alone), and W would not walk. By the keyboard (Tab)
@@ -357,8 +360,6 @@ export function realmControls(page: RealmPage) {
   resAuto?.addEventListener('change', () => res?.set({ auto: resAuto.checked }))
   resIn?.addEventListener('input', () => res?.set({ scale: Number(resIn.value) / 100 }))
   for (const r of rates) r.addEventListener('change', () => { if (r.checked) res?.set({ target: Number(r.value), auto: true }) })
-  // The kit's voxels, once the world is drawing: the page is plain until they come, and stays so with ?kit=plain.
-  let kit: { adopt(root?: Element): void; refresh?(el: Element): void } | null = null
   // The line opens in the same press, so that a phone brings its keyboard up (Safari does only for a focus the hand made).
   // Where the panel is a drawer behind its key, it is folded first: the line is to be read.
   // (The line was hidden when the kit took up the controls, and is drawn as a card of it once it is shown.)
