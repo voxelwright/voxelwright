@@ -19,6 +19,7 @@ pub mod joints;
 pub mod kinds;
 pub mod land;
 pub mod melee;
+pub mod nav;
 pub mod ragdoll;
 pub mod scratch;
 pub mod solver;
@@ -142,10 +143,12 @@ struct Instance {
     fine_buf: fine::FineBuf,
     /// Precision 480 Hz sports/tennis physics & deterministic rollback state (#166).
     sports: Option<Box<sports::SportsWorld>>,
+    /// Destructible tiled navmesh, HPA* portals, panic flow fields and ORCA/RVO2 crowd avoidance (#164).
+    nav: nav::NavWorld,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new(), sports: None });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new(), sports: None, nav: nav::NavWorld::new() });
 }
 
 /// What a cell of a material weighs against water, set from outside while the core runs (#264: a kernel table as
@@ -425,6 +428,10 @@ fn moving(i: &mut Instance) -> &mut bodies::Bodies {
 pub extern "C" fn world_edit(after: i32) {
     INSTANCE.with_borrow_mut(|i| {
         let edits = read_edits(&i.edits);
+        for e in &edits {
+            let (lo, hi) = bodies::reach(e);
+            i.nav.mark_dirty_box(lo, hi);
+        }
         let b = moving(i);
         for e in edits {
             // Whatever sleeps where the world has changed is stepped again, and sleeps again if nothing reached it.
@@ -433,6 +440,8 @@ pub extern "C" fn world_edit(after: i32) {
             b.stir_edit(&e);
             b.ground.push(e, false, if after < 0 { None } else { Some(after as usize) });
         }
+        let n_edits = b.ground.edits.len();
+        i.nav.seen_edits = n_edits;
     })
 }
 
@@ -440,14 +449,20 @@ pub extern "C" fn world_edit(after: i32) {
 /// after it was asked about. Nothing done to the world is forgotten.
 #[unsafe(no_mangle)]
 pub extern "C" fn world_regrow(x0: i32, z0: i32, x1: i32, z1: i32) {
-    INSTANCE.with_borrow_mut(|i| moving(i).ground.forget_columns(x0, z0, x1, z1))
+    INSTANCE.with_borrow_mut(|i| {
+        i.nav.mark_dirty_box([x0, i32::MIN / 2, z0], [x1, i32::MAX / 2, z1]);
+        moving(i).ground.forget_columns(x0, z0, x1, z1);
+    })
 }
 
 /// Forgets everything done to the world and everything that moves in it: the instance is as it began. For a page that
 /// leaves one world for another (#264): the other's edits are then told with `world_edit`.
 #[unsafe(no_mangle)]
 pub extern "C" fn world_forget() {
-    INSTANCE.with_borrow_mut(|i| i.bodies = None)
+    INSTANCE.with_borrow_mut(|i| {
+        i.bodies = None;
+        i.nav.reset();
+    })
 }
 
 /// A blast at a point, of the solver's own doing: the edit is made here (do not also tell it with `world_edit`),
@@ -459,9 +474,22 @@ pub extern "C" fn world_forget() {
 pub extern "C" fn bodies_blast(x: i32, y: i32, z: i32, radius: i32, after: i32, spark: i32) -> usize {
     INSTANCE.with_borrow_mut(|i| {
         let b = moving(i);
+        let edits_before = b.ground.edits.len();
         b.out.clear();
         b.blast([x, y, z], radius, if after < 0 { None } else { Some(after as usize) }, spark != 0);
-        b.out.len()
+        let out_len = b.out.len();
+        let extra: Vec<_> = b.ground.edits[edits_before..].iter().map(bodies::reach).collect();
+        let n_edits = b.ground.edits.len();
+        let far = radius.saturating_mul(3).saturating_add(2);
+        i.nav.mark_dirty_box(
+            [x.saturating_sub(far), y.saturating_sub(far), z.saturating_sub(far)],
+            [x.saturating_add(far).saturating_add(1), y.saturating_add(far).saturating_add(1), z.saturating_add(far).saturating_add(1)],
+        );
+        for (lo, hi) in extra {
+            i.nav.mark_dirty_box(lo, hi);
+        }
+        i.nav.seen_edits = n_edits;
+        out_len
     })
 }
 
@@ -947,6 +975,209 @@ pub extern "C" fn sports_rollback(id: u32, use_world: u32) -> i32 {
             sw.rollback_from_buf(id, false, |_| false)
         }
     })
+}
+
+// ── Destructible tiled navmesh, HPA* portals, panic flow fields & ORCA/RVO2 crowd avoidance (nav/, #164) ──
+
+/// Clears all cached nav tiles, portals, dirty queue, panic flow field, path output and crowd slots.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_reset() {
+    INSTANCE.with_borrow_mut(|i| i.nav.reset())
+}
+
+/// Marks nav tiles intersecting `[x0..x1) × [z0..z1)` (fine cells, plus a 1-tile portal margin) dirty.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_mark_dirty(x0: i32, z0: i32, x1: i32, z1: i32) {
+    INSTANCE.with_borrow_mut(|i| i.nav.mark_dirty_box([x0, i32::MIN / 2, z0], [x1, i32::MAX / 2, z1]))
+}
+
+/// Number of nav tiles currently queued for incremental rebake.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_dirty_count() -> usize {
+    INSTANCE.with_borrow(|i| i.nav.cache.dirty_count())
+}
+
+/// Number of nav tiles currently held in the tile cache.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_tile_count() -> usize {
+    INSTANCE.with_borrow(|i| i.nav.cache.tile_count())
+}
+
+/// Number of walkable spans inside cached nav tile `(tx, tz)`, or `0` if not baked.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_tile_spans(tx: i32, tz: i32) -> usize {
+    INSTANCE.with_borrow(|i| i.nav.cache.get((tx, tz)).map_or(0, |t| t.spans.len()))
+}
+
+/// Number of cross-tile portals attached to cached nav tile `(tx, tz)`, or `0` if not baked.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_tile_portals(tx: i32, tz: i32) -> usize {
+    INSTANCE.with_borrow(|i| i.nav.cache.get((tx, tz)).map_or(0, |t| t.portals.len()))
+}
+
+/// Sorts dirty nav tiles by squared distance to `(fx, fz)` (fine cells) and incrementally rebakes
+/// up to `max_tiles` nearest dirty tiles. Returns the number of tiles rebaked.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_rebake_budget(fx: f32, fz: f32, max_tiles: usize) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.rebake_budget(&mut bodies.ground, fx, fz, max_tiles)
+    })
+}
+
+/// Ensures nav tiles within `radius_tiles` around `(fx, fz)` are baked (up to `max_tiles`, nearest-first).
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_bake_area(fx: f32, fz: f32, radius_tiles: i32, max_tiles: usize) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.bake_area(&mut bodies.ground, fx, fz, radius_tiles, max_tiles)
+    })
+}
+
+/// Finds a smoothed multi-layer HPA* path from `(sx, sy, sz)` to `(gx, gy, gz)` (fine cells) under
+/// capability `flags` (0 = walk+vault+drop; bit 0 vault, bit 1 drop, bit 2 climb, bit 3 walk-only).
+/// Stores `[x, y, z, move_kind]` floats in the path buffer (`nav_path_ptr`, `nav_path_len`) and
+/// returns the waypoint count (`0` if unreachable).
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_find_path(
+    sx: f32,
+    sy: f32,
+    sz: f32,
+    gx: f32,
+    gy: f32,
+    gz: f32,
+    flags: u32,
+) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.find_path(&mut bodies.ground, sx, sy, sz, gx, gy, gz, flags)
+    })
+}
+
+/// Pointer to the reusable `[x, y, z, move_kind]` f32 waypoint buffer (`nav_path_len() * 4` floats).
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_path_ptr() -> *const f32 {
+    INSTANCE.with_borrow(|i| i.nav.path_out.as_ptr())
+}
+
+/// Number of waypoints produced by the last `nav_find_path` call.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_path_len() -> usize {
+    INSTANCE.with_borrow(|i| i.nav.path_out.len() / 4)
+}
+
+/// Clears all panic flow-field threats and resets the field.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_flow_clear() {
+    INSTANCE.with_borrow_mut(|i| i.nav.flow.clear())
+}
+
+/// Registers a threat source `(x, y, z, radius)` in fine cells for the panic flow field.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_flow_add_threat(x: f32, y: f32, z: f32, radius: f32) {
+    INSTANCE.with_borrow_mut(|i| i.nav.flow.add_threat(x, y, z, radius))
+}
+
+/// Builds the escape vector field over walkable spans within all registered threat radii.
+/// Returns the number of walkable spans with an active escape vector.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_flow_build() -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let finer = i.scratch.finer;
+        let bodies = i.bodies.get_or_insert_with(|| {
+            let mut b = Box::new(bodies::Bodies::new());
+            b.ground.scratch.finer = finer;
+            b
+        });
+        i.nav.flow_build(&mut bodies.ground)
+    })
+}
+
+/// Samples the panic escape vector `(dx, dz)` at `(x, y, z)` in O(1), writing `[dx, dz]` to
+/// `nav_flow_vec_ptr()`. Returns `1` if inside the escape field, `0` if safe/outside.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_flow_sample(x: f32, y: f32, z: f32) -> i32 {
+    INSTANCE.with_borrow_mut(|i| i.nav.flow_sample(x, y, z))
+}
+
+/// Pointer to the 2-float `[dx, dz]` unit escape vector from the last `nav_flow_sample` call.
+#[unsafe(no_mangle)]
+pub extern "C" fn nav_flow_vec_ptr() -> *const f32 {
+    INSTANCE.with_borrow(|i| i.nav.flow.last_vec.as_ptr())
+}
+
+/// Resets all ORCA/RVO2 crowd agent slots and explicit 2D obstacle segments.
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_reset() {
+    INSTANCE.with_borrow_mut(|i| i.nav.crowd.reset())
+}
+
+/// Pointer to the contiguous SoA crowd buffer (`10 * 512` f32s: `pos_x, pos_z, pos_y, vel_x,
+/// vel_z, pref_vx, pref_vz, radius, max_speed, flags`, each plane stride `512`).
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_agents_ptr() -> *mut f32 {
+    INSTANCE.with_borrow_mut(|i| i.nav.crowd.agents_ptr())
+}
+
+/// Maximum number of active agents supported in the SoA crowd buffer (`512`).
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_capacity() -> usize {
+    nav::rvo::MAX_AGENTS
+}
+
+/// Writes one agent slot in the SoA crowd buffer.
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_set_agent(
+    idx: usize,
+    x: f32,
+    y: f32,
+    z: f32,
+    vx: f32,
+    vz: f32,
+    pref_vx: f32,
+    pref_vz: f32,
+    radius: f32,
+    max_speed: f32,
+    flags: u32,
+) {
+    INSTANCE.with_borrow_mut(|i| {
+        i.nav.crowd.set_agent(idx, x, y, z, vx, vz, pref_vx, pref_vz, radius, max_speed, flags)
+    })
+}
+
+/// Clears explicit 2D static wall segments in the ORCA/RVO2 crowd solver.
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_clear_obstacles() {
+    INSTANCE.with_borrow_mut(|i| i.nav.crowd.clear_obstacles())
+}
+
+/// Adds a 2D static obstacle wall segment `(x0, z0) -> (x1, z1)` to the ORCA/RVO2 crowd solver.
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_add_obstacle(x0: f32, z0: f32, x1: f32, z1: f32) {
+    INSTANCE.with_borrow_mut(|i| i.nav.crowd.add_obstacle(x0, z0, x1, z1))
+}
+
+/// Runs one ORCA/RVO2 avoidance step over agents `0..count.min(512)` with time step `dt` and
+/// lookahead `time_horizon`. Updates `vel_x, vel_z` and integrates `pos_x, pos_z` (unless flagged
+/// static or velocity-only). Returns the number of agents stepped.
+#[unsafe(no_mangle)]
+pub extern "C" fn crowd_step(count: usize, dt: f32, time_horizon: f32) -> usize {
+    INSTANCE.with_borrow_mut(|i| i.nav.crowd_step(count, dt, time_horizon))
 }
 
 #[cfg(test)]
