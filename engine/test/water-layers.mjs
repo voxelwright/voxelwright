@@ -36,26 +36,27 @@ const rig = (core, seconds = 6) => {
   }
   let told = null
   for (let k = 0; k < seconds * 60; k++) {
-    const n = core.bodies_advance(1 / 60)
+    // The address is asked for before the memory is read: a call may move it (the core's skill says why).
+    const n = core.bodies_advance(1 / 60), address = core.bodies_words()
     // The heights the page is told, as its FLOW record (tag 8): the last of them is kept.
-    const out = new Uint32Array(core.memory.buffer, core.bodies_words(), n)
+    const out = new Uint32Array(core.memory.buffer, address, n)
     for (let i = 0; i < n; i += 2 + out[i + 1]) if (out[i] === 8) told = out.slice(i + 2, i + 2 + out[i + 1])
   }
   return { at, poured, told, deck: core.world_kind(at[0] + 30, at[1] + 11, at[2] + 6), air: core.world_kind(at[0] + 30, at[1] + 5, at[2] + 6) }
 }
 /** The wet layers, read from the core. */
 const layersOf = (core) => {
-  const n = core.water_layers_len(), words = new Uint32Array(core.memory.buffer, core.water_layers_ptr(), n).slice()
+  const n = core.water_layers_len(), address = core.water_layers_ptr(), words = new Uint32Array(core.memory.buffer, address, n).slice()
   const floats = new Float32Array(words.buffer)
   return Array.from({ length: n / 5 }, (_, k) => ({ cx: words[5 * k] & 0xffff, cz: words[5 * k] >>> 16, bottom: floats[5 * k + 1], top: floats[5 * k + 2], ceiling: floats[5 * k + 3], fluid: words[5 * k + 4] & 255, stack: words[5 * k + 4] >>> 16 }))
 }
 const bricksOf = (core) => {
-  const n = core.water_sdf_brick_count()
-  return new Int32Array(core.memory.buffer, core.water_sdf_bricks_ptr(), 3 * n).slice()
+  const n = core.water_sdf_brick_count(), address = core.water_sdf_bricks_ptr()
+  return new Int32Array(core.memory.buffer, address, 3 * n).slice()
 }
 const brickOf = (core, key, lod = 0) => {
-  const held = core.water_sdf_build_brick_lod(key[0], key[1], key[2], lod, 0)
-  return { held, sdf: new Int8Array(core.memory.buffer, core.water_sdf_room(), 512).slice() }
+  const held = core.water_sdf_build_brick_lod(key[0], key[1], key[2], lod, 0), address = core.water_sdf_room()
+  return { held, sdf: new Int8Array(core.memory.buffer, address, 512).slice() }
 }
 
 const { url, page: openPage, check, failures, finish } = await start()
@@ -67,7 +68,8 @@ try {
   const made = rig(core)
   const { at } = made
   check(made.deck === 7 && made.air === 0, `the deck stands in the solver's world (${made.deck} in it, ${made.air} under it)`)
-  const layers = layersOf(core), window_ = new Int32Array(core.memory.buffer, core.water_window_ptr(), 4).slice()
+  const windowAt = core.water_window_ptr()
+  const layers = layersOf(core), window_ = new Int32Array(core.memory.buffer, windowAt, 4).slice()
   const column = (x, z) => layers.filter((l) => l.cx === Math.floor((at[0] + x - window_[0]) / window_[2]) && l.cz === Math.floor((at[2] + z - window_[1]) / window_[2])).sort((a, b) => a.bottom - b.bottom)
   const mid = column(30, 6)
   check(core.water_layers_stacked() === 2 && mid.length === 2 && mid.every((l) => l.stack === 2), `water lies under the deck and on it at once: ${core.water_layer_count()} wet layers, ${mid.length} in the deck's middle column`)
@@ -82,7 +84,7 @@ try {
   check(Math.abs((word & 0x3ffff) / 8 + (told[4] | 0) - mid[1]?.top) < 0.2, `the heights tell the top-most layer there (${((word & 0x3ffff) / 8 + (told[4] | 0) - at[1]).toFixed(2)} over the floor)`)
 
   // Where it changed: a few boxes, all round the channel.
-  const dirty = () => { const n = core.water_dirty_boxes_len(); return Array.from({ length: n }, (_, k) => [...new Int32Array(core.memory.buffer, core.water_dirty_boxes_ptr() + 24 * k, 6)]) }
+  const dirty = () => { const n = core.water_dirty_boxes_len(), address = core.water_dirty_boxes_ptr(); return Array.from({ length: n }, (_, k) => [...new Int32Array(core.memory.buffer, address + 24 * k, 6)]) }
   const boxes = dirty()
   check(boxes.length >= 1 && boxes.length <= 8 && boxes.every((b) => b[0] >= at[0] - 2 && b[3] <= at[0] + 62 && b[1] >= at[1] && b[4] <= at[1] + 24 && b[2] >= at[2] - 2 && b[5] <= at[2] + 14), `the water's changes are in ${boxes.length} box(es) that keep to the channel: ${JSON.stringify(boxes.map((b) => b.map((v, i) => v - at[i % 3])))}`)
   // The field as it begins: only the layer the heights cannot show.
@@ -130,9 +132,9 @@ try {
     const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports
     const made = new Function(`return (${rigSource})`)()(core)
     const { at } = made
-    const win = new Int32Array(core.memory.buffer, core.water_window_ptr(), 4).slice()
-    const bricks = () => { const n = core.water_sdf_brick_count(); return new Int32Array(core.memory.buffer, core.water_sdf_bricks_ptr(), 3 * n).slice() }
-    const brick = (key, lod) => { const held = core.water_sdf_build_brick_lod(key[0], key[1], key[2], lod, 0); return { held, sdf: new Int8Array(core.memory.buffer, core.water_sdf_room(), BRICK_BYTES).slice() } }
+    const winAt = core.water_window_ptr(), win = new Int32Array(core.memory.buffer, winAt, 4).slice()
+    const bricks = () => { const n = core.water_sdf_brick_count(), address = core.water_sdf_bricks_ptr(); return new Int32Array(core.memory.buffer, address, 3 * n).slice() }
+    const brick = (key, lod) => { const held = core.water_sdf_build_brick_lod(key[0], key[1], key[2], lod, 0), address = core.water_sdf_room(); return { held, sdf: new Int8Array(core.memory.buffer, address, BRICK_BYTES).slice() } }
 
     const W = 256, H = 144, format = 'rgba16float'
     const colour = device.createTexture({ size: [W, H], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -239,10 +241,17 @@ try {
     core.water_sdf_cover(0)
     own.place([win[0], win[1]], win[2])
     own.active(bricks())
-    for (let k = 0; k < bricks().length; k += 3) { const key = [...bricks().subarray(k, k + 3)]; own.set(key, 0, brick(key, 0).sdf) }
+    // Nothing is set by hand: the water's own draw is what lets the rays ask, as it will be in the page.
+    let ownAsked = 0
+    for (let round = 0; round < 8 && (own.wanted > 0 || round < 2); round++) {
+      await frame((encoder) => water.draw(encoder, to, near, 1.5))
+      own.poll()
+      await own.settled()
+      for (const want of own.requests(256)) { ownAsked++; own.set(want.key, want.lod, brick(want.key, want.lod).sdf) }
+    }
     const both = await frame((encoder) => water.draw(encoder, to, near, 1.5))
     await device.queue.onSubmittedWorkDone()
-    return { faults, bricks: list.length / 3, wantedAtFirst, empty, fed, shown, afterNear, walled, behind, touched, before, after, kept, fedFar, fedAll, shownFar, none: none === null, columns: water.columns, heights, both, ownBricks: own.bricks }
+    return { faults, ownAsked, bricks: list.length / 3, wantedAtFirst, empty, fed, shown, afterNear, walled, behind, touched, before, after, kept, fedFar, fedAll, shownFar, none: none === null, columns: water.columns, heights, both, ownBricks: own.bricks }
   }, String(rig))
 
   const s = seen
@@ -254,7 +263,7 @@ try {
   check(s.fedFar.asked > 0 && s.fedFar.builtAt[0] === 0 && s.fedFar.builtAt[1] + s.fedFar.builtAt[2] > 0, `from far off the rays ask for coarser bricks: ${s.fedFar.builtAt[1]} twice as coarse and ${s.fedFar.builtAt[2]} four times, none of the finest`)
   check(s.fedAll.builtAt[1] + s.fedAll.builtAt[2] > 0 && s.shownFar.covered > 20 && s.shownFar.bad === 0, `and all the water's layers are drawn from them (${s.shownFar.covered} pixels)`)
   check(s.none && s.columns > 100 && s.heights.covered > 300 && s.heights.bad === 0, `the heights pass is as it was, with no forest until one is asked for: ${s.columns} columns, ${s.heights.covered} pixels`)
-  check(s.ownBricks > 0 && s.both.covered > 300 && s.both.bad === 0, `with its forest, the heights and the bricks are drawn in one frame (${s.ownBricks} bricks, ${s.both.covered} pixels)`)
+  check(s.ownAsked > 0 && s.ownBricks > 0 && s.both.covered > 300 && s.both.bad === 0, `with its forest, the water's own draw lets the rays ask (${s.ownAsked} bricks asked for, ${s.ownBricks} held), and the heights and the bricks are drawn in one frame (${s.both.covered} pixels)`)
   check(s.faults.length === 0, `no GPU fault${s.faults.length ? `: ${s.faults.join('; ')}` : ''}`)
 } catch (e) {
   failures.push(String(e?.stack ?? e))

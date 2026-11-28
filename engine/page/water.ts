@@ -63,15 +63,19 @@ fn linearDepth(d: f32) -> f32 {
     out.pos = vec4f(2.0, 2.0, 2.0, 1.0);
     return out;
   }
-  // The corner's height, depth and speed: the mean of the wet columns round it.
+  // The corner's height, depth and speed: the mean of the wet columns round it that are of this column's storey.
+  // Water told as lying over other water (the word's top bit, #226) has a deck under it: its top is not joined
+  // to the tops of the water below, or a sheet of falling water would hang from every flooded bridge.
   let vtx = column + corner;
+  let storey = word(column) >> 31u;
   var top = 0.0; var deep = 0.0; var fast = 0.0; var n = 0.0; var dry = 0.0;
   for (var k = 0; k < 4; k++) {
     let w = word(vtx - vec2i(k & 1, k >> 1u));
     if ((w >> 18u) == 0u) { dry += 1.0; continue; }
+    if ((w >> 31u) != storey) { continue; }
     top += f32(w & 0x3ffffu) / 8.0;
     deep += f32((w >> 18u) & 255u) / 16.0;
-    fast += f32(w >> 26u) * 2.0;
+    fast += f32((w >> 26u) & 31u) * 2.0;
     n += 1.0;
   }
   top /= n;
@@ -95,9 +99,10 @@ fn linearDepth(d: f32) -> f32 {
       if (dist <= 3.5) {
         let wt = 1.0 - dist / 3.5;
         wtSum += wt;
-        if (isWet) { wetSum += wt; }
+        // Under a storey of water over it this water goes on; a storey's own water ends where its deck does.
+        if (isWet && (nw >> 31u) >= storey) { wetSum += wt; }
       }
-      if (isWet) {
+      if (isWet && (nw >> 31u) == storey) {
         let nt = f32(nw & 0x3ffffu) / 8.0;
         if (nt > top + 14.0) {
           minFallDist = min(minFallDist, dist);
@@ -515,16 +520,18 @@ export async function flowing(device: GPUDevice, format: GPUTextureFormat, march
       for (let z = box[1] + 1, k = 0; z < box[1] + box[3] - 1 && landings.length < 40; z++) for (let x = box[0] + 1; x < box[0] + box[2] - 1; x++) {
         const w = cells[x + side * z]
         if (!w) continue
-        const top = (w & 0x3ffff) / 8, over = Math.max(...[cells[x + 1 + side * z], cells[x - 1 + side * z], cells[x + side * (z + 1)], cells[x + side * (z - 1)]].map((n) => (n ? (n & 0x3ffff) / 8 : 0)))
+        // Water of another storey beside it (on a deck over it) is not falling onto it.
+        const top = (w & 0x3ffff) / 8, over = Math.max(...[cells[x + 1 + side * z], cells[x - 1 + side * z], cells[x + side * (z + 1)], cells[x + side * (z - 1)]].map((n) => (n && n >>> 31 === w >>> 31 ? (n & 0x3ffff) / 8 : 0)))
         if (over - top > 30 && k++ % 7 === 0 && landings.length < 24) landings.push([low[0] + x * col, base + top, low[1] + z * col])
       }
     },
     draw(encoder, to, view, time) {
       // Water under water is drawn first, from its bricks: what lies over it is laid on top. A forest told to
       // cover every layer draws them all, and the heights are left out so that no surface is drawn twice.
-      const forested = !!bricks && bricks.bricks > 0
-      if (forested) bricks!.draw(encoder, to, view, time)
-      if (!wet || (forested && bricks!.covers === 'all')) return
+      // It is drawn while it only wants bricks too: the rays of that pass are what ask for them. Until the first
+      // brick of a forest of all the water has come, the heights still stand in for it.
+      if (bricks && (bricks.bricks > 0 || bricks.wanted > 0)) bricks.draw(encoder, to, view, time)
+      if (!wet || (bricks && bricks.bricks > 0 && bricks.covers === 'all')) return
       const oGroup = ownFor(to.depth)
       if (!oGroup) return
       const wDepth = waterDepthFor(to)

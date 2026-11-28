@@ -1176,8 +1176,9 @@ impl Water {
 
     /// What the page is told: the window, then for each column of the box round the wet ones a word: how high the
     /// water's top is over `base` in eighths of a cell (18 bits), how deep in sixteenths (8 bits), how fast it runs
-    /// in pairs of cells a second (6 bits). A dry column is 0. Where water lies over water the word is of the
-    /// top-most: the layers under it are told as a distance field (`sdf_bricks`).
+    /// in pairs of cells a second (5 bits), and whether it lies over other water (1 bit, #226). A dry column is 0.
+    /// Where water lies over water the word is of the top-most: the layers under it are told as a distance field
+    /// (`sdf_bricks`).
     fn tell(&self) -> Vec<u32> {
         let (mut x0, mut z0, mut x1, mut z1) = (N, N, 0, 0);
         for &e in &self.wet {
@@ -1197,10 +1198,15 @@ impl Water {
             let top = ((l.top() - base as f32) * 8.0).clamp(1.0, 262143.0) as u32;
             let deep = (l.height * 16.0).clamp(1.0, 255.0) as u32;
             let f = l.flow;
-            let fast = (((f[0] - f[1]).hypot(f[2] - f[3]) / (l.height.max(0.1) * COL as f32)) / 2.0).min(63.0) as u32;
+            let fast = (((f[0] - f[1]).hypot(f[2] - f[3]) / (l.height.max(0.1) * COL as f32)) / 2.0).min(31.0) as u32;
+            // Over other water, and not running off an edge onto water below: it is a storey of its own, and the
+            // page does not join its top to the tops of the storey under it (there is a deck between them).
+            let col = &self.cols[self.slot[i] as usize - 1];
+            let falls = [i + 1, i - 1, i + N, i - N].into_iter().enumerate().any(|(d, j)| f[d] > 0.5 && self.col(j).is_some_and(|c| c.layers[l.link[d] as usize].bottom < l.bottom - 2.0));
+            let over = (col.known().iter().any(|o| o.listed && o.bottom < l.bottom) && !falls) as u32;
             let word = &mut words[9 + (cx - x0) + w * (cz - z0)];
             if *word & 0x3ffff < top {
-                *word = top | deep << 18 | fast << 26;
+                *word = top | deep << 18 | fast << 26 | over << 31;
             }
         }
         words
@@ -1714,6 +1720,10 @@ mod tests {
         let far = wet_layers(w, at[0] + 44, at[2] + 6);
         assert!(far.len() == 1 && far[0].bottom == at[1] as f32 && far[0].height > 0.5 && far[0].fluid == FRESH, "the water ran under the deck and out the far side: {far:?}");
         assert_eq!(w.stacked(), 2);
+        // The page is told which columns' water lies over other water, so that it joins no sheet between the two.
+        let told = w.tell();
+        let word = |x: i32| told[9 + ((at[0] + x - w.low[0]) / COL) as usize - told[5] as usize + told[7] as usize * (((at[2] + 6 - w.low[1]) / COL) as usize - told[6] as usize)];
+        assert!(word(30) >> 31 == 1 && word(44) >> 31 == 0 && word(10) >> 31 == 0 && word(20) != 0 && word(20) >> 31 == 0, "the deck's water is told as over other water, the channel's and the water under the kerb as not");
         // What the heights tell is the top-most: on the deck over the deck, on the floor beside it.
         assert_eq!(w.shallow_at(at[0] as f32 + 30.5, at[2] as f32 + 6.5).unwrap().0, at[1] as f32 + 12.0);
         assert_eq!(w.shallow_at(at[0] as f32 + 44.5, at[2] as f32 + 6.5).unwrap().0, at[1] as f32);
