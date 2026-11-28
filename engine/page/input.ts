@@ -38,6 +38,16 @@ export interface Mode {
   use?(): boolean | void
   /** The wheel, by the event's `deltaY`. True if this mode took it. */
   wheel?(deltaY: number): boolean | void
+  /** The picture's button going down with the pointer held (#226: the Cleave draws while it is held). True if this mode took it: the click that ends the press is then this mode's, and no `use`. */
+  pointerDown?(): boolean | void
+  /** That button coming up again, wherever the pointer is by then. True if this mode took it. */
+  pointerUp?(): boolean | void
+  /** The second button (a right click) with the pointer held. True if this mode took it. */
+  rightClick?(): boolean | void
+  /** The head about to be turned, by mouse, thumb or stick (radians: right, up). True if this mode took it: the view stays where it is (the Cleave's brush is steered instead). */
+  move?(dx: number, dy: number): boolean | void
+  /** Whatever this mode was in the middle of is called off: Escape, the pointer let go of, the window left. */
+  cancel?(): void
 }
 
 export interface Input {
@@ -59,6 +69,11 @@ export interface Input {
   always(code: string, act: (e: KeyboardEvent) => boolean | void): void
   /** Does what a click with the pointer held does: for the checks and for buttons a lane adds. */
   use(): void
+  /** Does what the picture's button going down (true) or coming up does, and what a right click does: for the checks and for buttons a lane adds. */
+  press?(down: boolean): void
+  secondary?(): void
+  /** Turns the head by so much (radians: right, up), as the mouse would: a live mode's `move` may take it. For the checks. */
+  turnBy?(dx: number, dy: number): void
   /** Holds a key down or lets it up, as a key on the keyboard would be (an on-screen key for a thumb: up and down in flight). Nothing in a text mode. */
   hold(code: string, down: boolean): void
   /** Where the left thumb went down to steer, and where it is now (client px), while it is down: for what shows the stick. */
@@ -91,6 +106,23 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   /** From the top down, until one takes it or a solid one has been asked. */
   const each = (ask: (mode: Mode) => boolean | void) => { for (let i = stack.length - 1; i >= 0; i--) { if (ask(stack[i]) === true || stack[i].solid) return } }
   const use = () => each((m) => m.use?.())
+  /** The head turned by so much: a live mode may take it for itself (`move`), else the view turns. */
+  const turned = (dx: number, dy: number) => {
+    if (dx === 0 && dy === 0) return
+    let took = false
+    each((m) => { if (m.move?.(dx, dy) === true) took = true; return took })
+    if (!took) { right += dx; up += dy }
+  }
+  /** A press and its release (#226). Whether a mode took the press that is down now: the click that ends it is then not a `use`. */
+  let pressTaken = false
+  const press = (isDown: boolean) => {
+    if (!isDown) { each((m) => m.pointerUp?.()); return }
+    pressTaken = false
+    each((m) => { if (m.pointerDown?.() === true) pressTaken = true; return pressTaken })
+  }
+  const secondary = () => each((m) => m.rightClick?.())
+  /** Every live mode that was in the middle of something calls it off. */
+  const cancel = () => { for (let i = stack.length - 1; i >= 0; i--) { stack[i].cancel?.(); if (stack[i].solid) return } }
   const live = (name: string) => {
     for (let i = stack.length - 1; i >= 0; i--) { if (stack[i].name === name) return true; if (stack[i].solid) return false }
     return false
@@ -108,22 +140,32 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   addEventListener('keydown', (e) => {
     if (written(e.target) || top()?.text) return
     down.add(e.code)
+    if (e.code === 'Escape') cancel()
     if (!top()?.every && !still() && everywhere.get(e.code)?.(e) === true) return
     each((m) => m.key?.(e.code, e))
   })
   addEventListener('keyup', (e) => down.delete(e.code))
   // A window that is left never hears the keys come up.
-  addEventListener('blur', () => down.clear())
+  addEventListener('blur', () => { down.clear(); cancel() })
+  // Escape with the pointer held lets the pointer go, and a browser may not say the key was pressed: the pointer let go calls off the same.
+  document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== canvas) cancel() })
+  canvas.addEventListener('mousedown', (e) => {
+    pressTaken = false
+    if (phone || still() || document.pointerLockElement !== canvas) return
+    if (e.button === 0) press(true)
+    else if (e.button === 2) secondary()
+  })
+  // The button comes up wherever the pointer is: a press a mode took must always end.
+  addEventListener('mouseup', (e) => { if (e.button === 0 && !phone) press(false) })
   canvas.addEventListener('click', () => {
     if (phone || still()) return
-    if (document.pointerLockElement === canvas) use()
+    if (document.pointerLockElement === canvas) { if (pressTaken) pressTaken = false; else use() }
     else void Promise.resolve(canvas.requestPointerLock()).catch(() => {})
   })
   useButton?.addEventListener('click', use)
   addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== canvas) return
-    right += e.movementX * 0.0022
-    up -= e.movementY * 0.0022
+    turned(e.movementX * 0.0022, -e.movementY * 0.0022)
   })
   addEventListener('wheel', (e) => { if (!written(e.target)) each((m) => m.wheel?.(e.deltaY)) }, { passive: true })
   // A phone: the left half of the screen is a stick to move by, the right half turns the head.
@@ -139,8 +181,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   canvas.addEventListener('pointermove', (e) => {
     if (touch.move?.id === e.pointerId) { touch.move.dx = (e.clientX - touch.move.x) / 60; touch.move.dy = (e.clientY - touch.move.y) / 60 }
     if (touch.turn?.id === e.pointerId) {
-      right += (e.clientX - touch.turn.x) * 0.005
-      up -= (e.clientY - touch.turn.y) * 0.005
+      turned((e.clientX - touch.turn.x) * 0.005, -(e.clientY - touch.turn.y) * 0.005)
       touch.turn.x = e.clientX
       touch.turn.y = e.clientY
     }
@@ -169,7 +210,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     get driveAxes() { return pad.driveAxes },
     poll(dt: number) {
       const [gr, gu] = pad.poll(dt)
-      if (gr !== 0 || gu !== 0) { right += gr; up += gu }
+      turned(gr, gu)
     },
     rumble(telemetry: RumbleTelemetry | null) { pad.rumble(telemetry) },
     pulse(kind: RumbleImpact, intensity?: number) { pad.pulse(kind, intensity) },
@@ -189,6 +230,9 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     get locked() { return document.pointerLockElement === canvas },
     always(code, act) { everywhere.set(code, act) },
     use,
+    press,
+    secondary,
+    turnBy: turned,
     hold(code, on) {
       if (!on) { down.delete(code); return }
       if (top()?.text) return
