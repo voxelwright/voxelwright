@@ -27,6 +27,7 @@ import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { marksBytes, marksIn, said, squaresBytes } from './marks.mjs'
 import { kerbsBytes, kerbsIn, said as kerbsSaid } from './kerbs.mjs'
+import { bridgesBin, said as bridgesSaid } from './bridges.mjs'
 import { buildMap } from './map.mjs'
 import { buildPlaces } from './places.mjs'
 import { releaseCredits } from '../page/release-credits.ts'
@@ -358,6 +359,9 @@ console.log(`  road marks: ${said(marks)}`)
 const kerbs = kerbsBytes(kerbsIn(GRAPHS))
 writeFileSync(join(out, 'bay/kerbs.bin'), kerbs)
 console.log(`  surveyed kerbs: ${kerbsSaid(kerbs)}`)
+const bridges = bridgesBin()
+writeFileSync(join(out, 'bay/bridges.bin'), bridges)
+console.log(`  elevated bridges: ${bridgesSaid(bridges)}`)
 
 // ── Release packs (#82): bundle tiny release objects into VXPK packs under releases/<pin>/packs/ without touching manifest.json ──
 if (!noPacks) {

@@ -8,6 +8,7 @@
 pub mod ballistics;
 pub mod bay;
 pub mod beams;
+pub mod bridges;
 pub mod heroes;
 pub mod bodies;
 pub mod broadphase;
@@ -317,6 +318,20 @@ pub extern "C" fn bay_marks() -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn bay_kerbs() -> i32 {
     bay::kerbs()
+}
+
+/// Takes surveyed elevated bridges, viaducts, ramps and piers in the room (`bay_room`; bay.rs `bridges`): every core
+/// of a world is told the same before its sectors are made (#228). Returns span count, or -1 on invalid bytes.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_bridges() -> i32 {
+    bay::bridges()
+}
+
+/// Elevated bridge deck driving-surface top cell (`top_g + 1`, matching `feet_at`) at `(x, z)` for OSM `layer`,
+/// or `i32::MIN` when no bridge deck at that layer covers `(x, z)` (#228).
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_bridge_y(x: i32, z: i32, layer: i32) -> i32 {
+    bay::bridge_y(x, z, layer)
 }
 
 /// Lets go of one pack, named by where its ground starts and how far apart its samples are. Returns how many are held.

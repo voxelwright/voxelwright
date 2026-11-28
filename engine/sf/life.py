@@ -200,7 +200,7 @@ for g in graphs.values():
         ids.add(r["id"])
         roads.append(r)
 MINOR = ("Alley", "Place", "Lane", "Court", "Terrace", "Walk", "Way")
-CLASS = {"service": 0, "residential": 1, "unclassified": 1, "living_street": 1, "tertiary": 2, "tertiary_link": 2, "secondary": 3, "secondary_link": 3, "primary": 4, "primary_link": 4, "trunk": 4, "busway": 5}
+CLASS = {"service": 0, "residential": 1, "unclassified": 1, "living_street": 1, "tertiary": 2, "tertiary_link": 2, "secondary": 3, "secondary_link": 3, "primary": 4, "primary_link": 4, "trunk": 4, "trunk_link": 4, "motorway_link": 4, "motorway": 5, "busway": 5}
 klass = {r["id"]: CLASS.get(raw_ways.get(r["id"].split("/")[0], {}).get("tags", {}).get("highway"), 1 if r.get("name") else 0) for r in roads}
 
 # ── Junctions and what controls each way into them ──

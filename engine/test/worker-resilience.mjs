@@ -82,6 +82,7 @@ const fakeCore = {
   bay_load: () => 1,
   bay_marks: () => 0,
   bay_kerbs: () => 0,
+  bay_bridges: () => 0,
   bay_begin: () => {},
   bay_drop: () => 0,
   bay_hero: () => 1,

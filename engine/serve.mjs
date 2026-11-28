@@ -143,6 +143,9 @@ if (ground && !ground.squares && !ground.remote) {
   if (!ground.kerbs) {
     try { const k = await import('./sf/kerbs.mjs'); ground.kerbs = k.kerbsBytes(k.kerbsIn(graphs)) } catch (e) { console.error(`no surveyed kerbs from ${graphs}: ${e.message}: sidewalks keep the bake's raster`) }
   }
+  if (!ground.bridges) {
+    try { const b = await import('./sf/bridges.mjs'); ground.bridges = b.bridgesBin() } catch (e) { console.error(`no surveyed bridges: ${e.message}: highways keep the bare-earth DEM`) }
+  }
 }
 if (ground?.remote) {
   // From an address: what this server hands its pages of the release is read through bay.ts as its worlds read it,
@@ -663,7 +666,7 @@ function open(of) {
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
   let questions = 0
-  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, fineDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, kerbs: ground.kerbs, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, fineDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, kerbs: ground.kerbs, bridges: ground.bridges, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
   // that were in the air when the world last stopped are lost; where they came from is as they left it).
   const log = []
@@ -1356,8 +1359,8 @@ function gapsAll() {
 }
 
 let topsAsked = 0, topsSince = Date.now()
-/** The road's marks (/bay/marks.bin), surveyed kerbs (/bay/kerbs.bin), neighborhood places (/bay/places.json) and 3D map binary (/bay/map.bin), once made. */
-let roadMarks = null, roadKerbs = null, navMap = null, bayPlaces = null
+/** The road's marks (/bay/marks.bin), surveyed kerbs (/bay/kerbs.bin), elevated bridges (/bay/bridges.bin), neighborhood places (/bay/places.json) and 3D map binary (/bay/map.bin), once made. */
+let roadMarks = null, roadKerbs = null, roadBridges = null, navMap = null, bayPlaces = null
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
@@ -1450,11 +1453,11 @@ const server = createServer((req, res) => {
   }
   // The release every world here stands on (#526): its pointer and its own objects, the bytes its worlds' processes hold.
   if (ground && url.pathname.startsWith('/release/')) return done(Promise.resolve().then(() => ground.object(decodeURIComponent(url.pathname.slice(9)))).then((bytes) => (bytes ? send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream') : send(res, 404, 'not of the release this world holds'))))
-  // Its landmarks, road's marks, surveyed kerbs and 3D map binary are the ones its worlds hold, for every page here.
-  if (ground && ['/bay/heroes.json', '/bay/marks.bin', '/bay/marks-squares.bin', '/bay/kerbs.bin', '/bay/map.bin'].includes(url.pathname)) {
-    const bytes = url.pathname === '/bay/heroes.json' ? ground.heroes : url.pathname === '/bay/marks.bin' ? ground.marks : url.pathname === '/bay/marks-squares.bin' ? ground.squares : url.pathname === '/bay/kerbs.bin' ? ground.kerbs : ground.map
+  // Its landmarks, road's marks, surveyed kerbs, elevated bridges and 3D map binary are the ones its worlds hold, for every page here.
+  if (ground && ['/bay/heroes.json', '/bay/marks.bin', '/bay/marks-squares.bin', '/bay/kerbs.bin', '/bay/bridges.bin', '/bay/map.bin'].includes(url.pathname)) {
+    const bytes = url.pathname === '/bay/heroes.json' ? ground.heroes : url.pathname === '/bay/marks.bin' ? ground.marks : url.pathname === '/bay/marks-squares.bin' ? ground.squares : url.pathname === '/bay/kerbs.bin' ? ground.kerbs : url.pathname === '/bay/bridges.bin' ? ground.bridges : ground.map
     if (bytes) return send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream')
-    if (url.pathname !== '/bay/map.bin' && url.pathname !== '/bay/kerbs.bin') return send(res, 404, 'no road marks')
+    if (url.pathname !== '/bay/map.bin' && url.pathname !== '/bay/kerbs.bin' && url.pathname !== '/bay/bridges.bin') return send(res, 404, 'no road marks')
   }
   // Neighborhood storefronts & plazas (/bay/places.json), lazily compiled from sf/places-raw.json.br + brands.json + plazas.json.
   if (url.pathname === '/bay/places.json') {
@@ -1482,6 +1485,10 @@ const server = createServer((req, res) => {
     const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
     roadKerbs ??= import('./sf/kerbs.mjs').then((m) => m.kerbsBytes(m.kerbsIn(graphs)))
     return void roadKerbs.then((bytes) => send(res, 200, bytes, 'application/octet-stream'), (e) => { roadKerbs = null; console.error(`no surveyed kerbs from ${graphs}: ${e.message}`); send(res, 404, 'no surveyed kerbs') })
+  }
+  if (url.pathname === '/bay/bridges.bin') {
+    roadBridges ??= import('./sf/bridges.mjs').then((m) => m.bridgesBin())
+    return void roadBridges.then((bytes) => send(res, 200, bytes, 'application/octet-stream'), (e) => { roadBridges = null; console.error(`no surveyed bridges: ${e.message}`); send(res, 404, 'no surveyed bridges') })
   }
   // The Bay's packs and their names (#373): baked outside the repo by bay/bake.py, read by page/bay.ts.
   if (url.pathname.startsWith('/bay/')) {

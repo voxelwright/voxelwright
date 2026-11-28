@@ -57,6 +57,7 @@ import {
 export interface Ground {
   feet_at(x: number, z: number): number
   ground_at(x: number, z: number): number
+  bay_bridge_y?(x: number, z: number, layer: number): number
   world_kind(x: number, y: number, z: number): number
   world_under?(x: number, y: number, z: number, depth: number): number
   top_at?(x: number, z: number): number
@@ -87,7 +88,7 @@ export interface CrowdAiStats {
 }
 
 type Ring = Float64Array
-interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number; railShift?: number }
+interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number; railShift?: number; highway?: string; bridge?: boolean; tunnel?: boolean; layer: number; hasBridge?: boolean }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number; lights?: { s: number; node: number; dx: number; dz: number }[] }
 interface Look { size: [number, number, number]; per: number; low: [number, number, number]; palette: number[]; runs: string; roles?: string[] }
@@ -267,9 +268,10 @@ export function stepDeepensOverlap(
  * so diagonal intersections (like Columbus Ave) never drive through turning cross-traffic.
  */
 export function trafficObstacleGap(
-  c: { x: number; z: number; hx: number; hz: number; halfL: number; halfW: number; v: number; id: number },
-  ob: { x: number; z: number; hx: number; hz: number; long: number; wide: number; v: number; id?: number },
+  c: { x: number; y?: number; z: number; hx: number; hz: number; halfL: number; halfW: number; v: number; id: number },
+  ob: { x: number; y?: number; z: number; hx: number; hz: number; long: number; wide: number; v: number; id?: number },
 ): number {
+  if (c.y !== undefined && ob.y !== undefined && Math.abs(c.y - ob.y) > 25) return Infinity
   const dx = ob.x - c.x, dz = ob.z - c.z
   if (Math.abs(dx) > 450 || Math.abs(dz) > 450) return Infinity
   if (ob.long > 40) {
@@ -523,21 +525,33 @@ export function street(o: {
   let routed = false
   const squares = new Map<string, 'asked' | 'held'>()
   const rails: { a: number; b: number; p: Ring }[] = []
-  const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][]; heads?: number[][] }, name = '') => {
+  const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][]; heads?: number[][]; roadTags?: Record<string, { highway?: string; layer?: string | number; bridge?: string; tunnel?: string }> }, name = '') => {
     for (const [way, a, b, x, z] of s.heads ?? []) { const n = heads.push({ key: `${way}/${a}/${b}`, x, z, piece: null, shown: '' }) - 1; file(headGrid, x, z, x, z, n) }
     walkGraph.addSquare(name || `sq:${squares.size}`, s)
+    const rtags = s.roadTags ?? {}
     for (const r of s.roads) {
       const [way, a, b, lanes, flags, next, ctl] = r as [number, number, number, number, number, number[], number]
       const { p, cum, len } = line(r as number[], 7)
       if (len < 1) continue
       const key = `${way}/${a}/${b}`, nexts: string[] = []
       for (let i = 0; i < next.length; i += 2) nexts.push(`${next[i]}/${b}/${next[i + 1]}`)
+      const tag = rtags[String(way)]
+      const highway = tag?.highway
+      const bridge = !!(tag?.bridge && tag.bridge !== 'no' && tag.bridge !== 'None')
+      const tunnel = !!(tag?.tunnel && tag.tunnel !== 'no' && tag.tunnel !== 'None')
+      const layer = Number(tag?.layer ?? 0) || 0
+      const isMotorway = highway === 'motorway'
+      const isRamp = highway === 'motorway_link'
       // How many cars it carries, per cell of its length: by its class (sf/life.py: service, residential, tertiary,
       // secondary, primary, busway) and its lanes; an alley or a place fewer still.
-      const cls = flags >> 4, weight = [0.15, 0.5, 1, 1.5, 2, 0.4][cls] * (flags & 4 ? 0.5 : 1) * Math.min(3, lanes) / 1000
+      const cls = isMotorway ? 5 : isRamp ? Math.max(flags >> 4, 4) : (flags >> 4)
+      const weight = (isMotorway ? 2.6 : isRamp ? 1.5 : ([0.15, 0.5, 1, 1.5, 2, 0.4][flags >> 4] ?? 0.5)) * (flags & 4 ? 0.5 : 1) * Math.min(3, lanes) / 1000
       const mid = { x: 0, z: 0, tx: 0, tz: 0 }
       along(p, cum, len / 2, mid)
-      const road: Road = { key, way, a, b, lanes: Math.max(1, Math.min(4, lanes)), flags, next: nexts, ctl, cls, wired: (flags & 8) !== 0, blocked: false, p, cum, len, open: null, weight, mx: mid.x, mz: mid.z }
+      // Close unexcavated tunnels (layer < 0 or tunnel=yes) via `open = false` (not `blocked`, which is reserved for
+      // dynamic blast craters and drives `activeCongested` detour routing) (#228).
+      const closedTunnel = tunnel || layer < 0
+      const road: Road = { key, way, a, b, lanes: Math.max(1, Math.min(4, lanes)), flags, next: nexts, ctl: isMotorway || isRamp ? 0 : ctl, cls, wired: (flags & 8) !== 0, blocked: false, p, cum, len, open: closedTunnel ? false : null, weight, mx: mid.x, mz: mid.z, highway, bridge, tunnel, layer, hasBridge: bridge || layer > 0 ? true : undefined }
       roads.set(key, road)
       let from = roadsFrom.get(a); if (!from) roadsFrom.set(a, from = []); from.push(road)
       let to = roadsTo.get(b); if (!to) roadsTo.set(b, to = []); to.push(road)
@@ -814,7 +828,7 @@ export function street(o: {
   let lastLod: LodStats = { ring1: 0, ring2: 0, ring3: 0, total: 0, capped: 0, suppressedTaken: 0, caps: { ...DEFAULT_RING_CAPS } }
   let macroAt = -99, macroRing3 = 0
   /** Where people were drawn last, for the cars to wait for them on a crossing, plus Ring-1 sidewalk pedestrians for near-miss reactions. */
-  const crossing: [number, number][] = []
+  const crossing: [number, number, number][] = []
   const nearPeds: [number, number][] = []
   /** Living City Traffic AI state (#164 Phase 3A): sim clock, stats, detour cache, & pedestrian near-miss reaction cues. */
   let simTime = 0
@@ -1578,7 +1592,7 @@ export function street(o: {
       q.lod = lod; q.archetype = ev.archetype; q.activity = activityVal; q.phase = ev.phase
       q.panicRole = panicRole ?? undefined
       q.sheltered = pr.rainSheltered || undefined
-      if (ev.crossing || ev.kind === 1) crossing.push([x, z])
+      if (ev.crossing || ev.kind === 1) crossing.push([x, at[1], z])
       else if (lod === 1 && !down) nearPeds.push([x, z])
       n++
     }
@@ -1838,26 +1852,42 @@ export function street(o: {
     for (const s of o.cuts ?? []) if (Math.abs(s.at[0] - x) < s.radius + 60 && Math.abs(s.at[2] - z) < s.radius + 60) return true
     return false
   }
-  const wheelAt = (x: number, z: number) => {
-    const f = feetAt(x, z), ix = Math.round(x), iz = Math.round(z)
+  /** Elevation of a road surface at `(x, z)` accounting for elevated highway bridges & untagged overpasses (#228). */
+  const bridgeSurfaceAt = (r: Road | null | undefined, x: number, z: number): number => {
+    if (!o.land.bay_bridge_y || !r || r.tunnel || r.hasBridge === false) return -1_000_000_000
+    const by = o.land.bay_bridge_y(Math.round(x), Math.round(z), r.layer)
+    return by > -1_000_000 ? by : -1_000_000_000
+  }
+  const roadSurfaceAt = (r: Road | null | undefined, x: number, z: number): number => {
+    const by = bridgeSurfaceAt(r, x, z)
+    return by > -1_000_000 ? by : feetAt(x, z)
+  }
+  const wheelAt = (x: number, z: number, r?: Road | null, r2?: Road | null) => {
+    let f = roadSurfaceAt(r, x, z)
+    if (r2 && r2 !== r) {
+      const b2 = bridgeSurfaceAt(r2, x, z)
+      if (b2 > f) f = b2
+    }
+    const ix = Math.round(x), iz = Math.round(z)
     if (!changedNear(x, z)) return f
     if (o.land.world_kind(ix, f - 1, iz)) return f
     for (let y = f - 2; y >= f - 30; y--) if (o.land.world_kind(ix, y, iz)) return y + 1
     return f
   }
   /** Exact surface height under a wheel ray using `floor` cell coordinates and `world_under`, matching `living.rs::ray`. */
-  const roadAt = (x: number, z: number, fromY?: number) => {
+  const roadAt = (x: number, z: number, fromY?: number, r?: Road | null) => {
     const ix = Math.floor(x), iz = Math.floor(z)
+    const by = bridgeSurfaceAt(r, x, z)
     if (o.land.world_under) {
       const f = o.land.feet_at(ix, iz), g = o.land.ground_at(ix, iz)
-      const base = f - g > 25 ? g + 1 : f
+      const base = by > -1_000_000 ? by : f - g > 25 ? g + 1 : f
       const top = fromY !== undefined ? Math.floor(fromY) : base + 12
       const hit = o.land.world_under(ix, top, iz, 36)
       if (hit > -1_000_000) return hit
       return base
     }
     const f = o.land.feet_at(ix, iz), g = o.land.ground_at(ix, iz)
-    const base = f - g > 25 ? g + 1 : f
+    const base = by > -1_000_000 ? by : f - g > 25 ? g + 1 : f
     if (!changedNear(x, z)) return base
     if (o.land.world_kind(ix, base - 1, iz)) return base
     for (let y = base - 2; y >= base - 30; y--) if (o.land.world_kind(ix, y, iz)) return y + 1
@@ -1867,9 +1897,13 @@ export function street(o: {
   const settle = (c: Car, exact = false) => {
     const st = stanceOf(c.model)
     const fx = Math.cos(c.heading), fz = Math.sin(c.heading)
+    const cr = c.road ?? null
+    const cAlt = c.road && c.s !== undefined
+      ? (c.next && c.s > c.road.len - 40 ? c.next : c.prev && c.s < 40 ? c.prev : null)
+      : null
     if (!st) {
       const hl = c.model.long * 0.32
-      const front = wheelAt(c.x + fx * hl, c.z + fz * hl), back = wheelAt(c.x - fx * hl, c.z - fz * hl)
+      const front = wheelAt(c.x + fx * hl, c.z + fz * hl, cr, cAlt), back = wheelAt(c.x - fx * hl, c.z - fz * hl, cr, cAlt)
       c.y = (front + back) / 2 - 0.5
       c.pitch = Math.atan2(front - back, 2 * hl)
       c.roll = 0
@@ -1880,7 +1914,7 @@ export function street(o: {
     let y0 = 0, sp = 0, sr = 0
     for (let i = 0; i < st.feet.length; i++) {
       const f = st.feet[i]
-      const gi = exact ? roadAt(c.x + fx * f.along + rx * f.right, c.z + fz * f.along + rz * f.right) : wheelAt(c.x + fx * f.along + rx * f.right, c.z + fz * f.along + rz * f.right)
+      const gi = exact ? roadAt(c.x + fx * f.along + rx * f.right, c.z + fz * f.along + rz * f.right, undefined, cr) : wheelAt(c.x + fx * f.along + rx * f.right, c.z + fz * f.along + rz * f.right, cr, cAlt)
       g[i] = gi
       const h = gi + f.ride
       y0 += st.fit[i][0] * h; sp += st.fit[i][1] * h; sr += st.fit[i][2] * h
@@ -1897,7 +1931,7 @@ export function street(o: {
         const start = rotate(q, [f.lx, f.ly, f.lz])
         const sx = c.x + start[0], sy = y0 + start[1], sz = c.z + start[2]
         const estDist = Math.max(0, (sy - g[i]) / cosTilt)
-        const gi = roadAt(sx + down[0] * estDist, sz + down[2] * estDist, sy)
+        const gi = roadAt(sx + down[0] * estDist, sz + down[2] * estDist, sy, cr)
         if (gi !== g[i]) { g[i] = gi; changed = true }
       }
       if (changed) {
@@ -2151,7 +2185,7 @@ export function street(o: {
         settle(c, true)
         // Not on a roof or a stair (the footing there is not the street's), and not in what the survey left standing at the kerb.
         const g = o.land.ground_at(Math.round(s.x), Math.round(s.z))
-        if (c.y + (m.looks[0]?.low[1] ?? 0) - g > 8 || Math.abs(c.pitch) > 0.3) { if (isFine) gone.add(i); continue }
+        if (c.y + (m.looks[0]?.low[1] ?? 0) - g > 8 || Math.abs(c.pitch) > 0.25 || Math.abs(c.roll ?? 0) > 0.22) { if (isFine) gone.add(i); continue }
         // Never in a lane: no part of it where a lane's cars go (by the lanes as traffic keeps them, laneOff).
         if (inLane(s.x, s.z, m.wide / 2)) { gone.add(i); inLanes++; continue }
         parked.set(i, c)
@@ -2345,38 +2379,55 @@ export function street(o: {
   let inLanes = 0, signStops = 0
   const isSolidBuildingMat = (m: number) => m === 8 || m === 9 || m === 11 || m === 14
   const open = (r: Road) => {
-    if (r.blocked) return false
+    if (r.blocked || r.tunnel || r.layer < 0) return false
     if (r.open !== null) return r.open
     if (probes <= 0) return false
     probes--
     // Verify centerline and full lane width (±0.9 m) across the entire segment including its endpoint `s = r.len`
     // against roofs and solid building walls; never cache `open = true` while a tile is unloaded (`ground_at <= -150`) (#129).
+    // On elevated bridge decks (`bay_bridge_y`), check clearance and grade along the bridge deck rather than bare-earth DEM (#228).
     const steps = Math.max(1, Math.ceil(r.len / 20))
-    const checkSpot = (x: number, z: number): 'ok' | 'unloaded' | 'blocked' => {
+    let sawBridge = r.hasBridge === true
+    const checkSpot = (x: number, z: number, knownBy?: number): 'ok' | 'unloaded' | 'blocked' => {
       const ix = Math.round(x), iz = Math.round(z)
       const g = o.land.ground_at(ix, iz)
       if (g <= -150) return 'unloaded'
+      const by = knownBy !== undefined ? knownBy : bridgeSurfaceAt(r, x, z)
+      if (by > -1_000_000) {
+        sawBridge = true
+        if (isSolidBuildingMat(o.land.world_kind(Math.floor(x), by + 8, Math.floor(z)) & 15)) return 'blocked'
+        return 'ok'
+      }
       if (o.land.feet_at(ix, iz) - g > 30) return 'blocked'
       if (isSolidBuildingMat(o.land.world_kind(Math.floor(x), g + 8, Math.floor(z)) & 15)) return 'blocked'
       return 'ok'
     }
     // Trimming `r.lanes` on a one-way road shifts its symmetric `laneOff`, so re-verify until stable.
     const stepLen = r.len / steps
+    const checkCrossSlope = !r.bridge && (r.highway === 'motorway' || r.highway === 'motorway_link' || r.highway === 'primary' || r.highway === 'primary_link' || r.highway === 'secondary' || !r.highway)
     for (let attempt = 0; attempt < 4; attempt++) {
       let openLanes = r.lanes
-      let prevCenterG: number | null = null
+      let prevCenterY: number | null = null
       for (let k = 0; k <= steps; k++) {
         const s = (r.len * k) / steps
         along(r.p, r.cum, s, P)
-        const centerState = checkSpot(P.x, P.z)
+        const by = bridgeSurfaceAt(r, P.x, P.z)
+        const centerState = checkSpot(P.x, P.z, by)
         if (centerState === 'unloaded') return false
         if (centerState === 'blocked') { r.open = false; return false }
-        // Reject unnavigable cliff-grade paper streets (e.g. Telegraph Hill stairways > 38% grade; steepest SF road is 31.5%).
-        const cg = o.land.ground_at(Math.round(P.x), Math.round(P.z))
-        if (prevCenterG !== null && stepLen >= 8 && Math.abs(cg - prevCenterG) / stepLen > 0.38) {
+        // Reject unnavigable cliff-grade paper streets (>38% longitudinal) or sheer highway embankment cut-slopes (>42% lateral).
+        const cy = by > -1_000_000 ? by : feetAt(P.x, P.z)
+        if (prevCenterY !== null && stepLen >= 8 && Math.abs(cy - prevCenterY) / stepLen > 0.38) {
           r.open = false; return false
         }
-        prevCenterG = cg
+        if (checkCrossSlope && by <= -1_000_000) {
+          const gl = o.land.ground_at(Math.round(P.x - P.tz * 12), Math.round(P.z + P.tx * 12))
+          const gr = o.land.ground_at(Math.round(P.x + P.tz * 12), Math.round(P.z - P.tx * 12))
+          if (gl > -150 && gr > -150 && Math.abs(gl - gr) > 10) {
+            r.open = false; return false
+          }
+        }
+        prevCenterY = cy
         for (let lane = 0; lane < openLanes; lane++) {
           lanePoint(r, lane, s, P)
           const tx = P.tx, tz = P.tz, lx = P.x, lz = P.z
@@ -2390,9 +2441,9 @@ export function street(o: {
         }
         if (openLanes <= 0) { r.open = false; return false }
       }
-      if (openLanes === r.lanes) { r.open = true; return true }
+      if (openLanes === r.lanes) { r.hasBridge = sawBridge; r.open = true; return true }
       r.lanes = openLanes
-      if (!(r.flags & 1)) { r.open = true; return true }
+      if (!(r.flags & 1)) { r.hasBridge = sawBridge; r.open = true; return true }
     }
     r.open = false
     return false
@@ -2502,7 +2553,7 @@ export function street(o: {
     }
     settle(c)
   }
-  const limit = (r: Road) => (r.flags & 4 ? SLOW : r.lanes >= 2 ? FAST : ORDINARY)
+  const limit = (r: Road) => (r.highway === 'motorway' ? 240 : r.highway === 'motorway_link' ? 140 : r.flags & 4 ? SLOW : r.lanes >= 2 ? FAST : ORDINARY)
   /** Whether a junction asks everyone to take a turn: three ways or more meet there. */
   /** A junction as its approaches say: three neighbours or more (two through-ways crossing share one way id each way). */
   interface Junction { x: number; z: number; ax: number; az: number; offset: number; lights: boolean; stops: boolean; allway: boolean; size: number }
@@ -2547,12 +2598,12 @@ export function street(o: {
    * cars are not asked about: they stand beside the lanes, some a little into them, and a bus has 35 cm to spare
    * each side.)
    */
-  const taken = (x: number, z: number, hx: number, hz: number, halfL: number, halfW: number, room: number, cars = true) => {
+  const taken = (x: number, z: number, hx: number, hz: number, halfL: number, halfW: number, room: number, cars = true, y?: number) => {
     const far = halfL + 160
-    const near = (cx: number, cz: number, fx: number, fz: number, long: number, wide: number) => Math.abs(cx - x) < far && Math.abs(cz - z) < far && obbOverlap(x, z, hx, hz, halfL, halfW, cx, cz, fx, fz, long / 2, wide / 2) < room
-    for (const list of cars ? [traffic, depotCars, trams, cables] : [depotCars, trams, cables]) for (const c of list) if (near(c.x, c.z, Math.cos(c.heading), Math.sin(c.heading), c.model.long, c.model.wide)) return true
-    for (const c of pending.keys()) if (near(c.x, c.z, Math.cos(c.heading), Math.sin(c.heading), c.model.long, c.model.wide)) return true
-    for (const t of o.alive.things) { const w = o.alive.where(t); if (w && near(w.at[0], w.at[2], w.front[0], w.front[2], Math.max(t.size[0], t.size[2]), Math.min(t.size[0], t.size[2]))) return true }
+    const near = (cx: number, cy: number, cz: number, fx: number, fz: number, long: number, wide: number) => (y === undefined || Math.abs(cy - y) <= 25) && Math.abs(cx - x) < far && Math.abs(cz - z) < far && obbOverlap(x, z, hx, hz, halfL, halfW, cx, cz, fx, fz, long / 2, wide / 2) < room
+    for (const list of cars ? [traffic, depotCars, trams, cables] : [depotCars, trams, cables]) for (const c of list) if (near(c.x, c.y, c.z, Math.cos(c.heading), Math.sin(c.heading), c.model.long, c.model.wide)) return true
+    for (const c of pending.keys()) if (near(c.x, c.y, c.z, Math.cos(c.heading), Math.sin(c.heading), c.model.long, c.model.wide)) return true
+    for (const t of o.alive.things) { const w = o.alive.where(t); if (w && near(w.at[0], w.at[1], w.at[2], w.front[0], w.front[2], Math.max(t.size[0], t.size[2]), Math.min(t.size[0], t.size[2]))) return true }
     return false
   }
   const spawn = (view: View, any: boolean) => {
@@ -2578,7 +2629,9 @@ export function street(o: {
       const s = random() * r.len, lane = Math.floor(random() * r.lanes)
       lanePoint(r, lane, s, P)
       const sg = o.land.ground_at(Math.round(P.x), Math.round(P.z))
-      if (sg <= -150 || o.land.feet_at(Math.round(P.x), Math.round(P.z)) - sg > 30) continue
+      const by = bridgeSurfaceAt(r, P.x, P.z)
+      if (sg <= -150 || (by <= -1_000_000 && o.land.feet_at(Math.round(P.x), Math.round(P.z)) - sg > 30)) continue
+      const spawnY = by > -1_000_000 ? by : sg + 1
       const d = Math.hypot(P.x - eye[0], P.z - eye[2])
       if (d > DRIVEN || (!any && (d < 1200 || !unseen(P.x, P.z, view)))) continue
       if (traffic.some((c) => c.road === r && c.lane === lane && Math.abs(c.s! - s) < 120)) continue
@@ -2591,7 +2644,7 @@ export function street(o: {
         else if (emergency === 'police' && ready.get('suv')) m = ready.get('suv')!
       }
       const paint = emergency ? -1 : !m.variants.length || random() < 0.3 ? -1 : Math.floor(random() * m.variants.length)
-      if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 40, m.wide / 2, 2)) continue
+      if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 40, m.wide / 2, 2, true, spawnY)) continue
       const seedId = ids + 1
       const prof = driverProfile(seedId, m.kind, emergency)
       const c: Car = { id: ids++, model: m, paint, kind: 'traffic', seed: seedId, x: P.x, y: 0, z: P.z, heading: 0, pitch: 0, v: limit(r) * prof.speedBias * (0.5 + random() * 0.4), piece: null, shown: '', road: r, prev: null, next: null, lane, s, hold: null, stuck: 0, lidarAngle: random() * Math.PI * 2, profile: prof, emergency, sirenActive: !!emergency }
@@ -3009,7 +3062,7 @@ export function street(o: {
   }
 
   /** The things in the way of cars: other cars, people on crossings and anyone standing in a lane, living things, cable cars. */
-  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; car?: Car; alive?: boolean; isCrater?: boolean; isPedestrian?: boolean; stalled?: boolean }[] = []
+  const obstacles: { x: number; y?: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; id?: number; car?: Car; alive?: boolean; isCrater?: boolean; isPedestrian?: boolean; stalled?: boolean }[] = []
   /**
    * Whether any of an obstacle's outline lies in the path straight ahead of a vehicle at a place heading a way, a
    * path `half` wide each side of its middle line; and if so how far ahead of the vehicle's middle that part of it
@@ -3039,7 +3092,7 @@ export function street(o: {
     for (const c of traffic) {
       const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
       const stalled = !!c.rtStuck || (c.v < 2 && !c.queued && (c.stuck ?? 0) > 1.2)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c, stalled })
+      obstacles.push({ x: c.x, y: c.y, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c, stalled })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, stalled })
       // Reserve destination lane slot for cars mid-lane-change or mid-overtake so queued cars never merge into the same spot.
       if (c.road && (Math.abs(c.laneShift ?? 0) > 2 || c.overtake)) {
@@ -3071,13 +3124,13 @@ export function street(o: {
 
     for (const c of depotCars) {
       const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c })
+      obstacles.push({ x: c.x, y: c.y, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
     }
     // Parked cars, which no place puts in a lane (inLane); and the holes blasts made in the road.
     for (const c of parked.values()) if (!c.thing) {
       const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: ch, hz: sh })
+      obstacles.push({ x: c.x, y: c.y, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: ch, hz: sh })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: 0, hx: ch, hz: sh })
     }
     for (const h of craters) {
@@ -3086,7 +3139,7 @@ export function street(o: {
     }
     for (const c of [...cables, ...trams]) {
       const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c })
+      obstacles.push({ x: c.x, y: c.y, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
     }
     for (const th of o.alive.things) {
@@ -3094,16 +3147,16 @@ export function street(o: {
       if (w) {
         const hl = Math.max(th.size[0], th.size[2]) / 2, hw = Math.min(th.size[0], th.size[2]) / 2
         const v = th.state ? Math.abs(th.state.speed ?? 0) : 0
-        obstacles.push({ x: w.at[0], z: w.at[2], long: hl, wide: hw, v, hx: w.front[0], hz: w.front[2], alive: true })
+        obstacles.push({ x: w.at[0], y: w.at[1], z: w.at[2], long: hl, wide: hw, v, hx: w.front[0], hz: w.front[2], alive: true })
         aiObstacles.push({ x: w.at[0], z: w.at[2], halfL: hl, halfW: hw, v, hx: w.front[0], hz: w.front[2] })
       }
     }
-    for (const [x, z] of crossing) {
-      obstacles.push({ x, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0, isPedestrian: true })
+    for (const [x, y, z] of crossing) {
+      obstacles.push({ x, y, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0, isPedestrian: true })
       pedPts.push([x, z])
     }
     for (const b of o.bodies()) {
-      obstacles.push({ x: b[0], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0, isPedestrian: true })
+      obstacles.push({ x: b[0], y: b[1], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0, isPedestrian: true })
       pedPts.push([b[0], b[2]])
     }
     const nearMissPeds = nearPeds.length ? pedPts.concat(nearPeds) : pedPts
@@ -3114,10 +3167,10 @@ export function street(o: {
       const rf = rainDrivingFactors(profile, rainNow)
       const pedYieldBuf = crosswalkYieldBuffer(profile, c.v, rainNow)
       let gap = Infinity, lead = 0, why = '', leadCar: Car | undefined, hitCrater = false
-      const meCar = { x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, id: c.id }
+      const meCar = { x: c.x, y: c.y, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, id: c.id }
       for (const ob of obstacles) {
         if (ob.car === c) continue
-        let g = trafficObstacleGap(meCar, ob.car ? { ...ob, id: ob.car.id } : ob)
+        let g = trafficObstacleGap(meCar, ob)
         if (g === Infinity) continue
         if (ob.isPedestrian && g > 4) g = Math.max(0.5, g - pedYieldBuf)
         if (g < gap) {
