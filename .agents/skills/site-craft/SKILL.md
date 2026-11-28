@@ -13,7 +13,10 @@ ask whether the idea makes reading or finding things better. If not, drop it.
 
 Motion, easing and typography rules adapted from Emil Kowalski's skills,
 https://github.com/emilkowalski/skills (MIT). The React, Motion and Base UI parts are left
-out; everything here is plain CSS, HTML and small vanilla JS.
+out; everything here is plain CSS, HTML and small vanilla JS. Anti-clutter and type-scale
+restraint rules also draw on Google Gemini's gemini-frontend-design skill,
+https://github.com/google-gemini/demolab/tree/main/skills/gemini-frontend-design
+(Apache-2.0), leaving out its landing-page hero, scroll-animation and image-generation rules.
 
 ## 1. Loop
 
@@ -36,6 +39,10 @@ out; everything here is plain CSS, HTML and small vanilla JS.
   One `letter-spacing` value for every size is wrong somewhere.
 - Build hierarchy from size, weight and leading together. Emphasise with weight before
   colour.
+- Keep body type sizes tight: at most three distinct sizes below the page title (heading,
+  body, small). Keep consecutive body paragraphs and lists at the same size — no oversized
+  lead paragraphs or shrunken bullet lists — and differentiate subheadings, labels and
+  buttons with weight, family and colour rather than inventing extra sizes.
 - Paragraph spacing is one line of the body leading. Headings sit closer to what follows
   than to what precedes.
 - `text-wrap: balance` on headings, `text-wrap: pretty` on paragraphs.
@@ -207,8 +214,14 @@ state change.
 
 ## 10. Never
 
-- Card soup: every post in a shadowed box.
+- Card soup: every post in a shadowed box, or bordered cards nested inside cards.
 - Purple gradients, glassmorphism over text, neon glows behind body copy.
+- Pre-heading eyebrow or kicker micro-labels in all caps, decorative non-interactive chips or
+  badges, decorative `01`/`02` heading prefixes, or fake `LIVE`/`SCROLL` telemetry.
+- Button walls for choosing modes or filters; use tabs, radios or a connected segmented
+  control instead.
+- Filler marketing copy ("seamless", "elevate", "reimagined") or headlines split mid-phrase
+  with italic line breaks.
 - Decoration that moves while someone reads.
 - Scroll-jacking, parallax on text, fade-in on every section.
 - Animation on keyboard-driven actions.
