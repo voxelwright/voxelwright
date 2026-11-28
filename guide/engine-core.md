@@ -38,6 +38,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `bodies.rs`, `bodies/living.rs` | Loose bodies, living things, people's bodies. |
 | `bodies/hull.rs` | How two rolling vehicles meet and part, and where a vehicle put into another's place ends up. |
 | `fire.rs`, `water.rs` | Fire spreading from cell to cell. Water as depths over columns, not cells. |
+| `beams.rs` | Continuous multi-bounce thermal laser and energy beams: 3D DDA raycast across voxels and dynamic proxies (`BeamTarget`), specular reflections off `POLISHED` steel and grazing-angle Fresnel splits off `GLASS`, and a sparse cooling `ThermalMap` that bores tunnels, ignites flammable cells, and emits `HeatGlow` records. |
 | `hash.rs` | Whole-number hashes and smooth noise that give the same result on every machine. |
 
 All lengths are in finest cells (10 cm). In San Francisco, x is east and z is south from a fixed UTM zone 10N origin, and y is up from the bay's water (`bay.rs`).
