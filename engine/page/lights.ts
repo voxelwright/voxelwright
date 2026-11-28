@@ -213,10 +213,10 @@ fn evalLocalLights(p: vec3f, n: vec3f, rd: vec3f, albedo: vec3f, rough: f32, cle
       }
     }
   }
-  // Smooth knee highlight shoulder: zero loss on dark asphalt & red taillight pools (<= 0.12 linear), while compressing
-  // intense white car paint / close-range overlapping beams below glow.ts's 0.80 bloom threshold so only real lamps bloom.
+  // Smooth highlight shoulder: zero loss on dark asphalt & red taillight pools (<= 0.12 linear), while compressing
+  // close-range overlapping beams on high-albedo white vehicle paint so cars never blow out or glow neon coral-red.
   let peak = max(sum.r, max(sum.g, sum.b));
-  return sum / (1.0 + max(peak - 0.12, 0.0) * 1.45);
+  return sum / (1.0 + max(peak - 0.12, 0.0) * 1.55);
 }
 `
 

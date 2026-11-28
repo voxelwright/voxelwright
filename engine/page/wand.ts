@@ -97,9 +97,9 @@ struct U {
 }
 const NEAR = 1.0;
 const FAR = 100000.0;
-// The wand's light: pale and cool where it only shows, warm where it strikes.
-const SHOW = vec3f(0.62, 0.9, 1.0);
-const STRIKE = vec3f(1.0, 0.78, 0.42);
+// The wand's light (linear HDR): cool cyan where it only shows, warm gold where it strikes.
+const SHOW = vec3f(0.45, 1.05, 1.35);
+const STRIKE = vec3f(1.6, 0.92, 0.25);
 
 fn chosen(c: vec3i) -> bool {
   let size = vec3i(textureDimensions(cells));
@@ -445,9 +445,11 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
       // A ring big enough to be seen from where the eye is, and never smaller than a hand.
       floats.set([...rel(met?.at ?? view.eye), Math.max(2.5, (met?.t ?? 0) * 0.03), ...(box ? rel(box) : [0, 0, 0]), flash, ...(box ? rel(box.slice(3)) : [0, 0, 0]), going ? 0 : 1, ...(thing?.normal ?? [0, 1, 0]), mode === 'thing' && thing?.share === 'side' ? 1 : 0, to.size[0], to.size[1]], 16)
       device.queue.writeBuffer(uniforms, 0, block)
-      const panes = march.panes(to.size)
+      const panes = march.panes(to.allocSize ?? to.size)
       if (!bound || bound.depth !== to.depth || bound.mask !== mask || bound.panes !== panes) bound = { depth: to.depth, mask, panes, group: device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: to.depth }, { binding: 2, resource: mask.createView() }, { binding: 3, resource: panes }] }) }
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }] })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bound.group)
       pass.draw(3)

@@ -260,14 +260,14 @@ async function main() {
   })
   // Build independent GPU pipelines concurrently in two batches (#83) so shader compilation never serializes startup.
   const [march, blit, debris, smoke, water, planet, shade, roadTracks, released] = await Promise.all([
-    marcher(device, gpu.format, world, false, !!LOCAL?.release),
+    marcher(device, gpu.sceneFormat, world, false, !!LOCAL?.release),
     glow(gpu),
-    crumbs(device, gpu.format),
-    puffs(device, gpu.format),
-    flowing(device, gpu.format),
-    space(device, gpu.format),
-    under(device, gpu.format),
-    tracks(device, gpu.format),
+    crumbs(device, gpu.sceneFormat),
+    puffs(device, gpu.sceneFormat),
+    flowing(device, gpu.sceneFormat),
+    space(device, gpu.sceneFormat),
+    under(device, gpu.sceneFormat),
+    tracks(device, gpu.sceneFormat),
     releasedPromise,
   ])
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
@@ -285,13 +285,13 @@ async function main() {
   const farAsked = query.get('far') === '' ? '' : query.has('far') ? samePath(query.get('far')) : null
   if (query.has('far') && farAsked === null) console.warn('?far= names no path of this site: the realm\'s own far model is drawn')
   const [falling, farModel, marine, skyEggs, folk, staff, carWheels] = await Promise.all([
-    pieces(device, gpu.format, march),
-    farOf(device, gpu.format, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null)),
-    fog(device, gpu.format, march),
-    eggSky(device, gpu.format, march),
-    people(device, gpu.format, march),
-    wand(device, gpu.format, march, core, controls, over),
-    wheels(device, gpu.format, march.localLights.buffer),
+    pieces(device, gpu.sceneFormat, march),
+    farOf(device, gpu.sceneFormat, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null)),
+    fog(device, gpu.sceneFormat, march),
+    eggSky(device, gpu.sceneFormat, march),
+    people(device, gpu.sceneFormat, march),
+    wand(device, gpu.sceneFormat, march, core, controls, over),
+    wheels(device, gpu.sceneFormat, march.localLights.buffer),
   ])
   // Show the place once its near boxes and skyline are ready. Coarser fallback cells have lower fetch priority.
   const nearLevels = farModel.listing && farModel.reach > 0
@@ -482,9 +482,16 @@ async function main() {
     // (At most two device pixels a CSS pixel, #81: a phone's three draws 2.25 times the pixels for little to see.)
     const dpr = Math.min(devicePixelRatio || 1, 2)
     const w = Math.max(1, Math.round(laid.w * dpr)), h = Math.max(1, Math.round(laid.h * dpr))
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; target?.destroy(); target = null }
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h }
     const size: [number, number] = [Math.max(1, Math.round(w * scale)), Math.max(1, Math.round(h * scale))]
-    if (!target || target.size[0] !== size[0] || target.size[1] !== size[1]) { target?.destroy(); target = offscreen(gpu, size) }
+    if (!target) {
+      // Pre-allocate the Linear HDR target at full canvas size so dynamic resolution (`steer`) updates only the active viewport with zero GPU texture reallocations.
+      target = offscreen(gpu, [w, h], gpu.sceneFormat)
+      target.resize(size)
+    } else {
+      if (w > target.allocSize[0] || h > target.allocSize[1]) target.resize([Math.max(w, target.allocSize[0]), Math.max(h, target.allocSize[1])])
+      target.resize(size)
+    }
     return target
   }
   // ── The hour ────────────────────────────────────────────────────────────
@@ -1840,22 +1847,23 @@ async function main() {
    */
   const steps = async (withFlags = flags) => {
     // At the size the page draws at: what is drawn as one block goes by how big a pixel is.
-    const size: [number, number] = [canvas.width, canvas.height], v = view()
-    const to = offscreen(gpu, size), read = device.createBuffer({ size: size[0] * size[1] * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+    const size: [number, number] = [canvas.width, canvas.height], v = view(), row = Math.ceil((size[0] * 4) / 256) * 256
+    const to = offscreen(gpu, size, 'rgba8unorm'), read = device.createBuffer({ size: row * size[1], usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
     const encoder = device.createCommandEncoder()
     paused = true
     march.draw(encoder, to, v, (withFlags & ~HEAT) | COUNT, 0)
-    encoder.copyTextureToBuffer({ texture: to.texture }, { buffer: read, bytesPerRow: size[0] * 4 }, size)
+    encoder.copyTextureToBuffer({ texture: to.texture }, { buffer: read, bytesPerRow: row }, size)
     device.queue.submit([encoder.finish()])
     await read.mapAsync(GPUMapMode.READ)
     const bytes = new Uint8Array(read.getMappedRange().slice(0))
     read.unmap(); read.destroy(); to.destroy()
     paused = false
-    // The count is in the first two colours, low byte first; a picture kept blue-first has them the other way about.
-    const low = gpu.format.startsWith('bgra') ? 2 : 0
     let sum = 0, most = 0
-    for (let i = 0; i < bytes.length; i += 4) { const n = bytes[i + low] + bytes[i + 1] * 256; sum += n; most = Math.max(most, n) }
-    return { mean: sum / (bytes.length / 4), most }
+    for (let y = 0; y < size[1]; y++) for (let x = 0; x < size[0]; x++) {
+      const i = y * row + x * 4
+      const n = bytes[i] + bytes[i + 1] * 256; sum += n; most = Math.max(most, n)
+    }
+    return { mean: sum / (size[0] * size[1]), most }
   }
 
   /**
@@ -1863,17 +1871,19 @@ async function main() {
    * of pixels (of a small picture) that differ by more than a tenth of the range in any colour. For the checks.
    */
   const shadowsDiffer = async () => {
-    const size: [number, number] = [640, 360], v = view(), was = march.maps
+    const size: [number, number] = [640, 360], v = view(), was = march.maps, row = Math.ceil((size[0] * 4) / 256) * 256
     const shot = async (maps: boolean) => {
       march.maps = maps
-      const to = offscreen(gpu, size), read = device.createBuffer({ size: size[0] * size[1] * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+      const hdr = offscreen(gpu, size, gpu.sceneFormat), ldr = offscreen(gpu, size, gpu.format)
+      const read = device.createBuffer({ size: row * size[1], usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
       const encoder = device.createCommandEncoder()
-      march.draw(encoder, to, v, SHADOWS, 0)
-      encoder.copyTextureToBuffer({ texture: to.texture }, { buffer: read, bytesPerRow: size[0] * 4 }, size)
+      march.draw(encoder, hdr, v, SHADOWS, 0)
+      blit(encoder, hdr, ldr.color, 0, 0, [1, 0], 0)
+      encoder.copyTextureToBuffer({ texture: ldr.texture }, { buffer: read, bytesPerRow: row }, size)
       device.queue.submit([encoder.finish()])
       await read.mapAsync(GPUMapMode.READ)
       const bytes = new Uint8Array(read.getMappedRange().slice(0))
-      read.unmap(); read.destroy(); to.destroy()
+      read.unmap(); read.destroy(); ldr.destroy(); hdr.destroy()
       return bytes
     }
     paused = true
@@ -1881,13 +1891,16 @@ async function main() {
     paused = false
     march.maps = was
     let differ = 0
-    for (let i = 0; i < a.length; i += 4) if (Math.abs(a[i] - b[i]) > 24 || Math.abs(a[i + 1] - b[i + 1]) > 24 || Math.abs(a[i + 2] - b[i + 2]) > 24) differ++
-    return differ / (a.length / 4)
+    for (let y = 0; y < size[1]; y++) for (let x = 0; x < size[0]; x++) {
+      const i = y * row + x * 4
+      if (Math.abs(a[i] - b[i]) > 24 || Math.abs(a[i + 1] - b[i + 1]) > 24 || Math.abs(a[i + 2] - b[i + 2]) > 24) differ++
+    }
+    return differ / (size[0] * size[1])
   }
 
   /** The march from here at the device's own pace, ms a frame at the canvas's full size: for comparing two settings fairly. */
   const paced = async (withFlags = flags, withPeople = false, withWand = false, withPieces = false, withPasses = false, withUnder = false) => {
-    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
+    const to = offscreen(gpu, [canvas.width, canvas.height], gpu.sceneFormat), v = view()
     paused = true
     // With the people in sight drawn over it too, if asked: what they cost the GPU is the difference.
     const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0); if (withUnder) shade.draw(encoder, target, v, shades(), groundUnder, march.day, march.sun.s); if (withPieces) falling.draw(encoder, target, v, march.sun.s, undefined, (withFlags & MIRRORS) !== 0); if (withPasses) pluginDraws.draw(encoder, target, v, 0) }, 100)
@@ -1903,7 +1916,7 @@ async function main() {
    */
   const passes = async (withFlags = flags, times = 40) => {
     if (!gpu.canTime) return null
-    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
+    const to = offscreen(gpu, [canvas.width, canvas.height], gpu.sceneFormat), v = view()
     const set = device.createQuerySet({ type: 'timestamp', count: 4 }), resolved = device.createBuffer({ size: 32, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }), read = device.createBuffer({ size: 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
     const march_: number[] = [], bodies_: number[] = []
     paused = true
@@ -2100,7 +2113,7 @@ async function main() {
    * 1 to 5); a cell the march met gives number 1 and way 6; sky and sea give nothing (all four 0).
    */
   const farIds = async (size: [number, number]) => {
-    const v = view(), to = offscreen(gpu, size), row = Math.ceil((size[0] * 4) / 256) * 256
+    const v = view(), to = offscreen(gpu, size, 'rgba8unorm'), row = Math.ceil((size[0] * 4) / 256) * 256
     const read = [0, 1].map(() => device.createBuffer({ size: row * size[1], usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }))
     paused = true
     const encoder = device.createCommandEncoder()
@@ -2113,10 +2126,10 @@ async function main() {
     const [cells, faces] = read.map((r) => new Uint8Array(r.getMappedRange().slice(0)))
     read.forEach((r) => { r.unmap(); r.destroy() }); to.destroy()
     paused = false
-    const blue = gpu.format.startsWith('bgra'), out = new Uint8Array(size[0] * size[1] * 4)
+    const out = new Uint8Array(size[0] * size[1] * 4)
     for (let y = 0; y < size[1]; y++) for (let x = 0; x < size[0]; x++) {
       const i = y * row + x * 4, o = (y * size[0] + x) * 4
-      if (faces[i] | faces[i + 1] | faces[i + 2] | faces[i + 3]) { out[o] = faces[blue ? i + 2 : i]; out[o + 1] = faces[i + 1]; out[o + 2] = faces[blue ? i : i + 2]; out[o + 3] = faces[i + 3] }
+      if (faces[i] | faces[i + 1] | faces[i + 2] | faces[i + 3]) { out[o] = faces[i]; out[o + 1] = faces[i + 1]; out[o + 2] = faces[i + 2]; out[o + 3] = faces[i + 3] }
       else if (cells[i] | cells[i + 1] | cells[i + 2] | cells[i + 3]) { out[o] = 1; out[o + 3] = 6 }
     }
     return out
@@ -2128,7 +2141,7 @@ async function main() {
    * walls with windows, and only windows with at least `least` pixels of glass. For sf/lockers.mjs, which places them.
    */
   const lockerWindows = async (size: [number, number], least = 4) => {
-    const v = view(), to = offscreen(gpu, size), row = Math.ceil((size[0] * 16) / 256) * 256
+    const v = view(), to = offscreen(gpu, size, 'rgba8unorm'), row = Math.ceil((size[0] * 16) / 256) * 256
     const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
     const keys = device.createTexture({ size, format: 'rgba32uint', usage }), at = device.createTexture({ size, format: 'rgba32float', usage })
     const read = [0, 1].map(() => device.createBuffer({ size: row * size[1], usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }))
@@ -2162,7 +2175,7 @@ async function main() {
    * march's time on this GPU, not the pass's: #423).
    */
   const farPasses = async (rounds = 5) => {
-    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = [], fogged: number[] = []
+    const to = offscreen(gpu, [canvas.width, canvas.height], gpu.sceneFormat), v = view(), alone: number[] = [], both: number[] = [], fogged: number[] = []
     paused = true
     for (let i = 0; i < rounds; i++) {
       alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0) }, 100)).ms)
@@ -2296,7 +2309,7 @@ async function main() {
   }
   if (BAY_ON && !far && query.get('neighborhood') !== '0') {
     void firstPicture.then(() => createNeighborhood({
-      device, format: gpu.format, pieces: falling, land: core,
+      device, format: gpu.sceneFormat, pieces: falling, land: core,
       hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks,
       load: placesData,
       loadPayload: ensurePlacesPayload,
@@ -2310,7 +2323,7 @@ async function main() {
   // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
   // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
   const signboards = LOCAL?.signs && !far && query.get('boards') !== '0' ? await boards({
-    file: LOCAL.signs, device, format: gpu.format, passes: pluginDraws, pieces: falling,
+    file: LOCAL.signs, device, format: gpu.sceneFormat, passes: pluginDraws, pieces: falling,
     lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
     // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
     kept: (box) => farModel.keep(box),
@@ -2342,7 +2355,7 @@ async function main() {
    * the screens, turn about, the middle of `rounds` each, ms a frame at the canvas's full size and the device's own pace.
    */
   const signPasses = async (rounds = 5) => {
-    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = []
+    const to = offscreen(gpu, [canvas.width, canvas.height], gpu.sceneFormat), v = view(), alone: number[] = [], both: number[] = []
     paused = true
     for (let i = 0; i < rounds; i++) {
       alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v) }, 100)).ms)
@@ -2641,8 +2654,8 @@ async function main() {
     gpu, far, realms: realm, world, march, pose, began,
     make: () => new World(device, { ...world.options, workers: bounded(query.get('portalworkers'), world.options.workers, 1, 8, true) }),
     // The other world's own marcher: made again, as this one's is, when that world comes to hold finer cells (#372).
-    marcher: async (w) => { const m = await marcher(device, gpu.format, w, true); w.onFine = () => void m.reshade((wgsl) => wgsl); return m },
-    people: (m) => people(device, gpu.format, m),
+    marcher: async (w) => { const m = await marcher(device, gpu.sceneFormat, w, true); w.onFine = () => void m.reshade((wgsl) => wgsl); return m },
+    people: (m) => people(device, gpu.sceneFormat, m),
     residents: (look, taken) => query.get('people') === '0' ? () => [] : townsfolk(core, () => look()?.hour ?? 11, () => look()?.rain ?? 0, () => folkClock.now(), [], taken),
     light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) },
     pause: (on) => { paused = on },
@@ -2691,7 +2704,7 @@ async function main() {
     report.env.canvas = [canvas.width, canvas.height]
     await post('start')
     await flight({
-      gpu, world, march, pose, view, street, report, post,
+      gpu: { ...gpu, format: gpu.sceneFormat }, world, march, pose, view, street, report, post,
       canvas: () => [canvas.width, canvas.height],
       pause: (on) => { paused = on },
       now: () => ({ frameMs, gpuMs, scale }),

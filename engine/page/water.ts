@@ -89,24 +89,24 @@ fn noise1(p: vec2f) -> f32 {
   let look = normalize(-in.seen);
   let facing = max(dot(n, look), 0.0);
   let fresnel = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
-  // Its own colour: thin water shows what is under it, deep water is green-blue.
+  // Its own colour (linear HDR): thin water shows what is under it, deep water is green-blue.
   let lit = 0.3 + 0.7 * max(dot(n, u.sun), 0.0);
-  var col = mix(vec3f(0.26, 0.58, 0.56), vec3f(0.05, 0.33, 0.37), clamp(deep / 5.0, 0.0, 1.0)) * lit;
+  var col = mix(vec3f(0.06, 0.30, 0.28), vec3f(0.006, 0.09, 0.12), clamp(deep / 5.0, 0.0, 1.0)) * (lit * 1.6);
   col = mix(col, u.sky, fresnel * 0.75);
-  col += vec3f(1.0, 0.95, 0.85) * pow(max(dot(reflect(-look, n), u.sun), 0.0), 90.0) * 1.2;
+  col += vec3f(1.0, 0.94, 0.80) * pow(max(dot(reflect(-look, n), u.sun), 0.0), 90.0) * 3.2;
   // Foam: where it runs fast, where it falls, and along its thin edge, broken up as foam is.
   let churn = clamp((fast - 2.0) / 6.0, 0.0, 1.6) + 0.6 * (1.0 - smoothstep(0.1, 0.7, deep));
   let broken = noise1(in.plan * 0.9 - vec2f(run * 2.0, run * 1.3)) * 0.6 + noise1(in.plan * 2.3 + vec2f(run * 1.7, 0.0)) * 0.4;
   let foam = clamp(churn, 0.0, 1.0) * smoothstep(0.62 - 0.4 * clamp(churn, 0.0, 1.0), 0.75, broken + 0.25 * clamp(churn - 1.0, 0.0, 1.0));
-  col = mix(col, vec3f(0.9, 0.94, 0.96) * (0.55 + 0.45 * lit), foam);
+  col = mix(col, vec3f(1.05, 1.15, 1.22) * (0.45 + 0.55 * lit), foam);
   var cover = max(clamp(0.2 + deep * 0.13 + fresnel * 0.5, 0.0, 0.85), foam * 0.95) * smoothstep(0.0, 0.12, deep);
   // Where it falls it is not a sheet: streaks of white water running down, and between them what is behind shows.
   let fall = clamp(steep * 2.4 - 0.3, 0.0, 1.0);
   let streak = noise1(vec2f((in.plan.x + in.plan.y) * 1.1, in.high * 0.16 + u.time * 9.0)) * 0.6 + noise1(vec2f((in.plan.x - in.plan.y) * 2.7, in.high * 0.45 + u.time * 15.0)) * 0.4;
   let white = smoothstep(0.32, 0.7, streak);
-  col = mix(col, mix(vec3f(0.5, 0.68, 0.76), vec3f(0.93, 0.96, 0.98), white) * (0.6 + 0.4 * lit), fall);
+  col = mix(col, mix(vec3f(0.24, 0.46, 0.58), vec3f(1.1, 1.2, 1.25), white) * (0.5 + 0.5 * lit), fall);
   cover = mix(cover, 0.3 + 0.62 * white, fall);
-  col *= mix(0.1, 1.0, u.day);
+  col *= mix(0.035, 1.0, u.day);
   return vec4f(col * cover, cover);
 }
 `
@@ -184,13 +184,15 @@ export async function flowing(device: GPUDevice, format: GPUTextureFormat): Prom
       f.set([sun[0] / sunLength, sun[1] / sunLength, sun[2] / sunLength, col], 16)
       f.set([low[0] - anchor[0], base - anchor[1], low[1] - anchor[2], 0], 20)
       u.set(box, 24)
-      // The sky it mirrors, as the screen shows it by day.
-      f.set([0.6, 0.7, 0.82, 0], 28)
+      // The sky it mirrors, in linear HDR by day.
+      f.set([0.38, 0.56, 0.82, 0], 28)
       device.queue.writeBuffer(uniforms, 0, block)
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
       pass.draw(4, box[2] * box[3])

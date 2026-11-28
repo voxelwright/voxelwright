@@ -45,10 +45,10 @@ struct Out { @builtin(position) pos: vec4f, @location(0) c: vec2f }
   // Until the place behind it is made the window is light: slow bands of it, brighter to the middle.
   let r = length(in.c);
   let bands = 0.5 + 0.5 * sin(r * 9.0 - u.time * 3.0 + sin(in.c.x * 4.0 + u.time) * 1.5);
-  let light = mix(vec3f(0.55, 0.7, 1.0), vec3f(1.0, 0.97, 0.9), bands * (1.0 - 0.6 * r)) * (1.1 - 0.35 * r);
-  // A bright rim, so that the window is seen to be one.
+  let light = mix(vec3f(0.28, 0.48, 1.0), vec3f(1.6, 1.5, 1.3), bands * (1.0 - 0.6 * r)) * (1.2 - 0.35 * r);
+  // A bright rim, so that the window is seen to be one (linear HDR).
   let rim = smoothstep(0.93, 1.0, max(abs(in.c.x), abs(in.c.y)));
-  return vec4f(mix(mix(seen, light, u.veil), vec3f(1.0, 0.92, 0.7) * 1.6, rim), 1.0);
+  return vec4f(mix(mix(seen, light, u.veil), vec3f(1.0, 0.86, 0.52) * 3.0, rim), 1.0);
 }
 `
 
@@ -97,7 +97,7 @@ export async function portal(o: {
 }) {
   const { device } = o.gpu, M = 10
   const module = await shader(device, 'portal', CODE)
-  const pipeline = await device.createRenderPipelineAsync({ label: 'portal', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format: o.gpu.format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' } })
+  const pipeline = await device.createRenderPipelineAsync({ label: 'portal', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format: o.gpu.sceneFormat }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' } })
   const uniforms = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
   let other: World | null = null, march2: Marcher | null = null, folk2: People | null = null
@@ -180,7 +180,7 @@ export async function portal(o: {
     if (!p) {
       // The page's own picture changes size as it steers: what was kept for other sizes is let go.
       if (pictures.size >= 6) { for (const old of pictures.values()) old.to.destroy(); pictures.clear() }
-      const to = offscreen(o.gpu, want)
+      const to = offscreen(o.gpu, want, o.gpu.sceneFormat)
       pictures.set(key, p = { to, bind: device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: to.color }, { binding: 2, resource: sampler }] }) })
     }
     return p
@@ -194,6 +194,8 @@ export async function portal(o: {
       ...a, g.size[0] / 2, ...tint, g.size[1] / 2, to.size[0], to.size[1], time, 0,
     ]))
     const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+    pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+    pass.setScissorRect(0, 0, to.size[0], to.size[1])
     pass.setPipeline(pipeline)
     pass.setBindGroup(0, bind)
     pass.draw(6)
@@ -442,7 +444,7 @@ export async function portal(o: {
     /** What the window costs the GPU: the page's own march by itself, then with the other world marched into a window of a share of the picture, at the device's own pace, ms a frame at the canvas's full size. */
     async bench(view: View, flags: number, canvas: readonly [number, number]) {
       if (!gate || !other || !march2) return null
-      const to = offscreen(o.gpu, canvas), v2 = through(view), out: Record<string, number> = {}
+      const to = offscreen(o.gpu, canvas, o.gpu.sceneFormat), v2 = through(view), out: Record<string, number> = {}
       o.pause(true)
       out.own = (await pace(o.gpu, to, (encoder, t) => o.march.draw(encoder, t, view, flags, 0), 100)).ms
       out.other = (await pace(o.gpu, to, (encoder, t) => march2!.draw(encoder, t, v2, flags, 0), 100)).ms

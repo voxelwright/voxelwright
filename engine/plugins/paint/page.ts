@@ -10,7 +10,7 @@
 interface View { eye: readonly number[]; forward: readonly number[]; right: readonly number[]; up: readonly number[]; tanHalf: number }
 interface Target { color: GPUTextureView; depth: GPUTextureView; size: readonly [number, number] }
 type Draw = (encoder: GPUCommandEncoder, to: Target, view: View, time: number) => void
-interface Engine { gpu: { device: GPUDevice; format: GPUTextureFormat }; draws: { add(name: string, draw: Draw): void; remove(name: string): void; names: string[] }; feet(x: number, z: number): number; march: { day: number } }
+interface Engine { gpu: { device: GPUDevice; format: GPUTextureFormat; sceneFormat?: GPUTextureFormat }; draws: { add(name: string, draw: Draw): void; remove(name: string): void; names: string[] }; feet(x: number, z: number): number; march: { day: number } }
 interface Mark { id: string; colour: string; wide: number; fill: number; at?: [number, number]; within?: number; line?: [number, number][]; closed?: boolean }
 
 /** The most marks drawn, and points of lines between them (world.mjs keeps a world to 64 marks of 32 points). */
@@ -99,7 +99,8 @@ const read = (v: unknown): Mark[] => (Array.isArray(v) ? v : []).filter((m): m i
   && ((spot(m.at) && num(m.within, 1, 2000)) || (Array.isArray(m.line) && m.line.length >= 2 && m.line.length <= 32 && m.line.every(spot)))).slice(0, MOST)
 
 export default ({ engine }: { engine: Engine }) => {
-  const { device, format } = engine.gpu
+  const { device } = engine.gpu
+  const format = engine.gpu.sceneFormat ?? engine.gpu.format
   // ?fine=n: the page's cells are 2^n to the world's (main.ts FINE).
   const fine = 2 ** Number(new URLSearchParams(location.search).get('fine') ?? 0)
   const block = new Float32Array(20), uniforms = device.createBuffer({ size: block.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
@@ -120,7 +121,7 @@ export default ({ engine }: { engine: Engine }) => {
     let used = 0
     shown = []
     marks.forEach((m, i) => {
-      const c = [1, 3, 5].map((k) => parseInt(m.colour.slice(k, k + 2), 16) / 255)
+      const c = [1, 3, 5].map((k) => (parseInt(m.colour.slice(k, k + 2), 16) / 255) ** 2.2)
       // The heights it lies between: the ground under it, felt for at its points (a ring: its middle and round it).
       const ring = m.at && m.within ? m.at : null, line = m.line ?? []
       const felt = ring ? [ring, ...Array.from({ length: 16 }, (_, k) => [ring[0] + Math.sin(k * Math.PI / 8) * m.within! * (k & 1 ? 0.5 : 1), ring[1] - Math.cos(k * Math.PI / 8) * m.within! * (k & 1 ? 0.5 : 1)])]
@@ -139,10 +140,12 @@ export default ({ engine }: { engine: Engine }) => {
 
   const paint = (encoder: GPUCommandEncoder, to: Target, view: View) => {
     if (!count || !pipeline) return
-    block.set([...view.eye, view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, fine, ...view.forward, count, to.size[0], to.size[1], 0.3 + 0.7 * engine.march.day, 0])
+    block.set([...view.eye, view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, fine, ...view.forward, count, to.size[0], to.size[1], 0.15 + 1.45 * engine.march.day, 0])
     device.queue.writeBuffer(uniforms, 0, block)
     if (bound?.depth !== to.depth) bound = { depth: to.depth, group: device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: to.depth }, { binding: 2, resource: { buffer: markBuffer } }, { binding: 3, resource: { buffer: pointBuffer } }] }) }
     const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }] })
+    pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+    pass.setScissorRect(0, 0, to.size[0], to.size[1])
     pass.setPipeline(pipeline)
     pass.setBindGroup(0, bound.group)
     pass.draw(3)

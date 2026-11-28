@@ -181,8 +181,9 @@ fn carPaint(col: vec3f, n: vec3f, rd: vec3f, direct: f32) -> vec3f {
   let back = reflect(rd, n);
   let sky = mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(clamp(back.y, 0.0, 1.0), g.skyZenith.a));
   let seen = select(sky, sky * 0.2, back.y < 0.0);
-  let sheen = pow(max(dot(back, u.sun), 0.0), 60.0) * direct * 1.2;
-  return col * (1.0 - f) + seen * f + vec3f(sheen);
+  let sunScale = g.lightSun.rgb * mix(0.25, 1.25, g.day);
+  let sheen = sunScale * (pow(max(dot(back, u.sun), 0.0), 60.0) * direct * 1.2);
+  return col * (1.0 - f) + seen * f + sheen;
 }
 // What a smooth panel of glass or clear coat mirrors (#38): the sky as the hour colours it, a bright band along the
 // horizon (the line down a car's flank), and below it the street: warm with light thrown up from the road near the
@@ -205,9 +206,10 @@ fn clearCoat(col: vec3f, albedo: vec3f, n: vec3f, rd: vec3f, direct: f32, open: 
   let f = 0.04 + 0.92 * pow(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 5.0);
   let back = reflect(rd, n);
   let toSun = max(dot(back, u.sun), 0.0);
-  let sheen = pow(toSun, 22.0) * direct * 0.35 * mix(vec3f(1.0), albedo, 0.55);
-  let coat = pow(toSun, 150.0) * direct * 1.8;
-  return col * (1.0 - f) + street(back, open) * f * mix(0.7, 1.0, open) + sheen + vec3f(coat);
+  let sunScale = g.lightSun.rgb * mix(0.25, 1.25, g.day);
+  let sheen = sunScale * (pow(toSun, 22.0) * direct * 0.35 * mix(vec3f(1.0), albedo, 0.55));
+  let coat = sunScale * (pow(toSun, 150.0) * direct * 1.8);
+  return col * (1.0 - f) + street(back, open) * f * mix(0.7, 1.0, open) + sheen + coat;
 }
 // The colour of a smooth car's paint: as made, with a flake in it a fine cell across, not the town's blotches of wear.
 fn factoryPaint(kind: u32, fine: vec3f) -> vec3f {
@@ -216,10 +218,10 @@ fn factoryPaint(kind: u32, fine: vec3f) -> vec3f {
   if (ci != 0u) { base = looks.palette[ci].rgb; }
   return base * (1.0 + (hash3i(vec3i(floor(fine)), 17u) - 0.5) * 0.04);
 }
-// What is behind a pane of the world's glass that the march looked through is seen through it, tinted as the pane tints.
+// What is behind a pane of the world's glass that the march looked through is seen through it, tinted in linear space.
 fn behindPane(in: Out) -> vec3f {
   let pane = textureLoad(panes, vec2i(in.pos.xy), 0);
-  return select(vec3f(1.0), pow(pane.rgb, vec3f(0.4545)), pane.a > 0.0 && length(in.seen) > pane.a);
+  return select(vec3f(1.0), pane.rgb, pane.a > 0.0 && length(in.seen) > pane.a);
 }
 // Dynamic vehicle lamp emissive (#26): front headlights (warm white, low/high beam), rear tail/brake lamps (crimson,
 // blazing >1.0 HDR into glow.ts when braking/handbraking), and crisp white reverse lamps when gear == -1.
@@ -256,7 +258,7 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     if (head <= 0.01) { return vec3f(0.0); }
     let hi = clamp(head - 1.0, 0.0, 1.0);
     let tint = mix(vec3f(1.0, 0.88, 0.66), vec3f(1.0, 0.97, 0.90), hi);
-    return tint * (min(head, 1.0) * 2.8 + hi * 6.5);
+    return tint * (min(head, 1.0) * 5.6 + hi * 8.5);
   }
   // Rear lamps: dedicated white reverse lenses, deep orange-amber hazard blinkers, inner reverse zone on red clusters when reversing, steady crimson tails, blazing crimson brakes.
   if (along < -0.35 && faceFwd < 0.5) {
@@ -269,8 +271,8 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       return vec3f(1.3, 0.10, 0.002) * amp;
     }
     if (rev > 0.05 && across < 0.62) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
-    let tail = min(head, 1.0) * 1.9;
-    let stop = brake * 9.5;
+    let tail = min(head, 1.0) * 2.5;
+    let stop = brake * 10.5;
     let redPower = max(tail, stop);
     if (redPower <= 0.01) { return vec3f(0.0); }
     let hot = clamp(brake, 0.0, 1.0);
@@ -377,16 +379,14 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   if (localLights.info.x > 0u && !dynLamp) {
     col += evalLocalLights(worldP, n, rd, albedo, rough, select(0.0, coat, polished), 0.0);
   }
-  let lit = tone(col);
-  // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
-  let glowAlpha = select(1.0, 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0), dynLamp);
+  let lin = max(col, vec3f(0.0));
   if (u.ghost != 0) {
     // Every other pixel, in a grain that drifts upward, and paler: the world shows through.
     let p = vec2u(in.pos.xy);
     if (((p.x + p.y + u32(in.at.y * u.cell * 4.0)) & 1u) == 0u) { discard; }
-    return vec4f(mix(lit, vec3f(0.75, 0.88, 1.0), 0.45) * behindPane(in), 1.0);
+    return vec4f(mix(lin, vec3f(0.85, 1.15, 1.45), 0.45) * behindPane(in), 1.0);
   }
-  return vec4f(lit * behindPane(in), glowAlpha);
+  return vec4f(lin * behindPane(in), 1.0);
 }
 // A pane of a body's glass, the face of it that looks at the eye (one face a pane, from inside or out). Two passes,
 // so that panes need no order among themselves: what is already drawn behind is multiplied by what comes through
@@ -523,7 +523,7 @@ fn paneCrack(in: Out) -> vec2f {
   let block = select(0.74, 0.48, cracked > 0.0 && eyeInsidePiece());
   let through = 1.0 - block * cracked;
   let mirrored = select(0.0, paneMirror(rd, n, soft), u.mirrors > 0.5);
-  return vec4f(pow(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - mirrored) * through, vec3f(0.4545)), 1.0);
+  return vec4f(glassTint(in.kind, u.cell + 0.5) * 0.94 * (1.0 - mirrored) * through, 1.0);
 }
 @fragment fn fs_glint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }
@@ -555,7 +555,7 @@ fn paneCrack(in: Out) -> vec2f {
   let transmitted = vec3f(0.68, 0.72, 0.76) * max(g.lightSun.a, 0.32);
   let crackLight = select(min(max(litCrack, transmitted), vec3f(0.76)), min(litCrack, vec3f(1.25)), in.hasSmooth != 0u);
   let add = own * 0.1 + sky * paneMirror(rd, n, soft) + crackLight * cracked * crackStrength;
-  return vec4f(tone(add + 0.3) - tone(vec3f(0.3)), 0.0);
+  return vec4f(max(add, vec3f(0.0)), 0.0);
 }
 `
 
@@ -933,8 +933,10 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
         ...(timing ? { timestampWrites: timing } : {}),
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
-      pass.setBindGroup(1, litFor(march.panes(to.size)))
+      pass.setBindGroup(1, litFor(march.panes(to.allocSize ?? to.size)))
       for (const piece of live) {
         // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
         if (!piece.cell || !piece.count) continue

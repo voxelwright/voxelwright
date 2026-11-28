@@ -69,18 +69,21 @@ const FAR = 100000.0;
   if (u.leds.x < 1.0) {
     let c = textureSampleLevel(picture, smooth_, at, 0.0);
     if (c.a < 0.5) { discard; }
-    return vec4f(c.rgb * u.lit, 1.0 - u.glow * max(c.r, max(c.g, c.b)));
+    let lin = pow(max(c.rgb, vec3f(0.0)), vec3f(2.2));
+    // Linear HDR radiance: cloth matches sunlit walls by day and dims naturally at night; glowing logos/faces lift into bloom.
+    return vec4f(lin * pow(max(u.lit, 0.0), 1.7) * (1.55 + u.glow * 14.0), 1.0);
   }
   // LEDs: the one this pixel is on, its colour from its middle, and how far from its middle the pixel is.
   let grid = at * u.leds;
   let small = max(length(dpdx(grid)), length(dpdy(grid)));
-  let led = textureSampleLevel(picture, smooth_, (floor(grid) + 0.5) / u.leds, 0.0).rgb;
+  let led = pow(max(textureSampleLevel(picture, smooth_, (floor(grid) + 0.5) / u.leds, 0.0).rgb, vec3f(0.0)), vec3f(2.2));
   let lamp = 1.0 - smoothstep(0.26, 0.47, length(fract(grid) - 0.5));
   // From far the picture itself, as bright as its lamps and the dark between them come to together.
   let far = smoothstep(0.22, 0.6, small);
   let near = led * (0.035 + lamp * 1.9);
-  let c = mix(near, textureSampleLevel(picture, smooth_, at, 0.0).rgb, far) * u.lit;
-  return vec4f(c, 1.0 - u.glow * max(c.r, max(c.g, c.b)));
+  let avg = pow(max(textureSampleLevel(picture, smooth_, at, 0.0).rgb, vec3f(0.0)), vec3f(2.2));
+  let c = mix(near, avg, far) * u.lit * (1.5 + u.glow * 16.0);
+  return vec4f(c, 1.0);
 }
 `
 
@@ -211,6 +214,8 @@ export async function screens(device: GPUDevice, format: GPUTextureFormat): Prom
     draw(encoder, to, view, time, day, dull = 0, faced = null) {
       if (!live.size) return
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       const block = new ArrayBuffer(128), f = new Float32Array(block), u = new Uint32Array(block)
       for (const s of live) {
