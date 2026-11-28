@@ -155,6 +155,10 @@ const STYLE = /* css */ `
 html.first #minimap { display: none !important; }
 html.map-open #minimap { opacity: 0; pointer-events: none; }
 html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: none !important; }
+/* The tool bar (index.html #tools, 13 tools since #226) runs under the minimap's corner on a laptop screen: the minimap stands on top of it. */
+@media (pointer: fine) {
+  html:has(body:not(.wand) #tools:not(:empty)) #minimap { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 52px); }
+}
 
 #minimap .mm-clip {
   position: absolute;

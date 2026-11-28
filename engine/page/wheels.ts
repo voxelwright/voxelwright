@@ -188,7 +188,7 @@ export interface WheelDebug {
 
 /** Pure helper checking whether wheel `footIndex` is marked detached in a `0..15` bitmask. */
 export function isWheelDetached(detachedWheels: number | undefined, footIndex: number): boolean {
-  if (!detachedWheels || footIndex < 0 || footIndex >= 8) return false
+  if (!detachedWheels || footIndex < 0 || footIndex >= 4 || !Number.isInteger(footIndex)) return false
   return ((detachedWheels | 0) & (1 << footIndex)) !== 0
 }
 
@@ -730,6 +730,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
       tick++
       active.length = 0
       if (!vehicles.length) {
+        lastCount = 0
         if (states.size) { states.clear(); debugView.clear() }
         return
       }

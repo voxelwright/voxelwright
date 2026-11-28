@@ -70,4 +70,12 @@ export const WORLD: Record<string, Patch> = {
   carBump: { how: 'struck', hard: 0.32, rough: 0.55, shape: 'skin', pitch: 66, ring: 0.11, damp: 0.9, bend: -0.25, air: { from: 520, to: 110, for: 0.1, gain: 0.55, q: 0.65 }, gain: 0.8 },
   carCrunch: { how: 'struck', hard: 0.72, rough: 0.95, shape: 'plate', pitch: 155, ring: 0.16, damp: 0.82, bend: -0.2, pieces: { count: 6, over: 0.22, spread: 0.45 }, air: { from: 2400, to: 260, for: 0.22, gain: 0.85, q: 0.5 }, gain: 0.88 },
   carHorn: { how: 'blown', hard: 0.9, rough: 0.15, shape: 'tube', pitch: 415, ring: 0.08, damp: 0.28, gain: 0.55 },
+  // The Cleave (#226), heard in the head (world.ts `cleave`). The point taken out: a small bright glint, opening upward.
+  cleaveAim: { how: 'struck', hard: 0.95, rough: 0.05, shape: 'cup', pitch: 1568, ring: 0.9, damp: 0.2, bend: -0.12, air: { from: 2200, to: 7000, for: 0.28, gain: 0.3, q: 1.4 }, gain: 0.5 },
+  // The seam being drawn: a glowing breath held for as long as it is, bent up as the stroke lengthens.
+  cleaveDraw: { how: 'rubbed', hard: 0.25, rough: 0.55, shape: 'hollow', pitch: 660, ring: 0.3, damp: 0.35, waver: 0.35, gain: 0.5 },
+  // Let go: steel drawn hard across steel, struck once, and the blade ringing on through the dark of the instant.
+  cleaveStrike: { how: 'struck', hard: 1, rough: 0.3, shape: 'plate', pitch: 1900, ring: 1.1, damp: 0.1, bend: 0.3, air: { from: 9500, to: 1500, for: 0.24, gain: 0.9, q: 1.2 }, gain: 0.85 },
+  // Time (#226): a heavy clock's stroke with a breath of air through it. Low and slow as time stops, high and fast as it is wound back.
+  rewind: { how: 'struck', hard: 0.75, rough: 0.5, shape: 'bar', pitch: 480, ring: 0.16, damp: 0.6, bend: 0.2, air: { from: 420, to: 2600, for: 0.3, gain: 0.8, q: 1.1 }, gain: 1 },
 }
