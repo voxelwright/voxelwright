@@ -10,7 +10,9 @@ import { FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
 import type { View } from './march.ts'
 import type { CombatSound } from './sound/combat.ts'
 import {
+  BALL_RADIUS_CELLS,
   ITF_COURT,
+  RACKET_SPEC,
   TennisCourtController,
   racketPoseFromNormal,
   type CourtSurface,
@@ -220,6 +222,8 @@ export interface CombatToolCallbacks {
   jointsSetWinch?(jointId: number, speed: number): number | boolean
   /** Where an anchor is now (it moves with its body). Without it an anchor stays where it was set. */
   anchorAt?(anchor: CableAnchor): Vec3 | null
+  /** Every racket, bounce, net, fault and point on the court, for a HUD. */
+  onTennisEvent?(event: TennisCourtEvent): void
 }
 
 export interface CombatToolsOptions {
@@ -335,7 +339,13 @@ export const BULLET_SPEED = 9400, TRACER_LENGTH = 70, RIFLE_RANGE = 4000
 export const ROCKET_SPEED = 650, ROCKET_FLIGHT = 6, ROCKET_RADIUS = 40, ROCKET_PRESSURE = 8
 export const LASER_RANGE = 512, LASER_BOUNCES = 6, LASER_POWER = 150
 export const CABLE_MAX = 8, WINCH_SPEED = 30
+/** How long one reel input winds the winch before it stops by itself (s). */
+export const REEL_HOLD = 0.25
+/** A hand this far from its weapon (cells) has jumped: the weapon is put back in it. */
+export const RESPAWN_GAP = 20
 const RETURN_DELAY = 0.12
+/** An assisted return's ball speed (cells/s, ~100 km/h) and where it lands, as a fraction of the far half-court. */
+export const RALLY_SPEED = 280, RALLY_DEPTH = 0.35
 
 /** Floats per drawn primitive: a (xyz, radius), b (xyz, radius), premultiplied colour (rgb, alpha), look (core, falloff, depth softness, 0). */
 export const PRIM_FLOATS = 16
@@ -383,6 +393,7 @@ export async function createCombatTools(
   let lastBlade: { emitter: V3; tip: V3; radius: number } | null = null
   let carvedCount = 0
   let clashes = 0
+  let lastClashFx = -1
   let glow: Float32Array = new Float32Array(0)
   let lastTipPos: V3 | null = null
 
@@ -492,9 +503,12 @@ export async function createCombatTools(
         }
         case 'plasma-clash':
           clashes++
+          // Locked blades clash every substep: the crackle and flare come at most every 90 ms.
+          if (now - lastClashFx < 0.09) break
+          lastClashFx = now
           audio?.saberClash?.({ at: e.pos, impulse: e.intensity, force: clamp(e.intensity, 0.2, 1) })
           sparksOf(e.pos, [0, 1, 0], 18, [1, 0.95, 0.8], 90)
-          flashes.push({ at: e.pos, born: now, life: 0.12, radius: 6, color: mul(add(saberColor, [1, 1, 1]), 3) })
+          flashes.push({ at: e.pos, born: now, life: 0.12, radius: 2.5, color: mul(add(saberColor, [1, 1, 1]), 2) })
           break
         case 'parry':
           clashes++
@@ -519,6 +533,16 @@ export async function createCombatTools(
     const { pos, rot, bladeDir } = saberPose()
     if (melee && saberId) {
       if (groundMode === 'plane' && cb.groundAt) melee.setGround('plane', cb.groundAt(pos[0], pos[2]))
+      // A teleport, a ride or a tool put away and taken up again elsewhere: the weapon is put back in the
+      // hand rather than flung across the world through whatever lies between.
+      const was = melee.pose(saberId)
+      if (!was || len(sub(was.pos, pos)) > RESPAWN_GAP) {
+        melee.remove(saberId)
+        saberId = melee.spawn('lightsaber', pos, rot)
+        if (!saberId) return
+        melee.setColor(saberId, saberColor)
+        if (saberIgnited) melee.ignite(saberId, true)
+      }
       const events = melee.driveHand(saberId, pos, rot, dt)
       if (events === null) {
         saberId = 0
@@ -593,7 +617,8 @@ export async function createCombatTools(
     blasts++
     cb.shockwaveBlast?.(at, ROCKET_RADIUS, ROCKET_PRESSURE, 24)
     audio?.shockwaveBoom?.({ at, radius: ROCKET_RADIUS / 10, force: 1 })
-    flashes.push({ at, born: now, life: 0.35, radius: ROCKET_RADIUS * 0.6, color: [9, 5, 1.2] })
+    // A brief flash only: the fireball and smoke are the host's (shockwaveBlast and its puffs).
+    flashes.push({ at, born: now, life: 0.18, radius: ROCKET_RADIUS * 0.3, color: [6, 3.4, 0.9] })
     sparksOf(at, r.hit ? r.hit.normal : [0, 1, 0], 24, [1, 0.6, 0.2], 140)
   }
 
@@ -669,10 +694,12 @@ export async function createCombatTools(
     return 'linked'
   }
 
+  let reelUntil = -1
   const reel = (amount: number) => {
     const c = cables[cables.length - 1]
     if (!c) return
     reelSpeed = clamp(amount, -1, 1) * WINCH_SPEED
+    reelUntil = now + REEL_HOLD
     c.winch = reelSpeed
     cb.jointsSetWinch?.(c.id, reelSpeed)
   }
@@ -700,15 +727,33 @@ export async function createCombatTools(
       ballTrail.length = 0
       return 'serve'
     }
-    // An assisted swing: the strings sweep through the ball if it is in reach, towards the far court.
+    // An assisted swing. With the ball in reach the racket is set so the strings send it deep into the far
+    // court: the impulse along the face's normal n is (1 + e)(v_racket - v_ball)·n, so n points along the change
+    // of velocity wanted and the head moves through the ball just fast enough to make it.
     const ball = c.readBall()
     const d = unit(dir)
-    const reachPoint = add(from, mul(d, 8))
-    const centre: V3 = ball && len(sub(ball.pos, from)) < 30 ? [...ball.pos] as V3 : reachPoint
-    const toFar = unit([0, 0.35, 1])
-    const across: V3 = unit(cross([0, 1, 0], toFar), [1, 0, 0])
-    const prev = racketPoseFromNormal(sub(centre, add(mul(toFar, 3), mul(across, 3))), toFar)
-    const curr = racketPoseFromNormal(add(centre, add(mul(toFar, 3), mul(across, 3))), toFar)
+    if (!ball || len(sub(ball.pos, from)) >= 30) {
+      const at = add(from, mul(d, 8))
+      c.swingRacket('near', racketPoseFromNormal(sub(at, [0, 0, 0.04]), [0, 0, 1]), racketPoseFromNormal(add(at, [0, 0, 0.04]), [0, 0, 1]))
+      return 'swing'
+    }
+    const o = c.origin
+    const centre: V3 = [ball.pos[0], ball.pos[1], ball.pos[2]]
+    const target: V3 = [o[0] + clamp((from[0] - o[0]) * -0.3, -20, 20), o[1], o[2] + ITF_COURT.halfLength * RALLY_DEPTH]
+    const flat = [target[0] - centre[0], target[2] - centre[2]]
+    const dist = Math.max(1, Math.hypot(flat[0], flat[1]))
+    const time = dist / RALLY_SPEED
+    const vy = (0.5 * 98 * time * time - (centre[1] - o[1])) / time
+    const want: V3 = [flat[0] / dist * RALLY_SPEED, vy, flat[1] / dist * RALLY_SPEED]
+    const change = sub(want, ball.vel)
+    const n = unit(change, [0, 0, 1])
+    const headSpeed = len(change) / (1 + RACKET_SPEC.eCenter) + dot(ball.vel, n)
+    // sports.rs takes the racket's speed as this sweep over the next tick's first 480 Hz substep. The face starts
+    // just clear of the ball: one that starts inside it is pushed apart as well as struck, and flies long.
+    const sweep = mul(n, Math.max(0, headSpeed) / 480)
+    const start = sub(centre, mul(n, BALL_RADIUS_CELLS + 0.06))
+    const prev = racketPoseFromNormal(start, n)
+    const curr = racketPoseFromNormal(add(start, sweep), n)
     c.swingRacket('near', prev, curr)
     return 'swing'
   }
@@ -733,6 +778,7 @@ export async function createCombatTools(
 
   const handleTennis = (events: TennisCourtEvent[]) => {
     for (const e of events) {
+      cb.onTennisEvent?.(e)
       if (e.type === 'racket') tennisHits++
       if (e.type === 'bounce') {
         tennisBounces++
@@ -767,8 +813,8 @@ export async function createCombatTools(
     eye = [at[0], at[1], at[2]]
     aim = unit(dir)
     updateSaber(step)
-    if (tool !== 'saber' && melee && saberId) {
-      // A put-away saber still cools its kerfs.
+    if (tool !== 'saber' && melee && glow.length) {
+      // Kerfs cut before the saber was put away still cool.
       melee.step(step)
       glow = melee.glow()
     }
@@ -796,6 +842,15 @@ export async function createCombatTools(
     for (const c of cables) {
       if (c.winch) c.rest = Math.max(1, c.rest - c.winch * step)
     }
+    if (reelSpeed !== 0 && now >= reelUntil) {
+      // One notch of the wheel winds for a moment; holding it renews it.
+      reelSpeed = 0
+      const c = cables[cables.length - 1]
+      if (c) {
+        c.winch = 0
+        cb.jointsSetWinch?.(c.id, 0)
+      }
+    }
     updateTennis(step)
   }
 
@@ -818,7 +873,11 @@ export async function createCombatTools(
       grown.set(list)
       list = grown
     }
-    list.set([pa[0], pa[1], pa[2], ra, pb[0], pb[1], pb[2], rb, rgb[0], rgb[1], rgb[2], alpha, core, falloff, soft, 0], count * PRIM_FLOATS)
+    const o = count * PRIM_FLOATS
+    list[o] = pa[0]; list[o + 1] = pa[1]; list[o + 2] = pa[2]; list[o + 3] = ra
+    list[o + 4] = pb[0]; list[o + 5] = pb[1]; list[o + 6] = pb[2]; list[o + 7] = rb
+    list[o + 8] = rgb[0]; list[o + 9] = rgb[1]; list[o + 10] = rgb[2]; list[o + 11] = alpha
+    list[o + 12] = core; list[o + 13] = falloff; list[o + 14] = soft; list[o + 15] = 0
     count++
   }
   const sprite = (at: Vec3, r: number, rgb: Vec3, alpha: number, core: number, falloff: number) => prim(at, at, r, r, rgb, alpha, core, falloff)
@@ -841,7 +900,8 @@ export async function createCombatTools(
       const h = glow[i + 3]
       if (h <= 0.01) continue
       const hot = Math.pow(h, 1.6)
-      sprite([glow[i], glow[i + 1], glow[i + 2]], 0.55 + 0.3 * h, [HOT[0] * 5 * hot + saberColor[0] * 0.6 * hot, HOT[1] * 5 * hot * h, HOT[2] * 3 * hot * h], 0, 0.6 * hot * h, 1.4)
+      // Small and sharp, so neighbours run together into a glowing seam rather than a pile of beads.
+      sprite([glow[i], glow[i + 1], glow[i + 2]], 0.32 + 0.12 * h, [HOT[0] * 2.2 * hot + saberColor[0] * 0.2 * hot, HOT[1] * 2.2 * hot * h, HOT[2] * 1.2 * hot * h], 0, 0.2 * hot * h, 3.5)
     }
     // Tracers: a bright streak running along the path, and a faint line left behind it.
     for (const t of tracers) {
@@ -966,6 +1026,10 @@ export async function createCombatTools(
       if (tool === 'laser') stopLaser()
       if (tool === 'saber' && next !== 'saber') {
         if (saberIgnited) ignite(false)
+        // Put away: out of the arena, so nothing is stepped at a hand that has gone.
+        if (melee && saberId) melee.remove(saberId)
+        saberId = 0
+        saberExt = 0
         lastBlade = null
       }
       if (tool === 'grapple') pending = null

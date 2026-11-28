@@ -72,6 +72,27 @@ try {
     const words = new Uint32Array([0x63 | (2 << 8), 1, 2, 8 | (3 << 8), 4, 5, 6])
     const decoded = decodeMeleeEvents(words)
     check(decoded.length === 1 && decoded[0].type === 'ignite' && decoded[0].cell.join() === '4,5,6', 'event decoder skips an unknown record by its length')
+
+    // The default ground: the solver's own cells in this instance (the city's rule here; no edits told).
+    const inst = await fresh()
+    const w = new MeleeWasm(inst)
+    w.reset()
+    w.setGround('world')
+    const [gx, gz] = [705, 4070]
+    const top = inst.exports.ground_at(gx, gz)
+    const wid = w.spawn('lightsaber', [gx, top + 20, gz], down)
+    w.ignite(wid, true)
+    let worldKerf = 0, worst = 0
+    const t0 = performance.now()
+    for (let f = 1; f <= 60; f++) {
+      const t = f / 60, s0 = performance.now()
+      const ev = w.driveHand(wid, [gx + 10 * Math.max(0, t - 0.4), top + 20 - 14 * Math.min(1, t * 2.5), gz], down, 1 / 60)
+      worst = Math.max(worst, performance.now() - s0)
+      worldKerf += ev.filter((e) => e.type === 'kerf').length
+    }
+    const mean = (performance.now() - t0) / 60
+    check(worldKerf > 0, `ground 'world': a saber cuts the solver's cells at (${gx}, ${top}, ${gz}) (${worldKerf} kerf records)`)
+    console.log(`  ground 'world' frame: mean ${mean.toFixed(3)} ms, worst ${worst.toFixed(2)} ms (first touch builds the sector)`)
   }
 
   // ── 2. The tools' state machines, with a recorded world and sound ──
@@ -115,7 +136,43 @@ try {
     const { fwd } = eyeFrame(unit([0, -0.9, -0.5]))
     check(dot([blade.tip[0] - eye[0], blade.tip[1] - eye[1], blade.tip[2] - eye[2]], fwd) > 0, 'saber: the blade is in front of the eye')
     check(tools.drawList(eye, fwd).count >= 3, 'saber: blade, core and hilt are drawn')
-    tools.secondary(eye, aim)
+    // A second lit blade held across the aim: the swing meets it in a plasma clash.
+    const across = [0, 0, -Math.SQRT1_2, Math.SQRT1_2] // -90° about Z: blade along +X
+    const foe = melee.spawn('lightsaber', [eye[0] - 5, eye[1] - 1.5, eye[2] - 8], across)
+    melee.ignite(foe, true)
+    const clashesBefore = tools.state().saber.clashes
+    for (let k = 0; k < 3; k++) {
+      tools.swing()
+      for (let f = 0; f < 30; f++) tools.update(1 / 60, eye, unit([0, -0.1, -1]))
+    }
+    check(tools.state().saber.clashes > clashesBefore && audio.calls.saberClash?.length > 0, `saber: meets another blade in a plasma clash (${tools.state().saber.clashes - clashesBefore} clashes, saberClash)`)
+    melee.remove(foe)
+
+    // Put away, walk 300 cells, take it up again: it comes back in the hand, cutting nothing on the way.
+    tools.select('rifle')
+    check(melee.count() === 0, 'saber: put away leaves the arena')
+    const far = [eye[0] + 300, eye[1], eye[2]]
+    for (let f = 0; f < 10; f++) tools.update(1 / 60, far, [0, 0, -1])
+    const carvesBefore = carves.length
+    tools.select('saber')
+    tools.ignite(true)
+    for (let f = 0; f < 10; f++) tools.update(1 / 60, far, [0, 0, -1])
+    const back = melee.pose(tools.state().saber.id)
+    const gap = Math.hypot(back.pos[0] - far[0], back.pos[1] - far[1], back.pos[2] - far[2])
+    check(melee.count() === 1 && gap < 8 && carves.length === carvesBefore, `saber: taken up 300 cells away it is in the hand (${gap.toFixed(1)} cells from the eye), nothing carved in transit`)
+    // Run at 60 cells/s (6 m/s): the hilt keeps up with the hand.
+    let lo = Infinity, hi = 0
+    for (let f = 0; f < 90; f++) {
+      const at = [far[0] + f, far[1], far[2]]
+      tools.update(1 / 60, at, [0, 0, -1])
+      if (f > 10) {
+        const p = melee.pose(tools.state().saber.id)
+        const d = Math.hypot(p.pos[0] - at[0], p.pos[1] - at[1], p.pos[2] - at[2])
+        lo = Math.min(lo, d); hi = Math.max(hi, d)
+      }
+    }
+    check(hi - lo < 2, `saber: running at 60 cells/s the hilt stays with the hand (distance to eye ${lo.toFixed(2)}..${hi.toFixed(2)})`)
+    tools.secondary(far, [0, 0, -1])
     check(!tools.state().saber.ignited && audio.calls.saberRetract?.length >= 1, 'saber: secondary retracts it (saberRetract)')
     tools.destroy()
     check(melee.count() === 0, 'destroy removes the saber from the arena')
@@ -177,8 +234,10 @@ try {
     check(tools.grappleClick(eye, unit([0, -1, -0.2])) === 'anchored', 'grapple: first click anchors A')
     check(tools.grappleClick(eye, unit([0, -1, 0.6])) === 'linked' && world.calls.jointsAddRope?.length === 1, 'grapple: second click links A to B (jointsAddRope)')
     tools.reel(1)
-    for (let f = 0; f < 30; f++) tools.update(1 / 60, eye, level)
+    tools.update(1 / 60, eye, level)
     check(world.calls.jointsSetWinch?.[0]?.join() === '7,30' && tools.state().grapple.winch === 30, 'grapple: reel winds the winch in (jointsSetWinch 7, 30)')
+    for (let f = 0; f < 30; f++) tools.update(1 / 60, eye, level)
+    check(world.calls.jointsSetWinch.at(-1).join() === '7,0' && tools.state().grapple.winch === 0, 'grapple: one notch winds for a moment, then the winch stops (jointsSetWinch 7, 0)')
     rope = 0
     tools.grappleClick(eye, unit([0, -1, -0.2]))
     check(tools.grappleClick(eye, unit([0, -1, 0.6])) === 'refused' && tools.state().grapple.cables === 1, 'grapple: a cable the solver refuses is not drawn as made')
@@ -189,7 +248,8 @@ try {
     // Tennis on the real sports core: serve, bounces, the far side's return.
     const sports = SportsWasm.fromInstance(await fresh())
     const audio = recorder()
-    const tools = await createCombatTools(null, 'rgba16float', { sports, combatAudio: audio.proxy, groundAt: () => 0 })
+    const events = []
+    const tools = await createCombatTools(null, 'rgba16float', { sports, combatAudio: audio.proxy, groundAt: () => 0, onTennisEvent: (e) => events.push(e) })
     tools.select('tennis')
     check(tools.tennisClick(eye, [0, 0, 1]) === 'serve', 'tennis: first click sets up a court round the player and serves')
     check(audio.calls.tennisPop?.length === 1 && tools.state().tennis.ballId > 0, 'tennis: serve pops (tennisPop) and a ball is live')
@@ -198,6 +258,40 @@ try {
     check(t.bounces >= 1 && audio.calls.tennisBounce?.length >= 1, `tennis: the ball bounces on court (${t.bounces}, tennisBounce)`)
     check(tools.drawList(eye, [0, 0, 1]).count > 8, 'tennis: court lines, net and ball drawn')
     check(t.score !== null, `tennis: score ${t.score?.call}`)
+
+    // A rally: serve, the far side returns it, the player swings at it after it bounces on the near side.
+    const rally = async () => {
+      events.length = 0
+      tools.secondary(eye, [0, 0, 1])
+      tools.tennisClick(eye, [0, 0, 1])
+      let nearBounceAt = -1, swungAt = -1
+      for (let f = 0; f < 600; f++) {
+        tools.update(1 / 120, eye, [0, 0, 1])
+        const last = events.at(-1)
+        if (nearBounceAt < 0 && last?.type === 'bounce' && last.side === 'near') nearBounceAt = f
+        if (swungAt < 0 && nearBounceAt >= 0 && f === nearBounceAt + 12) {
+          const ball = sports.readBall(tools.state().tennis.ballId)
+          // The player has run to it: the eye a little behind and above the ball.
+          const ballWorld = events.findLast((e) => e.type === 'bounce').pos
+          const at = [ballWorld[0], 14, ballWorld[2] - 6]
+          if (ball) { tools.tennisClick(at, [0, 0, 1]); swungAt = f }
+        }
+        if (swungAt >= 0 && events.some((e, i) => i > 0 && e.type === 'bounce' && e.side === 'far' && events.slice(0, i).some((r) => r.type === 'racket' && r.side === 'near' && r.tick > 0))) break
+      }
+      const hit = events.find((e) => e.type === 'racket' && e.side === 'near' && swungAt >= 0)
+      const landed = events.filter((e) => e.type === 'bounce' && e.side === 'far').at(-1)
+      return { nearBounce: nearBounceAt >= 0, hit, landed }
+    }
+    const r1 = await rally()
+    const runs = []
+    for (let k = 0; k < 6; k++) runs.push(await rally())
+    const returned = runs.filter((r) => r.nearBounce)
+    const struck = returned.filter((r) => r.hit)
+    const inCourt = struck.filter((r) => r.landed?.inBounds)
+    check(returned.length >= 5, `tennis: the far side returns the serve onto the near court (${returned.length}/6)`)
+    check(struck.length === returned.length, `tennis: a swing at the returned ball strikes it (${struck.length}/${returned.length}, ${struck.map((r) => (r.hit.speedCellsPerSec * 0.36).toFixed(0)).join(', ')} km/h)`)
+    // Known spread (#166 open): returns leave at 86–150 km/h for the same swing, so some land just past the baseline.
+    check(inCourt.length >= Math.ceil(struck.length * 0.66), `tennis: most returns land in the far court (${inCourt.length}/${struck.length}, z ${struck.map((r) => r.landed?.pos[2].toFixed(0)).join(', ')})`)
     tools.destroy()
   }
 
