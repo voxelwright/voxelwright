@@ -15,6 +15,7 @@ pub mod fire;
 pub mod hash;
 pub mod kinds;
 pub mod land;
+pub mod ragdoll;
 pub mod scratch;
 pub mod support;
 pub mod tree;
