@@ -8,15 +8,50 @@ import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { chromium } from 'playwright'
-import { CHROME, turn as acquireGpuTurn } from '../test/kit.mjs'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { GameControlInterruptedError, SessionControl } from './session-control.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ENGINE_ROOT = resolve(HERE, '..')
 const REPO_ROOT = resolve(ENGINE_ROOT, '..')
 export const DEFAULT_CAPTURES_DIR = join(homedir(), '.village', 'engine', 'studio', 'captures')
+
+let cachedHeadlessRuntime = null
+
+/**
+ * Lazy-loads Playwright and the GPU-turn arbiter from `engine/test/kit.mjs`.
+ * Fresh git worktrees often lack their own `engine/node_modules`, so when the local
+ * import fails with ERR_MODULE_NOT_FOUND we fall back to the main checkout's
+ * `engine/node_modules` and `engine/test/kit.mjs` via `git rev-parse --git-common-dir`.
+ */
+async function loadHeadlessRuntime() {
+  if (cachedHeadlessRuntime) return cachedHeadlessRuntime
+  try {
+    const [{ chromium }, kit] = await Promise.all([
+      import('playwright'),
+      import('../test/kit.mjs'),
+    ])
+    cachedHeadlessRuntime = { chromium, CHROME: kit.CHROME, acquireGpuTurn: kit.turn }
+    return cachedHeadlessRuntime
+  } catch (localErr) {
+    if (localErr?.code !== 'ERR_MODULE_NOT_FOUND') throw localErr
+    let commonGitDir = ''
+    try {
+      commonGitDir = (await execAsync('git', ['rev-parse', '--git-common-dir'], { cwd: REPO_ROOT })).trim()
+    } catch { /* not a git worktree */ }
+    if (!commonGitDir) throw localErr
+    const mainRepoRoot = dirname(resolve(REPO_ROOT, commonGitDir))
+    const fallbackPw = join(mainRepoRoot, 'engine', 'node_modules', 'playwright', 'index.mjs')
+    const fallbackKit = join(mainRepoRoot, 'engine', 'test', 'kit.mjs')
+    if (!existsSync(fallbackPw) || !existsSync(fallbackKit)) throw localErr
+    const [{ chromium }, kit] = await Promise.all([
+      import(pathToFileURL(fallbackPw).href),
+      import(pathToFileURL(fallbackKit).href),
+    ])
+    cachedHeadlessRuntime = { chromium, CHROME: kit.CHROME, acquireGpuTurn: kit.turn }
+    return cachedHeadlessRuntime
+  }
+}
 
 const execAsync = (cmd, args, opts = {}) =>
   new Promise((res, rej) => {
@@ -348,6 +383,7 @@ export class GameSessionHub {
     let browser = null
 
     try {
+      const { chromium, CHROME, acquireGpuTurn } = await loadHeadlessRuntime()
       releaseTurn = await acquireGpuTurn({ mine: false })
       let baseUrl = url
       if (!baseUrl) {
@@ -403,10 +439,12 @@ export class GameSessionHub {
       }
       this.#sessions.set(sessionId, record)
 
+      let regTimer = null
       const registered = new Promise((res, rej) => {
-        const t = setTimeout(() => rej(new Error(`Headless game did not connect to Studio Bridge within ${timeoutMs} ms`)), timeoutMs)
-        record.readyResolvers.push(() => { clearTimeout(t); res(record) })
+        regTimer = setTimeout(() => rej(new Error(`Headless game did not connect to Studio Bridge within ${timeoutMs} ms`)), timeoutMs)
+        record.readyResolvers.push(() => { clearTimeout(regTimer); regTimer = null; res(record) })
       })
+      registered.catch(() => {})
 
       browser = await chromium.launch(CHROME)
       record.headless.browser = browser
@@ -416,8 +454,12 @@ export class GameSessionHub {
       const pageErrors = []
       page.on('pageerror', (e) => pageErrors.push(e.message))
 
-      await page.goto(target.toString(), { waitUntil: 'domcontentloaded', timeout: timeoutMs })
-      await registered
+      try {
+        await page.goto(target.toString(), { waitUntil: 'domcontentloaded', timeout: timeoutMs })
+        await registered
+      } finally {
+        if (regTimer) { clearTimeout(regTimer); regTimer = null }
+      }
 
       if (waitSettled) {
         await this.invoke({

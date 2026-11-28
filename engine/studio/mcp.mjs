@@ -9,12 +9,11 @@
 //   2. Standalone stdio MCP process (`node engine/studio/mcp.mjs [--bridge http://127.0.0.1:5764]`)
 //      configured in `.mcp.json` — proxies to a running Studio Bridge or boots an embedded GameSessionHub
 //      on demand so headless QA works even when no user game tab is open!
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { GameSessionHub } from './game-hub.mjs'
 
 export const MCP_PROTOCOL_VERSION = '2025-03-26'
 export const MCP_SERVER_INFO = { name: 'voxelwright-game', version: '1.0.0' }
@@ -516,6 +515,15 @@ async function runStdio() {
   })
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+function isDirectMain() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return process.argv[1] === fileURLToPath(import.meta.url)
+  }
+}
+
+if (isDirectMain()) {
   void runStdio()
 }

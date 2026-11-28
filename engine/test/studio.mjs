@@ -17,6 +17,7 @@
 //      game_perf, game_flight_recorder, game_assert, game_eval, dynamic extension tool, close.
 //
 // Pass `--shots <dir>` to also save full-size UI inspection PNGs (collapsed, drawer, lab, F9 bug).
+import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -103,9 +104,45 @@ mkdirSync(workDir, { recursive: true })
   const agyMcp = JSON.parse(readFileSync(new URL('.agents/plugins/voxelwright-game/mcp_config.json', repoRoot), 'utf8'))
   const codexToml = readFileSync(new URL('.codex/config.toml', repoRoot), 'utf8')
   check(mcpJson.mcpServers?.['voxelwright-game']?.args?.[0] === 'engine/studio/mcp.mjs', '.mcp.json registers voxelwright-game MCP server')
-  check(claudeSettings.enabledMcpjsonServers?.includes('voxelwright-game'), '.claude/settings.json auto-enables voxelwright-game MCP server')
+  check(claudeSettings.enableAllProjectMcpServers === true && claudeSettings.enabledMcpjsonServers?.includes('voxelwright-game'), '.claude/settings.json auto-enables voxelwright-game MCP server')
   check(agyMcp.mcpServers?.['voxelwright-game']?.args?.[0] === 'engine/studio/mcp.mjs', '.agents/plugins/voxelwright-game/mcp_config.json enables Antigravity MCP')
   check(codexToml.includes('[mcp_servers.voxelwright-game]') && codexToml.includes('engine/studio/mcp.mjs'), '.codex/config.toml enables Codex MCP')
+
+  // Verify standalone stdio MCP entrypoint (`node engine/studio/mcp.mjs`) answers initialize + tools/list + game_session_list
+  const stdioResult = await new Promise((resolveStdio) => {
+    const child = spawn(process.execPath, ['engine/studio/mcp.mjs'], {
+      cwd: new URL('../..', import.meta.url),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let buf = ''
+    let stderr = ''
+    const msgs = []
+    const timer = setTimeout(() => { try { child.kill('SIGTERM') } catch {}; resolveStdio({ msgs, stderr, timedOut: true }) }, 15_000)
+    child.stderr.on('data', (d) => { stderr += d.toString('utf8') })
+    child.stdout.on('data', (d) => {
+      buf += d.toString('utf8')
+      while (buf.includes('\n')) {
+        const nl = buf.indexOf('\n')
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (!line) continue
+        try { msgs.push(JSON.parse(line)) } catch { /* ignore */ }
+        if (msgs.length >= 3) child.stdin.end()
+      }
+    })
+    child.on('exit', (code) => { clearTimeout(timer); resolveStdio({ msgs, stderr, code }) })
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'studio-test', version: '1.0' } } }) + '\n')
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n')
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'game_session_list', arguments: {} } }) + '\n')
+  })
+  const stdioInit = stdioResult.msgs.find((m) => m.id === 1)?.result
+  const stdioTools = stdioResult.msgs.find((m) => m.id === 2)?.result?.tools
+  const stdioList = stdioResult.msgs.find((m) => m.id === 3)?.result?.structuredContent
+  check(
+    !stdioResult.timedOut && stdioResult.code === 0 && stdioInit?.serverInfo?.name === 'voxelwright-game' && Array.isArray(stdioTools) && stdioTools.length >= 19 && Array.isArray(stdioList?.sessions),
+    `node engine/studio/mcp.mjs stdio handshake, tools/list (${stdioTools?.length ?? 0}), and game_session_list work cleanly${stdioResult.stderr ? ` (stderr: ${stdioResult.stderr.slice(0, 120)})` : ''}`,
+  )
 
   // Verify `serve.mjs --studio` injects meta tag, boots loopback Studio Bridge, and protects /studio/bootstrap
   const studioSrv = await serve('/dev/null', ['--studio', '--studio-port', '0'])
