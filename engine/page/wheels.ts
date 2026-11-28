@@ -200,8 +200,12 @@ export interface Wheels {
     groundUnder: (x: number, y: number, z: number) => number,
     detachedByVehicle?: ReadonlyMap<number, number>,
   ): void
+  /** Culls visible wheels and uploads instance/uniform buffers before a render pass begins; returns true when at least one wheel will draw. */
+  prepare(to: Target, view: View): boolean
+  /** Records the prepared wheel instances into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
   /** Draws all visible active vehicle wheels. No GPU work when none are active/visible. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, sharedPass?: GPURenderPassEncoder): void
   /** Sets sun direction and day factor to match the scene's lighting. */
   light(sun: readonly number[], day: number): void
   /** Clears cached per-vehicle wheel state (e.g. on world reset). */
@@ -708,7 +712,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
   let tick = 0
   let lastCount = 0
 
-  return {
+  const self: Wheels = {
     get count() { return lastCount },
     get state() { return debugView },
     light(from, isDay) {
@@ -1015,10 +1019,10 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
         }
       }
     },
-    draw(encoder, to, view) {
+    prepare(to, view) {
       if (!active.length) {
         lastCount = 0
-        return
+        return false
       }
       const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
       const fx = view.forward[0], fy = view.forward[1], fz = view.forward[2]
@@ -1056,7 +1060,7 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
       }
 
       lastCount = n
-      if (!n) return
+      if (!n) return false
 
       uniformData.set([
         ex - ax0, ey - ay0, ez - az0, view.tanHalf,
@@ -1067,19 +1071,28 @@ export async function wheels(device: GPUDevice, format: GPUTextureFormat, localL
       ])
       device.queue.writeBuffer(uniforms, 0, uniformData)
       device.queue.writeBuffer(instBuf, 0, instData, 0, n * INST_FLOATS)
-
+      return true
+    },
+    record(pass) {
+      if (!lastCount) return
+      pass.setPipeline(pipeline)
+      pass.setBindGroup(0, bind)
+      pass.setVertexBuffer(0, vertBuf)
+      pass.setVertexBuffer(1, instBuf)
+      pass.draw(vertCount, lastCount)
+    },
+    draw(encoder, to, view, sharedPass) {
+      if (!self.prepare(to, view)) return
+      if (sharedPass) { self.record(sharedPass); return }
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
       pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      pass.setPipeline(pipeline)
-      pass.setBindGroup(0, bind)
-      pass.setVertexBuffer(0, vertBuf)
-      pass.setVertexBuffer(1, instBuf)
-      pass.draw(vertCount, n)
+      self.record(pass)
       pass.end()
     },
   }
+  return self
 }

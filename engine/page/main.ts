@@ -766,6 +766,18 @@ async function main() {
   let paused = false, saying = ''
   /** Parts of a frame left out, by name, for finding what a slow frame is spent on: pieces, crumbs, puffs, flames, spoil. */
   const off = new Set<string>()
+  const OVERLAY_STAGES = ['under', 'tracks', 'wheels', 'pieces', 'signs', 'people', 'crumbs'] as const
+  /** Last frame's merged TBDR overlay render pass stats (#165): `passes` (0 or 1), `merged` sub-passes recorded into it, and active stage names. */
+  const overlayPasses = {
+    passes: 0,
+    merged: 0,
+    mask: 0,
+    get stages() {
+      const out: string[] = []
+      for (let i = 0; i < OVERLAY_STAGES.length; i++) if (this.mask & (1 << i)) out.push(OVERLAY_STAGES[i])
+      return out
+    },
+  }
   /** How fast the world goes (#264): 1 as it does. What this page moves and its dust and smoke go by it; in a shared world the world's process says it. */
   const tempo = { rate: 1 }
   /** What a frame costs this thread, smoothed, in ms; split into real JS/encode work vs swapchain/submit wait (#155). `heard` is the mover's answers, summed. */
@@ -975,27 +987,57 @@ async function main() {
     lap('tend')
     if (pose.y > SPACE) {
       march.localLights.clear()
+      overlayPasses.passes = 0; overlayPasses.merged = 0; overlayPasses.mask = 0
       // Where the page starts is the land's middle (land.rs HOME), 70 m east and 407 m south of the world's corner.
       planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     } else {
       updateLocalLights(v)
-      march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
-      windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
+      const seconds = (now - started) / 1000
+      march.draw(encoder, to, v, flags, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+      windowed = portalDraw?.(encoder, to, v, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       farModel.draw(encoder, to, v)
-      skyEggs.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
-      marine.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
-      if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
-      if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
-      if (!off.has('under')) roadTracks.draw(encoder, to, v, groundUnder)
-      if (!off.has('wheels')) carWheels.draw(encoder, to, v)
-      if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
-      if (!off.has('signs')) neighborhood?.drawSigns(encoder, to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth)
-      if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
-      if (!off.has('crumbs')) debris.draw(encoder, to, v)
+      skyEggs.draw(encoder, to, farModel.depth, v, seconds)
+      marine.draw(encoder, to, farModel.depth, v, seconds)
+      if (!off.has('water')) water.draw(encoder, to, v, seconds)
+      // Shared TBDR overlay pass (#165): run all CPU prep, queue.writeBuffer uploads, and crumbs-compute BEFORE
+      // beginning ONE shared GPURenderPassEncoder over (to.color, to.depth) to avoid 6-7 tile load/store flushes.
+      const drawShade = !off.has('under') && alive.things.length > 0 && shade.prepare(to, v, shades(), groundUnder, march.day, march.sun.s)
+      const drawTracks = !off.has('under') && roadTracks.prepare(to, v, groundUnder)
+      const drawWheels = !off.has('wheels') && carWheels.prepare(to, v)
+      const drawPieces = !off.has('pieces') && falling.prepare(to, v, march.sun.s, (flags & MIRRORS) !== 0)
+      const drawSigns = !off.has('signs') && (neighborhood?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth) ?? false)
+      const drawPeople = !off.has('people') && folk.prepare(to, v, seconds)
+      let drawCrumbs = false
+      if (!off.has('crumbs')) {
+        debris.defer()
+        debris.draw(encoder, to, v)
+        drawCrumbs = debris.ready
+      }
+      const overlayMask = (drawShade ? 1 : 0) | (drawTracks ? 2 : 0) | (drawWheels ? 4 : 0) | (drawPieces ? 8 : 0) | (drawSigns ? 16 : 0) | (drawPeople ? 32 : 0) | (drawCrumbs ? 64 : 0)
+      overlayPasses.mask = overlayMask
+      overlayPasses.merged = (drawShade ? 1 : 0) + (drawTracks ? 1 : 0) + (drawWheels ? 1 : 0) + (drawPieces ? 1 : 0) + (drawSigns ? 1 : 0) + (drawPeople ? 1 : 0) + (drawCrumbs ? 1 : 0)
+      overlayPasses.passes = overlayMask ? 1 : 0
+      if (overlayMask) {
+        const pass = encoder.beginRenderPass({
+          label: 'overlay-tbdr',
+          colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
+          depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
+        })
+        pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+        pass.setScissorRect(0, 0, to.size[0], to.size[1])
+        if (drawShade) shade.record(pass)
+        if (drawTracks) roadTracks.record(pass)
+        if (drawWheels) carWheels.record(pass)
+        if (drawPieces) falling.record(pass)
+        if (drawSigns) neighborhood!.recordSigns(pass)
+        if (drawPeople) folk.record(pass)
+        if (drawCrumbs) debris.record(pass)
+        pass.end()
+      }
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
       // What the engine's plugins draw (plugins.ts `passes`): after the world and whoever is in it, before the wand's marker.
-      pluginDraws.draw(encoder, to, v, (now - started) / 1000)
-      staff.draw(encoder, to, v, (now - started) / 1000)
+      pluginDraws.draw(encoder, to, v, seconds)
+      staff.draw(encoder, to, v, seconds)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
     const texBegan = performance.now()
@@ -1997,7 +2039,7 @@ async function main() {
   }, 'Cast')
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, overlayPasses, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby, arrival })
   // In a lobby: whose server this is in the corner, who is here, what it says, the way out (lobbies.ts).

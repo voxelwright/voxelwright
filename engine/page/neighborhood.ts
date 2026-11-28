@@ -131,6 +131,17 @@ export interface Neighborhood {
   }
   /** Call once per frame from main loop to stream nearby storefronts & plazas around the eye. */
   frame(view: View): void
+  /** Prepares storefront & plaza signage uniforms before a shared render pass; returns true when at least one sign will draw. */
+  prepareSigns(
+    to: Target,
+    view: View,
+    sun: readonly [number, number, number],
+    day: number,
+    dull: number,
+    faced?: GPUTextureView | null,
+  ): boolean
+  /** Records the prepared storefront & plaza signage into an active `(to.color, to.depth)` render pass. */
+  recordSigns(pass: GPURenderPassEncoder): void
   /** Single-draw-call instanced storefront & plaza signage pass. */
   drawSigns(
     encoder: GPUCommandEncoder,
@@ -140,6 +151,7 @@ export interface Neighborhood {
     day: number,
     dull: number,
     faced?: GPUTextureView | null,
+    sharedPass?: GPURenderPassEncoder,
   ): void
   /** Provider function to push into `folk.from` for seated & gathering neighborhood crowds. */
   folk(view: View, seconds: number): readonly Person[]
@@ -1229,9 +1241,17 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
       if (!ready) { loadOnce(); return }
       refreshAround(view.eye[0] / M, view.eye[2] / M)
     },
-    drawSigns(encoder, to, view, sun, day, dull, faced = null) {
+    prepareSigns(to, view, sun, day, dull, faced = null) {
+      if (!enabled || !ready) return false
+      return signsPass.prepare(to, view, sun, day, dull, faced)
+    },
+    recordSigns(pass) {
       if (!enabled || !ready) return
-      signsPass.draw(encoder, to, view, sun, day, dull, faced)
+      signsPass.record(pass)
+    },
+    drawSigns(encoder, to, view, sun, day, dull, faced = null, sharedPass) {
+      if (!enabled || !ready) return
+      signsPass.draw(encoder, to, view, sun, day, dull, faced, sharedPass)
     },
     folk,
     near(xM, zM, radiusM = 180) {

@@ -38,6 +38,17 @@ export interface SignSpec {
 export interface StorefrontSigns {
   /** Updates the active set of visible nearby signs (reuses cached atlas slots, zero per-frame repainting for unchanged ids). */
   sync(specs: readonly SignSpec[]): void
+  /** Uploads sign uniforms before a render pass begins; returns true when at least one sign will draw. */
+  prepare(
+    to: Target,
+    view: View,
+    sun: readonly [number, number, number],
+    day: number,
+    dull: number,
+    faced?: GPUTextureView | null,
+  ): boolean
+  /** Records the prepared storefront and plaza signs into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
   draw(
     encoder: GPUCommandEncoder,
     to: Target,
@@ -46,6 +57,7 @@ export interface StorefrontSigns {
     day: number,
     dull: number,
     faced?: GPUTextureView | null,
+    sharedPass?: GPURenderPassEncoder,
   ): void
   readonly count: number
   clear(): void
@@ -486,8 +498,10 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
   const instData = new Float32Array(MAX_SIGNS * FLOATS_PER_INST)
   const uData = new Float32Array(20)
   let activeCount = 0
+  let preparedBind: GPUBindGroup | null = null
+  let preparedCount = 0
 
-  return {
+  const self: StorefrontSigns = {
     get count() {
       return activeCount
     },
@@ -495,6 +509,7 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
       slotOf.clear()
       slotOwner.fill(null)
       activeCount = 0
+      preparedCount = 0
     },
     sync(specs) {
       const capped = specs.length > MAX_SIGNS ? specs.slice(0, MAX_SIGNS) : specs
@@ -560,26 +575,40 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
         device.queue.writeBuffer(instances, 0, instData.subarray(0, activeCount * FLOATS_PER_INST))
       }
     },
-    draw(encoder, to, view, sun, day, dull, faced = null) {
-      if (activeCount <= 0) return
+    prepare(to, view, sun, day, dull, faced = null) {
+      if (activeCount <= 0) {
+        preparedCount = 0
+        return false
+      }
       uData[0] = view.eye[0]; uData[1] = view.eye[1]; uData[2] = view.eye[2]; uData[3] = view.tanHalf
       uData[4] = view.right[0]; uData[5] = view.right[1]; uData[6] = view.right[2]; uData[7] = to.size[0] / to.size[1]
       uData[8] = view.up[0]; uData[9] = view.up[1]; uData[10] = view.up[2]; uData[11] = day
       uData[12] = view.forward[0]; uData[13] = view.forward[1]; uData[14] = view.forward[2]; uData[15] = dull
       uData[16] = sun[0]; uData[17] = sun[1]; uData[18] = sun[2]; uData[19] = 0
       device.queue.writeBuffer(uniforms, 0, uData)
-
+      preparedBind = bindFor(faced ?? none)
+      preparedCount = activeCount
+      return true
+    },
+    record(pass) {
+      if (preparedCount <= 0 || !preparedBind) return
+      pass.setPipeline(pipeline)
+      pass.setBindGroup(0, preparedBind)
+      pass.setVertexBuffer(0, instances)
+      pass.draw(6, preparedCount)
+    },
+    draw(encoder, to, view, sun, day, dull, faced = null, sharedPass) {
+      if (!self.prepare(to, view, sun, day, dull, faced)) return
+      if (sharedPass) { self.record(sharedPass); return }
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
       pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      pass.setPipeline(pipeline)
-      pass.setBindGroup(0, bindFor(faced ?? none))
-      pass.setVertexBuffer(0, instances)
-      pass.draw(6, activeCount)
+      self.record(pass)
       pass.end()
     },
   }
+  return self
 }

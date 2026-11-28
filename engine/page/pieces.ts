@@ -590,8 +590,12 @@ export interface Pieces {
   add(born: Born, share?: boolean): Piece
   /** Gives a piece made unshared new faces (and smooth words) for the same look: its square faces once its smooth ones are made (#38). Nothing for one destroyed. */
   refit(piece: Piece, faces: Uint32Array<ArrayBuffer>, smooth?: Uint32Array<ArrayBuffer>): void
+  /** Culls visible pieces and writes per-piece uniform/deformed-mesh buffers before a render pass begins; returns true when at least one piece will draw. */
+  prepare(to: Target, view: View, sun: readonly [number, number, number], mirrors?: boolean): boolean
+  /** Records the prepared solid and glass faces into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
   /** mirrors: false is the M key's mirrors off, under which glass is seen through, tinted, mirroring nothing. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites, mirrors?: boolean): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites, mirrors?: boolean, sharedPass?: GPURenderPassEncoder): void
   /** Automatically emits local lights for every non-vehicle piece containing LAMP (material 15) voxels (robotaxi LiDAR domes, traffic signals, depot canopies, conjured lamps). */
   emitLights(sink: LocalLightSink): void
   readonly count: number
@@ -887,12 +891,15 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   const common = new WeakMap<Uint32Array, Shared>()
   const block = new ArrayBuffer(UNIFORMS), f = new Float32Array(block), i32 = new Int32Array(block)
   const visible: { piece: Held; faces: Faces }[] = []
+  let preparedPanes: GPUTextureView | null = null
+  let preparedMirrors = true
+  let preparedGlass = false
   let smooth = true
-  return {
+  const self: Pieces = {
     get smooth() { return smooth },
     set smooth(on: boolean) { smooth = on },
     get count() { return live.size },
-    get faces() { let n = 0; for (const p of live) n += (p.deform?.dentCount ? p.bent?.mesh ?? p : p).count; return n },
+    get faces() { let n = 0; for (const p of live) n += facesOf(p).count; return n },
     add(born, share = false) {
       let made = share ? common.get(born.faces) : undefined
       if (!made) {
@@ -916,8 +923,10 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       piece.held = { ...upload(piece.born), users: 1 }
       piece.faces = piece.held.faces; piece.count = piece.held.count; piece.glass = piece.held.glass
     },
-    draw(encoder, to, view, sun, timing, mirrors = true) {
-      if (!live.size) return
+    prepare(to, view, sun, mirrors = true) {
+      visible.length = 0
+      preparedGlass = false
+      if (!live.size) return false
       const aspect = to.size[0] / to.size[1]
       const tanV = view.tanHalf, tanH = tanV * aspect
       const secV = Math.hypot(1, tanV), secH = Math.hypot(1, tanH)
@@ -927,16 +936,6 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       const ux = view.up[0], uy = view.up[1], uz = view.up[2]
       const fx = view.forward[0], fy = view.forward[1], fz = view.forward[2]
       f.set([ex - anchorX, ey - anchorY, ez - anchorZ, tanV, rx, ry, rz, aspect, ux, uy, uz, 0, fx, fy, fz, 0, sun[0], sun[1], sun[2], 0])
-      visible.length = 0
-      const pass = encoder.beginRenderPass({
-        colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
-        depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
-        ...(timing ? { timestampWrites: timing } : {}),
-      })
-      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
-      pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      pass.setPipeline(pipeline)
-      pass.setBindGroup(1, litFor(march.panes(to.allocSize ?? to.size)))
       for (const piece of live) {
         // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
         if (!piece.cell || !piece.count) continue
@@ -981,27 +980,57 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
           if (c && strength > 0) { f[o] = c[0]; f[o + 1] = c[1]; f[o + 2] = c[2]; f[o + 3] = strength }
           else { f[o] = 0; f[o + 1] = 0; f[o + 2] = 0; f[o + 3] = 0 }
         }
-        // (Copied when called: one block serves every piece.)
+        // (Copied when called: each piece has its own uniform buffer, so zero writeBuffer aliasing across pieces.)
         device.queue.writeBuffer(piece.uniforms, 0, block)
         const faces = facesOf(piece)
+        if (faces.glass) preparedGlass = true
         visible.push({ piece, faces })
-        pass.setBindGroup(0, piece.bind)
-        pass.setVertexBuffer(0, faces.faces)
+      }
+      if (!visible.length) return false
+      preparedPanes = march.panes(to.allocSize ?? to.size)
+      preparedMirrors = mirrors
+      return true
+    },
+    record(pass) {
+      if (!visible.length || !preparedPanes) return
+      pass.setPipeline(pipeline)
+      pass.setBindGroup(1, litFor(preparedPanes))
+      for (let i = 0; i < visible.length; i++) {
+        const { piece, faces } = visible[i]
         // The solid faces.
-        if (faces.count > faces.glass) pass.draw(4, faces.count - faces.glass)
+        if (faces.count > faces.glass) {
+          pass.setBindGroup(0, piece.bind)
+          pass.setVertexBuffer(0, faces.faces)
+          pass.draw(4, faces.count - faces.glass)
+        }
       }
       // The glass of those that have any: what is behind it tinted, then what it adds of itself. With mirrors off
       // it is still seen through (#74): a pale face there was a car's every window opaque from its own seat.
-      for (const panes of mirrors ? [tint, glint] : [tint]) {
-        pass.setPipeline(panes)
-        for (let i = 0; i < visible.length; i++) {
-          const { piece, faces } = visible[i]
-          if (!faces.glass) continue
-          pass.setBindGroup(0, piece.bind)
-          pass.setVertexBuffer(0, faces.faces)
-          pass.draw(4, faces.glass, 0, faces.count - faces.glass)
+      if (preparedGlass) {
+        for (const panes of preparedMirrors ? [tint, glint] : [tint]) {
+          pass.setPipeline(panes)
+          for (let i = 0; i < visible.length; i++) {
+            const { piece, faces } = visible[i]
+            if (!faces.glass) continue
+            pass.setBindGroup(0, piece.bind)
+            pass.setVertexBuffer(0, faces.faces)
+            pass.draw(4, faces.glass, 0, faces.count - faces.glass)
+          }
         }
       }
+    },
+    draw(encoder, to, view, sun, timing, mirrors = true, sharedPass) {
+      const ready = self.prepare(to, view, sun, mirrors)
+      if (!ready && !(timing && live.size)) return
+      if (sharedPass && !timing) { if (ready) self.record(sharedPass); return }
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
+        depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
+        ...(timing ? { timestampWrites: timing } : {}),
+      })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
+      if (ready) self.record(pass)
       pass.end()
     },
     emitLights(sink) {
@@ -1062,4 +1091,5 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       }
     },
   }
+  return self
 }
