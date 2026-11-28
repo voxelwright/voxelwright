@@ -332,3 +332,82 @@ export function formatDistance(metres: number): string {
   const miles = metres / 1609.344
   return `${miles >= 10 ? miles.toFixed(1) : miles.toFixed(2)} mi`
 }
+
+export interface GpsStop {
+  id: string
+  x: number
+  z: number
+  name: string
+  kind?: 'pickup' | 'dropoff' | 'shop' | 'hangout' | 'custom'
+  subtitle?: string
+  orderId?: string
+  accent?: string
+}
+
+export interface MultiStopRoute {
+  stops: GpsStop[]
+  /** Concatenated route across all stops in order (first leg drives active minimap trim; full polyline renders cleanly). */
+  combined: GpsRoute
+  /** Individual routed legs (leg[0] = player -> stop[0], leg[i] = stop[i-1] -> stop[i]). */
+  legs: GpsRoute[]
+  /** Distance per leg in metres. */
+  legDistancesM: number[]
+  /** Cumulative distance to each stop from the player (metres). */
+  cumStopM: number[]
+  totalM: number
+  computeMs: number
+}
+
+/**
+ * Computes a chained multi-stop A* GPS route across an ordered list of stops (Apple Maps / Google Maps style).
+ * Uses the existing zero-GC A* router leg-by-leg and concatenates the full road polyline.
+ */
+export function computeMultiStopRoute(map: MapData, sx: number, sz: number, stops: readonly GpsStop[]): MultiStopRoute | null {
+  if (!stops.length) return null
+  const t0 = performance.now()
+  const legs: GpsRoute[] = []
+  const legDistancesM: number[] = []
+  const cumStopM: number[] = []
+  const allPts: number[] = []
+  const allSegNames: number[] = []
+  let cx = sx, cz = sz, acc = 0
+
+  for (let s = 0; s < stops.length; s++) {
+    const st = stops[s]
+    const leg = computeRoute(map, cx, cz, st.x, st.z, st.name)
+    legs.push(leg)
+    legDistancesM.push(leg.totalM)
+    acc += leg.totalM
+    cumStopM.push(acc)
+    const nv = leg.points.length >> 1
+    for (let i = 0; i < nv; i++) {
+      const px = leg.points[i * 2], pz = leg.points[i * 2 + 1]
+      const n = allPts.length
+      if (n >= 2 && Math.hypot(px - allPts[n - 2], pz - allPts[n - 1]) < 0.75) continue
+      if (n >= 2) allSegNames.push(leg.segNames[Math.max(0, i - 1)] ?? 0xffff)
+      allPts.push(px, pz)
+    }
+    cx = st.x; cz = st.z
+  }
+
+  const last = stops[stops.length - 1]
+  const first = stops[0]
+  const combined = packRoute(allPts, allSegNames, first.x, first.z, first.name, legs.some((l) => l.routed), t0)
+  // Keep combined destX/destZ pointed at the NEXT stop (stop[0]) while rendering the full chained polyline!
+  // If only 1 stop, dest matches last === first.
+  if (stops.length > 1) {
+    combined.destName = `${first.name} (+${stops.length - 1} stop${stops.length > 2 ? 's' : ''})`
+  } else {
+    combined.destX = last.x
+    combined.destZ = last.z
+  }
+  return {
+    stops: stops.map((s) => ({ ...s })),
+    combined,
+    legs,
+    legDistancesM,
+    cumStopM,
+    totalM: acc,
+    computeMs: performance.now() - t0,
+  }
+}

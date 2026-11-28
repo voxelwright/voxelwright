@@ -134,6 +134,7 @@ let checks = [
   ['volumetric-bitmasks', 'node', ['test/volumetric-bitmasks.mjs'], true],
   ['sports-rollback', 'node', ['test/sports-rollback.mjs'], false],
   ['ragdoll-bridge', 'node', ['test/ragdoll-bridge.mjs'], false],
+  ['delivery', 'node', ['test/delivery.mjs'], true],
   ['music', 'node', ['test/music.mjs'], false],
   ['radio', 'node', ['test/radio.mjs'], true],
   ['radio-providers', 'node', ['test/radio-providers.mjs'], true],
