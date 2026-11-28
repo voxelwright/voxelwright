@@ -64,6 +64,8 @@ struct TraceParams {
   beamRect: vec4u,
   // x=beamW, y=beamH, z=useBeam (0 or 1), w=pad
   beamFull: vec4u,
+  // xy: Halton(2, 3) sub-pixel jitter in render-res pixels ([-0.5, 0.5]), zw: pad
+  jitter: vec4f,
 }
 `
 
@@ -950,7 +952,7 @@ fn cs_vis(@builtin(global_invocation_id) gid: vec3u) {
   let px = tp.onlyRect.xy + gid.xy;
   if (px.x >= tp.onlyRect.x + tp.onlyRect.z || px.y >= tp.onlyRect.y + tp.onlyRect.w) { return; }
   work = 0u;
-  let at = vec2f(px) + vec2f(0.5);
+  let at = vec2f(px) + vec2f(0.5) + tp.jitter.xy;
   let uv = (at / g.res) * 2.0 - 1.0;
   var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
   rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
@@ -1040,21 +1042,165 @@ fn cs_vis(@builtin(global_invocation_id) gid: vec3u) {
 }
 
 /**
- * Generates the dedicated Sun-Map Tile shader module (`vs` + `fs_sun`).
- * Kept separate from shading/lighting/far-model so it compiles in a few milliseconds.
+ * Generates Pass 1.5a — Lightweight depth + normal pre-pass reading `vis0`/`vis1` and writing
+ * hardware `depth24plus` + world normals into `aux.visNormal` (`rgba16float`) so screen-space
+ * compute GTAO (`gtao.ts`) can run between Pass 1 and Pass 2 without adding any octree walks or
+ * storage writes to `cs_vis`.
  */
-export function sunCode(world: World, deps: TraceCodeDeps): string {
+export function visDepthCode(deps: Pick<TraceCodeDeps, 'GLOBALS'>): string {
   return /* wgsl */ `
 ${deps.GLOBALS}
-struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2f }
+${TRACE_PARAMS_WGSL}
+${VIS_PACK_WGSL}
+
+@group(0) @binding(0) var<uniform> g: Globals;
+@group(1) @binding(0) var<uniform> tp: TraceParams;
+@group(1) @binding(1) var vis0Tex: texture_2d<u32>;
+@group(1) @binding(2) var vis1Tex: texture_2d<f32>;
+
+const NEAR = 1.0;
+const FAR = 100000.0;
+
+struct VisPreOut {
+  @location(0) normal: vec4f,
+  @builtin(frag_depth) depth: f32,
+}
+
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.5, 1.0);
+}
+
+@fragment fn fs_depth(@builtin(position) at: vec4f) -> VisPreOut {
+  let px = vec2i(at.xy);
+  let v1 = textureLoad(vis1Tex, px, 0);
+  if (v1.x < 0.0) { return VisPreOut(vec4f(0.0), 1.0); }
+  let jitUV = (at.xy + tp.jitter.xy) / g.res;
+  let uv = jitUV * 2.0 - 1.0;
+  let rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
+  let d = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(v1.x * dot(rd, g.forward), NEAR)), 0.0, 1.0);
+  let v0 = textureLoad(vis0Tex, px, 0);
+  var n = unpackFace((v0.w >> 20u) & 7u);
+  if (dot(n, n) < 0.5) { n = -rd; }
+  let stuff = v0.w & 15u;
+  if (abs(n.y) < 0.5) {
+    if (stuff == 1u || stuff == 3u || stuff == 4u || stuff == 6u) {
+      n = vec3f(0.0, 1.0, 0.0);
+    } else if (stuff == 7u && px.y > 0) {
+      let above = textureLoad(vis0Tex, vec2i(px.x, px.y - 1), 0);
+      if (((above.w >> 20u) & 7u) == 3u && above.y == v0.y) {
+        n = vec3f(0.0, 1.0, 0.0);
+      }
+    }
+  }
+  return VisPreOut(vec4f(n, 1.0), d);
+}
+`
+}
+
+/**
+ * Generates the post-overlay velocity patch pass (`vs` + `fs_patch_vel`) that runs right before
+ * `taa.resolve()` when TAA is active:
+ *   - Any dynamic overlay pixel written to `to.depth` in front of static world (`march` + `far`)
+ *     — moving cars, wheels, pedestrians, flying airplane + tow banner, debris, animated water,
+ *     or unjittered billboards — writes `(2.0, 2.0)` to `velocity` so TAA reconstructs it cleanly
+ *     with zero temporal smearing or ghosting.
+ *   - Static `farModel` skyline pixels (`farInvZ > 0` and closer than marched cells) get exact 3D
+ *     camera reprojection motion vectors (`prevUV - curUV`) so moving cameras keep far towers crisp.
+ *   - Static marched world and sky pixels execute `discard` and keep their exact unjittered velocity.
+ */
+export function patchVelocityCode(deps: Pick<TraceCodeDeps, 'GLOBALS'>): string {
+  return /* wgsl */ `
+${deps.GLOBALS}
+struct ShadeExtra {
+  prevViewProj: mat4x4f,
+  info: vec4f,
+  jitter: vec4f,
+  gtaoInfo: vec4f,
+}
+
+@group(0) @binding(0) var<uniform> g: Globals;
+@group(0) @binding(1) var<uniform> shadeExtra: ShadeExtra;
+@group(0) @binding(2) var vis1Tex: texture_2d<f32>;
+@group(0) @binding(3) var sceneDepth: texture_depth_2d;
+@group(0) @binding(4) var farDepth: texture_depth_2d;
+
+const NEAR = 1.0;
+const FAR = 100000.0;
+
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(p * 2.0 - 1.0, 0.5, 1.0);
+}
+
+@fragment fn fs_patch_vel(@builtin(position) at: vec4f) -> @location(0) vec2f {
+  let px = vec2i(at.xy);
+  let visT = textureLoad(vis1Tex, px, 0).x;
+  var marchD = 1.0;
+  if (visT >= 0.0) {
+    let jitUV = (at.xy + shadeExtra.jitter.xy) / g.res;
+    let uv = jitUV * 2.0 - 1.0;
+    let rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
+    marchD = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(visT * dot(rd, g.forward), NEAR)), 0.0, 1.0);
+  }
+  let fdDim = vec2i(textureDimensions(farDepth, 0));
+  var farInvZ = 0.0;
+  if (fdDim.x > 1 && px.x < fdDim.x && px.y < fdDim.y) {
+    farInvZ = textureLoad(farDepth, px, 0);
+  }
+  let farD = select(1.0, clamp(FAR / (FAR - NEAR) * (1.0 - NEAR * farInvZ), 0.0, 1.0), farInvZ > 0.0);
+  let staticD = min(marchD, farD);
+  let finalD = textureLoad(sceneDepth, px, 0);
+
+  if (finalD < staticD - 2e-6) {
+    return vec2f(2.0, 2.0);
+  }
+
+  if (farInvZ > 0.0 && farD < marchD) {
+    if (shadeExtra.info.x < 0.5) { return vec2f(0.0); }
+    let curUV = at.xy / g.res;
+    let ndc = curUV * 2.0 - 1.0;
+    let ray = g.forward + g.right * (ndc.x * g.tanHalf * g.aspect) - g.up * (ndc.y * g.tanHalf);
+    let worldPos = g.eye + ray / farInvZ;
+    let prevClip = shadeExtra.prevViewProj * vec4f(worldPos, 1.0);
+    if (prevClip.w <= 1e-4) { return vec2f(2.0, 2.0); }
+    let prevNdc = prevClip.xy / prevClip.w;
+    let prevUV = vec2f(prevNdc.x * 0.5 + 0.5, 0.5 - prevNdc.y * 0.5);
+    return prevUV - curUV;
+  }
+
+  discard;
+  return vec2f(0.0);
+}
+`
+}
+
+/**
+ * Generates the shared `g: Globals` + `trace(..., through = true)` WGSL prefix used by
+ * `sun-compute.ts` (`createComputeSunUpdater`) to update dirty sun-map tiles in one compute dispatch.
+ */
+export function sunTraceWgsl(world: World, deps: TraceCodeDeps): string {
+  return /* wgsl */ `
+${deps.GLOBALS}
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> pool: array<u32>;
 @group(0) @binding(2) var<storage, read> top: array<u32>;
-@group(1) @binding(0) var<uniform> sunTile: SunTile;
 
 ${treeCommonWgsl(world)}
 ${marchTraceCoreWgsl(world, deps, false, true)}
+`
+}
+
+/**
+ * Generates the dedicated legacy Sun-Map Tile shader module (`vs` + `fs_sun`, `?sun_compute=0` fallback).
+ * Kept separate from shading/lighting/far-model so it compiles in a few milliseconds.
+ */
+export function sunCode(world: World, deps: TraceCodeDeps): string {
+  return /* wgsl */ `
+${sunTraceWgsl(world, deps)}
+struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2f }
+@group(1) @binding(0) var<uniform> sunTile: SunTile;
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));

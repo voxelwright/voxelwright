@@ -255,8 +255,13 @@ fn chance(c: vec2i) -> f32 {
 
 const UNIFORM_BYTES = 64
 
+/** Minimal Linear HDR source accepted by `glow`: satisfied by both `Offscreen` and TAA's native-res resolved output. */
+export type GlowSource = Pick<Offscreen, 'texture' | 'color' | 'size'> & {
+  readonly allocSize?: readonly [number, number]
+}
+
 /** Draws Linear HDR `from` to swapchain `to` with Karis-averaged luminance bloom, AgX tonemapping, and optional rain. */
-export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number], drive?: number, drift?: number) => void> {
+export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: GlowSource, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number], drive?: number, drift?: number) => void> {
   const { device } = gpu
   const module = await shader(device, 'glow', codeOf(gpu.canF16)), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
@@ -296,54 +301,53 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     device.queue.writeBuffer(blocks[idx], 0, scratch)
   }
 
-  // Persistent grow-only bloom pyramid: keyed on the source backing texture and its allocated size, so dynamic
-  // resolution `steer` updates active sub-rect viewports & UVs with zero GPU texture or bind group churn.
+  // Persistent grow-only bloom pyramid: caches per-source bind groups in a WeakMap so switching between
+  // `Offscreen` and TAA's native-res output (or dynamic resolution `steer`) causes zero GPU texture or bind group churn.
   interface Kept {
-    srcTexture: GPUTexture
     alloc: readonly [number, number]
     quarter: readonly [number, number]
     sixteenth: readonly [number, number]
     textures: GPUTexture[]
     views: GPUTextureView[]
-    binds: GPUBindGroup[]
+    bindsByTex: WeakMap<GPUTexture, GPUBindGroup[]>
   }
   let kept: Kept | null = null
   const bind = (picture: GPUTextureView, spread: GPUTextureView, uniforms: GPUBuffer) =>
     device.createBindGroup({ layout, entries: [{ binding: 0, resource: picture }, { binding: 1, resource: sampler }, { binding: 2, resource: spread }, { binding: 3, resource: { buffer: uniforms } }] })
 
-  const keep = (from: Offscreen): Kept => {
+  const keep = (from: GlowSource): { k: Kept; binds: GPUBindGroup[] } => {
     const alloc = from.allocSize ?? from.size
-    if (kept && kept.srcTexture === from.texture && alloc[0] <= kept.alloc[0] && alloc[1] <= kept.alloc[1]) return kept
     const needGrow = !kept || alloc[0] > kept.alloc[0] || alloc[1] > kept.alloc[1]
-    const quarter: readonly [number, number] = needGrow
-      ? [Math.max(1, Math.ceil(alloc[0] / 4)), Math.max(1, Math.ceil(alloc[1] / 4))]
-      : kept!.quarter
-    const sixteenth: readonly [number, number] = needGrow
-      ? [Math.max(1, Math.ceil(quarter[0] / 4)), Math.max(1, Math.ceil(quarter[1] / 4))]
-      : kept!.sixteenth
-    let textures: GPUTexture[], views: GPUTextureView[]
     if (needGrow) {
+      const nextAlloc: readonly [number, number] = kept
+        ? [Math.max(alloc[0], kept.alloc[0]), Math.max(alloc[1], kept.alloc[1])]
+        : [alloc[0], alloc[1]]
+      const quarter: readonly [number, number] = [Math.max(1, Math.ceil(nextAlloc[0] / 4)), Math.max(1, Math.ceil(nextAlloc[1] / 4))]
+      const sixteenth: readonly [number, number] = [Math.max(1, Math.ceil(quarter[0] / 4)), Math.max(1, Math.ceil(quarter[1] / 4))]
       for (const t of kept?.textures ?? []) t.destroy()
       const makeTex = (size: readonly [number, number]) =>
         device.createTexture({ size: [size[0], size[1]], format: small, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
-      textures = [makeTex(quarter), makeTex(quarter), makeTex(sixteenth), makeTex(sixteenth)]
-      views = textures.map((t) => t.createView())
-    } else {
-      textures = kept!.textures
-      views = kept!.views
+      const textures = [makeTex(quarter), makeTex(quarter), makeTex(sixteenth), makeTex(sixteenth)]
+      const views = textures.map((t) => t.createView())
+      kept = { alloc: nextAlloc, quarter, sixteenth, textures, views, bindsByTex: new WeakMap() }
     }
-    const binds = [
-      bind(from.color, views[1], blocks[0]),
-      bind(views[0], views[0], blocks[1]),
-      bind(views[1], views[1], blocks[2]),
-      bind(from.color, views[0], blocks[3]),
-      bind(views[0], views[0], blocks[4]),
-      bind(views[2], views[2], blocks[5]),
-      bind(views[3], views[3], blocks[6]),
-      bind(views[2], views[2], blocks[7]),
-    ]
-    kept = { srcTexture: from.texture, alloc: needGrow ? [alloc[0], alloc[1]] : kept!.alloc, quarter, sixteenth, textures, views, binds }
-    return kept
+    const k = kept!
+    let binds = k.bindsByTex.get(from.texture)
+    if (!binds) {
+      const views = k.views
+      binds = [
+        bind(from.color, views[1], blocks[0]),
+        bind(views[0], views[0], blocks[1]),
+        bind(views[1], views[1], blocks[2]),
+        bind(from.color, views[0], blocks[3]),
+        bind(views[0], views[0], blocks[4]),
+        bind(views[2], views[2], blocks[5]),
+        bind(views[3], views[3], blocks[6]),
+        bind(views[2], views[2], blocks[7]),
+      ]
+      k.bindsByTex.set(from.texture, binds)
+    }
+    return { k, binds }
   }
 
   const pass = (encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, bg: GPUBindGroup, to: GPUTextureView, onto = false, viewport?: readonly [number, number]) => {
@@ -359,7 +363,7 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
   }
 
   return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1], drive = 0, drift = 0) => {
-    const k = keep(from)
+    const { k, binds } = keep(from)
     const alloc = from.allocSize ?? from.size
     const srcW = from.size[0], srcH = from.size[1]
     const srcUvX = srcW / alloc[0], srcUvY = srcH / alloc[1]
@@ -384,10 +388,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     // 3: final composite + AgX tonemap -> swapchain
     writeU(3, grade[0], grade[1], bloomGain, Math.max(0, Math.min(1, drive)), tint[0], tint[1], tint[2], Math.max(-1, Math.min(1, drift)), srcUvX, srcUvY, Math.max(srcStepX * 0.5, srcUvX - srcStepX * 0.5), Math.max(srcStepY * 0.5, srcUvY - srcStepY * 0.5), qUvX, qUvY, TONEMAP_ACES ? 1 : 0, exposure)
 
-    pass(encoder, bright, k.binds[0], k.views[0], false, qActive)
+    pass(encoder, bright, binds[0], k.views[0], false, qActive)
     for (let twice = 0; twice < 2; twice++) {
-      pass(encoder, blur, k.binds[1], k.views[1], false, qActive)
-      pass(encoder, blur, k.binds[2], k.views[0], false, qActive)
+      pass(encoder, blur, binds[1], k.views[1], false, qActive)
+      pass(encoder, blur, binds[2], k.views[0], false, qActive)
     }
     if (night > 0) {
       const sW = Math.max(1, Math.min(k.sixteenth[0], Math.ceil(qW / 4)))
@@ -399,12 +403,12 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
       writeU(5, sStepX, 0, 0, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
       writeU(6, 0, sStepY, 0, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
       writeU(7, 0, 0, 0.85, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
-      pass(encoder, down, k.binds[4], k.views[2], false, sActive)
-      pass(encoder, blur, k.binds[5], k.views[3], false, sActive)
-      pass(encoder, blur, k.binds[6], k.views[2], false, sActive)
-      pass(encoder, add, k.binds[7], k.views[0], true, qActive)
+      pass(encoder, down, binds[4], k.views[2], false, sActive)
+      pass(encoder, blur, binds[5], k.views[3], false, sActive)
+      pass(encoder, blur, binds[6], k.views[2], false, sActive)
+      pass(encoder, add, binds[7], k.views[0], true, qActive)
     }
-    pass(encoder, last, k.binds[3], to)
+    pass(encoder, last, binds[3], to)
     if (rain > 0) {
       device.queue.writeBuffer(rainBlock, 0, new Float32Array([srcW, srcH, time, rain * 0.4]))
       const p = encoder.beginRenderPass({ colorAttachments: [{ view: to, loadOp: 'load', storeOp: 'store' }] })

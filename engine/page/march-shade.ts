@@ -10,6 +10,7 @@
 import type { World } from './world.ts'
 import { MARKS } from './marks.ts'
 import { LOCAL_LIGHTS_STRUCT, localLightsEval } from './lights.ts'
+import { GTAO_WGSL } from './gtao.ts'
 import { fineCellWgsl, treeCommonWgsl, VIS_PACK_WGSL } from './march-trace.ts'
 
 export interface ShadeCodeDeps {
@@ -51,6 +52,10 @@ struct ShadeExtra {
   prevViewProj: mat4x4f,
   // x: 1.0 if prevViewProj is valid (0.0 on frame 0), y: resX, z: resY, w: pad
   info: vec4f,
+  // xy: Halton(2, 3) sub-pixel jitter in render-res pixels ([-0.5, 0.5]), zw: pad
+  jitter: vec4f,
+  // xy: active GTAO texture size (aoW, aoH), z: 1.0 if halfRes else 0.0, w: pad
+  gtaoInfo: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -65,12 +70,18 @@ ${LOCAL_LIGHTS_STRUCT}
 @group(1) @binding(0) var vis0Tex: texture_2d<u32>;
 @group(1) @binding(1) var vis1Tex: texture_2d<f32>;
 @group(1) @binding(2) var<uniform> shadeExtra: ShadeExtra;
+@group(1) @binding(3) var gtaoTex: texture_2d<f32>;
 
 override MIRRORS: bool = true;
 override FOGGY: bool = false;
 override NIGHT: bool = false;
 override UNDERWATER: bool = false;
 override LOCAL_OCCLUDE: bool = false;
+override USE_GTAO: bool = false;
+
+const INDOORS = 0.45;
+const NEAR = 1.0;
+const FAR = 100000.0;
 
 ${deps.SCREEN}
 fn screenOf(at: vec3f) -> vec4f {
@@ -340,6 +351,32 @@ ${deps.LANDMARK_LIGHT}
 ${deps.LEAF_NIGHT}
 ${deps.sunlitText(!!world.options.fineSun)}
 ${deps.FOG}
+${GTAO_WGSL}
+
+fn sampleGtao(px: vec2i, linearZ: f32) -> f32 {
+  let aoDim = vec2i(shadeExtra.gtaoInfo.xy);
+  let maxAo = max(aoDim - vec2i(1), vec2i(0));
+  if (shadeExtra.gtaoInfo.z < 0.5) {
+    return clamp(textureLoad(gtaoTex, clamp(px, vec2i(0), maxAo), 0).r, 0.0, 1.0);
+  }
+  // Half-res texel (ax, ay) sits at full-res pixel (2*ax, 2*ay); 4-tap depth-aware bilateral upsample.
+  let f = vec2f(px) * 0.5;
+  let b0 = clamp(vec2i(floor(f)), vec2i(0), maxAo);
+  let b1 = min(b0 + vec2i(1), maxAo);
+  let frac = clamp(f - vec2f(b0), vec2f(0.0), vec2f(1.0));
+  let t00 = textureLoad(gtaoTex, b0, 0);
+  let t10 = textureLoad(gtaoTex, vec2i(b1.x, b0.y), 0);
+  let t01 = textureLoad(gtaoTex, vec2i(b0.x, b1.y), 0);
+  let t11 = textureLoad(gtaoTex, b1, 0);
+  let invSig = 1.0 / max(linearZ * 0.06, 0.5);
+  let w00 = (1.0 - frac.x) * (1.0 - frac.y) * exp(-abs(t00.g - linearZ) * invSig);
+  let w10 = frac.x * (1.0 - frac.y) * exp(-abs(t10.g - linearZ) * invSig);
+  let w01 = (1.0 - frac.x) * frac.y * exp(-abs(t01.g - linearZ) * invSig);
+  let w11 = frac.x * frac.y * exp(-abs(t11.g - linearZ) * invSig);
+  let wSum = w00 + w10 + w01 + w11;
+  if (wSum <= 1e-5) { return clamp(t00.r, 0.0, 1.0); }
+  return clamp((t00.r * w00 + t10.r * w10 + t01.r * w01 + t11.r * w11) / wSum, 0.0, 1.0);
+}
 
 fn cloud(p: vec2f) -> f32 {
   var q = p;
@@ -503,9 +540,9 @@ fn leavingShadow(ro: vec3f, rd: vec3f, hit: Hit) -> f32 {
 
 struct PrimaryLit { col: vec3f, n: vec3f, rough: f32 }
 
-// Single-site primary surface shading: evaluates paint, slope/diagonal normals, openness, shadows,
-// GGX Metallic/Roughness PBR, night windows/landmarks, and local lights (with LOCAL_OCCLUDE).
-fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
+// Single-site primary surface shading: evaluates paint, slope/diagonal normals, compute GTAO or legacy openness,
+// shadows, GGX Metallic/Roughness PBR, night windows/landmarks, and local lights (with LOCAL_OCCLUDE).
+fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> PrimaryLit {
   let stuff = hit.kind & 15u;
   let m = looks.material[stuff];
   let p = ro + rd * hit.t;
@@ -596,17 +633,30 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
     }
     direct *= max(sunny, 0.0);
   }
-  var open = 1.0;
+  var directOpen = 1.0;
+  var ambientAo = vec3f(1.0);
+  var specAo = 1.0;
   let wide = 1.0 / (lvh.scale * max(hit.t, 1.0) * g.pixel);
-  if (shadows == 1u && faced && !slope && (g.flags & 32u) == 0u && wide > 1.5${world.options.bricks ? ' && (hit.kind & 64u) == 0u' : ''}) {
-    let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5);
-    open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0));
+  if (USE_GTAO) {
+    if (shadows == 1u && (g.flags & 32u) == 0u && stuff != 5u && stuff != 15u) {
+      let linZ = max(hit.t * dot(rd, g.forward), NEAR);
+      let ao = sampleGtao(px, linZ);
+      ambientAo = gtaoMultiBounce(ao, albedo);
+      specAo = mix(ao, 1.0, 0.25);
+    }
+  } else {
+    if (shadows == 1u && faced && !slope && (g.flags & 32u) == 0u && wide > 1.5${world.options.bricks ? ' && (hit.kind & 64u) == 0u' : ''}) {
+      let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5);
+      directOpen = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0));
+    }
+    ambientAo = vec3f(directOpen);
+    specAo = directOpen;
   }
   let ci = (hit.kind >> 8u) & 255u;
   let sign = stuff == 15u && ci != 46u;
   let surfRough = select(m.rough, min(m.rough, 0.22), (hit.kind & 128u) != 0u);
   let surfMet = select(m.metallic, max(m.metallic, 0.65), stuff == 12u && (((hit.kind & 128u) != 0u) || ci == 0u));
-  ${useF16 ? 'var col = vec3<f16>(min(max(shadePbr(albedo, n, rd, g.sun, direct, open, surfRough, select(m.glow, 0.0, sign), surfMet), vec3f(0.0)), vec3f(60000.0)));' : 'var col = shadePbr(albedo, n, rd, g.sun, direct, open, surfRough, select(m.glow, 0.0, sign), surfMet);'}
+  ${useF16 ? 'var col = vec3<f16>(min(max(shadePbrAo(albedo, n, rd, g.sun, direct, directOpen, ambientAo, specAo, surfRough, select(m.glow, 0.0, sign), surfMet), vec3f(0.0)), vec3f(60000.0)));' : 'var col = shadePbrAo(albedo, n, rd, g.sun, direct, directOpen, ambientAo, specAo, surfRough, select(m.glow, 0.0, sign), surfMet);'}
   if (NIGHT && g.weather.z > 0.0) {
     let dark = g.weather.z;
     let letters = lettered(p, n, stuff == 15u && ci == 6u);
@@ -767,7 +817,7 @@ fn net(at: vec2f) -> f32 {
   let b = noise2(at * 0.047 - vec2f(g.time * 0.17, g.time * 0.24) + vec2f(7.3, 1.9));
   return pow(clamp(1.0 - abs(a - b) * 3.2, 0.0, 1.0), 5.0);
 }
-fn deep(rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
+fn deep(rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> PrimaryLit {
   let M = 0.1;
   let down = (g.sea - g.eye.y) * M;
   var out = 1e9;
@@ -783,7 +833,7 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
     far = hit.t;
     let p = g.eye + rd * hit.t;
     let under = max(g.sea - p.y, 0.0);
-    let lp = litPrimary(g.eye, rd, hit, shadows);
+    let lp = litPrimary(g.eye, rd, hit, shadows, px);
     outN = lp.n;
     outR = lp.rough;
     col = lp.col * (1.05 + 1.1 * net(p.xz + sun.xz * (under / sun.y)) * (0.15 + 0.85 * max(hit.n.y, 0.0)));
@@ -814,19 +864,17 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
   return PrimaryLit(col, outN, outR);
 }
 
-// Analytic screen-space motion vector (prevUV - curUV) from anchor-relative world position (or sky direction when visT < 0).
-fn motionVector(rd: vec3f, visT: f32, curUV: vec2f) -> vec2f {
+// Analytic screen-space motion vector (prevUV - jitUV) from anchor-relative world position (or sky direction when visT < 0).
+// Because rd passes through the jittered screen coordinate jitUV while prevViewProj is unjittered,
+// subtracting jitUV cancels Halton(2, 3) jitter exactly so static world/sky pixels produce velocity == (0, 0).
+fn motionVector(rd: vec3f, visT: f32, jitUV: vec2f) -> vec2f {
   if (shadeExtra.info.x < 0.5) { return vec2f(0.0); }
   let prevClip = select(shadeExtra.prevViewProj * vec4f(rd, 0.0), shadeExtra.prevViewProj * vec4f(g.eye + rd * visT, 1.0), visT >= 0.0);
   if (prevClip.w <= 1e-4) { return vec2f(2.0, 2.0); }
   let prevNdc = prevClip.xy / prevClip.w;
   let prevUV = vec2f(prevNdc.x * 0.5 + 0.5, 0.5 - prevNdc.y * 0.5);
-  return prevUV - curUV;
+  return prevUV - jitUV;
 }
-
-const INDOORS = 0.45;
-const NEAR = 1.0;
-const FAR = 100000.0;
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
@@ -835,7 +883,7 @@ const FAR = 100000.0;
 
 // MRT layout stays <= 32 bytes/sample (24 B with rg11b10ufloat color):
 //   @location(0) colour    : sceneFormat (rg11b10ufloat / rgba16float / rgba8unorm)
-//   @location(1) velocity  : rg16float (analytic prevUV - curUV motion vectors)
+//   @location(1) velocity  : rg16float (analytic prevUV - jitUV motion vectors)
 //   @location(2) visNormal : rgba16float (world-space normal xyz, roughness w; 0 for sky)
 //   @location(3) panes     : rgba16float (attached only when MIRRORS is true)
 struct Drawn {
@@ -853,8 +901,8 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
 
 @fragment fn fs(@builtin(position) at: vec4f) -> Drawn {
   let px = vec2i(at.xy);
-  let curUV = at.xy / g.res;
-  let uv = curUV * 2.0 - 1.0;
+  let jitUV = (at.xy + shadeExtra.jitter.xy) / g.res;
+  let uv = jitUV * 2.0 - 1.0;
   var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
   rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
   let shadows = g.flags & 1u;
@@ -884,8 +932,8 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
 
   if (UNDERWATER && (g.flags & 128u) != 0u) {
     let d = depthOf(hit.t, rd);
-    let dp = deep(rd, hit, shadows);
-    let vel = motionVector(rd, hit.t, curUV);
+    let dp = deep(rd, hit, shadows, px);
+    let vel = motionVector(rd, hit.t, jitUV);
     if ((g.flags & 4u) != 0u) {
       let h = f32(work) / 128.0;
       return Drawn(vec4f(h * 2.0, h * h * 2.0, pow(h, 4.0) * 2.0, 1.0), vel, vec4f(dp.n, dp.rough), vec4f(0.0), d);
@@ -898,7 +946,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
   if (!hasPane && hit.t < 0.0) {
     var col = sky(rd);
     if (FOGGY) { col = inFog(col, rd, 1e7); }
-    let vel = motionVector(rd, -1.0, curUV);
+    let vel = motionVector(rd, -1.0, jitUV);
     if ((g.flags & 4u) != 0u) {
       let h = f32(work) / 128.0;
       return Drawn(vec4f(h * 2.0, h * h * 2.0, pow(h, 4.0) * 2.0, 1.0), vel, vec4f(0.0), vec4f(0.0), 1.0);
@@ -991,7 +1039,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
       let glass = stuff == 11u && MIRRORS;
       let scale = g.level[hit.level].scale;
       let m = looks.material[stuff];
-      let lp = litPrimary(g.eye, rd, hit, select(lights, lights * 2u, glass));
+      let lp = litPrimary(g.eye, rd, hit, select(lights, lights * 2u, glass), px);
       var own = lp.col;
       var n = lp.n;
       outN = n;
@@ -1070,7 +1118,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
   if (first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
   if (FOGGY) { col = inFog(col, rd, select(1e7, first, first >= 0.0)); }
   let depth = depthOf(visT, rd);
-  let vel = motionVector(rd, visT, curUV);
+  let vel = motionVector(rd, visT, jitUV);
   let visN = select(vec4f(0.0), vec4f(outN, outRough), visT >= 0.0);
 
   if ((g.flags & 4u) != 0u) {

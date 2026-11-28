@@ -4,10 +4,12 @@
 // rg16float analytic motion vectors (prevUV - curUV), rgba16float world normals, and rgba16float panes.
 import { FAR, NEAR, shader, viewProjection, type Target } from '../probe/gpu.ts'
 import { SUN_SIDE, SUN_TILE, SunMaps } from './sun.ts'
+import { createComputeSunUpdater, MAX_SUN_TILES, prepareSunTiles, type ComputeSunUpdater, type SunComputeStats } from './sun-compute.ts'
+import { createGtao, type GtaoPass, type GtaoStats, type GtaoTimestampWrites } from './gtao.ts'
 import { SIDE, type World } from './world.ts'
 import { grid as marksGrid } from './marks.ts'
 import { createLocalLights, type LocalLights } from './lights.ts'
-import { beamCode, sunCode, visCode, type TraceCodeDeps } from './march-trace.ts'
+import { beamCode, patchVelocityCode, sunCode, sunTraceWgsl, visCode, visDepthCode, type TraceCodeDeps } from './march-trace.ts'
 import { shadeCode, type ShadeCodeDeps } from './march-shade.ts'
 
 /**
@@ -26,6 +28,10 @@ export const FINE_ASKED = bounded(new URLSearchParams(globalThis.location?.searc
 export const MAX_LEVELS = 10 + Math.max(0, FINE_ASKED - 1)
 /** Diagnostic override: `?beam=0` disables the 1/4-res conservative beam pre-pass. */
 const BEAM_ON = new URLSearchParams(globalThis.location?.search ?? '').get('beam') !== '0'
+/** Diagnostic override: `?sun_compute=0` falls back to legacy per-tile `fs_sun` render passes. */
+const SUN_COMPUTE_ON = new URLSearchParams(globalThis.location?.search ?? '').get('sun_compute') !== '0'
+/** Diagnostic override: `?gtao=0` falls back to legacy 4-tree-walk `openness()` AO. */
+const GTAO_ON = new URLSearchParams(globalThis.location?.search ?? '').get('gtao') !== '0'
 
 /** The colours every thing in the world shares: 0 is the material's own, 1 to 15 white to black, then 24 hues in ten tones (kinds.rs). */
 export function palette(): Float32Array<ArrayBuffer> {
@@ -406,7 +412,7 @@ const lightWgsl = (useF16: boolean) => /* wgsl */ `
 const ROOM_LIGHT = 1.6;
 var<private> roomLit: f32 = 1.0;
 var<private> skyLit: f32 = 1.0;
-fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32, metallic: f32) -> vec3f {
+fn shadePbrAo(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, directOpen: f32, ambientAo: vec3f, specAo: f32, rough: f32, glow: f32, metallic: f32) -> vec3f {
   let r = clamp(rough, 0.045, 1.0);
   let a = r * r;
   let a2 = a * a;
@@ -446,7 +452,7 @@ fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f
   let kD = (vec3<f16>(1.0h) - F * f16(specEnergy)) * (1.0h - met);
   let sunCol = vec3<f16>(min(max(g.lightSun.rgb, vec3f(0.0)), vec3f(60000.0)));
   let fillCol = vec3<f16>(min(max(g.lightFill.rgb, vec3f(0.0)), vec3f(60000.0)));
-  let openH = f16(open);
+  let openH = f16(directOpen);
   let directLit = sunCol * f16(direct * 3.6) * (kD * alb * (0.75h + 0.25h * openH) + F * f16(dv * 3.14159265 * specEnergy) * (0.65h + 0.35h * openH));
   let skylight = mix(vec3<f16>(0.12h, 0.118h, 0.115h) * f16(g.lightFill.a), fillCol, f16(above));
   let bounce = vec3<f16>(0.24h, 0.2h, 0.15h) * f16(bounceW);
@@ -456,12 +462,12 @@ fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f
   let envGround = fillCol * 0.55h + vec3<f16>(0.14h, 0.145h, 0.155h) * f16(g.lightFill.a * 0.35 + g.lightSun.a * 0.95);
   let envSkyH = vec3<f16>(min(max(envSky, vec3f(0.0)), vec3f(60000.0)));
   let envSpec = mix(envGround, mix(fillCol, envSkyH, f16(1.0 - r * 0.75)), f16(envUp)) * fEnv * f16(envWeight);
-  let ambientLit = (alb * kDEnv * ((skylight + bounce) * f16(skyLit) + room) + envSpec) * openH;
+  let ambientLit = alb * kDEnv * ((skylight + bounce) * f16(skyLit) + room) * vec3<f16>(min(max(ambientAo, vec3f(0.0)), vec3f(60000.0))) + envSpec * f16(specAo);
   return vec3f(directLit + ambientLit + alb * f16(glow * 3.2));` : `let f0 = mix(vec3f(0.04), albedo, metallic);
   let F = f0 + (vec3f(1.0) - f0) * omVdh5;
   let kD = (vec3f(1.0) - F * specEnergy) * (1.0 - metallic);
   let SUN_LIGHT = g.lightSun.rgb;
-  let directLit = SUN_LIGHT * direct * 3.6 * (kD * albedo * (0.75 + 0.25 * open) + F * (dv * 3.14159265 * specEnergy) * (0.65 + 0.35 * open));
+  let directLit = SUN_LIGHT * direct * 3.6 * (kD * albedo * (0.75 + 0.25 * directOpen) + F * (dv * 3.14159265 * specEnergy) * (0.65 + 0.35 * directOpen));
   let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
   let bounce = vec3f(0.24, 0.2, 0.15) * bounceW;
   let room = SUN_LIGHT * g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * roomMask;
@@ -469,8 +475,11 @@ fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f
   let kDEnv = (vec3f(1.0) - fEnv * mix(1.0 - r, 1.0, metallic)) * (1.0 - metallic);
   let envGround = g.lightFill.rgb * 0.55 + vec3f(0.14, 0.145, 0.155) * (g.lightFill.a * 0.35 + g.lightSun.a * 0.95);
   let envSpec = mix(envGround, mix(g.lightFill.rgb, envSky, 1.0 - r * 0.75), envUp) * fEnv * envWeight;
-  let ambientLit = (albedo * kDEnv * ((skylight + bounce) * skyLit + room) + envSpec) * open;
+  let ambientLit = albedo * kDEnv * ((skylight + bounce) * skyLit + room) * ambientAo + envSpec * specAo;
   return directLit + ambientLit + albedo * glow * 3.2;`}
+}
+fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32, metallic: f32) -> vec3f {
+  return shadePbrAo(albedo, n, rd, sun, direct, open, vec3f(open), open, rough, glow, metallic);
 }
 fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
   return shadePbr(albedo, n, rd, sun, direct, open, rough, glow, 0.0);
@@ -600,11 +609,30 @@ export const VIS_NORMAL_FORMAT: GPUTextureFormat = 'rgba16float'
 /** Tiles of the sun's maps drawn each frame. */
 export const SUN_TILES_A_FRAME = 8
 
+export interface MarcherDrawExtra {
+  /** Halton(2, 3) sub-pixel jitter in render-res pixels ([-0.5, 0.5]). Defaults to [0, 0]. */
+  readonly jitter?: readonly [number, number]
+  /** Invalidate previous camera pose so motion vectors output exact (0, 0) on cuts/teleports. */
+  readonly resetHistory?: boolean
+  /** Monotonic frame counter seeding GTAO's spatio-temporal Hilbert + R2 noise (0 for deterministic checks). */
+  readonly gtaoFrame?: number
+  /** Optional GPU timestamp writes spanning the compute GTAO passes. */
+  readonly gtaoTiming?: GtaoTimestampWrites
+}
+
 export interface Marcher {
   /** The last draw used the requested glass pipeline, including any reflections. */
   readonly glassReady: boolean
   /** Draws the world into `to`, and how far off each pixel's thing is into its depth. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number]): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number], extra?: MarcherDrawExtra): void
+  /** Patches `velocityView` after overlay/banner/car/far passes so dynamic objects get zero TAA smearing and far towers get exact 3D reprojection. */
+  patchVelocity(encoder: GPUCommandEncoder, to: Target, farDepth?: GPUTextureView | null): void
+  /** Whether compute GTAO ran on the most recent `draw()`. */
+  readonly gtaoRan: boolean
+  /** Latest compute GTAO pass statistics (null when `?gtao=0` or unavailable). */
+  readonly gtaoStats: GtaoStats | null
+  /** Latest single-dispatch compute sun-tile updater statistics (null when `?sun_compute=0` or unavailable). */
+  readonly sunComputeStats: SunComputeStats | null
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
   rebind(): void
   /** The road's paint and rails (#450, marks.ts `grid`), drawn by a Bay world's march from now on. */
@@ -683,7 +711,7 @@ interface TargetAux {
 }
 
 /** `behind` allows a look to begin at a window plane. A released city's first view can draw while Metal compiles its mirrors. */
-export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false, deferMirrors = false): Promise<Marcher> {
+export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false, deferMirrors = false, maxSize?: readonly [number, number]): Promise<Marcher> {
   const grid = world.options.grid
   const hasCompute = typeof device.createComputePipelineAsync === 'function'
   const canF16 = device.features?.has?.('shader-f16') ?? false
@@ -697,13 +725,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
 
   const buildModules = async (change?: (wgsl: string) => string) => {
     const shadeSrc = shadeCode(world, shadeDepsFor(canF16), canF16)
-    const [shadeMod, sunMod, beamMod, visMod] = await Promise.all([
+    const [shadeMod, sunMod, beamMod, visMod, visDepthMod, patchVelMod] = await Promise.all([
       shader(device, 'march-shade', change ? change(shadeSrc) : shadeSrc),
       shader(device, 'march-sun', sunCode(world, traceDeps)),
       hasCompute ? shader(device, 'march-beam', beamCode(world, traceDeps, behind)) : Promise.resolve(null),
       hasCompute ? shader(device, 'march-vis', visCode(world, traceDeps, behind)) : Promise.resolve(null),
+      hasCompute ? shader(device, 'march-vis-depth', visDepthCode(traceDeps)) : Promise.resolve(null),
+      hasCompute ? shader(device, 'march-patch-vel', patchVelocityCode(traceDeps)) : Promise.resolve(null),
     ])
-    return { shadeMod, sunMod, beamMod, visMod }
+    return { shadeMod, sunMod, beamMod, visMod, visDepthMod, patchVelMod }
   }
 
   const initMods = await buildModules()
@@ -747,6 +777,29 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   })
   const visLayout = device.createPipelineLayout({ bindGroupLayouts: [visLayout0, visLayout1] })
 
+  const visDepthLayout0 = device.createBindGroupLayout({
+    entries: [{ binding: 0, visibility: F, buffer: {} }],
+  })
+  const visDepthLayout1 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: F, buffer: {} },
+      { binding: 1, visibility: F, texture: { sampleType: 'uint' } },
+      { binding: 2, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+    ],
+  })
+  const visDepthLayout = device.createPipelineLayout({ bindGroupLayouts: [visDepthLayout0, visDepthLayout1] })
+
+  const patchVelLayout0 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: F, buffer: {} },
+      { binding: 1, visibility: F, buffer: {} },
+      { binding: 2, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 3, visibility: F, texture: { sampleType: 'depth' } },
+      { binding: 4, visibility: F, texture: { sampleType: 'depth' } },
+    ],
+  })
+  const patchVelLayout = device.createPipelineLayout({ bindGroupLayouts: [patchVelLayout0] })
+
   const shadeLayout0 = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: F, buffer: {} },
@@ -764,6 +817,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       { binding: 0, visibility: F, texture: { sampleType: 'uint' } },
       { binding: 1, visibility: F, texture: { sampleType: 'unfilterable-float' } },
       { binding: 2, visibility: F, buffer: {} },
+      { binding: 3, visibility: F, texture: { sampleType: 'unfilterable-float' } },
     ],
   })
   const shadeLayout = device.createPipelineLayout({ bindGroupLayouts: [shadeLayout0, shadeLayout1] })
@@ -794,13 +848,47 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     mod && hasCompute ? device.createComputePipelineAsync({ label: 'march-beam', layout: beamLayout, compute: { module: mod, entryPoint: 'cs_beam' } }) : Promise.resolve(null)
   const makeVisPipeline = (mod: GPUShaderModule | null, mirrors: boolean, far = false, isUnder = false) =>
     mod && hasCompute ? device.createComputePipelineAsync(visDesc(mod, mirrors, far, isUnder)) : Promise.resolve(null)
+  const makeVisDepthPipeline = (mod: GPUShaderModule | null) =>
+    mod && hasCompute
+      ? device.createRenderPipelineAsync({
+          label: 'march-vis-depth',
+          layout: visDepthLayout,
+          vertex: { module: mod, entryPoint: 'vs' },
+          fragment: { module: mod, entryPoint: 'fs_depth', targets: [{ format: VIS_NORMAL_FORMAT }] },
+          depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' },
+        })
+      : Promise.resolve(null)
+  const makePatchVelPipeline = (mod: GPUShaderModule | null) =>
+    mod && hasCompute
+      ? device.createRenderPipelineAsync({
+          label: 'march-patch-vel',
+          layout: patchVelLayout,
+          vertex: { module: mod, entryPoint: 'vs' },
+          fragment: { module: mod, entryPoint: 'fs_patch_vel', targets: [{ format: VELOCITY_FORMAT }] },
+        })
+      : Promise.resolve(null)
+  const makeSunUpdater = () =>
+    hasCompute && SUN_COMPUTE_ON
+      ? createComputeSunUpdater(device, {
+          worldLayout: beamLayout0,
+          traceWgsl: sunTraceWgsl(world, traceDeps),
+          fineSun: !!world.options.fineSun,
+          label: 'march-sun-compute',
+        })
+      : Promise.resolve<ComputeSunUpdater | null>(null)
+
+  const gtaoWanted = hasCompute && GTAO_ON && !behind
+  let gtaoMax: [number, number] = [
+    Math.max(16, Math.round(maxSize?.[0] ?? 1920)),
+    Math.max(16, Math.round(maxSize?.[1] ?? 1080)),
+  ]
 
   // ── Deferred Shade pipeline cache (Pass 2: no FAR_MODEL permutation needed!) ──
-  const shadeKeyOf = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format, readback = false) =>
-    `${targetFormat}:${readback ? 'rb:' : ''}${(mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (isUnder ? 8 : 0) | (occ ? 16 : 0)}`
-  const shadeLabel = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ: boolean, targetFormat: GPUTextureFormat, readback: boolean) => {
-    if (!foggy && !night && !isUnder && !occ && !readback && targetFormat === format) return mirrors ? 'march' : 'march without mirrors'
-    return `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${isUnder ? ' under' : ''}${occ ? ' occ' : ''}${readback ? ' readback' : ''} (${targetFormat})`
+  const shadeKeyOf = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format, readback = false, useGtao = false) =>
+    `${targetFormat}:${readback ? 'rb:' : ''}${(mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (isUnder ? 8 : 0) | (occ ? 16 : 0) | (useGtao ? 32 : 0)}`
+  const shadeLabel = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ: boolean, targetFormat: GPUTextureFormat, readback: boolean, useGtao: boolean) => {
+    if (!foggy && !night && !isUnder && !occ && !readback && targetFormat === format) return `${mirrors ? 'march' : 'march without mirrors'}${useGtao ? ' gtao' : ''}`
+    return `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${isUnder ? ' under' : ''}${occ ? ' occ' : ''}${useGtao ? ' gtao' : ''}${readback ? ' readback' : ''} (${targetFormat})`
   }
   const shadeTargets = (mirrors: boolean, targetFormat: GPUTextureFormat, readback: boolean): GPUColorTargetState[] => {
     if (readback) return [{ format: targetFormat }]
@@ -809,21 +897,21 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       ? [{ format: targetFormat }, { format: VELOCITY_FORMAT }, { format: VIS_NORMAL_FORMAT }, { format: PANES_FORMAT }]
       : [{ format: targetFormat }, { format: VELOCITY_FORMAT }, { format: VIS_NORMAL_FORMAT }]
   }
-  const shadeDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format, readback = false): GPURenderPipelineDescriptor => ({
-    label: shadeLabel(mirrors, foggy, night, isUnder, occ, targetFormat, readback),
+  const shadeDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format, readback = false, useGtao = false): GPURenderPipelineDescriptor => ({
+    label: shadeLabel(mirrors, foggy, night, isUnder, occ, targetFormat, readback, useGtao),
     layout: shadeLayout,
     vertex: { module: mod, entryPoint: 'vs' },
     fragment: {
       module: mod,
       entryPoint: 'fs',
-      constants: { MIRRORS: mirrors && !isUnder ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, UNDERWATER: isUnder ? 1 : 0, LOCAL_OCCLUDE: occ ? 1 : 0 },
+      constants: { MIRRORS: mirrors && !isUnder ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, UNDERWATER: isUnder ? 1 : 0, LOCAL_OCCLUDE: occ ? 1 : 0, USE_GTAO: useGtao && !isUnder && !readback ? 1 : 0 },
       targets: shadeTargets(mirrors, targetFormat, readback),
     },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' },
   })
-  const shadingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format, readback = false) =>
-    device.createRenderPipelineAsync(shadeDesc(mod, mirrors, foggy, night, isUnder, occ, targetFormat, readback))
-  const shading = (mod: GPUShaderModule, defer = false) => Promise.all([defer ? null : shadingAs(mod, true), shadingAs(mod, false)])
+  const shadingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format, readback = false, useGtao = false) =>
+    device.createRenderPipelineAsync(shadeDesc(mod, mirrors, foggy, night, isUnder, occ, targetFormat, readback, useGtao))
+  const shading = (mod: GPUShaderModule, defer = false, useGtao = gtaoWanted) => Promise.all([defer ? null : shadingAs(mod, true, false, false, false, false, format, false, useGtao), shadingAs(mod, false, false, false, false, false, format, false, useGtao)])
   const sunning = (mod: GPUShaderModule) => device.createRenderPipelineAsync({
     label: 'sun map',
     layout: sunLayout,
@@ -831,26 +919,54 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     fragment: { module: mod, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] },
   })
 
-  const [[initMirrors, initPlain], initSun, initBeam, initVisPlain, initVisMirrors] = await Promise.all([
-    shading(initMods.shadeMod, deferMirrors),
+  const [[initMirrors, initPlain], initSun, initBeam, initVisPlain, initVisMirrors, initVisDepth, initPatchVel, initSunUpdater, initGtao] = await Promise.all([
+    shading(initMods.shadeMod, deferMirrors, gtaoWanted),
     sunning(initMods.sunMod),
     makeBeamPipeline(initMods.beamMod),
     makeVisPipeline(initMods.visMod, false, false, false),
     deferMirrors ? Promise.resolve(null) : makeVisPipeline(initMods.visMod, true, false, false),
+    makeVisDepthPipeline(initMods.visDepthMod),
+    makePatchVelPipeline(initMods.patchVelMod),
+    makeSunUpdater(),
+    gtaoWanted ? createGtao(device, gtaoMax) : Promise.resolve<GtaoPass | null>(null),
   ])
 
   let shadeModNow = initMods.shadeMod
   let visModNow = initMods.visMod
   let beamPipeline = initBeam
   let sunPipeline = initSun
+  const visDepthPipeline = initVisDepth
+  const patchVelPipeline = initPatchVel
+  let sunUpdater: ComputeSunUpdater | null = initSunUpdater
+  let gtaoPass: GtaoPass | null = initGtao
+  let gtaoGrowing: Promise<void> | null = null
+  let lastGtaoRan = false
+
+  // 1x1 white rgba16float fallback bound when GTAO is disabled or unavailable.
+  const gtaoFallbackTex = device.createTexture({ label: 'march-gtao-fallback', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST })
+  device.queue.writeTexture({ texture: gtaoFallbackTex }, new Uint16Array([0x3c00, 0x7bff, 0, 0]), { bytesPerRow: 8 }, [1, 1])
+  const gtaoFallbackView = gtaoFallbackTex.createView()
+
+  // 1x1 zero depth32float fallback bound when farModel has no depth texture (e.g. Town).
+  const emptyFarDepthTex = device.createTexture({ label: 'march-far-depth-empty', size: [1, 1], format: 'depth32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT })
+  const emptyFarDepthView = emptyFarDepthTex.createView()
+  {
+    const clearEnc = device.createCommandEncoder()
+    clearEnc.beginRenderPass({ colorAttachments: [], depthStencilAttachment: { view: emptyFarDepthView, depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' } }).end()
+    device.queue.submit([clearEnc.finish()])
+  }
+  let patchVelBind: GPUBindGroup | null = null
+  let patchVelVis1: GPUTextureView | null = null
+  let patchVelDepth: GPUTextureView | null = null
+  let patchVelFar: GPUTextureView | null = null
 
   const visPipelines = new Map<string, GPUComputePipeline>()
   if (initVisPlain) visPipelines.set(visKeyOf(false, false, false), initVisPlain)
   if (initVisMirrors) visPipelines.set(visKeyOf(true, false, false), initVisMirrors)
   const visMaking = new Map<string, Promise<unknown>>()
 
-  const shadePipelines = new Map<string, GPURenderPipeline>([[shadeKeyOf(false, false, false, false, false, format, false), initPlain]])
-  if (initMirrors) shadePipelines.set(shadeKeyOf(true, false, false, false, false, format, false), initMirrors)
+  const shadePipelines = new Map<string, GPURenderPipeline>([[shadeKeyOf(false, false, false, false, false, format, false, gtaoWanted), initPlain]])
+  if (initMirrors) shadePipelines.set(shadeKeyOf(true, false, false, false, false, format, false, gtaoWanted), initMirrors)
   const shadeMaking = new Map<string, Promise<unknown>>()
   let mirrorsStarted = !deferMirrors
   let mirrorsReady = !deferMirrors
@@ -876,33 +992,35 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     return p!
   }
 
-  const warmShade = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, onReady?: () => void, targetFormat: GPUTextureFormat = format, readback = false) => {
-    const k = shadeKeyOf(mirrors, foggy, night, isUnder, occ, targetFormat, readback)
+  const warmShade = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, onReady?: () => void, targetFormat: GPUTextureFormat = format, readback = false, useGtao = gtaoPass !== null) => {
+    const k = shadeKeyOf(mirrors, foggy, night, isUnder, occ, targetFormat, readback, useGtao)
     if (shadePipelines.has(k) || shadeMaking.has(k)) return
     const of = shadeModNow
-    const p = shadingAs(of, mirrors, foggy, night, isUnder, occ, targetFormat, readback).then(
+    const p = shadingAs(of, mirrors, foggy, night, isUnder, occ, targetFormat, readback, useGtao).then(
       (ready) => { if (of === shadeModNow) { shadePipelines.set(k, ready); onReady?.() } },
       (error: unknown) => { console.error('The march pipeline could not be compiled', error) },
     ).finally(() => { if (shadeMaking.get(k) === p) shadeMaking.delete(k) })
     shadeMaking.set(k, p)
   }
   // Background-warm the daytime blast / local-light mirrors variant so a sudden daytime explosion never snaps windows opaque while Metal compiles.
-  if (initMirrors && !behind) warmShade(true, false, true, false, true, undefined, format, false)
-  const requireShadePipeline = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format, readback = false) => {
-    const k = shadeKeyOf(mirrors, foggy, night, isUnder, occ, targetFormat, readback)
+  if (initMirrors && !behind) warmShade(true, false, true, false, true, undefined, format, false, gtaoWanted)
+  const requireShadePipeline = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format, readback = false, useGtao = false) => {
+    const k = shadeKeyOf(mirrors, foggy, night, isUnder, occ, targetFormat, readback, useGtao)
     let p = shadePipelines.get(k)
     if (!p) {
-      p = device.createRenderPipeline(shadeDesc(shadeModNow, mirrors, foggy, night, isUnder, occ, targetFormat, readback))
+      p = device.createRenderPipeline(shadeDesc(shadeModNow, mirrors, foggy, night, isUnder, occ, targetFormat, readback, useGtao))
       shadePipelines.set(k, p)
     }
     return p
   }
 
   // ── Persistent grow-only Visibility & Beam textures (0 reallocs across steer scale changes!) ──
-  const traceParams = device.createBuffer({ label: 'march-trace-params', size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const shadeExtra = device.createBuffer({ label: 'march-shade-extra', size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const traceParamsBuf = new Uint32Array(12)
-  const shadeExtraBuf = new Float32Array(20)
+  const traceParams = device.createBuffer({ label: 'march-trace-params', size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const shadeExtra = device.createBuffer({ label: 'march-shade-extra', size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const traceParamsRaw = new ArrayBuffer(64)
+  const traceParamsU32 = new Uint32Array(traceParamsRaw)
+  const traceParamsF32 = new Float32Array(traceParamsRaw)
+  const shadeExtraBuf = new Float32Array(28)
 
   let visAllocW = 0, visAllocH = 0
   let beamTex: GPUTexture | null = null, beamView: GPUTextureView
@@ -910,7 +1028,35 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let vis1Tex: GPUTexture | null = null, vis1View: GPUTextureView
   let beamBind1: GPUBindGroup | null = null
   let visBind1: GPUBindGroup | null = null
+  let visDepthBind1: GPUBindGroup | null = null
   let shadeBind1: GPUBindGroup | null = null
+
+  const rebuildShadeBind1 = () => {
+    if (!vis0View || !vis1View) return
+    shadeBind1 = device.createBindGroup({
+      layout: shadeLayout1,
+      entries: [
+        { binding: 0, resource: vis0View },
+        { binding: 1, resource: vis1View },
+        { binding: 2, resource: { buffer: shadeExtra } },
+        { binding: 3, resource: gtaoPass?.view ?? gtaoFallbackView },
+      ],
+    })
+  }
+
+  const ensureGtaoSize = (needW: number, needH: number) => {
+    if (!gtaoWanted || gtaoGrowing || (needW <= gtaoMax[0] && needH <= gtaoMax[1])) return
+    const nextMax: [number, number] = [Math.max(gtaoMax[0], needW), Math.max(gtaoMax[1], needH)]
+    gtaoGrowing = createGtao(device, nextMax).then(
+      (nextPass) => {
+        gtaoPass?.destroy()
+        gtaoPass = nextPass
+        gtaoMax = nextMax
+        rebuildShadeBind1()
+      },
+      (error: unknown) => { console.error('GTAO resize failed', error) },
+    ).finally(() => { gtaoGrowing = null })
+  }
 
   const ensureVisTextures = (w: number, h: number) => {
     const needW = Math.max(1, w), needH = Math.max(1, h)
@@ -941,14 +1087,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         { binding: 3, resource: vis1View },
       ],
     })
-    shadeBind1 = device.createBindGroup({
-      layout: shadeLayout1,
+    visDepthBind1 = device.createBindGroup({
+      layout: visDepthLayout1,
       entries: [
-        { binding: 0, resource: vis0View },
-        { binding: 1, resource: vis1View },
-        { binding: 2, resource: { buffer: shadeExtra } },
+        { binding: 0, resource: { buffer: traceParams } },
+        { binding: 1, resource: vis0View },
+        { binding: 2, resource: vis1View },
       ],
     })
+    rebuildShadeBind1()
   }
   ensureVisTextures(1, 1)
 
@@ -1020,6 +1167,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let visBind0 = makeVisBind0()
   let shadeBind0 = makeShadeBind0()
   let sunBind0 = makeSunBind0()
+  const visDepthBind0 = device.createBindGroup({
+    layout: visDepthLayout0,
+    entries: [{ binding: 0, resource: { buffer: globals } }],
+  })
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunLayout1, entries: [{ binding: 0, resource: { buffer } }] }) }
@@ -1214,6 +1365,9 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       return next
     },
     get glassReady() { return glassReady },
+    get gtaoRan() { return lastGtaoRan },
+    get gtaoStats() { return gtaoPass?.stats() ?? null },
+    get sunComputeStats() { return sunUpdater?.stats() ?? null },
     get sun() { return sunMaps },
     get looks() { return looks },
     get globals() { return globals },
@@ -1225,8 +1379,45 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     get vis1View() { return vis1View },
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
+    patchVelocity(encoder, to, farDepth = null) {
+      if (!patchVelPipeline || !vis1View) return
+      const [w, h] = to.size
+      if (w < 1 || h < 1) return
+      const farV = farDepth ?? emptyFarDepthView
+      if (!patchVelBind || patchVelVis1 !== vis1View || patchVelDepth !== to.depth || patchVelFar !== farV) {
+        patchVelVis1 = vis1View
+        patchVelDepth = to.depth
+        patchVelFar = farV
+        patchVelBind = device.createBindGroup({
+          label: 'march-patch-vel',
+          layout: patchVelLayout0,
+          entries: [
+            { binding: 0, resource: { buffer: globals } },
+            { binding: 1, resource: { buffer: shadeExtra } },
+            { binding: 2, resource: vis1View },
+            { binding: 3, resource: to.depth },
+            { binding: 4, resource: farV },
+          ],
+        })
+      }
+      const pass = encoder.beginRenderPass({
+        label: 'march-patch-vel',
+        colorAttachments: [{ view: lastAux.velocityView, loadOp: 'load', storeOp: 'store' }],
+      })
+      pass.setViewport?.(0, 0, w, h, 0, 1)
+      pass.setScissorRect?.(0, 0, w, h)
+      pass.setPipeline(patchVelPipeline)
+      pass.setBindGroup(0, patchVelBind)
+      pass.draw(3)
+      pass.end()
+    },
     tend(encoder, view, ready, most = SUN_TILES_A_FRAME, timing) {
-      const anchor = tell(view, [1, 1], 0, 0), tiles = sunMaps.plan(view.eye, Math.min(SUN_TILES_A_FRAME, most), ready)
+      const useCompute = sunUpdater !== null && typeof encoder.beginComputePass === 'function'
+      const anchor = tell(view, [1, 1], 0, 0), tiles = sunMaps.plan(view.eye, Math.min(useCompute ? MAX_SUN_TILES : SUN_TILES_A_FRAME, most), ready)
+      if (!tiles.length) return 0
+      if (useCompute) {
+        return sunUpdater!.dispatch(encoder, prepareSunTiles(tiles, sunMaps, anchor), sunMaps.all, beamBind0, timing)
+      }
       tiles.forEach((tile, i) => {
         const { buffer, bind: tileBind } = sunTiles[i], corner = sunMaps.corner(tile, anchor), tileBlock = new ArrayBuffer(32)
         new Float32Array(tileBlock).set([corner[0], corner[1], 1 << tile.level, 0, tile.slotX * SUN_TILE, tile.slotY * SUN_TILE])
@@ -1281,25 +1472,28 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       const began = performance.now()
       const nextMods = await buildModules(change)
       const compiled = performance.now() - began
-      const [[nextMirrors, nextPlain], nextSun, nextBeam, nextVisPlain, nextVisMirrors] = await Promise.all([
-        shading(nextMods.shadeMod),
+      const useGtaoDefault = gtaoPass !== null
+      const [[nextMirrors, nextPlain], nextSun, nextBeam, nextVisPlain, nextVisMirrors, nextSunUpdater] = await Promise.all([
+        shading(nextMods.shadeMod, false, useGtaoDefault),
         sunning(nextMods.sunMod),
         makeBeamPipeline(nextMods.beamMod),
         makeVisPipeline(nextMods.visMod, false, false, false),
         makeVisPipeline(nextMods.visMod, true, false, false),
+        makeSunUpdater(),
       ])
       shadeModNow = nextMods.shadeMod
       visModNow = nextMods.visMod
       beamPipeline = nextBeam
       sunPipeline = nextSun
+      if (nextSunUpdater) { sunUpdater?.destroy(); sunUpdater = nextSunUpdater }
       visPipelines.clear()
       visMaking.clear()
       if (nextVisPlain) visPipelines.set(visKeyOf(false, false, false), nextVisPlain)
       if (nextVisMirrors) visPipelines.set(visKeyOf(true, false, false), nextVisMirrors)
       shadePipelines.clear()
       shadeMaking.clear()
-      shadePipelines.set(shadeKeyOf(false, false, false, false, false, format, false), nextPlain)
-      if (nextMirrors) shadePipelines.set(shadeKeyOf(true, false, false, false, false, format, false), nextMirrors)
+      shadePipelines.set(shadeKeyOf(false, false, false, false, false, format, false, useGtaoDefault), nextPlain)
+      if (nextMirrors) shadePipelines.set(shadeKeyOf(true, false, false, false, false, format, false, useGtaoDefault), nextMirrors)
       mirrorsStarted = true
       mirrorsReady = true
       beamBind0 = makeBeamBind0()
@@ -1308,7 +1502,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       sunBind0 = makeSunBind0()
       return { compiled, ms: performance.now() - began }
     },
-    draw(encoder, to, view, flags, time, timing, only, starts) {
+    draw(encoder, to, view, flags, time, timing, only, starts, extra) {
       const anchor = tell(view, to.size, flags, time, starts)
       const isReadback = (flags & (PICK | COUNT)) !== 0
       const targetFormat: GPUTextureFormat = to.format ?? (isReadback ? pickFormat : format)
@@ -1320,41 +1514,55 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       const wantUnder = !isReadback && (under || (flags & UNDER) !== 0)
       const wantFog = !isReadback && fog > 0
 
+      const allocSize = to.allocSize ?? to.size
+      const w = Math.max(1, to.size[0]), h = Math.max(1, to.size[1])
+      const runCompute = hasCompute && typeof encoder.beginComputePass === 'function'
+
+      let runGtao = false
+      if (runCompute && gtaoPass && visDepthPipeline && !isReadback && !wantUnder && !only && (flags & SHADOWS) !== 0 && (flags & (FLAT | HEAT | COUNT | PICK)) === 0 && w >= 16 && h >= 16) {
+        if (allocSize[0] <= gtaoMax[0] && allocSize[1] <= gtaoMax[1]) runGtao = true
+        else ensureGtaoSize(allocSize[0], allocSize[1])
+      }
+      // Reuse the leaner USE_GTAO=1 pipeline (which dead-code-eliminates openness()) when shadows are off or FLAT is set.
+      const shadeUseGtao = !isReadback && !wantUnder && (runGtao || (gtaoPass !== null && !only && ((flags & SHADOWS) === 0 || (flags & FLAT) !== 0)))
+
       // Select active shade pipeline (non-blocking async warming for mirrors/fog/local-occlude variants).
       let mirrors = false
       let useNight = wantNight
       let useOcc = wantOcc
       if (wantsMirrors) {
-        const wantMirrorFog = wantFog && shadePipelines.has(shadeKeyOf(true, true, wantNight, wantUnder, wantOcc, targetFormat, false))
-        if (shadePipelines.has(shadeKeyOf(true, wantMirrorFog, wantNight, wantUnder, wantOcc, targetFormat, false))) {
+        const wantMirrorFog = wantFog && shadePipelines.has(shadeKeyOf(true, true, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao))
+        if (shadePipelines.has(shadeKeyOf(true, wantMirrorFog, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao))) {
           mirrors = true
           mirrorsReady = true
-        } else if (wantOcc && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, false, targetFormat, false))) {
+        } else if (wantOcc && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, false, targetFormat, false, shadeUseGtao))) {
           mirrors = true
           useOcc = false
-          warmShade(true, false, wantNight, wantUnder, true, undefined, targetFormat, false)
-        } else if (wantNight && lightsNow() === 0 && screen.up === 0 && shadePipelines.has(shadeKeyOf(true, false, false, wantUnder, false, targetFormat, false))) {
+          warmShade(true, false, wantNight, wantUnder, true, undefined, targetFormat, false, shadeUseGtao)
+        } else if (wantNight && lightsNow() === 0 && screen.up === 0 && shadePipelines.has(shadeKeyOf(true, false, false, wantUnder, false, targetFormat, false, shadeUseGtao))) {
           // Transient daytime local light (e.g. a blast): keep transparent glass alive while the night+mirrors variant warms in the background.
           mirrors = true
           useNight = false
           useOcc = false
-          warmShade(true, false, true, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false)
+          warmShade(true, false, true, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false, shadeUseGtao)
         } else {
           mirrorsStarted = true
-          warmShade(true, false, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false)
-          if (wantFog) warmShade(true, true, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false)
+          warmShade(true, false, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false, shadeUseGtao)
+          if (wantFog) warmShade(true, true, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false, shadeUseGtao)
         }
       }
       let useFog = false
       if (wantFog) {
-        if (shadePipelines.has(shadeKeyOf(mirrors, true, useNight, wantUnder, useOcc, targetFormat, false))) useFog = true
-        else warmShade(mirrors, true, useNight, wantUnder, useOcc, undefined, targetFormat, false)
+        if (shadePipelines.has(shadeKeyOf(mirrors, true, useNight, wantUnder, useOcc, targetFormat, false, shadeUseGtao))) useFog = true
+        else warmShade(mirrors, true, useNight, wantUnder, useOcc, undefined, targetFormat, false, shadeUseGtao)
       }
-      const activeShade = requireShadePipeline(mirrors, useFog, useNight, wantUnder, useOcc, targetFormat, isReadback)
+      const activeShade = requireShadePipeline(mirrors, useFog, useNight, wantUnder, useOcc, targetFormat, isReadback, shadeUseGtao)
 
-      const allocSize = to.allocSize ?? to.size
-      const w = Math.max(1, to.size[0]), h = Math.max(1, to.size[1])
-      const runCompute = hasCompute && typeof encoder.beginComputePass === 'function'
+      const aux = isReadback ? lastAux : auxFor(allocSize)
+      if (!isReadback) lastAux = aux
+      const jx = isReadback ? 0 : (extra?.jitter?.[0] ?? 0)
+      const jy = isReadback ? 0 : (extra?.jitter?.[1] ?? 0)
+      let aoW = 1, aoH = 1
 
       if (runCompute) {
         ensureVisTextures(allocSize[0], allocSize[1])
@@ -1374,10 +1582,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         const bx1 = Math.min(beamW, Math.ceil((ox + ow) / 4) + 1)
         const by1 = Math.min(beamH, Math.ceil((oy + oh) / 4) + 1)
 
-        traceParamsBuf[0] = ox; traceParamsBuf[1] = oy; traceParamsBuf[2] = ow; traceParamsBuf[3] = oh
-        traceParamsBuf[4] = bx0; traceParamsBuf[5] = by0; traceParamsBuf[6] = bx1; traceParamsBuf[7] = by1
-        traceParamsBuf[8] = beamW; traceParamsBuf[9] = beamH; traceParamsBuf[10] = useBeam ? 1 : 0; traceParamsBuf[11] = 0
-        device.queue.writeBuffer(traceParams, 0, traceParamsBuf)
+        traceParamsU32[0] = ox; traceParamsU32[1] = oy; traceParamsU32[2] = ow; traceParamsU32[3] = oh
+        traceParamsU32[4] = bx0; traceParamsU32[5] = by0; traceParamsU32[6] = bx1; traceParamsU32[7] = by1
+        traceParamsU32[8] = beamW; traceParamsU32[9] = beamH; traceParamsU32[10] = useBeam ? 1 : 0; traceParamsU32[11] = 0
+        traceParamsF32[12] = jx; traceParamsF32[13] = jy; traceParamsF32[14] = 0; traceParamsF32[15] = 0
+        device.queue.writeBuffer(traceParams, 0, traceParamsRaw)
 
         // Pass 0: 1/4-res conservative cone beam pre-pass.
         if (useBeam && beamPipeline && beamBind1) {
@@ -1406,9 +1615,61 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
           visPass.dispatchWorkgroups(Math.ceil(ow / 8), Math.ceil(oh / 8), 1)
           visPass.end()
         }
+
+        // Pass 1.5: Lightweight depth + normal pre-pass -> half-res compute GTAO between Pass 1 and Pass 2 (retires ~3 ms openness()).
+        if (runGtao && gtaoPass && visDepthPipeline && visDepthBind1) {
+          const depthPass = encoder.beginRenderPass({
+            label: 'march-vis-depth',
+            colorAttachments: [{ view: aux.visNormalView, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
+            depthStencilAttachment: { view: to.depth, depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
+          })
+          depthPass.setViewport?.(0, 0, w, h, 0, 1)
+          depthPass.setScissorRect?.(0, 0, w, h)
+          depthPass.setPipeline(visDepthPipeline)
+          depthPass.setBindGroup(0, visDepthBind0)
+          depthPass.setBindGroup(1, visDepthBind1)
+          depthPass.draw(3)
+          depthPass.end()
+
+          gtaoPass.dispatch(encoder, {
+            depth: to.depth,
+            normal: aux.visNormalView,
+            normalSpace: 'world',
+            normalEncoding: 'snorm',
+            renderSize: [w, h],
+            allocSize,
+            projParams: {
+              tanHalfFovY: view.tanHalf,
+              aspect: w / h,
+              near: NEAR,
+              far: FAR,
+              right: view.right,
+              up: view.up,
+              forward: view.forward,
+            },
+            radius: 12.0,
+            power: 1.35,
+            falloffRange: 0.55,
+            maxScreenRadius: 96,
+            slices: 2,
+            steps: 3,
+            frameIndex: extra?.gtaoFrame ?? 0,
+            halfRes: true,
+            timestampWrites: extra?.gtaoTiming,
+          })
+          aoW = Math.max(1, (w + 1) >> 1)
+          aoH = Math.max(1, (h + 1) >> 1)
+          lastGtaoRan = true
+        } else {
+          lastGtaoRan = false
+        }
+      } else {
+        lastGtaoRan = false
       }
 
-      // Upload previous-frame viewProjection relative to CURRENT anchor for analytic rg16float motion vectors.
+      if (extra?.resetHistory) hasPrevView = false
+
+      // Upload previous-frame unjittered viewProjection relative to CURRENT anchor + jitter + GTAO info.
       if (!isReadback && hasPrevView) {
         prevEyeRel[0] = prevEye[0] - anchor[0]
         prevEyeRel[1] = prevEye[1] - anchor[1]
@@ -1424,10 +1685,16 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         shadeExtraBuf[17] = w
         shadeExtraBuf[18] = h
       }
+      shadeExtraBuf[20] = jx
+      shadeExtraBuf[21] = jy
+      shadeExtraBuf[22] = 0
+      shadeExtraBuf[23] = 0
+      shadeExtraBuf[24] = aoW
+      shadeExtraBuf[25] = aoH
+      shadeExtraBuf[26] = lastGtaoRan ? 1 : 0
+      shadeExtraBuf[27] = 0
       device.queue.writeBuffer(shadeExtra, 0, shadeExtraBuf)
 
-      const aux = isReadback ? lastAux : auxFor(allocSize)
-      if (!isReadback) lastAux = aux
       glassReady = !wantsMirrors || mirrors
       if (!isReadback) {
         if (mirrors) panesWritten.add(aux.panes)

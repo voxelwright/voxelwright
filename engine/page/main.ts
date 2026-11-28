@@ -7,9 +7,10 @@
 //   ?fly=1 (on by default at the address /): the flight that measures this device and posts what it found; ?seconds=40 how long it flies
 //   ?shadows=0  ?mirrors=0  ?heat=1 (show how many steps each pixel took)  ?detail=1 (pixels a thing must be wide to be drawn as itself)
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
-import { glow } from './glow.ts'
+import { glow, type GlowSource } from './glow.ts'
+import { createTaa, haltonJitter, type TaaPass } from './taa.ts'
 import { fill } from '../probe/fill.ts'
-import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
+import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, PLAIN, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
 import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
 import type { Heavens } from './almanac.ts'
 import type { WindowEffect } from './eggs-pictures.ts'
@@ -259,9 +260,19 @@ async function main() {
     workers: bounded(query.get('workers'), WORKERS, 1, 8, true),
   })
   // Build independent GPU pipelines concurrently in two batches (#83) so shader compilation never serializes startup.
-  const [march, blit, debris, smoke, water, planet, shade, roadTracks, released] = await Promise.all([
-    marcher(device, gpu.sceneFormat, world, false, !!LOCAL?.release),
+  const initDpr = Math.min(devicePixelRatio || 1, 2)
+  const initMax: [number, number] = [
+    Math.max(1, Math.round((laid.w || innerWidth || 1280) * initDpr)),
+    Math.max(1, Math.round((laid.h || innerHeight || 720) * initDpr)),
+  ]
+  const hasCompute = typeof device.createComputePipelineAsync === 'function'
+  const taaAsked = query.get('taa') !== '0'
+  let taaEnabled = taaAsked && hasCompute
+  let taaSharpness = bounded(query.get('taa_sharp'), 0.25, 0, 1)
+  const [march, blit, taaPass, debris, smoke, water, planet, shade, roadTracks, released] = await Promise.all([
+    marcher(device, gpu.sceneFormat, world, false, !!LOCAL?.release, initMax),
     glow(gpu),
+    taaAsked && hasCompute ? createTaa(device, initMax) : Promise.resolve<TaaPass | null>(null),
     crumbs(device, gpu.sceneFormat),
     puffs(device, gpu.sceneFormat),
     flowing(device, gpu.sceneFormat),
@@ -270,6 +281,19 @@ async function main() {
     tracks(device, gpu.sceneFormat),
     releasedPromise,
   ])
+  // TAA / TSR-lite temporal state (declared before hour/realm hooks and rAF loop to avoid TDZ).
+  let taaFrame = 0, taaNeedsReset = true, taaWasActive = false, taaMs = 0, gtaoMs = 0
+  let taaPrevEye: readonly [number, number, number] | null = null
+  let taaPrevFwd: readonly [number, number, number] | null = null
+  let taaPrevTanHalf: number | null = null
+  let taaPrevFlags = -1, taaPrevMaps = true, taaPrevUnder = false
+  const resetTaa = () => { taaNeedsReset = true; taaPass?.reset() }
+  const taaGlowSrc: { texture: GPUTexture; color: GPUTextureView; size: [number, number]; allocSize: [number, number] } = {
+    texture: null as unknown as GPUTexture,
+    color: null as unknown as GPUTextureView,
+    size: [1, 1],
+    allocSize: [1, 1],
+  }
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
   world.onFine = () => { core.fine_cells(1); void march.reshade((wgsl) => wgsl) }
   // In a world whose process holds a release (#526), this page's core holds finer cells from the start, as that process
@@ -553,7 +577,9 @@ async function main() {
     carWheels.light(sun, day)
   }
   const setHour = (h: number | null) => {
-    hour = h === null ? null : ((h % 24) + 24) % 24
+    const next = h === null ? null : ((h % 24) + 24) % 24
+    if (next !== hour) resetTaa()
+    hour = next
     const { sun, day, low } = sunOf(hour)
     lightBy(sun, day, low)
   }
@@ -578,12 +604,14 @@ async function main() {
     const day = shown.day + (to.day - shown.day) * k, low = shown.low + (to.low - shown.low) * k
     const off = Math.hypot(sun[0] - toward[0], sun[1] - toward[1], sun[2] - toward[2])
     // The moon's disc is drawn where the light comes from: shown once the light is the moon's, not sliding there.
+    if (k === 1 && apart > 0.05) resetTaa()
     lightBy(sun, day, low, byMoon && off < 0.01 ? { sun: sky.sun, disc: 1, light: 0.55 + 0.45 * sky.lit } : { sun: sky.sun, disc: -1, light: byMoon ? 0.55 + 0.45 * sky.lit : 0.55 })
     return off < 0.003 && Math.abs(day - to.day) < 0.002 && Math.abs(low - to.low) < 0.002
   }
   // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
   /** The realm's own light (#450): the sun and grade of the afternoon it is seen in, the hour unset (the eggs give it back, eggs.ts). */
   const ownLight = () => {
+    resetTaa()
     if (!LOCAL?.air?.sun) return setHour(null)
     hour = null
     lightBy(LOCAL.air.sun, 1, 0, WHOLE_MOON, LOCAL.air.grade ? [LOCAL.air.grade[0], LOCAL.air.grade[1]] : grade)
@@ -696,9 +724,9 @@ async function main() {
   // seen through an open window (#367). The picture's size is steered by their sum: by the page's own alone, a window
   // open cost a second march the steer knew nothing of, and the page ran at 30 frames a second beside it.
   const clock = gpu.canTime ? {
-    set: device.createQuerySet({ type: 'timestamp', count: 6 }),
-    resolved: device.createBuffer({ size: 48, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
-    read: device.createBuffer({ size: 48, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+    set: device.createQuerySet({ type: 'timestamp', count: 10 }),
+    resolved: device.createBuffer({ size: 80, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
+    read: device.createBuffer({ size: 80, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
     busy: false,
   } : null
   // ── The sun's maps and the frame (#73) ──
@@ -970,7 +998,7 @@ async function main() {
     const timed = clock && !clock.busy
     // Whether a window's world was marched this frame: a query nothing wrote keeps what it last read, so the window's
     // time is counted only then (counted always, a window long closed went on costing the picture its size).
-    let windowed = false
+    let windowed = false, gtaoRan = false, taaRan = false
     debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
     gathering.step(dt)
     smoke.step(dt * tempo.rate)
@@ -985,6 +1013,19 @@ async function main() {
     const sunDrew = sunRoom.drew = march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
     if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
+    const taaActive = Boolean(taaPass && taaEnabled && !off.has('taa') && pose.y <= SPACE && (flags & (PICK | COUNT | HEAT | PLAIN)) === 0)
+    let taaReset = false
+    let jitter: readonly [number, number] = [0, 0]
+    if (taaActive) {
+      const eyeJumpM = taaPrevEye ? Math.hypot(v.eye[0] - taaPrevEye[0], v.eye[1] - taaPrevEye[1], v.eye[2] - taaPrevEye[2]) / (M * FINE) : 0
+      const fwdDot = taaPrevFwd ? v.forward[0] * taaPrevFwd[0] + v.forward[1] * taaPrevFwd[1] + v.forward[2] * taaPrevFwd[2] : 1
+      const fovJump = taaPrevTanHalf !== null ? Math.abs(v.tanHalf - taaPrevTanHalf) : 0
+      const stateChanged = flags !== taaPrevFlags || march.maps !== taaPrevMaps || march.under !== taaPrevUnder
+      taaReset = taaNeedsReset || !taaWasActive || eyeJumpM > 5 || fwdDot < 0.7 || fovJump > 0.15 || stateChanged
+      jitter = haltonJitter(taaFrame, to.size[0], to.size[1])
+    } else if (taaWasActive) {
+      resetTaa()
+    }
     if (pose.y > SPACE) {
       march.localLights.clear()
       overlayPasses.passes = 0; overlayPasses.merged = 0; overlayPasses.mask = 0
@@ -993,7 +1034,23 @@ async function main() {
     } else {
       updateLocalLights(v)
       const seconds = (now - started) / 1000
-      march.draw(encoder, to, v, flags, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+      march.draw(
+        encoder,
+        to,
+        v,
+        flags,
+        seconds,
+        timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined,
+        undefined,
+        undefined,
+        {
+          jitter,
+          resetHistory: taaReset,
+          gtaoFrame: taaActive ? taaFrame : 0,
+          gtaoTiming: timed ? { prefilter0: { querySet: clock.set, beginningOfPassWriteIndex: 6 }, denoise: { querySet: clock.set, endOfPassWriteIndex: 7 } } : undefined,
+        },
+      )
+      gtaoRan = march.gtaoRan
       windowed = portalDraw?.(encoder, to, v, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       farModel.draw(encoder, to, v)
       skyEggs.draw(encoder, to, farModel.depth, v, seconds)
@@ -1039,12 +1096,43 @@ async function main() {
       pluginDraws.draw(encoder, to, v, seconds)
       staff.draw(encoder, to, v, seconds)
     }
+    let blitSrc: GlowSource = to
+    if (taaActive && taaPass) {
+      march.patchVelocity(encoder, to, farModel.depth)
+      const resolvedView = taaPass.resolve(
+        encoder,
+        {
+          color: to.color,
+          depth: to.depth,
+          velocity: march.velocityView,
+          renderSize: to.size,
+          allocSize: to.allocSize,
+          outputSize: [canvas.width, canvas.height],
+          jitter,
+          reset: taaReset,
+          sharpness: taaSharpness,
+        },
+        timed ? { querySet: clock.set, beginningOfPassWriteIndex: 8, endOfPassWriteIndex: 9 } : undefined,
+      )
+      const cap = taaPass.stats().capacity
+      taaGlowSrc.texture = taaPass.texture
+      taaGlowSrc.color = resolvedView
+      taaGlowSrc.size[0] = canvas.width; taaGlowSrc.size[1] = canvas.height
+      taaGlowSrc.allocSize[0] = cap[0]; taaGlowSrc.allocSize[1] = cap[1]
+      blitSrc = taaGlowSrc
+      taaRan = true
+      taaFrame++
+      taaNeedsReset = false
+    }
+    taaWasActive = taaActive
+    taaPrevEye = v.eye; taaPrevFwd = v.forward; taaPrevTanHalf = v.tanHalf
+    taaPrevFlags = flags; taaPrevMaps = march.maps; taaPrevUnder = march.under
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
     const texBegan = performance.now()
     const backbufferView = context.getCurrentTexture().createView()
     const texMs = performance.now() - texBegan
-    blit(encoder, to, backbufferView, march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
-    if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
+    blit(encoder, blitSrc, backbufferView, march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
+    if (timed) { encoder.resolveQuerySet(clock.set, 0, 10, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 80) }
     const subBegan = performance.now()
     device.queue.submit([encoder.finish()])
     const presentMs = texMs + (performance.now() - subBegan)
@@ -1057,13 +1145,15 @@ async function main() {
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
-        const [a, b, c, d, e, f] = new BigUint64Array(clock.read.getMappedRange().slice(0))
+        const [a, b, c, d, e, f, g0, g1, t0, t1] = new BigUint64Array(clock.read.getMappedRange().slice(0))
         clock.read.unmap()
         clock.busy = false
         // What a tile of the sun's maps took, from the first of this frame's beginning to the last one's end (a query
         // nothing wrote keeps what it last read: counted only where tiles were drawn). Held to what a tile can be, so
         // one wild reading (a phone's clock gives them, raw-webgpu) neither stops the maps nor floods the frame.
         if (sunDrew > 0 && f > e) sunRoom.tileMs += (Math.max(0.05, Math.min(8, Number(f - e) / 1e6 / sunDrew)) - sunRoom.tileMs) * 0.2
+        if (gtaoRan && g1 > g0) { const ms = Number(g1 - g0) / 1e6; gtaoMs = gtaoMs ? gtaoMs + (ms - gtaoMs) * 0.2 : ms }
+        if (taaRan && t1 > t0) { const ms = Number(t1 - t0) / 1e6; taaMs = taaMs ? taaMs + (ms - taaMs) * 0.2 : ms }
         const through = windowed && d > c ? Number(d - c) / 1e6 : 0
         windowMs += (through - windowMs) * 0.1
         // (The last one as it was is kept beside the smoothed: late frames are answered by what the march took just now.)
@@ -1770,6 +1860,7 @@ async function main() {
   const realm = far ? realms({
     far, began, ...(joined ? { land: (a: unknown) => void settle(a) } : {}),
     leave: (trade) => {
+      resetTaa()
       // On foot, the body is taken up first: its own core is about to forget the world it stands on, and it is set down again on arriving.
       afoot = me.on
       // Taking the body up lets go of every key (input.ts `push`): those held to move are held still when it is set down.
@@ -2039,7 +2130,7 @@ async function main() {
   }, 'Cast')
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, overlayPasses, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, overlayPasses, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v }, taa: { get enabled() { return taaEnabled }, set enabled(v: boolean) { taaEnabled = !!v && !!taaPass; resetTaa() }, get sharpness() { return taaSharpness }, set sharpness(v: number) { taaSharpness = Math.max(0, Math.min(1, Number(v) || 0)) }, reset: resetTaa, stats: () => taaPass?.stats() ?? null, get ms() { return taaMs } }, gtao: { stats: () => march.gtaoStats, get ms() { return gtaoMs } }, sunCompute: { stats: () => march.sunComputeStats } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby, arrival })
   // In a lobby: whose server this is in the corner, who is here, what it says, the way out (lobbies.ts).
@@ -2419,6 +2510,7 @@ async function main() {
   const resetting = new Set<() => void>()
   const reset = async () => {
     if (far) return over.notice('A shared world is put back by its keeper, not by one page', 5000)
+    resetTaa()
     for (const each of resetting) each()
     const afoot = me.on
     alive.forget()
