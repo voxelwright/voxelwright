@@ -177,6 +177,14 @@ assert.throws(() => stampRuns('wall', O, { mode: 'add' }), /kind/)
   const pond = world()
   for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) for (let y = 0; y < 18; y++) pond.cells[at(x, y, z)] = y < 10 ? 1 : 5
   ok(rakeRuns(pond.kind, [48, 20, 48], [0, 1, 0], 6, 7, 4).cells === 0, 'no ground within reach: nothing changed')
+  // A wall taller than the rake reaches stands in the brush: its foot is not cut, so it is not left hanging.
+  const walled = world()
+  for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) for (let y = 0; y < 22; y++) walled.cells[at(x, y, z)] = 1
+  for (let y = 22; y < 50; y++) for (let x = 46; x < 50; x++) walled.cells[at(x, y, 48)] = 8
+  const cut = rakeRuns(walled.kind, [48, 20, 48], [0, 1, 0], 8, null, 4)
+  const hit = cellsOf(cut.runs)
+  ok(cut.trimmed > 0, 'the ground round the wall is cut')
+  for (let x = 46; x < 50; x++) ok(![20, 21, 22, 23].some((y) => hit.has(`${x},${y},48`)), `the wall's foot at ${x} is left`)
 }
 
 // ── Undo and redo ──────────────────────────────────────────────────────────────────────────────────────
@@ -267,6 +275,10 @@ assert.throws(() => stampRuns('wall', O, { mode: 'add' }), /kind/)
   p = snapPlacement([30, 20, 30], [0, 1, 1], [20, 2, 20], { ...snap, mode: 'local', yaw: 0 })
   near(p.basis.up, [0, Math.SQRT1_2, Math.SQRT1_2], 'local on a slope: up along the normal')
   ok(Math.abs(p.pitch - 45) < 1e-9 && p.roll === 0, `local on a slope: pitched 45 (${p.pitch})`)
+  // Stamped as placed: a slab tilted on the slope, whole and about as many cells as flat.
+  const tilted = stampRuns('slab', p.origin, { mode: 'add', kind: 7, yaw: p.yaw, pitch: p.pitch, roll: p.roll })
+  wellFormed(tilted.runs, tilted.box, 'slab on a slope')
+  ok(Math.abs(tilted.cells - 800) / 800 < 0.12 && tilted.box[4] - tilted.box[1] > 12, `slab on a slope: ${tilted.cells} cells, ${tilted.box[4] - tilted.box[1]} high`)
   p = snapPlacement([30, 20, 30], [1, 1, 0], [20, 2, 20], { ...snap, mode: 'local', yaw: 90 })
   near(p.basis.up, [Math.SQRT1_2, Math.SQRT1_2, 0], 'local on a slope turned a quarter')
   // Local on a ceiling: upright, hanging.

@@ -206,7 +206,8 @@ const solidGround = (k: number) => k !== 0 && (k & 15) !== WATER
  * `planeNormal`: flat when the normal is straight up, a ramp when it leans. Under the plane each column is filled from
  * its ground up with `fillMaterial` (or, when it is null, with what the ground's top is); above it, it is cut away. No
  * column changes more than `maxDeltaY` cells either way, and a column with no ground within `maxDeltaY` under the
- * plane is left alone, so the rake never leaves a floating sheet over a pit.
+ * plane is left alone, so the rake never leaves a floating sheet over a pit, and so is a column still solid `maxDeltaY`
+ * cells over the plane, so it never cuts the foot from under a wall or a trunk.
  */
 export function rakeRuns(sample: Sample, center: Vec3, planeNormal: Vec3, radiusCells: number, fillMaterial: number | null, maxDeltaY: number): Rake {
   const len = Math.hypot(planeNormal[0], planeNormal[1], planeNormal[2])
@@ -222,6 +223,8 @@ export function rakeRuns(sample: Sample, center: Vec3, planeNormal: Vec3, radius
       if (dx * dx + dz * dz > r * r) continue
       // Cells under `top` are ground once raked; `top` and up are air.
       const top = Math.round(center[1] - (nx * dx + nz * dz) / ny)
+      // Standing higher than the rake reaches (a wall, a trunk, a cliff): cutting its foot would leave it hanging.
+      if (solidGround(sample(x, top + most, z))) continue
       for (let y = top; y < top + most; y++) if (solidGround(sample(x, y, z))) { cells.push(x, y, z, 0); trimmed++ }
       let ground = top - 1
       while (ground >= top - most && !solidGround(sample(x, ground, z))) ground--
@@ -350,6 +353,8 @@ export interface SnapState {
   /** Carving: the shape goes into the face aimed at (through a wall, down into a floor) instead of standing on it. */
   into?: boolean
 }
+/** The name the brief (#226) gives it. */
+export type PlacementSnap = SnapState
 export interface Placement { origin: Vec3; yaw: number; pitch: number; roll: number; basis: { right: Vec3; up: Vec3; forward: Vec3 } }
 
 export const snapAngle = (deg: number, step: number) => (step > 0 ? Math.round(deg / step) * step : deg)
