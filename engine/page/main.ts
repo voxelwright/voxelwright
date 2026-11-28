@@ -619,7 +619,9 @@ async function main() {
   let interiorSys: InteriorSystem | null = null
   let deliveryCtrl: DeliveryController | null = null
   let cachedPlaces: PlacesPayload | null = null
-  const observeNpcFolk = (src: (v: View, s: number) => readonly Person[]) => (v: View, s: number) => {
+  const EMPTY_PEOPLE: readonly Person[] = []
+  const observeNpcFolk = (src: (v: View, s: number) => readonly Person[], outdoorOnly = false) => (v: View, s: number) => {
+    if (outdoorOnly && interiorSys?.active) return EMPTY_PEOPLE
     const list = src(v, s)
     social?.observeLocal(list)
     for (const p of list) folkSeen.set(p.seed, p)
@@ -627,7 +629,7 @@ async function main() {
     return list.map((p) => { const ragdollPose = limp.has(p.seed) ? ragdolls.poseFor(p.seed) : undefined; return ragdollPose ? { ...p, ragdollPose } : p })
   }
   const lively = !!LOCAL?.street && query.get('street') !== '0'
-  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(observeNpcFolk(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay())))
+  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(observeNpcFolk(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()), true))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** By the sun wherever it is (towards it, a unit direction): how much of the day it is, how low it is, and where the light comes from: by day the sun, never from under the ground; by night the moon, from a fixed place. */
@@ -1025,6 +1027,12 @@ async function main() {
     const ancY = Math.floor(v.eye[1] / SIDE) * SIDE
     const ancZ = Math.floor(v.eye[2] / SIDE) * SIDE
     march.localLights.beginFrame(v, ancX, ancY, ancZ, preset, march.lights, march.rain)
+    if (interiorSys?.active) {
+      // Indoors at y = 420 m: only interior room lights (ceiling lamps, pizza oven glow) affect the room.
+      deliveryCtrl?.lights(march.localLights, (performance.now() - started) / 1000)
+      march.localLights.finishFrame()
+      return
+    }
     alive.lights(march.localLights)
     streetLife?.lights(march.localLights)
     falling.emitLights(march.localLights)
@@ -1095,10 +1103,13 @@ async function main() {
     grip.frame()
     ownHold(v)
     lap('steer')
+    const indoors = Boolean(interiorSys?.active)
     fallOn(dt)
     lap('fallOn')
-    streetLife?.frame(dt, v)
-    neighborhood?.frame(v)
+    if (!indoors) {
+      streetLife?.frame(dt, v)
+      neighborhood?.frame(v)
+    }
     lap('street')
     world.update(interiorSys?.streetAnchor ?? ahead ?? v.eye)
     lap('update')
@@ -1110,12 +1121,14 @@ async function main() {
     // time is counted only then (counted always, a window long closed went on costing the picture its size).
     let windowed = false, gtaoRan = false, taaRan = false
     let clusterRan = false, dynShadowRan = false, volCloudsRan = false, froxelFogRan = false
-    debris.step(dt * worldRate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
-    gathering.step(dt)
-    smoke.step(dt * worldRate)
-    if (rewind) smoke.setClock(rewind.clock)
-    roadTracks.step(dt * worldRate)
-    if (!off.has('wheels')) carWheels.step(dt * worldRate, wheelVehicles(), groundUnder)
+    if (!indoors) {
+      debris.step(dt * worldRate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
+      gathering.step(dt)
+      smoke.step(dt * worldRate)
+      if (rewind) smoke.setClock(rewind.clock)
+      roadTracks.step(dt * worldRate)
+      if (!off.has('wheels')) carWheels.step(dt * worldRate, wheelVehicles(), groundUnder)
+    }
     stepFight(dt, v, worldRate)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
@@ -1123,7 +1136,7 @@ async function main() {
     const moving = eyeSpeed > 1
     sunRoom.moving = moving
     sunRoom.most = sunMost(budget, moving)
-    const sunDrew = sunRoom.drew = march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
+    const sunDrew = sunRoom.drew = indoors ? 0 : march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
     if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
     const taaActive = Boolean(taaPass && taaEnabled && !off.has('taa') && pose.y <= SPACE && (flags & (PICK | COUNT | HEAT | PLAIN)) === 0)
@@ -1158,10 +1171,10 @@ async function main() {
       const weatherFogActive = fogLvl >= 0.02 || march.rain >= 0.02 || march.cloud >= 0.15
 
       const clusterActive = Boolean(clusterLightsEnabled && march.localLights.clustered && !off.has('lights') && !off.has('clusterLights'))
-      const dynShadowActive = Boolean(dynShadowsEnabled && dynShadows && preset !== 'low' && (flags & SHADOWS) !== 0 && !isDebugOrPlain && !off.has('dynShadows') && march.day > 0.05 && march.sun.s[1] > 0.04)
+      const dynShadowActive = Boolean(!indoors && dynShadowsEnabled && dynShadows && preset !== 'low' && (flags & SHADOWS) !== 0 && !isDebugOrPlain && !off.has('dynShadows') && march.day > 0.05 && march.sun.s[1] > 0.04)
       const skyLutActive = Boolean(skyLutEnabled && skyLut && !isDebugOrPlain && !off.has('skyLut'))
-      const volCloudsActive = Boolean(volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01 && dayFade >= 0.12)
-      const froxelFogActive = Boolean(froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500 && weatherFogActive)
+      const volCloudsActive = Boolean(!indoors && volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01 && dayFade >= 0.12)
+      const froxelFogActive = Boolean(!indoors && froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500 && weatherFogActive)
       if (!volCloudsActive) volCloudsNeedsReset = true
       if (!froxelFogActive) froxelFogNeedsReset = true
       lastClusterActive = clusterActive
@@ -1335,7 +1348,7 @@ async function main() {
       )
       gtaoRan = march.gtaoRan
       windowed = portalDraw?.(encoder, to, v, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
-      if (!march.under) {
+      if (!march.under && !indoors) {
         farModel.draw(encoder, to, v)
         // Composite volumetric 3D clouds strictly behind marched geometry, farModel skyscrapers, and glass panes.
         if (volCloudsActive && volClouds) {
@@ -1357,20 +1370,20 @@ async function main() {
         skyEggs.draw(encoder, to, farModel.depth, v, seconds)
         if (!froxelFogActive) marine.draw(encoder, to, farModel.depth, v, seconds)
       }
-      if (!off.has('water')) water.draw(encoder, to, v, seconds)
+      if (!off.has('water') && !indoors) water.draw(encoder, to, v, seconds)
       // Grass over the ground and rubble thrown by what broke (#226): depth-tested into the picture.
-      if (grass && !off.has('grass')) { grass.update(v.eye, groundSample, { dt: dt * worldRate, pushPos: me.feet?.at ?? null }); grass.draw(encoder, to, v) }
-      if (rubble && !off.has('avbd') && rubble.count > 0) { rubble.step(encoder, Math.min(dt * worldRate, 1 / 30), core.ground_at(Math.round(v.eye[0]), Math.round(v.eye[2]))); rubble.drawTo(encoder, to, v) }
+      if (grass && !indoors && !off.has('grass')) { grass.update(v.eye, groundSample, { dt: dt * worldRate, pushPos: me.feet?.at ?? null }); grass.draw(encoder, to, v) }
+      if (rubble && !indoors && !off.has('avbd') && rubble.count > 0) { rubble.step(encoder, Math.min(dt * worldRate, 1 / 30), core.ground_at(Math.round(v.eye[0]), Math.round(v.eye[2]))); rubble.drawTo(encoder, to, v) }
       // Shared TBDR overlay pass (#165): run all CPU prep, queue.writeBuffer uploads, and crumbs-compute BEFORE
       // beginning ONE shared GPURenderPassEncoder over (to.color, to.depth) to avoid 6-7 tile load/store flushes.
-      const drawShade = !off.has('under') && alive.things.length > 0 && shade.prepare(to, v, shades(), groundUnder, march.day, march.sun.s)
-      const drawTracks = !off.has('under') && roadTracks.prepare(to, v, groundUnder)
-      const drawWheels = !off.has('wheels') && carWheels.prepare(to, v)
-      const drawPieces = !off.has('pieces') && falling.prepare(to, v, march.sun.s, (flags & MIRRORS) !== 0)
-      const drawSigns = !off.has('signs') && (neighborhood?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth) ?? false)
+      const drawShade = !indoors && !off.has('under') && alive.things.length > 0 && shade.prepare(to, v, shades(), groundUnder, march.day, march.sun.s)
+      const drawTracks = !indoors && !off.has('under') && roadTracks.prepare(to, v, groundUnder)
+      const drawWheels = !indoors && !off.has('wheels') && carWheels.prepare(to, v)
+      const drawPieces = !off.has('pieces') && falling.prepare(to, v, march.sun.s, (flags & MIRRORS) !== 0, undefined, indoors ? 3800 : undefined)
+      const drawSigns = !indoors && !off.has('signs') && (neighborhood?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth) ?? false)
       const drawInteriorSigns = !off.has('signs') && (interiorSys?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog)) ?? false)
       let drawCrumbs = false
-      if (!off.has('crumbs')) {
+      if (!indoors && !off.has('crumbs')) {
         // (crumbs and sparks bounce off what the picture shows, #166)
         debris.setDepthSource(off.has('crumbdepth') ? null : to.depth)
         debris.defer()
@@ -1400,7 +1413,7 @@ async function main() {
         pass.end()
       }
       smoke.billowsEnabled = billowsAsked && !off.has('billows')
-      if (!off.has('puffs')) smoke.draw(encoder, to, v)
+      if (!indoors && !off.has('puffs')) smoke.draw(encoder, to, v)
       if (combat && !off.has('combat')) combat.draw(encoder, to, v, seconds)
 
       // 6. 3D Froxel Volumetric Fog (active only during fog/rain/overcast; composited onto linear HDR BEFORE TAA & bloom).
@@ -3105,7 +3118,7 @@ async function main() {
     })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
-    if (query.get('people') !== '0') folk.from.push(observeNpcFolk(life.folk))
+    if (query.get('people') !== '0') folk.from.push(observeNpcFolk(life.folk, true))
   }
   if (BAY_ON && !far && query.get('neighborhood') !== '0') {
     void firstPicture.then(() => createNeighborhood({
@@ -3116,7 +3129,7 @@ async function main() {
     })).then((n) => {
       neighborhood = n
       if (landing && first && !first.engaged) n.enabled = false
-      if (query.get('people') !== '0') folk.from.push(observeNpcFolk(n.folk))
+      if (query.get('people') !== '0') folk.from.push(observeNpcFolk(n.folk, true))
     }).catch((e: unknown) => { console.warn(`no neighborhood places: ${e instanceof Error ? e.message : String(e)}`) })
   }
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
