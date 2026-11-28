@@ -105,6 +105,23 @@ try {
   check(stopped < live * 0.45, `time stopped drains the colour (chroma ${live.toFixed(3)} running, ${stopped.toFixed(3)} stopped)`)
   await page.keyboard.down('KeyT'); await page.waitForTimeout(60); await page.keyboard.up('KeyT')
   await page.waitForFunction(() => globalThis.engine.rewind.state === 'live', null, { timeout: 10_000 })
+
+  // Grass grows on the town's lawns (grass.ts reads what the top cell of each column is): stood on the nearest one.
+  const lawn = await page.evaluate(() => {
+    const g = globalThis.engine, p = g.pose
+    const isGrass = (x, z) => { const X = Math.round(x * 10), Z = Math.round(z * 10), f = g.feet(X, Z); return (g.kind(X, f - 1, Z) & 15) === 3 }
+    for (let r = 2; r < 200; r += 2) for (let a = 0; a < 6.283; a += 0.5 / r) {
+      const x = Math.round(p.x + Math.cos(a) * r), z = Math.round(p.z + Math.sin(a) * r)
+      if (isGrass(x, z) && isGrass(x + 2, z) && isGrass(x, z + 2) && isGrass(x - 2, z) && isGrass(x, z - 2)) return { x, z }
+    }
+    return null
+  })
+  if (lawn) {
+    await page.evaluate((l) => { const g = globalThis.engine, p = g.pose; p.x = l.x; p.z = l.z; p.y = g.ground(l.x, l.z) + 1.7 }, lawn)
+    await page.waitForTimeout(800)
+  }
+  const grassTexels = await page.evaluate(() => globalThis.engine.grass?.stats.grassTexels ?? -1)
+  check(!!lawn && grassTexels > 0, `grass grows on the lawn (${grassTexels} grass texels round the eye at ${JSON.stringify(lawn)})`)
 } catch (e) {
   failures.push(String(e))
 }

@@ -2491,8 +2491,8 @@ async function main() {
     return { at: target, ...(hit ?? {}) }
   }
 
-  /** The ground under a column for the grass (grass.ts): its top, and what that is made of. */
-  const groundSample = (x: number, z: number) => { const ix = Math.round(x), iz = Math.round(z), y = core.ground_at(ix, iz); return { y, kind: core.world_kind(ix, y - 1, iz) } }
+  /** The ground under a column for the grass (grass.ts): the height of its surface (the cell over its top), and what its top is made of. */
+  const groundSample = (x: number, z: number) => { const ix = Math.round(x), iz = Math.round(z), top = core.ground_at(ix, iz); return { y: top + 1, kind: core.world_kind(ix, top, iz) } }
   /** What is heard of the weapons (sound/combat.ts), once there is sound. */
   const combatEars = new Proxy({} as Partial<CombatSound>, { get: (_, name) => (...a: unknown[]) => (ears?.combat as unknown as Record<string, ((...a: unknown[]) => unknown) | undefined> | undefined)?.[name as string]?.(...a) })
   /** Where each grappled anchor sits on its body, in the body's own frame, so that the cable is drawn to it as the body moves. */
