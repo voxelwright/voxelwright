@@ -13,6 +13,7 @@ import { conductor } from './music/conductor.ts'
 import { MODES, MOODS, PACE, moodKey, resolve } from './music/compose.ts'
 import { played } from './things.ts'
 import { createRadio } from './radio.ts'
+import { combatSound } from './combat.ts'
 import { speak, type Way } from './voice.ts'
 import type { Things } from '../things.ts'
 import type { Hud } from '../hud.ts'
@@ -67,6 +68,7 @@ const M = 10, G = 98
 export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }: { music: boolean; query?: URLSearchParams }) {
   const music = withMusic ? conductor(voice) : null
   const radio = createRadio(voice, { ambient: music, query })
+  const combat = combatSound(voice)
   /** How much is going wrong near by, 0 to 1: blasts, things coming down, fire. It dies away over some seconds. */
   let threat = 0, snow = false, snowLooked = -9, place = ''
   /** Made things that sound and are played: there once the page's own parts are (asked each frame until they are). */
@@ -217,7 +219,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
     realm = { key: moodKey(m.like, 0, typeof m.mode === 'string' && Object.hasOwn(MODES, m.mode) ? m.mode : ''), pace: num(m.pace, PACE[0], PACE[1], 0), drive: typeof m.drive === 'number' ? num(m.drive, 0, 1, 0) : null, now: m.now === true }
   }
   return {
-    voice, blast, count, music, radio, sounded, tuned, follows,
+    voice, blast, count, music, radio, combat, sounded, tuned, follows,
     /** Updates the driven vehicle's continuous engine, tire screech, and road roll beds (null silences them). */
     drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null) {
       voice.set(SET.engineRpm, v ? v.rpm : 0)
