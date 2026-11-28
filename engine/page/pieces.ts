@@ -606,8 +606,8 @@ export interface Pieces {
   add(born: Born, share?: boolean): Piece
   /** Gives a piece made unshared new faces (and smooth words) for the same look: its square faces once its smooth ones are made (#38). Nothing for one destroyed. */
   refit(piece: Piece, faces: Uint32Array<ArrayBuffer>, smooth?: Uint32Array<ArrayBuffer>): void
-  /** Culls visible pieces (6-plane sphere + tight AABB, zero-GC) and writes per-piece uniform/deformed-mesh buffers before a render pass begins; when `encoder` is supplied, also dispatches `createIndirectCuller` on the GPU. Returns true when at least one piece will draw. */
-  prepare(to: Target, view: View, sun: readonly [number, number, number], mirrors?: boolean, encoder?: GPUCommandEncoder): boolean
+  /** Culls visible pieces (6-plane sphere + tight AABB, zero-GC) and writes per-piece uniform/deformed-mesh buffers before a render pass begins; when `encoder` is supplied, also dispatches `createIndirectCuller` on the GPU. Optional `minYCells` skips pieces below an elevation floor (e.g. outdoor street props while inside a sky-elevated interior). Returns true when at least one piece will draw. */
+  prepare(to: Target, view: View, sun: readonly [number, number, number], mirrors?: boolean, encoder?: GPUCommandEncoder, minYCells?: number): boolean
   /** Records the prepared solid and glass faces into an active `(to.color, to.depth)` render pass. */
   record(pass: GPURenderPassEncoder): void
   /** mirrors: false is the M key's mirrors off, under which glass is seen through, tinted, mirroring nothing. */
@@ -1102,7 +1102,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       }
       return staged
     },
-    prepare(to, view, sun, mirrors = true, encoder) {
+    prepare(to, view, sun, mirrors = true, encoder, minYCells) {
       const t0 = performance.now()
       visibleCount = 0
       preparedGlass = false
@@ -1132,7 +1132,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       f[12] = fx; f[13] = fy; f[14] = fz; f[15] = 0
       f[16] = sun[0]; f[17] = sun[1]; f[18] = sun[2]; f[19] = 0
 
-      const stageGpuCull = culler !== null && (encoder !== undefined || n >= CULLER_BATCH_THRESHOLD)
+      const stageGpuCull = culler !== null && encoder !== undefined && n >= CULLER_BATCH_THRESHOLD
       const maxCullSlots = culler ? culler.maxInstances : 0
       let staged = 0
       let activeTotal = 0
@@ -1144,6 +1144,10 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         const piece = liveList[idx]
         // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
         if (!piece.cell || !piece.count) continue
+        if (minYCells !== undefined && piece.pos[1] < minYCells) {
+          culled++
+          continue
+        }
         activeTotal++
         const [x, y, z, w] = piece.rot, b = piece.born, cell = piece.cell
         const m00 = 1 - 2 * (y * y + z * z), m10 = 2 * (x * y + z * w), m20 = 2 * (x * z - y * w)

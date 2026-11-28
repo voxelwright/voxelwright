@@ -471,8 +471,8 @@ export function living(o: {
     if (scheme?.name !== 'drive') touch.show(false)
     if (!scheme) { buttons.replaceChildren(); seat = null; repairBtn = null; return }
     if (scheme.name === 'drive') {
-      // By touch the car's own keys are the scheme's (drive-touch.ts: steering under one thumb, pedals, drift and boost
-      // under the other); along the top right, quiet icon-only keys (Horn, Radio, Cam, Exit, and Repair when damaged).
+      // By touch the car's own keys are the scheme's (drive-touch.ts: steering under one thumb, pedals and drift under
+      // the other, boost under whichever is not holding Gas); along the top right, quiet icon-only keys (Horn, Radio, Cam, Exit, and Repair when damaged).
       seat = null
       const util = Object.assign(document.createElement('div'), { className: 'drive-util' })
       const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })

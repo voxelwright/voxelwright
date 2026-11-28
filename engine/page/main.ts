@@ -85,6 +85,10 @@ import { steerScale, type SteerState } from './steer.ts'
 import { feedbackUi, type FeedbackUi } from './feedback.ts'
 import { initPwa } from './pwa.ts'
 import { createSocial, type SocialCandidate, type SocialController } from './social.ts'
+import { createPhone, type PhoneOS } from './phone.ts'
+import { createInteriorSystem, type InteriorSystem } from './interiors.ts'
+import { createDeliveryEngine, type DeliveryController } from './delivery.ts'
+import { createDoorSmashApp } from './delivery-ui.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -198,7 +202,7 @@ async function main() {
     // had the page ask that master and join that server with no click. It asks first now, and says whose it is;
     // until the visitor agrees nothing is sent to either, and the door's code is not fetched.)
     : query.has('lobby') && MASTER && RULES.lobbies === 'preview' && agreed('join') ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
-  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; bay_bridge_y?(x: number, z: number, layer: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; bay_bridge_y?(x: number, z: number, layer: number): number; world_edit(after: number): void; world_forget(): void; world_memory_budget?(keeps: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // Open GPU and the page's WASM core in parallel so core compilation overlaps adapter/device creation (#83).
   const [gpu, innerInit] = await Promise.all([openGpu(), open<Core>(new URL('./core.wasm', import.meta.url).href)])
   useFineCore(innerInit)
@@ -225,6 +229,10 @@ async function main() {
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
   let inner = innerInit
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
+  // Bound main-thread and mover WASM sector caches by device tier so blasting tall buildings never hits mobile Jetsam limits.
+  const MAIN_KEEPS = phone ? 16 : 32
+  const MOVER_KEEPS = BUDGET.pool <= 80 ? 36 : BUDGET.pool <= 192 ? 48 : 64
+  core.world_memory_budget?.(MAIN_KEEPS)
   // Start on land, a little above a street — resolve arrival coordinates early so tile & release fetches overlap GPU pipeline creation (#83).
   const upright = innerHeight > innerWidth && !query.has('look') ? LOCAL?.upright : undefined
   const directLL = query.has('ll') && !!BAY_START
@@ -581,13 +589,19 @@ async function main() {
   let streetLife: Street | null = null
   let neighborhood: Neighborhood | null = null
   let social: SocialController | null = null
-  const observeNpcFolk = (src: (v: View, s: number) => readonly Person[]) => (v: View, s: number) => {
+  let phoneOs: PhoneOS | null = null
+  let interiorSys: InteriorSystem | null = null
+  let deliveryCtrl: DeliveryController | null = null
+  let cachedPlaces: PlacesPayload | null = null
+  const EMPTY_PEOPLE: readonly Person[] = []
+  const observeNpcFolk = (src: (v: View, s: number) => readonly Person[], outdoorOnly = false) => (v: View, s: number) => {
+    if (outdoorOnly && interiorSys?.active) return EMPTY_PEOPLE
     const list = src(v, s)
     social?.observeLocal(list)
     return list
   }
   const lively = !!LOCAL?.street && query.get('street') !== '0'
-  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(observeNpcFolk(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay())))
+  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(observeNpcFolk(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()), true))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** By the sun wherever it is (towards it, a unit direction): how much of the day it is, how low it is, and where the light comes from: by day the sun, never from under the ground; by night the moon, from a fixed place. */
@@ -983,11 +997,18 @@ async function main() {
     const ancY = Math.floor(v.eye[1] / SIDE) * SIDE
     const ancZ = Math.floor(v.eye[2] / SIDE) * SIDE
     march.localLights.beginFrame(v, ancX, ancY, ancZ, preset, march.lights, march.rain)
+    if (interiorSys?.active) {
+      // Indoors at y = 420 m: only interior room lights (ceiling lamps, pizza oven glow) affect the room.
+      deliveryCtrl?.lights(march.localLights, (performance.now() - started) / 1000)
+      march.localLights.finishFrame()
+      return
+    }
     alive.lights(march.localLights)
     streetLife?.lights(march.localLights)
     falling.emitLights(march.localLights)
     smoke.lights(march.localLights)
     portalLights?.(march.localLights)
+    deliveryCtrl?.lights(march.localLights, (performance.now() - started) / 1000)
     emitPlacedLamps(march.localLights)
     if (BAY_ON && march.lights > 0.02) {
       const useClust = clusterLightsEnabled && march.localLights.clustered !== null && !off.has('clusterLights')
@@ -1030,8 +1051,10 @@ async function main() {
     controls.poll?.(dt)
     shot?.before?.()
     drawAhead(now)
-    if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
+    if (!interiorSys?.frame(dt) && !alive.frame(dt) && !me.frame(dt)) walk(dt)
     stuntHud.frame(dt)
+    phoneOs?.frame(dt)
+    deliveryCtrl?.frame(dt, (now - started) / 1000)
     shot?.after(dt)
     const budget = rate ? Math.max(1000 / rate, screenMs) : fastestMs
     steer(budget, gap, resting)
@@ -1046,12 +1069,15 @@ async function main() {
     grip.frame()
     ownHold(v)
     lap('steer')
+    const indoors = Boolean(interiorSys?.active)
     fallOn(dt)
     lap('fallOn')
-    streetLife?.frame(dt, v)
-    neighborhood?.frame(v)
+    if (!indoors) {
+      streetLife?.frame(dt, v)
+      neighborhood?.frame(v)
+    }
     lap('street')
-    world.update(ahead ?? v.eye)
+    world.update(interiorSys?.streetAnchor ?? ahead ?? v.eye)
     lap('update')
     if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
     lap('spoil')
@@ -1061,18 +1087,20 @@ async function main() {
     // time is counted only then (counted always, a window long closed went on costing the picture its size).
     let windowed = false, gtaoRan = false, taaRan = false
     let clusterRan = false, dynShadowRan = false, volCloudsRan = false, froxelFogRan = false
-    debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
-    gathering.step(dt)
-    smoke.step(dt * tempo.rate)
-    roadTracks.step(dt * tempo.rate)
-    if (!off.has('wheels')) carWheels.step(dt * tempo.rate, wheelVehicles(), groundUnder)
+    if (!indoors) {
+      debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
+      gathering.step(dt)
+      smoke.step(dt * tempo.rate)
+      roadTracks.step(dt * tempo.rate)
+      if (!off.has('wheels')) carWheels.step(dt * tempo.rate, wheelVehicles(), groundUnder)
+    }
     lap('step')
     for (const level of world.moved) march.sun.age(level)
     // (Moving: more than a metre a second.)
     const moving = eyeSpeed > 1
     sunRoom.moving = moving
     sunRoom.most = sunMost(budget, moving)
-    const sunDrew = sunRoom.drew = march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
+    const sunDrew = sunRoom.drew = indoors ? 0 : march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
     if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
     const taaActive = Boolean(taaPass && taaEnabled && !off.has('taa') && pose.y <= SPACE && (flags & (PICK | COUNT | HEAT | PLAIN)) === 0)
@@ -1107,10 +1135,10 @@ async function main() {
       const weatherFogActive = fogLvl >= 0.02 || march.rain >= 0.02 || march.cloud >= 0.15
 
       const clusterActive = Boolean(clusterLightsEnabled && march.localLights.clustered && !off.has('lights') && !off.has('clusterLights'))
-      const dynShadowActive = Boolean(dynShadowsEnabled && dynShadows && preset !== 'low' && (flags & SHADOWS) !== 0 && !isDebugOrPlain && !off.has('dynShadows') && march.day > 0.05 && march.sun.s[1] > 0.04)
+      const dynShadowActive = Boolean(!indoors && dynShadowsEnabled && dynShadows && preset !== 'low' && (flags & SHADOWS) !== 0 && !isDebugOrPlain && !off.has('dynShadows') && march.day > 0.05 && march.sun.s[1] > 0.04)
       const skyLutActive = Boolean(skyLutEnabled && skyLut && !isDebugOrPlain && !off.has('skyLut'))
-      const volCloudsActive = Boolean(volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01 && dayFade >= 0.12)
-      const froxelFogActive = Boolean(froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500 && weatherFogActive)
+      const volCloudsActive = Boolean(!indoors && volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01 && dayFade >= 0.12)
+      const froxelFogActive = Boolean(!indoors && froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500 && weatherFogActive)
       if (!volCloudsActive) volCloudsNeedsReset = true
       if (!froxelFogActive) froxelFogNeedsReset = true
       lastClusterActive = clusterActive
@@ -1283,7 +1311,7 @@ async function main() {
       )
       gtaoRan = march.gtaoRan
       windowed = portalDraw?.(encoder, to, v, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
-      if (!march.under) {
+      if (!march.under && !indoors) {
         farModel.draw(encoder, to, v)
         // Composite volumetric 3D clouds strictly behind marched geometry, farModel skyscrapers, and glass panes.
         if (volCloudsActive && volClouds) {
@@ -1305,23 +1333,24 @@ async function main() {
         skyEggs.draw(encoder, to, farModel.depth, v, seconds)
         if (!froxelFogActive) marine.draw(encoder, to, farModel.depth, v, seconds)
       }
-      if (!off.has('water')) water.draw(encoder, to, v, seconds)
+      if (!off.has('water') && !indoors) water.draw(encoder, to, v, seconds)
       // Shared TBDR overlay pass (#165): run all CPU prep, queue.writeBuffer uploads, and crumbs-compute BEFORE
       // beginning ONE shared GPURenderPassEncoder over (to.color, to.depth) to avoid 6-7 tile load/store flushes.
-      const drawShade = !off.has('under') && alive.things.length > 0 && shade.prepare(to, v, shades(), groundUnder, march.day, march.sun.s)
-      const drawTracks = !off.has('under') && roadTracks.prepare(to, v, groundUnder)
-      const drawWheels = !off.has('wheels') && carWheels.prepare(to, v)
-      const drawPieces = !off.has('pieces') && falling.prepare(to, v, march.sun.s, (flags & MIRRORS) !== 0)
-      const drawSigns = !off.has('signs') && (neighborhood?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth) ?? false)
+      const drawShade = !indoors && !off.has('under') && alive.things.length > 0 && shade.prepare(to, v, shades(), groundUnder, march.day, march.sun.s)
+      const drawTracks = !indoors && !off.has('under') && roadTracks.prepare(to, v, groundUnder)
+      const drawWheels = !indoors && !off.has('wheels') && carWheels.prepare(to, v)
+      const drawPieces = !off.has('pieces') && falling.prepare(to, v, march.sun.s, (flags & MIRRORS) !== 0, undefined, indoors ? 3800 : undefined)
+      const drawSigns = !indoors && !off.has('signs') && (neighborhood?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth) ?? false)
+      const drawInteriorSigns = !off.has('signs') && (interiorSys?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog)) ?? false)
       let drawCrumbs = false
-      if (!off.has('crumbs')) {
+      if (!indoors && !off.has('crumbs')) {
         debris.defer()
         debris.draw(encoder, to, v)
         drawCrumbs = debris.ready
       }
-      const overlayMask = (drawShade ? 1 : 0) | (drawTracks ? 2 : 0) | (drawWheels ? 4 : 0) | (drawPieces ? 8 : 0) | (drawSigns ? 16 : 0) | (drawPeople ? 32 : 0) | (drawCrumbs ? 64 : 0)
+      const overlayMask = (drawShade ? 1 : 0) | (drawTracks ? 2 : 0) | (drawWheels ? 4 : 0) | (drawPieces ? 8 : 0) | ((drawSigns || drawInteriorSigns) ? 16 : 0) | (drawPeople ? 32 : 0) | (drawCrumbs ? 64 : 0)
       overlayPasses.mask = overlayMask
-      overlayPasses.merged = (drawShade ? 1 : 0) + (drawTracks ? 1 : 0) + (drawWheels ? 1 : 0) + (drawPieces ? 1 : 0) + (drawSigns ? 1 : 0) + (drawPeople ? 1 : 0) + (drawCrumbs ? 1 : 0)
+      overlayPasses.merged = (drawShade ? 1 : 0) + (drawTracks ? 1 : 0) + (drawWheels ? 1 : 0) + (drawPieces ? 1 : 0) + ((drawSigns || drawInteriorSigns) ? 1 : 0) + (drawPeople ? 1 : 0) + (drawCrumbs ? 1 : 0)
       overlayPasses.passes = overlayMask ? 1 : 0
       if (overlayMask) {
         const pass = encoder.beginRenderPass({
@@ -1336,11 +1365,12 @@ async function main() {
         if (drawWheels) carWheels.record(pass)
         if (drawPieces) falling.record(pass)
         if (drawSigns) neighborhood!.recordSigns(pass)
+        if (drawInteriorSigns) interiorSys!.recordSigns(pass)
         if (drawPeople) folk.record(pass)
         if (drawCrumbs) debris.record(pass)
         pass.end()
       }
-      if (!off.has('puffs')) smoke.draw(encoder, to, v)
+      if (!indoors && !off.has('puffs')) smoke.draw(encoder, to, v)
 
       // 6. 3D Froxel Volumetric Fog (active only during fog/rain/overcast; composited onto linear HDR BEFORE TAA & bloom).
       if (froxelFogActive && froxelFog) {
@@ -1553,6 +1583,7 @@ async function main() {
   let moverAge = 0
   const hireMover = () => {
     const w = share(new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' }))
+    w.postMessage({ budget: MOVER_KEEPS })
     w.onmessage = (e: MessageEvent<Answer>) => heed.message?.(e)
     w.onerror = (e) => { e.preventDefault(); heed.error?.(e); loseMover(w) }
     return w
@@ -1897,9 +1928,10 @@ async function main() {
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
-    // A body that is cells again is drawn until those cells are in the picture.
-    const made = world.stats.stale === 0 && world.stats.wanted === 0
-    lying = lying.filter((l) => { if (++l.shown > 2 && made) { l.piece.destroy(); return false } return true })
+    // A body that is cells again is drawn until edited sectors (`stale`) finish rebuilding, without waiting on
+    // distant unstreamed sectors (`wanted`) and with a hard frame cap so settled pieces never leak GPU buffers.
+    const made = world.stats.stale === 0
+    lying = lying.filter((l) => { if ((++l.shown > 2 && made) || l.shown > 90) { l.piece.destroy(); return false } return true })
   }
 
   /** Breaks what is straight ahead. What it is made of decides how far the break goes (the core's kinds), and what that leaves unheld falls. Returns where, or null for sky. */
@@ -1948,6 +1980,7 @@ async function main() {
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.
   const shadow = far ? share(new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' })) : null
+  if (shadow) shadow.postMessage({ budget: MAIN_KEEPS })
   const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   // The residents go round this person's own body when it is on its feet, and round everyone else who is here.
   const waysFull: (readonly [number, number, number])[] = []
@@ -2042,6 +2075,7 @@ async function main() {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(buf)) as PlacesPayload
         if (!parsed || !Array.isArray(parsed.shops) || !Array.isArray(parsed.plazas)) { sfPlacesPromise = null; return null }
+        cachedPlaces = parsed
         mapSys?.setPlacesData(parsed)
         return parsed
       } catch {
@@ -2485,6 +2519,7 @@ async function main() {
   const recore = async (url: string) => {
     const began = performance.now()
     inner = await open<Core>(url)
+    core.world_memory_budget?.(MAIN_KEEPS)
     world.recore(url)
     if (shadow) {
       const on = me.on, held = on ? ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].filter((code) => controls.held(code)) : []
@@ -2776,7 +2811,7 @@ async function main() {
     })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
-    if (query.get('people') !== '0') folk.from.push(observeNpcFolk(life.folk))
+    if (query.get('people') !== '0') folk.from.push(observeNpcFolk(life.folk, true))
   }
   if (BAY_ON && !far && query.get('neighborhood') !== '0') {
     void firstPicture.then(() => createNeighborhood({
@@ -2787,7 +2822,7 @@ async function main() {
     })).then((n) => {
       neighborhood = n
       if (landing && first && !first.engaged) n.enabled = false
-      if (query.get('people') !== '0') folk.from.push(observeNpcFolk(n.folk))
+      if (query.get('people') !== '0') folk.from.push(observeNpcFolk(n.folk, true))
     }).catch((e: unknown) => { console.warn(`no neighborhood places: ${e instanceof Error ? e.message : String(e)}`) })
   }
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
@@ -3073,7 +3108,89 @@ async function main() {
     canTalk: () => Boolean(far && over.line.onsubmit),
     openTalk: () => { if (far && over.line.onsubmit) over.line.show() },
   })
-  resetting.add(() => { carSummon.clear(); telemetry?.edit({ op: 'reset' }) })
+  // Extensible GTA 6–style Smartphone OS, Modular Store Interiors & DoorSmash Food Delivery Game.
+  let phoneWasInsideBeforeOpen = false
+  let wasAfootBeforeInterior = false
+  phoneOs = createPhone({
+    hud: over,
+    input: controls,
+    hour: () => hour ?? 12,
+    engaged: () => first?.engaged ?? true,
+    driving: () => Boolean(alive.riding && (alive.riding.controls ?? 'drive') === 'drive'),
+    blocked: () => Boolean(mapSys?.open || playedHud?.choosing || over.line.open || document.documentElement.classList.contains('drawer')),
+    sound: () => ears?.voice ?? null,
+    telemetry: () => alive.telemetry ? { kmh: alive.telemetry.kmh, slip: alive.telemetry.slip, drifting: alive.telemetry.drifting } : null,
+    onOpenChange: (isOpen, driving) => {
+      if (isOpen) {
+        me.phoneReading = me.on && !driving
+        if (driving) {
+          phoneWasInsideBeforeOpen = alive.inside
+          if (!alive.inside) alive.view(true)
+        }
+      } else {
+        me.phoneReading = false
+        if (driving && !phoneWasInsideBeforeOpen && alive.inside) {
+          alive.view(false)
+        }
+      }
+    },
+  })
+  interiorSys = createInteriorSystem({
+    device,
+    format: gpu.sceneFormat,
+    pieces: falling,
+    hud: over,
+    input: controls,
+    pose,
+    onSfx: (k) => { void import('./delivery-sound.ts').then((m) => m.playDeliverySfx(ears?.voice, k)) },
+    onEnterChanged: (inside) => {
+      if (inside) {
+        wasAfootBeforeInterior = me.on
+        if (me.on) me.walk(false)
+      } else if (wasAfootBeforeInterior) {
+        wasAfootBeforeInterior = false
+        me.walk(true)
+      }
+    },
+  })
+  deliveryCtrl = createDeliveryEngine({
+    land: core,
+    alive,
+    hud: over,
+    pieces: falling,
+    phone: phoneOs,
+    interiors: interiorSys,
+    map: () => mapSys,
+    street: () => streetLife,
+    places: () => cachedPlaces,
+    player: () => {
+      const r = alive.rider, f = me.feet
+      return {
+        x: r ? r.at[0] / M : f ? f.at[0] / M : pose.x,
+        y: r ? r.at[1] / M : f ? f.at[1] / M : pose.y,
+        z: r ? r.at[2] / M : f ? f.at[2] / M : pose.z,
+        yaw: r ? r.yaw : f ? f.yaw : pose.yaw,
+        driving: !!alive.riding,
+        onFoot: me.on && !alive.riding,
+      }
+    },
+    engaged: () => first?.engaged ?? true,
+    sound: () => ears?.voice ?? null,
+    hour: () => hour ?? 12,
+    onVehiclePrebake: (kinds, size) => { void prebakeLook(kinds, size, true) },
+  })
+  phoneOs.registerApp(createDoorSmashApp(deliveryCtrl))
+  if (query.get('people') !== '0') folk.from.push(observeNpcFolk(deliveryCtrl.folk))
+  Object.assign((globalThis as unknown as { engine: object }).engine, { phone: phoneOs, delivery: deliveryCtrl, interiors: interiorSys })
+  if (!far) {
+    controls.always('KeyP', (e) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return false
+      if (first && !first.engaged) return false
+      phoneOs?.toggle()
+      return true
+    })
+  }
+  resetting.add(() => { carSummon.clear(); if (interiorSys?.active) interiorSys.exit(); telemetry?.edit({ op: 'reset' }) })
   // Black-box gameplay flight recorder & passive anomaly watchers + F8 / /bug feedback UI (#64).
   telemetry = createRecorder({
     build: 'city-4',

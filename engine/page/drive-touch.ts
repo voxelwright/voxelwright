@@ -3,7 +3,8 @@
 // how big and how see-through the keys are. living.ts asks `read()` once a frame and adds what a keyboard or a pad says.
 //
 // Each scheme is one way of doing each job, never two at once (#75 had a stick that steered and, with no pedal held,
-// drove too): the steering hand steers and the other drives.
+// drove too): the steering hand steers and the other drives. Boost works only while the car is told to go, so with
+// pedals it is the steering hand's: the other is holding Gas. With auto gas the driving hand is free for it.
 //
 //   steer   arrows   two keys under the steering thumb, left and right (the core eases a key's turn in and out)
 //           wheel    a wheel under the steering thumb, turned round its middle; let go, it comes back to the middle
@@ -148,16 +149,17 @@ export interface Placed { act: string; x: number; y: number; w: number; h: numbe
  * at each side when it is on its side) and the driving cluster is in the lower half, and no key is under 44 px a side.
  */
 export function layout(s: DriveTouchSettings, steer: Steer, view: { width: number; height: number; portrait: boolean; below?: number }, tiltAsk = false): Placed[] {
-  const brakeAcross = s.gas === 'pedals' && steer === 'tilt'
+  const pedals = s.gas === 'pedals', brakeAcross = pedals && steer === 'tilt'
   const widths = (k: number) => {
-    const gap = 10 * k, pedals = 80 * k + gap + 74 * k
-    const steering = steer === 'arrows' ? 2 * 84 * k + gap * 1.4 : steer === 'wheel' ? 150 * k : brakeAcross ? 92 * k : 0
-    return pedals + steering
+    const gap = 10 * k, driving = 80 * k + gap + 74 * k
+    // (With pedals and a slide or tilt, Boost, and tilt's Brake, still need their place under the steering thumb.)
+    const steering = steer === 'arrows' ? 2 * 84 * k + gap * 1.4 : steer === 'wheel' ? 150 * k : pedals ? 92 * k : 0
+    return driving + steering
   }
   const room = view.width - 28 - (view.portrait ? 0 : 118) - 24
   let k = s.size * (view.portrait ? 0.84 : 1)
   if (widths(k) > room) k *= room / widths(k)
-  // And low: the driving thumb's cluster (main pedal, a gap, boost) within the lower half at Medium, a little lower at
+  // And low: the driving thumb's cluster (108 + 10 + 56 tall) within the lower half at Medium, a little lower at
   // Small and a little higher at Large (or on a short screen the sizes would all be one), allowing 35 px of safe area
   // and margin.
   const tall = (108 + 10 + 56) * k, low = view.height * (0.5 + (s.size - 1) * 0.4) - 35 - 4
@@ -167,50 +169,63 @@ export function layout(s: DriveTouchSettings, steer: Steer, view: { width: numbe
   const drive: 'left' | 'right' = s.hand, steerSide: 'left' | 'right' = s.hand === 'right' ? 'left' : 'right'
   const out: Placed[] = []
   const put = (act: string, side: 'left' | 'right', x: number, y: number, w: number, h: number) => out.push({ act, side, x: Math.round(x), y: Math.round(y), w, h })
-  // The driving thumb's cluster: the main pedal tall at the edge; drift beside it (brake below drift with pedals);
-  // boost over the main pedal. With tilt and pedals, brake goes under the steering thumb, which has nothing else to do.
+  // The driving thumb's cluster: the main pedal at the edge, drift beside it. With pedals, Gas is the cluster's whole
+  // height and brake is below drift (with tilt, brake goes under the steering thumb, which has nothing else to do).
+  // With auto gas, brake is the main pedal and boost spans both keys over them.
   const mainW = px(80), mainH = px(108), sideW = px(74), smallH = px(56)
   // `below` (px from the top): the foot of what stands over the top left corner (the YouTube player); that corner's keys go under it.
   const under = view.below ? Math.max(44, view.height - view.below - 35 - 8) : Infinity
-  const main = s.gas === 'auto' ? 'brake' : 'gas'
-  if (drive === 'left' && mainH + gap + smallH > under) {
-    // Under the player: the same cluster in two short rows (a row as wide as four keys would reach the car).
-    const h = Math.max(44, Math.floor((under - gap) / 2))
-    put(main, drive, 0, 0, mainW, h)
-    if (s.gas === 'pedals' && !brakeAcross) {
-      put('brake', drive, mainW + gap, 0, sideW, h)
-      put('boost', drive, 0, h + gap, mainW, h)
-      put('drift', drive, mainW + gap, h + gap, sideW, h)
-    } else {
-      put('drift', drive, mainW + gap, 0, sideW, h)
-      put('boost', drive, 0, h + gap, mainW + gap + sideW, h)
-    }
-  } else if (s.gas === 'pedals' && !brakeAcross) {
-    // Four keys, two by two, their tops and feet in line: Boost over Gas, a taller Drift over Brake.
-    const brakeH = px(76)
-    put(main, drive, 0, 0, mainW, mainH)
-    put('boost', drive, 0, mainH + gap, mainW, smallH)
+  // (Under the player, the same cluster in two short rows: a row as wide as four keys would reach the car.)
+  const low2 = drive === 'left' && mainH + gap + smallH > under
+  const row = Math.max(44, Math.floor((under - gap) / 2))
+  const tallH = low2 ? row * 2 + gap : mainH + gap + smallH
+  if (!pedals) {
+    const h = low2 ? row : mainH
+    put('brake', drive, 0, 0, mainW, h)
+    put('drift', drive, mainW + gap, 0, sideW, h)
+    put('boost', drive, 0, h + gap, mainW + gap + sideW, low2 ? row : smallH)
+  } else if (!brakeAcross) {
+    const brakeH = low2 ? row : px(76)
+    put('gas', drive, 0, 0, mainW, tallH)
     put('brake', drive, mainW + gap, 0, sideW, brakeH)
-    put('drift', drive, mainW + gap, brakeH + gap, sideW, mainH + smallH - brakeH)
+    put('drift', drive, mainW + gap, brakeH + gap, sideW, tallH - brakeH - gap)
   } else {
-    // Three: Drift as tall as the main pedal beside it, Boost the width of both over them.
-    put(main, drive, 0, 0, mainW, mainH)
-    put('drift', drive, mainW + gap, 0, sideW, mainH)
-    put('boost', drive, 0, mainH + gap, mainW + gap + sideW, smallH)
+    put('gas', drive, 0, 0, mainW, tallH)
+    put('drift', drive, mainW + gap, 0, sideW, tallH)
   }
-  // The steering thumb's (under the player where they are in its corner).
+  // The steering thumb's (under the player where they are in its corner), and with pedals Boost over them.
   const steerRoom = steerSide === 'left' ? under : Infinity
   if (steer === 'arrows') {
     const a = Math.min(px(84), steerRoom), between = Math.round(gap * 1.4)
-    put('left', steerSide, steerSide === 'left' ? 0 : a + between, 0, a, a)
-    put('right', steerSide, steerSide === 'left' ? a + between : 0, 0, a, a)
+    // Boost over the arrows; where both do not fit, two short rows.
+    const short = pedals && a + gap + smallH > steerRoom
+    const h = short ? Math.max(44, Math.floor((steerRoom - gap) / 2)) : a
+    put('left', steerSide, steerSide === 'left' ? 0 : a + between, 0, a, h)
+    put('right', steerSide, steerSide === 'left' ? a + between : 0, 0, a, h)
+    let top = h
+    if (pedals) {
+      const boostH = short ? h : smallH
+      put('boost', steerSide, 0, h + gap, a * 2 + between, boostH)
+      top += gap + boostH
+    }
     // (Where there is no room for it, the first touch anywhere asks for tilt, and the driving panel says so.)
-    if (tiltAsk && a + gap + 48 <= steerRoom) put('tilt-on', steerSide, 0, a + gap, a * 2 + between, 48)
+    if (tiltAsk && top + gap + 48 <= steerRoom) put('tilt-on', steerSide, 0, top + gap, a * 2 + between, 48)
   } else if (steer === 'wheel') {
     const d = Math.min(px(150), steerRoom)
     put('wheel', steerSide, 0, 0, d, d)
+    // Over the wheel, or beside it where there is no room over (a smaller wheel would be hard to turn).
+    if (pedals) {
+      if (d + gap + smallH <= steerRoom) put('boost', steerSide, 0, d + gap, d, smallH)
+      else put('boost', steerSide, d + gap, 0, sideW, Math.min(mainH, d))
+    }
   } else if (brakeAcross) {
-    put('brake', steerSide, 0, 0, mainW, Math.min(mainH, steerRoom))
+    const h = Math.min(mainH, steerRoom)
+    put('brake', steerSide, 0, 0, mainW, h)
+    if (h + gap + smallH <= steerRoom) put('boost', steerSide, 0, h + gap, mainW, smallH)
+    else put('boost', steerSide, mainW + gap, 0, sideW, h)
+  } else if (pedals) {
+    // A slide: Boost in the corner, and the slide's mark over it (build()).
+    put('boost', steerSide, 0, 0, mainW, Math.min(smallH, steerRoom))
   }
   return out
 }
@@ -453,7 +468,8 @@ export function driveTouch(o: {
     const tiltAsk = settings.steer === 'tilt' && tilt === 'ask'
     const c = Object.assign(document.createElement('div'), { className: 'dt-cluster' })
     c.style.setProperty('--dt-alpha', String(settings.opacity))
-    for (const p of layout(settings, steer, { width: innerWidth, height: innerHeight, portrait: portrait.matches, below: ytBelow }, tiltAsk)) {
+    const placed = layout(settings, steer, { width: innerWidth, height: innerHeight, portrait: portrait.matches, below: ytBelow }, tiltAsk)
+    for (const p of placed) {
       let el: HTMLElement
       if (p.act === 'wheel') {
         el = Object.assign(document.createElement('div'), { className: 'vx-recess dt-wheel' })
@@ -480,8 +496,12 @@ export function driveTouch(o: {
     if (steer === 'slide') {
       const ghost = Object.assign(document.createElement('div'), { className: 'dt-ghost', textContent: '‹  slide to steer  ›' })
       const side = settings.hand === 'right' ? 'left' : 'right'
-      ghost.style.bottom = 'calc(env(safe-area-inset-bottom, 0px) + 30px)'
-      ghost.style[side] = `calc(env(safe-area-inset-${side}, 0px) + 28px)`
+      // Over the key of its corner, if any; beside it under the player, where there is no room over.
+      const keys = placed.filter((p) => p.side === side), beside = side === 'left' && ytBelow > 0
+      const foot = beside ? 30 : Math.max(30, ...keys.map((p) => 14 + p.y + p.h + 16))
+      const inset = beside ? Math.max(28, ...keys.map((p) => 14 + p.x + p.w + 16)) : 28
+      ghost.style.bottom = `calc(env(safe-area-inset-bottom, 0px) + ${foot}px)`
+      ghost.style[side] = `calc(env(safe-area-inset-${side}, 0px) + ${inset}px)`
       c.append(ghost)
     }
     // One pad for the cluster: a touch holds the key under it, and as it slides, the key it comes onto instead.

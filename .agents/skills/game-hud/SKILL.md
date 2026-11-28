@@ -30,8 +30,10 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
   the picture turns the head while driving (`input.stickSide = null`), except with Slide, where it is a slide that steers
   across only. Settings → `Controls…` (touch only) opens the sheet (`#drive-controls`): Steer with Arrows (default) /
   Wheel / Slide / Tilt, Gas Pedals (default) / Auto, Driving keys Right (default) / Left, Key size, Key opacity, Steering
-  sensitivity, Center tilt. `layout()` places every key from the bottom corners: the main pedal tall at the edge
-  (`80×108` at Medium on its side), Boost above it, Brake and Drift beside it; arrows `84×84`; the wheel a `150` px
+  sensitivity, Center tilt. `layout()` places every key from the bottom corners. Boost works only while the car is told
+  to go, so it is never under the thumb that holds Gas: with Pedals it is the steering thumb's (above the arrows, wheel
+  or tilt's Brake, or in the slide's corner), and Gas stands the cluster's whole height (`80×174` at Medium on its side)
+  with Brake and Drift beside it; with auto gas it spans Brake and Drift in the driving cluster. Arrows `84×84`; the wheel a `150` px
   voxel wheel (`.vx-recess[data-vx-ring]`: rim, three spokes, hub, lit top stripe) turned as a whole. Keys shrink to fit: the clusters stay
   `>= 24px` apart, the driving cluster stays in the lower half at Medium (lower at Small, higher at Large), no key goes under 44 px (`test/drive-touch.mjs` checks
   every scheme, hand and size on four phone screens). A cluster is one pad: a thumb sliding from key to key holds the
@@ -41,8 +43,8 @@ icon-led slim voxel thumb controls bottom-right, and suppresses the redundant fl
   stays hidden while undamaged (Rule 8) and appears below them only when the car takes damage.
 - **YouTube mini-player (`[data-panel="radio-yt"]`) by touch:** the bottom corners are the thumbs', so it stands at the
   top left (in the minimap's place on its side, the minimap hidden meanwhile; below it upright), and the keys of that
-  corner fit under it (`layout()`'s `below`: the steering keys, or the driving cluster in two short rows when
-  left-handed). `sf-hud.mjs` counts it among the controls that must not meet; `sf-drive-touch.mjs` shows it over
+  corner fit under it (`layout()`'s `below`: the steering keys, with Boost over short arrows or beside a smaller wheel
+  and the slide's mark beside Boost, or when left-handed a driving cluster only as tall as two short rows). `sf-hud.mjs` counts it among the controls that must not meet; `sf-drive-touch.mjs` shows it over
   each scheme in both hands.
 
 **Direction (owner, November 26, #75):** the Make bar opened must always have a way out by touch: a × key before the
