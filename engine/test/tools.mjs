@@ -52,6 +52,23 @@ try {
   check(after.pieces > before.pieces + 3, `the cannon's ball broke things (${after.pieces - before.pieces} bodies came of it)`)
   check(struck.now && struck.was && struck.now.t > struck.was.t + 0.5, `where it struck there is a hole (${struck.was?.t.toFixed(1)} cells off before, ${struck.now?.t.toFixed(1)} after)`)
 
+  // Torch: something burns. The nearest crown up the street is looked for and lit (before the Cleave, whose stroke fells the trees in view).
+  let lit = 0
+  for (let right = -3.1; right < 3.1 && !lit; right += 0.05) for (const up of [-0.1, 0.05, 0.2]) {
+    const hit = await page.evaluate(([r, u]) => globalThis.engine.pick(r, u), [right, up])
+    if (hit?.material === 13 && hit.t < 300) {
+      await page.evaluate(([r, u]) => { globalThis.engine.pose.yaw += r; globalThis.engine.pose.pitch += u }, [right, up])
+      await page.waitForTimeout(80)
+      await page.evaluate(() => globalThis.engine.ignite(4))
+      // (what it set alight is heard when the mover answers)
+      await page.waitForFunction(() => globalThis.engine.burning > 0, null, { timeout: 6000 }).catch(() => {})
+      lit = await page.evaluate(() => globalThis.engine.burning)
+      await page.evaluate(([r, u]) => { globalThis.engine.pose.yaw -= r; globalThis.engine.pose.pitch -= u }, [right, up])
+      if (lit) break
+    }
+  }
+  check(lit > 0, `the torch set a tree alight (${lit} cells burning)`)
+
   // Cleave (tool 6, key 6): in hand, its gesture is the picture's; a stroke drawn across the houses parts them.
   const inHand = await page.evaluate(() => { globalThis.engine.pickTool(5); const e = globalThis.engine; return { tool: e.tool, live: e.input.live('cleaving') } })
   check(inHand.tool === 'Cleave' && inHand.live, `tool 6 is the Cleave, and its gesture is the picture's (${JSON.stringify(inHand)})`)
@@ -69,22 +86,6 @@ try {
   const placed = await turned(-0.9, async () => { await page.evaluate(() => globalThis.engine.place()); await page.waitForTimeout(400); await still(page); return fell() })
   check(!!bare && placed.asks >= before.asks, 'a brick was put against the wall')
 
-  // Torch: something burns. The nearest crown up the street is looked for and lit.
-  let lit = 0
-  for (let right = -3.1; right < 3.1 && !lit; right += 0.05) for (const up of [-0.1, 0.05, 0.2]) {
-    const hit = await page.evaluate(([r, u]) => globalThis.engine.pick(r, u), [right, up])
-    if (hit?.material === 13 && hit.t < 300) {
-      await page.evaluate(([r, u]) => { globalThis.engine.pose.yaw += r; globalThis.engine.pose.pitch += u }, [right, up])
-      await page.waitForTimeout(80)
-      await page.evaluate(() => globalThis.engine.ignite(4))
-      // (the mover may still be busy with what the Cleave let loose: what it set alight is heard when it answers)
-      await page.waitForFunction(() => globalThis.engine.burning > 0, null, { timeout: 6000 }).catch(() => {})
-      lit = await page.evaluate(() => globalThis.engine.burning)
-      if (lit) break
-      await page.evaluate(([r, u]) => { globalThis.engine.pose.yaw -= r; globalThis.engine.pose.pitch -= u }, [right, up])
-    }
-  }
-  check(lit > 0, `the torch set a tree alight (${lit} cells burning)`)
 
   // The thirteen tools run the width of a laptop's screen: the minimap in the corner stands clear of the bar (#226).
   const crossed = await page.evaluate(() => {
