@@ -1199,7 +1199,7 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
     var diffIrr = vec3f(0.0);
     var specLum = 0.0;
     if (outY != RESTIR_INVALID_LIGHT && outY < lightCount && outW > 0.0) {
-      let effW = min(outW, 14.0);
+      let effW = min(outW, 64.0);
       let ev = evalRestirLightScene(lights[outY], curWorldPos, curN, curV, curRough, curWet, wetness);
       diffIrr = restirCleanRgb(ev.diffuse * effW);
       specLum = min(max(ev.specLuma * effW, 0.0), 65000.0);
@@ -1370,10 +1370,13 @@ fn cs_restir_denoise_temp(@builtin(global_invocation_id) gid: vec3u) {
   let avgV = meanV / wMean;
   let avgL = restirLuma(avgV.rgb);
   let curL = restirLuma(rawC.rgb);
-  let maxL = avgL * 3.2 + 0.25;
+  let maxL = avgL * 8.5 + 1.5;
+  let maxSpec = avgV.a * 8.5 + 1.5;
   var curV = rawC;
   if (curL > maxL && curL > 1e-4) {
-    curV = vec4f(rawC.rgb * (maxL / curL), min(rawC.a, avgV.a * 3.2 + 0.25));
+    curV = vec4f(rawC.rgb * (maxL / curL), min(rawC.a, maxSpec));
+  } else if (curV.a > maxSpec) {
+    curV.a = maxSpec;
   }
 
   let hasHistory = (params.configU.w & ${FLAG_HAS_HISTORY}u) != 0u;

@@ -330,7 +330,7 @@ async function main() {
   let lastClusterActive = false, lastDynShadowActive = false, lastSkyLutActive = false, lastVolCloudsActive = false, lastFroxelFogActive = false
   let lastGiActive = false, lastRestirActive = false
   let clusterHadLights = false, volCloudsNeedsReset = true, froxelFogNeedsReset = true
-  let giNeedsReset = true, giForceFullFrames = 2, giEditPending = false, giSunPending = false, restirNeedsReset = true, restirFrame = 0
+  let giNeedsReset = true, giSvgfReset = false, giForceFullFrames = 8, giEditPending = false, giSunPending = false, restirNeedsReset = true, restirFrame = 0
   let taaPrevEye: readonly [number, number, number] | null = null
   let taaPrevFwd: readonly [number, number, number] | null = null
   let taaPrevTanHalf: number | null = null
@@ -1081,8 +1081,8 @@ async function main() {
     lap('street')
     world.update(ahead ?? v.eye)
     lap('update')
-    if (giEditPending && world.stats.stale === 0) { giEditPending = false; giForceFullFrames = Math.max(giForceFullFrames, 4) }
-    if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0; giSunPending = true; giForceFullFrames = Math.max(giForceFullFrames, 4) }
+    if (giEditPending && world.stats.stale === 0) { giEditPending = false; giForceFullFrames = Math.max(giForceFullFrames, 8); giSvgfReset = true }
+    if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0; giSunPending = true; giForceFullFrames = Math.max(giForceFullFrames, 8) }
     lap('spoil')
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
@@ -1107,7 +1107,7 @@ async function main() {
     sunRoom.moving = moving
     sunRoom.most = sunMost(budget, moving)
     const sunDrew = sunRoom.drew = march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
-    if (giSunPending && sunDrew === 0) { giSunPending = false; giForceFullFrames = Math.max(giForceFullFrames, 4) }
+    if (giSunPending && sunDrew === 0) { giSunPending = false; giForceFullFrames = Math.max(giForceFullFrames, 8); giSvgfReset = true }
     if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
     const eyeJumpM = taaPrevEye ? Math.hypot(v.eye[0] - taaPrevEye[0], v.eye[1] - taaPrevEye[1], v.eye[2] - taaPrevEye[2]) / (M * FINE) : 0
@@ -1330,6 +1330,7 @@ async function main() {
           froxelFogActive,
           giActive,
           giReset: giDoReset,
+          giSvgfReset,
           giForceFull: giDoForceFull,
           giAmortizeStride: 8,
           giFlames: flames,
@@ -1368,6 +1369,7 @@ async function main() {
       lastRestirActive = restirRan
       if (giRan) {
         giNeedsReset = false
+        giSvgfReset = false
         if (giForceFullFrames > 0) giForceFullFrames--
       }
       if (restirRan) {

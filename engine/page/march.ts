@@ -657,6 +657,8 @@ export interface MarcherDrawExtra {
   readonly giActive?: boolean
   /** Hard temporal reset for GI clipmap + SVGF history on teleports/cuts/hour jumps. */
   readonly giReset?: boolean
+  /** Resets only SVGF screen-space temporal history (preserving the 3D multi-bounce clipmap cache) on blasts/edits. */
+  readonly giSvgfReset?: boolean
   /** Forces full clipmap voxelization + injection (no slice amortization) e.g. right after a blast/edit. */
   readonly giForceFull?: boolean
   /** Steady-state Z-slice amortization stride for clipmap updates (`1..8`, default `4`). */
@@ -2158,22 +2160,22 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
           // Pass 1.5c: Live Voxel-Native 3D Clipmap Radiance Cache GI + SVGF Denoiser.
           if (runGi && extGi && voxelizer) {
             const lb = 36 + MAX_LEVELS * 32
-            // Rich multi-bounce sun cache energy so blasted openings & sunlit streets flood colored bounce
-            // into shaded facades and interiors while sealed rooms stay genuinely dark (0 * 4.8 = 0).
-            giSunIrrBuf[0] = f[lb] * 4.8
-            giSunIrrBuf[1] = f[lb + 1] * 4.8
-            giSunIrrBuf[2] = f[lb + 2] * 4.8
-            giSkyZenithBuf[0] = f[lb + 4] * 1.12
-            giSkyZenithBuf[1] = f[lb + 5] * 1.12
-            giSkyZenithBuf[2] = f[lb + 6] * 1.12
+            // Physically balanced sun-to-sky cache ratio so sunlit streets, brick, and blasted rubble
+            // flood warm multi-bounce GI indoors & into shaded facades while sealed rooms stay dark (0 * 7.4 = 0).
+            giSunIrrBuf[0] = f[lb] * 7.4
+            giSunIrrBuf[1] = f[lb + 1] * 7.4
+            giSunIrrBuf[2] = f[lb + 2] * 7.4
+            giSkyZenithBuf[0] = f[lb + 4] * 1.10
+            giSkyZenithBuf[1] = f[lb + 5] * 1.10
+            giSkyZenithBuf[2] = f[lb + 6] * 1.10
             const hDay = day
-            giSkyHorizonBuf[0] = ((f[lb + 4] * 0.45 + f[lb + 12] * 0.55) * hDay + f[lb + 4] * (1 - hDay)) * 1.05
-            giSkyHorizonBuf[1] = ((f[lb + 5] * 0.45 + f[lb + 13] * 0.55) * hDay + f[lb + 5] * (1 - hDay)) * 1.05
-            giSkyHorizonBuf[2] = ((f[lb + 6] * 0.45 + f[lb + 14] * 0.55) * hDay + f[lb + 6] * (1 - hDay)) * 1.05
-            giSkyGroundBuf[0] = 0.14 * f[lb + 7]
-            giSkyGroundBuf[1] = 0.136 * f[lb + 7]
-            giSkyGroundBuf[2] = 0.132 * f[lb + 7]
-            giSkyObj.sunGlow = 0.10 * hDay * (1 - Math.max(rain, cloud))
+            giSkyHorizonBuf[0] = ((f[lb + 4] * 0.65 + f[lb + 12] * 0.35 * 1.08) * hDay + f[lb + 4] * (1 - hDay)) * 1.04
+            giSkyHorizonBuf[1] = ((f[lb + 5] * 0.65 + f[lb + 13] * 0.35 * 0.98) * hDay + f[lb + 5] * (1 - hDay)) * 1.04
+            giSkyHorizonBuf[2] = ((f[lb + 6] * 0.65 + f[lb + 14] * 0.35 * 0.84) * hDay + f[lb + 6] * (1 - hDay)) * 1.04
+            giSkyGroundBuf[0] = 0.28 * 1.08 * f[lb + 7]
+            giSkyGroundBuf[1] = 0.28 * 0.98 * f[lb + 7]
+            giSkyGroundBuf[2] = 0.28 * 0.86 * f[lb + 7]
+            giSkyObj.sunGlow = 0.14 * hDay * (1 - Math.max(rain, cloud))
 
             const giForceFull = Boolean(extra?.giForceFull || extra?.giReset)
             const giStride = giForceFull ? 1 : (extra?.giAmortizeStride ?? 8)
@@ -2197,7 +2199,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
                 sky: giSkyObj,
                 bounceFeedback: 0.85,
                 amortizeStride: giStride,
-                gatherRays: 4,
+                gatherRays: giForceFull ? 8 : 6,
                 reset: Boolean(extra?.giReset),
               },
               extra?.giTiming?.cascadeEnd ? { all: extra.giTiming.cascadeEnd } : undefined,
@@ -2224,7 +2226,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
                 sky: giSkyObj,
                 spp: 1,
                 atrousPasses: 3,
-                reset: Boolean(extra?.giReset),
+                reset: Boolean(extra?.giReset || extra?.giSvgfReset),
               },
               extra?.giTiming && (extra.giTiming.trace || extra.giTiming.svgfBegin || extra.giTiming.svgfEnd)
                 ? {

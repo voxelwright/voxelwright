@@ -1115,29 +1115,45 @@ fn cs_trace_gi(@builtin(global_invocation_id) gid: vec3u) {
   let skyGround = params.skyGroundPad.xyz;
 
   // Offset cleanly into the adjacent air voxel along the surface normal to avoid self-intersection.
-  // When fine L0 geometry sits recessed inside a coarse 80 cm Cascade-0 voxel, step along +n (never
-  // backward through a wall) up to 1.55 voxels until landing in air so recessed facades never self-occlude
-  // while sealed rooms (whose inward +n is already air at 0.52) keep zero light leak.
+  // When fine L0 geometry sits recessed inside a coarse 80 cm Cascade-0 voxel (e.g. narrow bay-window
+  // reveals or storefront alcoves), never step blindly further along +n into an opposing wall or dark
+  // interior; bias escape candidates back toward the camera view vector V (guaranteed open air),
+  // while sealed interior rooms (whose Try 1 is already interior air) keep 0.00000 light leak.
+  let toEye = params.camEyeNear.xyz - worldPos;
+  let toEyeLen = length(toEye);
+  let V = select(n, toEye / max(toEyeLen, 1e-4), toEyeLen > 1e-4);
+  let maxDistV = max(toEyeLen - 0.5, 0.0);
   var startPos = worldPos + n * (vox0 * 0.52);
   let orig0 = params.cascadeOrigins[0];
   if (orig0.w != 0) {
     let dimI = vec3i(dimU);
-    for (var esc = 0u; esc < 2u; esc++) {
-      let v0 = vec3i(floor(startPos / vox0));
-      let rel0 = v0 - orig0.xyz;
-      if (any(rel0 < vec3i(1)) || any(rel0 >= dimI - vec3i(1))) { break; }
-      let tc0 = toroidalCoord(v0, dimU);
-      if (loadCascadeMip(0u, vec3i(tc0), 0).a < 0.5) { break; }
-      let candPos = worldPos + n * (vox0 * select(1.55, 1.05, esc == 0u));
-      let vCand = vec3i(floor(candPos / vox0));
-      let relCand = vCand - orig0.xyz;
-      if (any(relCand < vec3i(1)) || any(relCand >= dimI - vec3i(1))) { break; }
-      let tcCand = toroidalCoord(vCand, dimU);
-      if (loadCascadeMip(0u, vec3i(tcCand), 0).a < 0.5) {
-        startPos = candPos;
-        break;
+    let v0 = vec3i(floor(startPos / vox0));
+    let rel0 = v0 - orig0.xyz;
+    let in0 = all(rel0 >= vec3i(1)) && all(rel0 < dimI - vec3i(1));
+    if (in0 && loadCascadeMip(0u, vec3i(toroidalCoord(v0, dimU)), 0).a >= 0.5) {
+      let blendSum = n + V * 1.2;
+      let dBlend = select(V, normalize(blendSum), dot(blendSum, blendSum) > 1e-4);
+      let cands = array<vec3f, 4>(
+        worldPos + dBlend * min(vox0 * 0.55, maxDistV),
+        worldPos + V * min(vox0 * 0.75, maxDistV),
+        worldPos + V * min(vox0 * 1.35, maxDistV),
+        worldPos + V * min(vox0 * 1.95, maxDistV),
+      );
+      var escaped = false;
+      for (var ci = 0u; ci < 4u; ci++) {
+        let candPos = cands[ci];
+        let vCand = vec3i(floor(candPos / vox0));
+        let relCand = vCand - orig0.xyz;
+        if (any(relCand < vec3i(1)) || any(relCand >= dimI - vec3i(1))) { continue; }
+        if (loadCascadeMip(0u, vec3i(toroidalCoord(vCand, dimU)), 0).a < 0.5) {
+          startPos = candPos;
+          escaped = true;
+          break;
+        }
       }
-      startPos = candPos;
+      if (!escaped) {
+        startPos = cands[1];
+      }
     }
   }
   let basis = makeBasis(n);

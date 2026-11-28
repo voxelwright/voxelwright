@@ -104,6 +104,11 @@ fn voxLitWindow(fine: vec3i) -> f32 {
   return smoothstep(0.7, 0.72, w) * (0.35 + 0.65 * fract(w * 17.0));
 }
 
+fn isAirKind(k: u32) -> bool {
+  let st = k & 15u;
+  return st == 0u || st == 11u;
+}
+
 fn sampleWorldKind(wVox: vec3i, casVoxel: i32, startL: u32) -> vec2u {
   let maxL = g.levels - 1u;
   let fineCenter = wVox * casVoxel + vec3i(casVoxel >> 1);
@@ -119,6 +124,34 @@ fn sampleWorldKind(wVox: vec3i, casVoxel: i32, startL: u32) -> vec2u {
     L += 1u;
   }
   return vec2u(0u, L);
+}
+
+// Matches Cascade 0's 2x2x2 L=1 opacity rule (solidN >= 3 -> solid) so sun tests only run on
+// exposed air-facing voxel boundaries and never poke across thin walls into dark sealed interiors.
+fn isCascade0Air(wVox: vec3i) -> bool {
+  if (isAirKind(sampleWorldKind(wVox, 8, 3u).x)) {
+    return true;
+  }
+  if (g.levels > 1u) {
+    let lv1 = g.level[1u];
+    let cBase1 = (wVox * 4) - lv1.cells;
+    if (all(cBase1 >= vec3i(0)) && all(cBase1 + vec3i(3) < vec3i(lv1.boxSize))) {
+      var solidN = 0u;
+      for (var sz = 0; sz < 2; sz++) {
+        for (var sy = 0; sy < 2; sy++) {
+          for (var sx = 0; sx < 2; sx++) {
+            let sk = kindAt(cBase1 + vec3i(sx * 2 + 1, sy * 2 + 1, sz * 2 + 1), 1u);
+            if (!isAirKind(sk)) {
+              solidN += 1u;
+              if (solidN >= 3u) { return false; }
+            }
+          }
+        }
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 @compute @workgroup_size(4, 4, 4)
@@ -155,8 +188,9 @@ fn cs_voxelize_world(@builtin(global_invocation_id) gid: vec3u) {
   var kind = kind_used.x;
   var usedL = kind_used.y;
 
-  // Anchor-relative voxel center in cells (integer subtraction first preserves full float32 precision at SF coords).
-  let pRel = vec3f(w * casVoxel - anchorI) + vec3f(casVoxelF * 0.5);
+  // Anchor-relative voxel min corner & center in cells (integer subtraction first preserves full float32 precision at SF coords).
+  let pMin = vec3f(w * casVoxel - anchorI);
+  let pRel = pMin + vec3f(casVoxelF * 0.5);
 
   var albedo = vec3f(0.0);
   var opacity = 0.0;
@@ -167,6 +201,12 @@ fn cs_voxelize_world(@builtin(global_invocation_id) gid: vec3u) {
   // so thin 10 cm trim / protruding bay-window lips do not dilate into full 80 cm solid blocks,
   // while real building walls, floors, and roofs (>= 20-30 cm) stay 100% solid with zero light leak.
   var handledSub = false;
+  var hasLoX = false;
+  var hasHiX = false;
+  var hasLoY = false;
+  var hasHiY = false;
+  var hasLoZ = false;
+  var hasHiZ = false;
   if (casVoxel == 8 && g.levels > 1u) {
     let lv1 = g.level[1u];
     let cBase1 = (w * 4) - lv1.cells;
@@ -197,23 +237,28 @@ fn cs_voxelize_world(@builtin(global_invocation_id) gid: vec3u) {
                   glassWarm = warm;
                 }
               }
-            } else if (st == 15u) {
-              solidN += 1u;
-              albSum += sAlb;
-              if (dark > 0.02) {
-                if (sci != 46u) {
-                  let sat = max(sAlb + (sAlb - vec3f(dot(sAlb, vec3f(0.333)))) * 3.0, vec3f(0.0));
-                  emSum += sat * (2.6 * dark);
-                } else {
-                  emSum += vec3f(1.0, 0.85, 0.60) * (4.2 * dark);
-                }
-              }
-            } else if (st == 5u) {
-              solidN += 1u;
-              albSum += vec3f(0.06, 0.16, 0.24);
             } else {
-              solidN += 1u;
-              albSum += sAlb;
+              if (sx == 0) { hasLoX = true; } else { hasHiX = true; }
+              if (sy == 0) { hasLoY = true; } else { hasHiY = true; }
+              if (sz == 0) { hasLoZ = true; } else { hasHiZ = true; }
+              if (st == 15u) {
+                solidN += 1u;
+                albSum += sAlb;
+                if (dark > 0.02) {
+                  if (sci != 46u) {
+                    let sat = max(sAlb + (sAlb - vec3f(dot(sAlb, vec3f(0.333)))) * 3.0, vec3f(0.0));
+                    emSum += sat * (2.6 * dark);
+                  } else {
+                    emSum += vec3f(1.0, 0.85, 0.60) * (4.2 * dark);
+                  }
+                }
+              } else if (st == 5u) {
+                solidN += 1u;
+                albSum += vec3f(0.06, 0.16, 0.24);
+              } else {
+                solidN += 1u;
+                albSum += sAlb;
+              }
             }
           }
         }
@@ -285,16 +330,97 @@ fn cs_voxelize_world(@builtin(global_invocation_id) gid: vec3u) {
   }
 
   if (opacity > 0.5 && day > 0.01 && g.sunMaps != 0u) {
-    // sunlit() internally offsets by 0.6 * texel along n plus 0.35 * texel along sun,
-    // cleanly clearing self-shadowing while keeping interior floors under roofs shadowed.
-    let vis = sunlit(pRel, g.sun, usedL);
-    if (vis >= 0.0) {
-      sunHint = clamp(vis, 0.0, 1.0);
+    // Evaluate sun visibility on exposed sunward voxel faces (pushed just outside the surface along the
+    // face normal) instead of from the voxel center pRel, eliminating self-shadowing on Cascade 0/1/2
+    // floors, rubble, sidewalks, and grazing vertical walls while keeping sealed interiors at 0.0.
+    let sunL = select(min(usedL, select(5u, 3u, casVoxel <= 32)), 1u, casVoxel == 8);
+    let halfOff = casVoxelF * 0.52;
+    var visSum = 0.0;
+    var visW = 0.0;
+    var anyExposed = false;
+
+    let ax = abs(g.sun.x);
+    if (ax > 0.02) {
+      let sxDir = select(-1, 1, g.sun.x > 0.0);
+      let wNx = w + vec3i(sxDir, 0, 0);
+      let expX = select(isAirKind(sampleWorldKind(wNx, casVoxel, targetL).x), isCascade0Air(wNx), handledSub);
+      if (expX) {
+        anyExposed = true;
+        let nX = vec3f(f32(sxDir), 0.0, 0.0);
+        var fPx = pRel + nX * halfOff;
+        if (handledSub && (hasLoX || hasHiX)) {
+          let loX = select(4.0, 0.0, hasLoX);
+          let hiX = select(6.0, 8.0, hasHiX);
+          fPx.x = select(pMin.x + loX - 0.16, pMin.x + hiX + 0.16, sxDir > 0);
+        }
+        let vx = sunlit(fPx, nX, sunL);
+        if (vx >= 0.0) {
+          visSum += clamp(vx, 0.0, 1.0) * ax;
+          visW += ax;
+        }
+      }
+    }
+
+    let ay = abs(g.sun.y);
+    if (ay > 0.02) {
+      let syDir = select(-1, 1, g.sun.y > 0.0);
+      let wNy = w + vec3i(0, syDir, 0);
+      let expY = select(isAirKind(sampleWorldKind(wNy, casVoxel, targetL).x), isCascade0Air(wNy), handledSub);
+      if (expY) {
+        anyExposed = true;
+        let nY = vec3f(0.0, f32(syDir), 0.0);
+        var fPy = pRel + nY * halfOff;
+        if (handledSub && (hasLoY || hasHiY)) {
+          let loY = select(4.0, 0.0, hasLoY);
+          let hiY = select(6.0, 8.0, hasHiY);
+          fPy.y = select(pMin.y + loY - 0.16, pMin.y + hiY + 0.16, syDir > 0);
+        }
+        let vy = sunlit(fPy, nY, sunL);
+        if (vy >= 0.0) {
+          visSum += clamp(vy, 0.0, 1.0) * ay;
+          visW += ay;
+        }
+      }
+    }
+
+    let az = abs(g.sun.z);
+    if (az > 0.02) {
+      let szDir = select(-1, 1, g.sun.z > 0.0);
+      let wNz = w + vec3i(0, 0, szDir);
+      let expZ = select(isAirKind(sampleWorldKind(wNz, casVoxel, targetL).x), isCascade0Air(wNz), handledSub);
+      if (expZ) {
+        anyExposed = true;
+        let nZ = vec3f(0.0, 0.0, f32(szDir));
+        var fPz = pRel + nZ * halfOff;
+        if (handledSub && (hasLoZ || hasHiZ)) {
+          let loZ = select(4.0, 0.0, hasLoZ);
+          let hiZ = select(6.0, 8.0, hasHiZ);
+          fPz.z = select(pMin.z + loZ - 0.16, pMin.z + hiZ + 0.16, szDir > 0);
+        }
+        let vz = sunlit(fPz, nZ, sunL);
+        if (vz >= 0.0) {
+          visSum += clamp(vz, 0.0, 1.0) * az;
+          visW += az;
+        }
+      }
+    }
+
+    if (visW > 0.0) {
+      sunHint = clamp(visSum / visW, 0.0, 1.0);
+    } else if (!anyExposed) {
+      sunHint = 0.0;
     }
   }
 
+  // Lift heavily gamma-linearized Voxelwright albedos gently for multi-bounce radiosity transport
+  // (preserving hue & keeping sealed interiors at 0.0) so 2nd/3rd indoor sun bounce survives AgX's shadow toe.
+  var outAlb = clamp(albedo, vec3f(0.0), vec3f(1.0));
+  if (opacity > 0.5 && max(outAlb.r, max(outAlb.g, outAlb.b)) > 1e-4) {
+    outAlb = min(mix(outAlb, sqrt(outAlb), 0.50), vec3f(0.85));
+  }
+
   let coord = vec3i(gid);
-  textureStore(outAlbedoOpacity, coord, vec4f(clamp(albedo, vec3f(0.0), vec3f(1.0)), opacity));
+  textureStore(outAlbedoOpacity, coord, vec4f(outAlb, opacity));
   textureStore(outEmissiveSun, coord, vec4f(min(max(emissive, vec3f(0.0)), vec3f(65000.0)), sunHint));
 }
 `
