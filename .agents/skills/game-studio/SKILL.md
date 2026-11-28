@@ -5,7 +5,7 @@ description: How Voxelwright agents and developers use the native in-game T3 Stu
 
 # Voxelwright Studio & Game-Use MCP
 
-Every Voxelwright checkout registers the **`voxelwright-game`** MCP server (`node engine/studio/mcp.mjs`) across Claude Code (`.mcp.json` + `.claude/settings.json`), Antigravity (`.agents/plugins/voxelwright-game/`), and Codex (`.codex/config.toml`).
+Every Voxelwright checkout registers the **`voxelwright-game`** MCP server (`node engine/studio/mcp.mjs`) across Claude Code (`.mcp.json` + `.claude/settings.json`), Antigravity (`.agents/plugins/voxelwright-game/`), and Codex (`.codex/config.toml`). The stdio server has zero startup npm dependencies and resolves Playwright from the main checkout in bare git worktrees. Note: under T3 Code's Antigravity ACP harness, workspace plugin MCPs are skipped unless Antigravity is signed in directly or `voxelwright-game` is added to `~/.gemini/config/mcp_config.json`.
 
 ## When to use `voxelwright-game` MCP
 
