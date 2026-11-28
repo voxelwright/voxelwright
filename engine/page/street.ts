@@ -104,6 +104,8 @@ interface Car {
   piece: Piece | null; shown: string
   // Driving: the road, its lane, how far along, the road before (for the corner) and the one after.
   road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number; queued?: boolean
+  /** Accumulated seconds this stopped/slow vehicle has remained in OBB overlap with another vehicle (independent of `queued`). */
+  overlapTime?: number
   /** The junction it last came to a stop at (a stop sign's), and how long it has waited on a control (lights, a sign, its turn). */
   stopped?: number; held?: number
   slot?: number; thing?: Thing | null; waking?: boolean
@@ -2359,14 +2361,22 @@ export function street(o: {
       return 'ok'
     }
     // Trimming `r.lanes` on a one-way road shifts its symmetric `laneOff`, so re-verify until stable.
+    const stepLen = r.len / steps
     for (let attempt = 0; attempt < 4; attempt++) {
       let openLanes = r.lanes
+      let prevCenterG: number | null = null
       for (let k = 0; k <= steps; k++) {
         const s = (r.len * k) / steps
         along(r.p, r.cum, s, P)
         const centerState = checkSpot(P.x, P.z)
         if (centerState === 'unloaded') return false
         if (centerState === 'blocked') { r.open = false; return false }
+        // Reject unnavigable cliff-grade paper streets (e.g. Telegraph Hill stairways > 38% grade; steepest SF road is 31.5%).
+        const cg = o.land.ground_at(Math.round(P.x), Math.round(P.z))
+        if (prevCenterG !== null && stepLen >= 8 && Math.abs(cg - prevCenterG) / stepLen > 0.38) {
+          r.open = false; return false
+        }
+        prevCenterG = cg
         for (let lane = 0; lane < openLanes; lane++) {
           lanePoint(r, lane, s, P)
           const tx = P.tx, tz = P.tz, lx = P.x, lz = P.z
@@ -3532,22 +3542,33 @@ export function street(o: {
           if (prevPose.route) c.route = prevPose.route
           c.v = 0; c.wait = sweptHit.kind === 'tram' || sweptHit.kind === 'cable' ? 'tram' : 'car'; c.stuck = (c.stuck ?? 0) + dt
         }
-      } else if (c.stuck! > 2.5) {
-        // If two stopped vehicles are already overlapping (e.g. from a tight junction or rail crossing), clear the traffic car before it lingers for 4+ s.
+      }
+      // Persistent overlap recovery (runs even while `queued` at a stop sign/light, so two stopped vehicles overlapping
+      // across a junction seam never remain fused together for tens of seconds).
+      if (c.v < 2) {
         const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
-        let cleared = false
+        let overlapping = false
         for (const oRail of [...trams, ...cables]) {
           if (Math.abs(oRail.x - c.x) > 180 || Math.abs(oRail.z - c.z) > 180 || Math.abs(oRail.y - c.y) > 25) continue
           const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oRail.x, oRail.z, Math.cos(oRail.heading), Math.sin(oRail.heading), oRail.model.long / 2, oRail.model.wide / 2)
-          if (g < -2) { letGo(c); hide(c); traffic.splice(i, 1); cleared = true; break }
+          if (g < -2) { overlapping = true; break }
         }
-        if (cleared) continue
-        for (let j = 0; j < traffic.length; j++) {
-          const oCar = traffic[j]
-          if (oCar === c || oCar.v >= 2 || c.id <= oCar.id || Math.abs(oCar.x - c.x) > 150 || Math.abs(oCar.z - c.z) > 150 || Math.abs(oCar.y - c.y) > 25) continue
-          const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
-          if (g < -2) { letGo(c); hide(c); traffic.splice(i, 1); break }
+        if (!overlapping) {
+          for (let j = 0; j < traffic.length; j++) {
+            const oCar = traffic[j]
+            if (oCar === c || oCar.v >= 2 || c.id <= oCar.id || Math.abs(oCar.x - c.x) > 150 || Math.abs(oCar.z - c.z) > 150 || Math.abs(oCar.y - c.y) > 25) continue
+            const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
+            if (g < -2) { overlapping = true; break }
+          }
         }
+        if (overlapping) {
+          c.overlapTime = (c.overlapTime ?? 0) + dt
+          if (c.overlapTime >= 1.2) { letGo(c); hide(c); traffic.splice(i, 1); continue }
+        } else {
+          c.overlapTime = 0
+        }
+      } else {
+        c.overlapTime = 0
       }
     }
   }
@@ -3609,37 +3630,109 @@ export function street(o: {
     const sig = lightsOf(l as (typeof tramLines)[number]).map((L) => { const j = junctionOf(L.node); return `${L.node}:${L.s}:${phaseOf(j, L.dx, L.dz)}:${j.offset}` }).join()
     if (lightsSeen.get(l) !== sig) { lightsSeen.set(l, sig); timetables.delete(l); cableBases.clear() }
   }
-  /** Each car on a line at a moment: how far along it is and how fast it goes. */
-  const cableAt = (l: Line, t: number, each: (s: number, v: number) => void) => {
+  /** Each car on a line at a moment: how far along it is, how fast it goes, and its departure index `n`. */
+  const cableAt = (l: Line, t: number, each: (s: number, v: number, dep: number) => void) => {
     const { every, base } = departures(l), most = (2 * l.len) / CABLE_SPEED + 300
     for (let n = Math.ceil((t - most - base) / every); n <= Math.floor((t - base) / every); n++) {
       const t0 = base + n * every, tt = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE), f = (t - t0) / STEP, i = Math.floor(f)
       if (i < 0 || i + 1 >= tt.length) continue
-      each(tt[i] + (tt[i + 1] - tt[i]) * (f - i), (tt[i + 1] - tt[i]) / STEP)
+      each(tt[i] + (tt[i + 1] - tt[i]) * (f - i), (tt[i + 1] - tt[i]) / STEP, n)
     }
   }
-  const cableCars = (t: number, view: View) => {
+  /** Live obstacle-aware position along the line per active cable-car departure so cable cars yield instead of ghosting through vehicles. */
+  const cableLive = new Map<string, { s: number; v: number }>()
+  const cableCars = (dt: number, t: number, view: View) => {
     const m = ready.get('cable-car')
     if (!m) return
+    const halfL = m.long / 2, halfW = m.wide / 2
+    // Collect live post-drive() vehicles (living cars, traffic, depot cars, trams) so cable cars yield cleanly to blocked tracks.
+    const railObs: { x: number; z: number; hx: number; hz: number; long: number; wide: number }[] = []
+    for (const list of [traffic, depotCars, trams]) {
+      for (let j = 0; j < list.length; j++) {
+        const vCar = list[j]
+        railObs.push({ x: vCar.x, z: vCar.z, hx: Math.cos(vCar.heading), hz: Math.sin(vCar.heading), long: vCar.model.long / 2, wide: vCar.model.wide / 2 })
+      }
+    }
+    for (const th of o.alive.things) {
+      const w = o.alive.where(th)
+      if (!w) continue
+      const hl = Math.max(th.size[0], th.size[2]) / 2, hw = Math.min(th.size[0], th.size[2]) / 2
+      railObs.push({ x: w.at[0], z: w.at[2], hx: w.front[0], hz: w.front[2], long: hl, wide: hw })
+    }
+    const cableBlockedAt = (x: number, z: number, tx: number, tz: number, margin: number): boolean => {
+      for (let j = 0; j < railObs.length; j++) {
+        const ob = railObs[j]
+        if (Math.abs(ob.x - x) > 160 || Math.abs(ob.z - z) > 160) continue
+        if (obbOverlap(x, z, tx, tz, halfL + margin, halfW + 1, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide) < 0) return true
+      }
+      return false
+    }
+    const seenKeys = new Set<string>()
     let n = 0
     for (const l of lines) {
       // (Not near the eye at all: its timetables are not made.)
       along(l.p, l.cum, l.len / 2, P)
       if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > l.len / 2 + DRAWN) continue
-      cableAt(l, t, (s, v) => {
+      cableAt(l, t, (schedS, schedV, dep) => {
+        const key = `${l.seed}:${dep}`
+        let st = cableLive.get(key)
+        let s = schedS
+        let v = schedV
+        if (st) {
+          seenKeys.add(key)
+          const stepS = Math.min(schedS, st.s + Math.max(schedV, CABLE_SPEED) * Math.max(dt, 0.001))
+          along(l.p, l.cum, st.s, Q)
+          along(l.p, l.cum, stepS, P)
+          const prevBox = { x: Q.x, z: Q.z, heading: Math.atan2(Q.tz, Q.tx), halfL, halfW }
+          const nextBox = { x: P.x, z: P.z, heading: Math.atan2(P.tz, P.tx), halfL, halfW }
+          let blocked = false
+          // Check both forward stopping probe (1.4 m ahead) and exact step-deepens-overlap guard against every live vehicle.
+          const probeS = Math.min(l.len, stepS + 14)
+          along(l.p, l.cum, probeS, Q)
+          for (let j = 0; j < railObs.length; j++) {
+            const ob = railObs[j]
+            if (Math.abs(ob.x - P.x) > 180 || Math.abs(ob.z - P.z) > 180) continue
+            const obBox = { x: ob.x, z: ob.z, heading: Math.atan2(ob.hz, ob.hx), halfL: ob.long, halfW: ob.wide }
+            if (stepDeepensOverlap(prevBox, nextBox, obBox)) { blocked = true; break }
+            const gapProbe = obbOverlap(Q.x, Q.z, Q.tx, Q.tz, halfL, halfW + 1, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide)
+            if (gapProbe < 2) {
+              const gapNow = obbOverlap(prevBox.x, prevBox.z, Math.cos(prevBox.heading), Math.sin(prevBox.heading), halfL, halfW + 1, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide)
+              if (gapProbe <= gapNow) { blocked = true; break }
+            }
+          }
+          if (blocked) {
+            s = st.s
+            v = 0
+          } else {
+            s = stepS
+            v = dt > 0 ? Math.min(CABLE_SPEED, (s - st.s) / dt) : schedV
+          }
+          st.s = s; st.v = v
+        } else {
+          along(l.p, l.cum, schedS, P)
+          if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > DRAWN) return
+          // Never spawn a newly visible cable car on top of a living or traffic vehicle.
+          if (cableBlockedAt(P.x, P.z, P.tx, P.tz, 6)) return
+          st = { s: schedS, v: schedV }
+          cableLive.set(key, st)
+          seenKeys.add(key)
+        }
         along(l.p, l.cum, s, P)
         if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > DRAWN) return
         // Hard invariant: never emit two cable cars overlapping on a shared track or crossing.
         for (let k = 0; k < n; k++) {
           const prev = cables[k]
           if (Math.abs(P.x - prev.x) > 140 || Math.abs(P.z - prev.z) > 140) continue
-          if (obbOverlap(P.x, P.z, P.tx, P.tz, m.long / 2, m.wide / 2, prev.x, prev.z, Math.cos(prev.heading), Math.sin(prev.heading), prev.model.long / 2, prev.model.wide / 2) < 1) return
+          if (obbOverlap(P.x, P.z, P.tx, P.tz, halfL, halfW, prev.x, prev.z, Math.cos(prev.heading), Math.sin(prev.heading), prev.model.long / 2, prev.model.wide / 2) < 1) return
         }
         const c = (cables[n] ??= { id: ids++, model: m, paint: -1, kind: 'cable', seed: n, x: 0, y: 0, z: 0, heading: 0, pitch: 0, v: 0, piece: null, shown: '' })
         c.x = P.x; c.z = P.z; c.heading = Math.atan2(P.tz, P.tx); c.v = v
         settle(c)
         n++
       })
+    }
+    for (const key of cableLive.keys()) {
+      if (!seenKeys.has(key)) cableLive.delete(key)
     }
     for (let i = cables.length - 1; i >= n; i--) { hide(cables[i]); cables.pop() }
   }
@@ -4294,7 +4387,7 @@ export function street(o: {
       lap('depot')
       tramsDrive(dt, view, o.clock(), !trams.length)
       lap('trams')
-      cableCars(o.clock(), view)
+      cableCars(dt, o.clock(), view)
       lap('cables')
       const feet = o.feet()
       lap('feet')

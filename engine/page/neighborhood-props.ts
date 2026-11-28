@@ -220,24 +220,29 @@ export function neighborhoodPropKit(): PropKit {
     return finish(g)
   })()
 
-  // 4. Overhead Festoon String-Light Span (5.6 m wide x 3.5 m tall x 0.3 m deep)
+  // 4. Overhead Festoon String-Light Span (5.6 m wide x 3.5 m tall x 0.3 m deep, per=2 -> 5 cm crisp unbroken cable & Edison bulbs)
   const festoon = (() => {
     const L = 5.6, H = 3.5, D = 0.3
-    const g = makeGrid(L, H, D, 1)
-    for (const px of [0.05, L - 0.20]) {
-      g.box(px - 0.04, px + 0.20, 0.0, 0.35, 0.04, 0.26, STONE_COOL)
-      g.box(px, px + 0.14, 0.30, 3.42, 0.08, 0.22, IRON)
+    const g = makeGrid(L, H, D, 2)
+    for (const px of [0.05, L - 0.17]) {
+      g.box(px - 0.04, px + 0.16, 0.0, 0.35, 0.05, 0.25, STONE_COOL)
+      g.box(px, px + 0.12, 0.30, 3.42, 0.09, 0.21, IRON)
     }
-    // Gently draped catenary cable with warm glowing Edison bulbs
-    const steps = 26
+    // Continuous draped catenary cable (guaranteed >= 1 voxel thick at every step) with neat glowing Edison bulbs
+    const steps = 64
+    let prevY = 3.32
     for (let i = 0; i <= steps; i++) {
       const t = i / steps
-      const xm = 0.15 + t * (L - 0.30)
+      const xm = 0.11 + t * (L - 0.22)
       const sag = 4 * t * (1 - t) * 0.48
       const ym = 3.32 - sag
-      g.box(xm - 0.06, xm + 0.06, ym, ym + 0.08, 0.12, 0.18, IRON)
-      if (i > 1 && i < steps - 1 && i % 3 === 0) {
-        g.box(xm - 0.07, xm + 0.07, ym - 0.14, ym, 0.09, 0.21, WARM_BULB)
+      const yLo = Math.min(prevY, ym)
+      const yHi = Math.max(prevY, ym) + 0.06
+      g.box(xm - 0.05, xm + 0.05, yLo, yHi, 0.12, 0.18, IRON)
+      prevY = ym
+      if (i > 4 && i < steps - 4 && i % 8 === 0) {
+        g.box(xm - 0.03, xm + 0.03, ym - 0.06, ym, 0.12, 0.18, IRON)
+        g.box(xm - 0.05, xm + 0.05, ym - 0.16, ym - 0.05, 0.10, 0.20, WARM_BULB)
       }
     }
     return finish(g)

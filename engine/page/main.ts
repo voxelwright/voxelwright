@@ -541,7 +541,9 @@ async function main() {
   const steer = (budget: number, gap: number, calm = false) => {
     steerState.scale = scale
     steerState.held = held
-    steerScale(steerState, { budget, gap, frameMs, cpuMs, workCpuMs, gpuMs, marchMs, fixedGpuMs: taaEnabled && taaPass ? taaMs : 0, clocked, calm, fixed })
+    // Account for scale-independent full-res / shadow passes (TAA + dynamic shadow maps + volClouds) so steerScale hits target FPS smoothly.
+    const fixedGpuMs = (taaEnabled && taaPass ? taaMs : 0) + (lastDynShadowActive ? dynShadowsMs : 0) + (lastVolCloudsActive ? volCloudsMs : 0)
+    steerScale(steerState, { budget, gap, frameMs, cpuMs, workCpuMs, gpuMs, marchMs, fixedGpuMs, clocked, calm, fixed })
     scale = steerState.scale
     held = steerState.held
   }

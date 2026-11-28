@@ -2060,8 +2060,14 @@ impl Bodies {
     /// so a blast asks in one as tall as ever, however narrow. A landing's dent asks in a small one: it is asked eight
     /// times a second while a house comes down, and the asking is most of what the solver then does.
     fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3], max_bodies: usize) -> usize {
+        self.release_box_below(at, radius, size, 48.min(size[1] as i32 / 2), max_bodies)
+    }
+
+    /// Like `release_box`, with an explicit downward margin (`below` cells under `at[1]`) so street-level vehicle
+    /// impacts bias their scan window upward to catch tall severed tree trunks and canopies without leaving them floating.
+    fn release_box_below(&mut self, at: [i32; 3], radius: i32, size: [usize; 3], below: i32, max_bodies: usize) -> usize {
         let side = size[0];
-        let low = [at[0] - side as i32 / 2, at[1] - 48.min(size[1] as i32 / 2), at[2] - side as i32 / 2];
+        let low = [at[0] - side as i32 / 2, at[1] - below.min(size[1] as i32 / 2), at[2] - side as i32 / 2];
         let hi = [low[0] + size[0] as i32, low[1] + size[1] as i32, low[2] + size[2] as i32];
         self.wake_in_aabb(low.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
         #[cfg(test)]
@@ -2348,14 +2354,45 @@ impl Bodies {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
         let far = radius * 3 + 4;
         self.wake_in_aabb(at.map(|c| (c - far) as f32), at.map(|c| (c + far + 1) as f32));
+        let hit_mat = material(self.ground.kind(at[0], at[1], at[2]));
+        // Detect street/park trees (leaves at impact or canopy above a struck wood trunk) so a severed trunk
+        // uses a tall upward-biased support box and does not leave its crown hovering in mid-air, without
+        // widening masonry/house collapse crushes.
+        let is_tree = hit_mat == LEAVES || (hit_mat == WOOD && {
+            let mut has_canopy = false;
+            let mut y = at[1] + 6;
+            while y <= at[1] + 120 {
+                if material(self.ground.kind(at[0], y, at[2])) == LEAVES
+                    || material(self.ground.kind(at[0] + 6, y, at[2])) == LEAVES
+                    || material(self.ground.kind(at[0] - 6, y, at[2])) == LEAVES
+                    || material(self.ground.kind(at[0], y, at[2] + 6)) == LEAVES
+                    || material(self.ground.kind(at[0], y, at[2] - 6)) == LEAVES
+                {
+                    has_canopy = true;
+                    break;
+                }
+                y += 6;
+            }
+            has_canopy
+        });
         // Falling intact structures still need the wider support query and solid rubble to topple correctly.
-        // Vehicles and already loose fragments use a bounded, cheap impact path.
+        // Vehicles and already loose fragments use a bounded, cheap impact path; for trees reserve at least 1
+        // body slot for the newly severed upper trunk + canopy so burst() cannot starve release_box.
         let budget = if fragments { CRASH_LUMPS } else { usize::MAX };
+        let burst_budget = if fragments && is_tree { budget.saturating_sub(1) } else { budget };
         let before = self.next;
-        if self.burst(at, radius, budget) {
-            let size = match radius { 0..=3 if fragments => [20, 32, 20], 4..=5 if fragments => [28, 48, 28], _ => [48, 96, 48] };
+        if self.burst(at, radius, burst_budget) {
+            let size = if is_tree {
+                [64, 160, 64]
+            } else {
+                match radius { 0..=3 if fragments => [20, 32, 20], 4..=5 if fragments => [28, 48, 28], _ => [48, 96, 48] }
+            };
+            let below = if is_tree { 14 } else { 48.min(size[1] as i32 / 2) };
             let remaining = if fragments { budget.saturating_sub((self.next - before) as usize) } else { budget };
-            self.release_box(at, radius, size, remaining);
+            self.release_box_below(at, radius, size, below, remaining);
+            if is_tree {
+                self.ask_far(at, radius.max(4));
+            }
         }
     }
 
@@ -4064,6 +4101,34 @@ mod tests {
         assert!(!bodies.ground.solid(at[0], at[1] + 4, at[2]), "unsupported brick above the crater releases");
         assert!(bodies.list.len() <= CRASH_LUMPS);
         assert!(bodies.list.iter().all(|b| b.points.len() <= LUMP_POINTS && (b.count >= 40 || b.passing)));
+    }
+
+    #[test]
+    fn crush_severing_tall_street_tree_releases_upper_trunk_and_canopy() {
+        let mut bodies = Bodies::new();
+        // Ground slab at y = 2400 with a 10 m tall street tree (trunk y = 2401..2475, canopy y = 2470..2500).
+        let cx = 760;
+        let cz = 4055;
+        let mut rows: Vec<Run> = Vec::new();
+        for z in cz - 20..=cz + 20 {
+            rows.push(Run { x0: cx - 20, x1: cx + 21, y: 2400, z, kind: kind(CONCRETE, OWN) });
+        }
+        for y in 2401..2476 {
+            for z in cz - 1..=cz + 1 {
+                rows.push(Run { x0: cx - 1, x1: cx + 2, y, z, kind: kind(WOOD, OWN) });
+            }
+        }
+        for y in 2470..2500 {
+            for z in cz - 8..=cz + 8 {
+                rows.push(Run { x0: cx - 8, x1: cx + 9, y, z, kind: kind(LEAVES, OWN) });
+            }
+        }
+        bodies.ground.push(Edit::Runs(rows), false, None);
+        // Vehicle hits the base of the trunk at y = 2410.
+        bodies.crush([cx, 2410, cz], 500_000.0, true);
+        assert!(!bodies.ground.solid(cx, 2450, cz), "severed upper tree trunk must not remain floating in mid-air");
+        assert!(!bodies.ground.solid(cx, 2485, cz), "severed tree canopy must not remain floating in mid-air");
+        assert!(bodies.list.len() <= CRASH_LUMPS);
     }
 
     /// Run alone on the target machine: cargo test --release car_crash_step_time -- --ignored --nocapture.
