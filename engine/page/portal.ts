@@ -9,6 +9,7 @@ import { offscreen, pace, shader, type Gpu, type Offscreen, type Target } from '
 import { ball, rows, type Edit } from './edits.ts'
 import type { Held, Link, Realm, Someone } from './link.ts'
 import type { Marcher, View } from './march.ts'
+import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
 import type { People, Person } from './people.ts'
 import { baseOf, type Pose, type Realms } from './realms.ts'
 import { SUN_SIDE } from './sun.ts'
@@ -407,6 +408,15 @@ export async function portal(o: {
       if (far * side > 2) return
       if (veil >= 0.5 || Math.abs(e[0] * a[0] + e[2] * a[2]) > g.size[0] / 2 || Math.abs(e[1]) > g.size[1] / 2 + 10) { if (far * side < -6) side = -side; return }
       void self.step()
+    },
+    /** Emits the open portal doorway's warm/celestial glow into the unified local-light sink. */
+    emitLights(sink: LocalLightSink) {
+      if (!gate || open <= 0.05) return
+      const glow = open * (1.8 + veil * 1.4)
+      const cr = (0.75 + 0.25 * tint[0]) * glow
+      const cg = (0.78 + 0.22 * tint[1]) * glow
+      const cb = (0.62 + 0.38 * tint[2]) * glow
+      sink.addPoint(gate.at[0], gate.at[1], gate.at[2], cr, cg, cb, 190, 58, 1.1, 130, LIGHT_EXTRA)
     },
     /** Steps through, wherever the person is: for the checks. */
     async step() {

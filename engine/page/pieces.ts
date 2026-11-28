@@ -16,7 +16,8 @@
 import type { CrashOpening } from './crash-opening.ts'
 import { shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
-import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, type Marcher, type View } from './march.ts'
+import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, palette, type Marcher, type View } from './march.ts'
+import { LIGHT_EXTRA, LOCAL_LIGHTS_STRUCT, localLightsEval, type LocalLightSink } from './lights.ts'
 import type { Born } from './told.ts'
 
 const CODE = /* wgsl */ `
@@ -50,12 +51,31 @@ struct Looks { palette: array<vec4f, 256>, material: array<Material, 16> }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var<uniform> looks: Looks;
 ${GLOBALS}
+${LOCAL_LIGHTS_STRUCT}
 @group(1) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(1) var sunMap: texture_2d_array<f32>;
 // Where the march looked through a pane of the world's glass: what it lets through, and how far off it is (march.ts panes).
 @group(1) @binding(2) var panes: texture_2d<f32>;
+@group(1) @binding(3) var<uniform> localLights: LocalLights;
 ${SUNLIT}
 ${LIGHT}
+${localLightsEval()}
+// Procedural-town street lamps (city.rs 1280x800 block grid, within 3.5 km of HOME); in San Francisco real lamps arrive via localLights.
+fn pieceTownLamps(at: vec3f, n: vec3f) -> f32 {
+  let worldXZ = at.xz + vec2f(g.fog.w, g.fogTint.a);
+  let out = (floor(worldXZ / vec2f(1280.0, 800.0)) + 0.5) * vec2f(1280.0, 800.0) - vec2f(700.0, 4070.0);
+  if (dot(out, out) >= 35000.0 * 35000.0) { return 0.0; }
+  let block = worldXZ - floor(worldXZ / vec2f(1280.0, 800.0)) * vec2f(1280.0, 800.0);
+  var pool = 0.0;
+  for (var k = 0; k < 9; k++) {
+    let lamp = array<vec2f, 9>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0), vec2f(369.0, 35.0), vec2f(673.0, 105.0), vec2f(977.0, 35.0), vec2f(35.0, 361.0), vec2f(105.0, 581.0))[k];
+    var to = lamp - block;
+    to -= round(to / vec2f(1280.0, 800.0)) * vec2f(1280.0, 800.0);
+    let line = vec3f(to.x, 60.0, to.y);
+    pool += (0.25 + 0.75 * max(dot(n, normalize(line)), 0.0)) / (1.0 + dot(to, to) / 6400.0);
+  }
+  return min(pool, 1.3);
+}
 ${GLASS}
 ${DEFORM_WGSL}
 struct Out {
@@ -235,10 +255,10 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
     }
     if (head <= 0.01) { return vec3f(0.0); }
     let hi = clamp(head - 1.0, 0.0, 1.0);
-    let tint = mix(vec3f(1.0, 0.90, 0.70), vec3f(1.0, 0.98, 0.92), hi);
-    return tint * (min(head, 1.0) * 3.6 + hi * 7.5);
+    let tint = mix(vec3f(1.0, 0.88, 0.66), vec3f(1.0, 0.97, 0.90), hi);
+    return tint * (min(head, 1.0) * 2.8 + hi * 6.5);
   }
-  // Rear lamps: dedicated white reverse lenses, deep orange-amber hazard blinkers, inner reverse zone on red clusters when reversing, vivid ruby-red tails, blazing crimson brakes.
+  // Rear lamps: dedicated white reverse lenses, deep orange-amber hazard blinkers, inner reverse zone on red clusters when reversing, steady crimson tails, blazing crimson brakes.
   if (along < -0.35 && faceFwd < 0.5) {
     let whiteLens = albedo.g > albedo.r * 0.65 && albedo.b > albedo.r * 0.55;
     if (whiteLens) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
@@ -249,11 +269,12 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       return vec3f(1.3, 0.10, 0.002) * amp;
     }
     if (rev > 0.05 && across < 0.62) { return vec3f(0.95, 0.98, 1.0) * (rev * 7.6); }
-    let tail = min(head, 1.0) * 4.2;
-    let stop = min(brake, 1.25) * 7.8;
+    let tail = min(head, 1.0) * 1.9;
+    let stop = brake * 9.5;
     let redPower = max(tail, stop);
     if (redPower <= 0.01) { return vec3f(0.0); }
-    return vec3f(1.0, 0.003, 0.001) * redPower;
+    let hot = clamp(brake, 0.0, 1.0);
+    return vec3f(1.0, 0.004 + hot * 0.003, 0.001 + hot * 0.001) * redPower;
   }
   // Side-mirror amber hazard repeaters & side/roof marker lamps.
   if (hazard > 0.05 && albedo.r > albedo.g * 1.4 && albedo.g > albedo.b * 2.2) {
@@ -337,17 +358,25 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
       }
     }
   }
+  let worldP = in.seen + u.eye;
   var direct = max(dot(n, u.sun), 0.0);
   if (direct > 0.0) {
     // In the world's shadow where the sun's maps say so; where they cannot say, in the sun. (Read by the square normal:
     // the maps are offset along it, and a smooth one along a stair would read them inside the step.)
-    let sunny = sunlit(in.seen + u.eye, in.facing, 0u);
+    let sunny = sunlit(worldP, in.facing, 0u);
     if (sunny >= 0.0) { direct *= sunny; }
   }
   let dynLamp = stuff == 15u && u.lampAxis != 0.0;
   var col = shade(albedo, n, rd, u.sun, direct, open, select(rough, 0.18, dynLamp), select(m.glow * (1.0 - brokenLamp), 0.0, dynLamp));
   if (dynLamp) { col += vehicleLamp(in, albedo) * (1.0 - brokenLamp); }
   if (polished) { col = mix(col, select(carPaint(col, in.facing, rd, direct), clearCoat(col, albedo, n, rd, direct, open), soft), coat); }
+  if (g.weather.z > 0.0) {
+    let townPool = pieceTownLamps(worldP, n);
+    if (townPool > 0.0) { col += albedo * vec3f(1.0, 0.78, 0.48) * townPool * g.weather.z * 1.5; }
+  }
+  if (localLights.info.x > 0u && !dynLamp) {
+    col += evalLocalLights(worldP, n, rd, albedo, rough, select(0.0, coat, polished), 0.0);
+  }
   let lit = tone(col);
   // Blazing vehicle lamps output reduced alpha (as march.ts lamps do) so glow.ts spreads lush halos at night.
   let glowAlpha = select(1.0, 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0), dynLamp);
@@ -563,11 +592,119 @@ export interface Pieces {
   refit(piece: Piece, faces: Uint32Array<ArrayBuffer>, smooth?: Uint32Array<ArrayBuffer>): void
   /** mirrors: false is the M key's mirrors off, under which glass is seen through, tinted, mirroring nothing. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites, mirrors?: boolean): void
+  /** Automatically emits local lights for every non-vehicle piece containing LAMP (material 15) voxels (robotaxi LiDAR domes, traffic signals, depot canopies, conjured lamps). */
+  emitLights(sink: LocalLightSink): void
   readonly count: number
   /** How many faces are drawn a frame. */
   readonly faces: number
   /** Whether faces with smooth words are lit by them (#38); off draws every face by its square normal. */
   smooth: boolean
+}
+
+/** One local-space light cluster automatically extracted from a Born's LAMP (material 15) faces. */
+interface PieceEmitter {
+  lx: number; ly: number; lz: number
+  nx: number; ny: number; nz: number
+  directional: boolean
+  r: number; g: number; b: number
+  area: number
+  vivid: boolean
+}
+let cachedPalette: Float32Array | null = null
+const lampRgb = (ci: number): [number, number, number, boolean] => {
+  if (ci === 0 || ci === 46) return [1.0, 0.78, 0.48, false]
+  const pal = (cachedPalette ??= palette())
+  const o = (ci & 255) * 4
+  let r = pal[o], g = pal[o + 1], b = pal[o + 2]
+  const avg = (r + g + b) / 3
+  const sat = Math.max(r, g, b) - Math.min(r, g, b)
+  // Boost chromatic LEDs/signals/signs gently just as march.ts does, keeping white/warm lamps natural.
+  if (sat > 0.06) {
+    r = Math.max(r + (r - avg) * 1.35, 0)
+    g = Math.max(g + (g - avg) * 1.35, 0)
+    b = Math.max(b + (b - avg) * 1.35, 0)
+  }
+  const peak = Math.max(r, g, b, 0.001)
+  return [r / peak, g / peak, b / peak, sat > 0.08]
+}
+const bornEmitters = new WeakMap<Born, readonly PieceEmitter[]>()
+const EMPTY_EMITTERS: readonly PieceEmitter[] = []
+/** Scans a Born's exterior faces once and clusters any LAMP (material 15) faces into up to 4 local-light emitters. */
+function emittersOf(born: Born): readonly PieceEmitter[] {
+  const hit = bornEmitters.get(born)
+  if (hit) return hit
+  const faces = born.faces
+  const total = faces.length >>> 1
+  const clusters: { ci: number; sx: number; sy: number; sz: number; nx: number; ny: number; nz: number; area: number }[] = []
+  const span = Math.max(born.size[0], born.size[1], born.size[2])
+  const mergeR = Math.max(12, span * 0.24)
+  const mergeR2 = mergeR * mergeR
+  for (let i = 0; i < total; i++) {
+    const b = faces[i * 2 + 1]
+    const kind = b >>> 16
+    if ((kind & 15) !== 15) continue
+    const a = faces[i * 2]
+    const sx = a & 1023, sy = (a >>> 10) & 1023, sz = (a >>> 20) & 1023
+    const long = (b & 255) || 1
+    const axis = (b >>> 8) & 3
+    const side = (b >>> 10) & 1
+    const sign = side * 2 - 1
+    let fx = sx, fy = sy, fz = sz, nx = 0, ny = 0, nz = 0
+    if (axis === 1) { fx += long * 0.5; fy += side; fz += 0.5; ny = sign }
+    else if (axis === 2) { fx += long * 0.5; fy += 0.5; fz += side; nz = sign }
+    else { fx += side; fy += 0.5; fz += long * 0.5; nx = sign }
+    const ci = (kind >>> 8) & 255
+    let merged = false
+    for (let c = 0; c < clusters.length; c++) {
+      const cl = clusters[c]
+      if (cl.ci !== ci) continue
+      const inv = 1 / cl.area
+      const dx = fx - cl.sx * inv, dy = fy - cl.sy * inv, dz = fz - cl.sz * inv
+      if (dx * dx + dy * dy + dz * dz <= mergeR2) {
+        cl.sx += fx * long; cl.sy += fy * long; cl.sz += fz * long
+        cl.nx += nx * long; cl.ny += ny * long; cl.nz += nz * long
+        cl.area += long
+        merged = true
+        break
+      }
+    }
+    if (!merged && clusters.length < 16) {
+      clusters.push({ ci, sx: fx * long, sy: fy * long, sz: fz * long, nx: nx * long, ny: ny * long, nz: nz * long, area: long })
+    }
+  }
+  if (!clusters.length) {
+    bornEmitters.set(born, EMPTY_EMITTERS)
+    return EMPTY_EMITTERS
+  }
+  if (clusters.length > 4) {
+    clusters.sort((a, b) => b.area - a.area)
+    clusters.length = 4
+  }
+  const out: PieceEmitter[] = []
+  for (let i = 0; i < clusters.length; i++) {
+    const cl = clusters[i]
+    const inv = 1 / cl.area
+    const nLen = Math.hypot(cl.nx, cl.ny, cl.nz)
+    const dirCoherence = nLen * inv
+    const directional = dirCoherence > 0.58
+    const dnx = nLen > 1e-4 ? cl.nx / nLen : 0
+    const dny = nLen > 1e-4 ? cl.ny / nLen : -1
+    const dnz = nLen > 1e-4 ? cl.nz / nLen : 0
+    const push = directional ? 1.2 : 0
+    const [r, g, b, vivid] = lampRgb(cl.ci)
+    out.push({
+      lx: cl.sx * inv + dnx * push,
+      ly: cl.sy * inv + dny * push,
+      lz: cl.sz * inv + dnz * push,
+      nx: dnx, ny: dny, nz: dnz,
+      directional,
+      r, g, b,
+      area: cl.area,
+      vivid,
+    })
+  }
+  bornEmitters.set(born, out)
+  return out
 }
 
 /** A piece's own numbers (struct U): twelve rows of four, its dents, then four per-window crack origins. */
@@ -691,7 +828,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   // One layout for the solid faces and the glass, so a piece's bindings serve all three pipelines.
   const both = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT
   const own = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: both, buffer: {} }, { binding: 1, visibility: both, buffer: {} }] })
-  const shared = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: both, buffer: {} }, { binding: 1, visibility: both, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }] })
+  const shared = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: both, buffer: {} }, { binding: 1, visibility: both, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: {} }] })
   const layout = device.createPipelineLayout({ bindGroupLayouts: [own, shared] })
   const drawn = (entryPoint: string, glass?: GPUBlendComponent) => device.createRenderPipelineAsync({
     label: `pieces ${entryPoint}`, layout,
@@ -704,7 +841,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   const [pipeline, tint, glint] = await Promise.all([drawn('fs'), drawn('fs_tint', { srcFactor: 'zero', dstFactor: 'src', operation: 'add' }), drawn('fs_glint', { srcFactor: 'one', dstFactor: 'one', operation: 'add' })])
   let lit: { panes: GPUTextureView; group: GPUBindGroup } | null = null
   const litFor = (panes: GPUTextureView) => {
-    if (lit?.panes !== panes) lit = { panes, group: device.createBindGroup({ layout: shared, entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }, { binding: 2, resource: panes }] }) }
+    if (lit?.panes !== panes) lit = { panes, group: device.createBindGroup({ layout: shared, entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }, { binding: 2, resource: panes }, { binding: 3, resource: { buffer: march.localLights.buffer } }] }) }
     return lit.group
   }
   /** count: all its faces; glass: how many of them, the last ones, are glass; held: its faces' buffer, and how many pieces draw from it. */
@@ -864,6 +1001,63 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         }
       }
       pass.end()
+    },
+    emitLights(sink) {
+      if (!live.size || sink.dark <= 0.02) return
+      const darkScale = Math.min(1, sink.dark * 1.35)
+      const isLow = sink.quality === 'low'
+      const maxReach = sink.quality === 'high' ? 1050 : sink.quality === 'medium' ? 750 : 450
+      const maxReach2 = maxReach * maxReach
+      for (const piece of live) {
+        if (!piece.cell || !piece.count || piece.ghost) continue
+        // Vehicles with dynamic `piece.lamps` are emitted explicitly with full dual-lobe optics by street.ts / living.ts.
+        if (piece.lamps && piece.lamps[3] !== 0) continue
+        const emitters = emittersOf(piece.born)
+        if (!emitters.length) continue
+        const dx0 = piece.pos[0] - sink.eyeX, dy0 = piece.pos[1] - sink.eyeY, dz0 = piece.pos[2] - sink.eyeZ
+        if (dx0 * dx0 + dy0 * dy0 + dz0 * dz0 > maxReach2) continue
+        const [x, y, z, w] = piece.rot, b = piece.born, cell = piece.cell
+        const m00 = 1 - 2 * (y * y + z * z), m10 = 2 * (x * y + z * w), m20 = 2 * (x * z - y * w)
+        const m01 = 2 * (x * y - z * w), m11 = 1 - 2 * (x * x + z * z), m21 = 2 * (y * z + x * w)
+        const m02 = 2 * (x * z + y * w), m12 = 2 * (y * z - x * w), m22 = 1 - 2 * (x * x + y * y)
+        const cell2 = cell * cell
+        const px0 = piece.pos[0], py0 = piece.pos[1], pz0 = piece.pos[2]
+        const com0 = b.com[0], com1 = b.com[1], com2 = b.com[2]
+        for (let i = 0; i < emitters.length; i++) {
+          const e = emitters[i]
+          const areaW = e.area * cell2
+          // On Low preset, skip small accent beacons (e.g. spinning LiDAR domes) to preserve budget for headlights/street lamps.
+          if (isLow && areaW < 12) continue
+          const ox = (e.lx - com0) * cell, oy = (e.ly - com1) * cell, oz = (e.lz - com2) * cell
+          const wx = px0 + m00 * ox + m01 * oy + m02 * oz
+          const wy = py0 + m10 * ox + m11 * oy + m12 * oz
+          const wz = pz0 + m20 * ox + m21 * oy + m22 * oz
+          const rad = Math.sqrt(Math.max(areaW, 0.5))
+          const power = Math.min(2.35, Math.max(1.45, 1.35 + Math.log2(1 + areaW) * 0.26)) * darkScale
+          const cr = e.r * power, cg = e.g * power, cb = e.b * power
+          if (e.directional) {
+            let dnx = m00 * e.nx + m01 * e.ny + m02 * e.nz
+            let dny = m10 * e.nx + m11 * e.ny + m12 * e.nz
+            let dnz = m20 * e.nx + m21 * e.ny + m22 * e.nz
+            // Horizontally aimed directional lamps (traffic signals, rotating LiDAR apertures, signs) tilt gently downward so
+            // their cone splashes naturally onto crosswalks, car hoods, and pedestrians below.
+            const horiz = Math.abs(dny) < 0.35
+            if (horiz) dny -= 0.22
+            const range = Math.min(210, Math.max(78, (horiz && e.vivid ? 95 : 58) + rad * 24))
+            const dHalf = range * 0.34
+            const cosOuter = horiz ? (areaW < 3 ? 0.42 : 0.14) : -0.05
+            const cosInner = horiz ? (areaW < 3 ? 0.88 : 0.72) : 0.58
+            const prio = areaW >= 18 ? 60 : e.vivid ? 52 : 46
+            sink.addSpot(wx, wy, wz, dnx, dny, dnz, cr, cg, cb, range, dHalf, cosOuter, cosInner, 0.25, 0.0, 1.05, prio, LIGHT_EXTRA)
+          } else {
+            // Omnidirectional emitters (spinning robotaxi LiDAR dome rings, active charging bay halos, glowing orbs/lanterns).
+            const range = Math.min(145, Math.max(68, 52 + rad * 18))
+            const dHalf = range * 0.33
+            const prio = e.vivid ? 54 : 48
+            sink.addPoint(wx, wy, wz, cr, cg, cb, range, dHalf, 1.0, prio, LIGHT_EXTRA)
+          }
+        }
+      }
     },
   }
 }

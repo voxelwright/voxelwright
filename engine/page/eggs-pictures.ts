@@ -62,6 +62,22 @@ export function codeRain(): Picture {
 const BAND_WIDE = [0.1, 0.9] as const
 const BAND_TALL = [0.18, 0.72] as const
 
+/** What of the view a video must stay off, top to bottom (fractions of it): the player's strip (eggs.ts). */
+export interface Clear { top: number; bottom: number }
+
+/**
+ * Where a video stands on the view, as fractions of it (left, top, width, height): in its band (by the view's shape),
+ * as tall as the band allows between what it must stay off (`clear`), unless that would lose more than `crop` of its
+ * width off the sides. `aspect` is the view's width over its height, `va` the video's. The one rule for it: the
+ * picture is drawn by it, and the player keeps clear of it by it (#134).
+ */
+export function videoRect(aspect: number, va: number, crop = 0, clear: Clear = { top: 0, bottom: 1 }) {
+  const band = aspect < 1 ? BAND_TALL : BAND_WIDE
+  const top = Math.max(band[0], clear.top), tall = Math.max(0, Math.min(band[1], clear.bottom) - top)
+  const h = Math.min(tall, aspect / (1 - crop) / va), w = Math.min(1, (h * va) / aspect)
+  return { x: (1 - w) / 2, y: top + (tall - h) / 2, w, h }
+}
+
 // ── Lazy singleton Web Audio analyser for the Skyline Equalizer mode ──
 // Attached to the singleton <video> element only when the user actually enables 'equalizer' (so 'ambilight' and 'off'
 // leave the browser's native media playback path completely untouched). All egg videos load from same-origin blob: URLs
@@ -141,6 +157,7 @@ export function videoPicture(
     crop = 0,
     sky = true,
     windowEffect = (() => 'ambilight') as () => WindowEffect,
+    clear = (): Clear | undefined => undefined,
   } = {},
 ): Picture {
   const [w, h] = SCREEN_SIZE
@@ -174,7 +191,7 @@ export function videoPicture(
   const reduced = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : null
 
   let frames = 0, drawn = -1
-  let lastAspect = -1
+  let lastAspect = -1, lastShape = ''
   let lastEffect: WindowEffect | null = null
   let lastT = -1
   let x0 = 0, y0 = 0, width: number = w, height: number = h
@@ -477,7 +494,10 @@ export function videoPicture(
       const a = aspect()
       const effect = windowEffect()
       const key = !ready ? -1 : watch ? frames : media.currentTime
-      const newFrame = key !== drawn || Math.abs(a - lastAspect) >= 1e-4
+      // (Drawn again for the view turned or the player's strip moved, a paused frame too.)
+      const r = ready ? videoRect(a, media.videoWidth / media.videoHeight, crop, clear()) : null
+      const shape = r ? `${r.x} ${r.y} ${r.w} ${r.h}` : ''
+      const newFrame = key !== drawn || Math.abs(a - lastAspect) >= 1e-4 || shape !== lastShape
       const newEffect = effect !== lastEffect
       const dt = lastT >= 0 ? Math.max(0.001, Math.min(0.08, t - lastT)) : 0.016
       lastT = t
@@ -501,17 +521,14 @@ export function videoPicture(
       if (newFrame) {
         drawn = key
         lastAspect = a
-        if (ready) {
-          // Fit the full uncropped video (crop = 0 by default) into the active band: on portrait phones the sky-gap
-          // drone/fog formation carries the upper part while the skyscraper windows carry the lower part seamlessly.
-          const band = a < 1 ? BAND_TALL : BAND_WIDE
-          const sx = w / (h * a), top = band[0] * h, tall = (band[1] - band[0]) * h, va = media.videoWidth / media.videoHeight
-          const rawH = Math.min(tall, (h * a) / (1 - crop) / va)
-          const rawW = rawH * va * sx
-          ix0 = Math.max(0, Math.round((w - rawW) / 2))
-          iy0 = Math.max(0, Math.round(top + (tall - rawH) / 2))
-          ix1 = Math.min(w, Math.max(ix0 + 1, ix0 + Math.round(rawW)))
-          iy1 = Math.min(h, Math.max(iy0 + 1, iy0 + Math.round(rawH)))
+        lastShape = shape
+        if (r) {
+          // Fit the full uncropped video (crop = 0 by default) into the active band (videoRect): on portrait phones the
+          // sky-gap drone/fog formation carries the upper part while the skyscraper windows carry the lower part seamlessly.
+          ix0 = Math.max(0, Math.round(r.x * w))
+          iy0 = Math.max(0, Math.round(r.y * h))
+          ix1 = Math.min(w, Math.max(ix0 + 1, ix0 + Math.round(r.w * w)))
+          iy1 = Math.min(h, Math.max(iy0 + 1, iy0 + Math.round(r.h * h)))
           x0 = ix0; y0 = iy0; width = ix1 - ix0; height = iy1 - iy0
           rect[0] = ix0 / w
           rect[1] = iy0 / h

@@ -43,11 +43,12 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Set what is ahead alight | F | - | - |
 | Take the wand | Q | Wand on the wheel | - |
 | **Driving** | | | |
-| Throttle, brake and reverse | W, S | Gas & Brake pedals (bottom-right), or left half forward/back one-handed | RT, LT (analog) |
-| Steer | A, D | Left half (side to side; pure steering while pedals are held) | Left stick |
-| Drift (handbrake) | Hold Space | Hold Drift (above Gas) | A / Cross (analog) |
-| Boost | Hold Shift | Hold Boost (above Brake) | B / Circle |
+| Throttle, brake and reverse | W, S | Gas and Brake (under the right thumb), or Brake alone with auto gas ([touch schemes](#touch-driving)) | RT, LT (analog) |
+| Steer | A, D | Arrows (the default), a wheel, a slide or tilting the phone, under the left thumb ([touch schemes](#touch-driving)) | Left stick |
+| Drift (handbrake) | Hold Space | Hold Drift (beside Gas) | A / Cross (analog) |
+| Boost | Hold Shift | Hold Boost (above Gas) | B / Circle |
 | Burnout, then launch | Hold W and Space at a standstill, then let go of Space | Hold Gas and Drift at a standstill, then let go of Drift | RT and A, then let go of A |
+| Change how touch drives | - | Settings, Controls… | - |
 | Next camera (the seat among them) | C | Cam (top-right utility rail) | RB or D-pad down |
 | Look back | Hold X | - | Hold LB |
 | Headlights | L | - | - |
@@ -232,7 +233,26 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
-**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for a two-zone icon-only layout: four pointer-captured driving controls sit under the right thumb (tall Gas pedal, Brake/Reverse pedal, Drift and Boost — dedicating the left stick to smooth horizontal steering while pedals are pressed), while quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+**Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for the touch driving scheme (below): the steering under one thumb and the pedals under the other. Quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
+
+### Touch driving
+
+`engine/page/drive-touch.ts` owns how a phone drives a car. A scheme is one way of steering and one way of driving, never two at once: the left half of the picture turns the head while you drive, and never drives. Settings → **Controls…** (by touch only) opens a sheet that sets the scheme, and the keys behind it change as you choose:
+
+| Setting | Choices | Default |
+| --- | --- | --- |
+| Steer with | **Arrows**: Left and Right under the steering thumb. **Wheel**: a wheel with spokes, turned round its middle, which comes back to the middle when let go. **Slide**: a slide that comes where the thumb goes down on its half of the picture, across only. **Tilt**: turn the phone like a wheel. | Arrows |
+| Gas | **Pedals**: Gas and Brake. **Auto**: the car drives itself forward once a key or the picture is first touched; Brake slows it, and held at a stop backs up. | Pedals |
+| Driving keys | Right or Left (the steering goes to the other side) | Right |
+| Key size | Small, Medium, Large. The keys also shrink to fit the screen: the two clusters stay 24 px apart, the driving cluster stays in the lower half at Medium (a little lower at Small, a little higher at Large), and no key is under 44 px. | Medium |
+| Key opacity | 30% to 100% | 82% |
+| Steering sensitivity | 50% to 200%, for Wheel, Slide and Tilt. At 100% full lock is 110 degrees of the wheel (`WHEEL_LOCK`) or 24 degrees of tilt (`TILT_LOCK`). | 100% |
+
+The driving cluster has the main pedal tall at the edge (Gas, or Brake with auto gas), Boost above it, and Brake and Drift beside it. With Tilt and Pedals, Brake moves under the other thumb, so each thumb has a pedal; with three keys, Drift stands as tall as the pedal beside it and Boost spans both. The keys of a cluster work as one pad. A thumb that slides from one key to the next lets go of the first and holds the second without lifting, so you can rock between Left and Right or Gas and Brake. Every key is let go when its touch ends or is cancelled, the page is hidden or loses focus, or Settings, the map, the radio, the ask bar or the sheet opens over the keys. Auto gas stops then too, and waits for the next touch. While it waits, the driving panel says `Tap to drive`.
+
+**Tilt** reads the phone's angles (`deviceorientation`) only while it is the scheme and you are driving. It works out which way is up on the screen, so it works upright and on either side, and with the phone held up or leaned back. Of the screen's angle and its opposite it takes the one that puts up on the screen upward, so a browser that reports the angle's sign the other way round still steers the right way. Lying flat, the steering lets go. Center tilt in the sheet makes how you hold the phone straight ahead. Where the browser asks before a page may read the sensor (Safari on iOS), the first touch after getting in asks, and until then a **Tap to steer by tilt** key stands over the arrows (the driving panel says `Tap for tilt`), which steer meanwhile. If access is refused, the device has no sensor, or the page is not served over https, the arrows steer, the sheet says why, and its Tilt choice says `arrows for now`.
+
+While the YouTube Music player shows, it stands at the top left (in the minimap's place on a phone on its side, where the minimap steps aside), and the keys in that corner shrink to fit under it: the steering keys, or with the driving keys on the left, the driving cluster in two short rows. The settings are kept in this browser (`localStorage`, `vw.drive-touch.v1`). Anything kept that is out of range is brought back in range, and anything unknown is the default. Desktop keys and a pad drive as before, and their axes add to the touch keys'.
 
 The **ask bar** (Make) is a slim key in the corner until it is opened. Open, it has a × key before the line; Esc, or a press anywhere on the picture, also puts it away, and the keys of play come straight back. The gameplay HUD has no Back key of its own: Back to the view is in the settings panel, and Backquote on a keyboard.
 
@@ -306,6 +326,8 @@ Eggs are surprises started by a phrase on the eggs' line (`/`), by a thing in th
 - **The first view** (`engine/page/eggs-first.ts`): between showings of the site's name, the banner shows a line for an egg. Tap it to start that egg.
 - **Window lockers** (`engine/page/eggs-lockers.ts`, `engine/sf/lockers.json`): in the first view some of the city's windows each hold an egg. A new one flickers like a television, an opened one glows green, a locked one is dim red. What you have opened is kept in the browser under `village.sf.lockers`.
 - **Sky-gap drone swarm, fog halo & lower-window effects** (`engine/page/eggs-sky.ts`, `engine/page/eggs-pictures.ts`): video eggs play uncropped across both the city's lit windows and any open sky gaps (such as the upper half of a portrait phone or spaces between towers). An instanced GPU drone swarm lifts off in staggered curved waves from behind the skyline with an atmospheric fog halo, and smoothly re-forms over ~1 s when the camera turns or rotates; each egg opts in via `sky` (The Matrix stays windows-only). While the drone swarm is active, the tow-banner airplane climbs to fly above the drones, descending back to its normal round once the drones finish landing. Unused windows below and beside the video band — especially the lower ~40% of portrait phone viewports — show a **Window glow** effect chosen in Settings (persisted under `village.windowEffect` and switchable live via `engine.windowEffect`): **Ambient** (default Ambilight skylight spill and wet-glass reflection that fades into the city's natural warm night lamps), **EQ** (a live audio-reactive skyline spectrum equalizer with peak-hold floor caps), or **Off** (dim framing).
+
+A video egg (and the Matrix's music) brings up a player made of the HUD's slim voxel keys: the title, a link to the original, a fader with the time, and Pause, Sound, Next, Stop and Hide. It stands in a strip along the top or bottom edge and the video on the windows is fitted into the rest of the view (`videoRect` in `engine/page/eggs-pictures.ts`), so the two never meet. On a desk it sits bottom right in the first view and top left in play. On an upright phone it is a three-row card under the top keys. On a phone on its side it starts folded into its key in the first view, where the picture is short, and opens as a two-row card at the bottom right; in play it sits in the top row. Hide folds it into its one key where that key was, and the video takes back the room the player took. The key is cobalt while the video plays, and tapping it brings the player back. What the player already shows (tuning in, paused, muted) is said only to screen readers, not laid over the picture.
 
 The public build has the procedural eggs only, including a silent code rain. The Rickroll, Bad Apple!!, the memes and the things that play them (jukebox, fruit cart, TV) appear only in a build with the private media. See [Private egg media](https://github.com/voxelwright/voxelwright/blob/main/deploy/README.md#private-egg-media).
 

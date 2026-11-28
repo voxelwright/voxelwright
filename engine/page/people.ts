@@ -7,6 +7,7 @@
 // looks like and how one moves.
 import { shader, type Target } from '../probe/gpu.ts'
 import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
+import { LOCAL_LIGHTS_STRUCT, localLightsEval } from './lights.ts'
 import { CHANNELS, play, type Channel, type Move } from './moves.ts'
 import { CARRIED, OWN, WORN, named, type Extra, type Look, type Part } from './wear.ts'
 import { chance, residents, type Land, type Resident, type Shock } from './residents.ts'
@@ -78,12 +79,15 @@ struct U {
 }
 @group(0) @binding(0) var<uniform> u: U;
 ${GLOBALS}
+${LOCAL_LIGHTS_STRUCT}
 @group(1) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(1) var sunMap: texture_2d_array<f32>;
 // Where the march looked through a pane of glass: what it lets through, and how far off it is (march.ts panes, #163).
 @group(1) @binding(2) var panes: texture_2d<f32>;
+@group(1) @binding(3) var<uniform> localLights: LocalLights;
 ${SUNLIT}
 ${LIGHT}
+${localLightsEval()}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) q: vec3f,
@@ -240,6 +244,9 @@ struct Lit { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     col += albedo * vec3f(1.0, 0.78, 0.48) * min(lamplight(lampAt, facing, in.more.z), 1.3) * g.weather.z * 1.5;
     // And what comes start windows and signs all round: without it a street at night is cut-outs.
     col += albedo * vec3f(0.9, 0.8, 0.7) * 0.06 * g.weather.z;
+  }
+  if (localLights.info.x > 0u) {
+    col += evalLocalLights(seen + u.eye, facing, rd, albedo, rough, 0.0, 0.0);
   }
   // Wet cloth is darker, and shines a little towards the light.
   col *= 1.0 - 0.18 * g.weather.y * select(1.0, 0.0, made == ${SKIN}u);
@@ -789,7 +796,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   const layout = device.createPipelineLayout({
     bindGroupLayouts: [
       device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] }),
-      device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }] }),
+      device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }, { binding: 3, visibility: GPUShaderStage.FRAGMENT, buffer: {} }] }),
     ],
   })
   const floats = (n: number, from: number): GPUVertexAttribute[] => Array.from({ length: n }, (_, i) => ({ shaderLocation: i, offset: from + i * 16, format: 'float32x4' as const }))
@@ -814,7 +821,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   // Bound again whenever the picture is another size: the march's panes are of the picture's size.
   let lit: { panes: GPUTextureView; group: GPUBindGroup } | null = null
   const litFor = (panes: GPUTextureView) => {
-    if (lit?.panes !== panes) lit = { panes, group: device.createBindGroup({ layout: bodies.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }, { binding: 2, resource: panes }] }) }
+    if (lit?.panes !== panes) lit = { panes, group: device.createBindGroup({ layout: bodies.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }, { binding: 2, resource: panes }, { binding: 3, resource: { buffer: march.localLights.buffer } }] }) }
     return lit.group
   }
   const packed = new Float32Array(MOST * EACH), shade = new Float32Array(1024 * 8)

@@ -35,7 +35,7 @@ import type { Marcher, View } from './march.ts'
 import { OWN_HOUR } from './weather.ts'
 import type { Skies, Weather } from './weather.ts'
 import type { Signs } from './signs.ts'
-import type { Picture, WindowEffect } from './eggs-pictures.ts'
+import type { Clear, Picture, WindowEffect } from './eggs-pictures.ts'
 import type { Hud } from './hud.ts'
 import type { Pieces } from './pieces.ts'
 import { things, type ThingId } from './eggs-things.ts'
@@ -179,7 +179,9 @@ export function eggs(page: EggsPage) {
   let brief = 0
   const briefly = (text: string, ms = 6000) => { const mine = ++brief; show(text); setTimeout(() => { if (brief === mine && !typing) show(onBanner) }, ms) }
   console.info(GREETING)
-  const say = (text: string, ms = 5000) => { page.notice(text, ms); if (status.parentElement !== laidOn()) laidOn().append(status); status.textContent = text }
+  const say = (text: string, ms = 5000) => { page.notice(text, ms); tell(text) }
+  /** Said only to whoever cannot see the picture: what the player shows already (what plays, that it is paused or muted) is not laid over it again (#134). */
+  const tell = (text: string) => { if (status.parentElement !== laidOn()) laidOn().append(status); status.textContent = text }
 
   // ── What is running, and the sky as it was before the first egg ──
   let running: { egg: Egg; picture: Picture | null; started: number; media?: HTMLVideoElement; blocked?: boolean; held?: boolean; waiting?: boolean; paused?: boolean } | null = null
@@ -307,8 +309,10 @@ export function eggs(page: EggsPage) {
       current.blocked = true
       m.muted = true
       void m.play().catch(() => {})
+      chosen = true
+      tuck(false)
       showPlayer()
-      say('Playing muted: Unmute on the player brings the sound.')
+      tell('Playing muted: Unmute on the player brings the sound.')
     })
   }
   /** A tap again while its sound was held back: the sound, now. */
@@ -317,7 +321,7 @@ export function eggs(page: EggsPage) {
     current.media!.muted = false
     run(current)
     showPlayer()
-    say('Sound on.')
+    tell('Sound on.')
   }
   /** The meme played last, which “meme” does not play again straight away. */
   let lastMeme: string | null = null, memesPlayed = 0
@@ -341,19 +345,20 @@ export function eggs(page: EggsPage) {
     page.hush(true)
     showPlayer()
     banner(`Now playing: ${v.title}`)
-    say(`Tuning in: ${v.title}…`)
+    tell(`Tuning in: ${v.title}…`)
     try {
-      const [{ videoPicture, wakeVideoAudio }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
+      const [{ videoPicture, wakeVideoAudio, videoRect }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
       wakeAudioFn = wakeVideoAudio
+      fitted = videoRect
       if (running !== current || started !== clock) return
-      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true, windowEffect: getWindowEffect })
+      current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast, sky: v.sky ?? true, windowEffect: getWindowEffect, clear: strip })
       m.src = url
       // It plays once the windows are its screen (every frame below): a 5 s clip started as the screen comes up was
       // half over before it could be seen. Until then its first frame stands on the windows. (The play started in the
       // gesture, with no file yet, would play it as soon as it came: held here. The gesture has let the element play.)
       m.pause()
       current.waiting = true
-      say(`${v.start} Esc, or Stop on the player, ends it.`)
+      tell(`${v.start} Esc, or Stop on the player, ends it.`)
     } catch (e) {
       console.warn(`${v.file} did not load:`, e)
       if (running !== current) return
@@ -380,13 +385,14 @@ export function eggs(page: EggsPage) {
     if (!staying) undress()
     if (!quiet) {
       if (was.egg === 'matrix') say('Blue pill. Back in the park.')
-      else say(ended ? VIDEOS[was.egg].end : `${VIDEOS[was.egg].title} stopped.`)
+      else tell(ended ? VIDEOS[was.egg].end : `${VIDEOS[was.egg].title} stopped.`)
     }
   }
 
   // ── The player: what is playing, a link to where it came from, and a control for each thing the hand does to a
-  // video (DESIGN.md): a key to pause it and to play it on, a fader for where in it the picture is (set by where it
-  // stands, as a scrubber is), a key for its sound, one for another meme, and one to stop it ──
+  // video (DESIGN.md), in one row of the HUD's slim keys: a key to pause it and to play it on, a fader for where in it
+  // the picture is (set by where it stands, as a scrubber is), a key for its sound, one for another meme, one to stop
+  // it, and one to hide the row ──
   const realm = page.ui
   /** Where what the eggs lay over the picture goes: the realm's controls, or in the first view, where they are hidden, beside the first view's own keys. */
   const laidOn = () => (document.documentElement.classList.contains('first') ? document.getElementById('first') ?? realm : realm)
@@ -395,55 +401,102 @@ export function eggs(page: EggsPage) {
   player.hidden = true
   player.setAttribute('role', 'group')
   player.setAttribute('aria-label', 'Now playing')
-  // (The city's cues stand clear of it, hud.ts: on a phone it is over the middle of the picture.)
+  // (The city's cues stand clear of it, hud.ts.)
   player.dataset.hudClear = ''
-  // Where it stands: under the keys in the top corners. On a desk, 56 px down. By touch, held upright: in the first view
-  // under the credits and settings keys (first.ts), in the realm under the Back key, the tool key and the street's name
-  // (play-hud.ts); held wide, gone in, between the corners' keys at the top. Never wider than the screen: the title
-  // is cut short, the keys are not. (By the page's state, not by what holds it: started in the first view it stays in #first.)
+  // Where it stands: in a strip along the top or the bottom of the picture, one end fixed, and the video is fitted
+  // into the rest (strip(), eggs-pictures.ts videoRect), so the two never meet. On a desk, in the first view at the
+  // bottom right, gone in at the top left under the servers' key (the settings panel is open at the
+  // top right). By touch, held upright: under the top corners' keys, as wide as the screen (in the first
+  // view under the credits and settings keys, first.ts; in the realm under the minimap, the tool key and the street's
+  // name, play-hud.ts); held wide and gone in, in the top row left of the settings key; held wide in the first view,
+  // at the bottom right in two rows, right of the BLOG board (the banner and the boards are at the top). Hidden, it is its one key
+  // where that key was. (By the page's state, not by what holds it: started in the first view it stays in #first.)
   const placed = document.createElement('style')
   placed.textContent = /* css */ `
-    .egg-player { position: absolute; display: grid; gap: 6px; padding: 8px 10px 10px; pointer-events: auto; box-sizing: border-box;
-      top: 56px; left: max(16px, env(safe-area-inset-left)); inline-size: min(340px, calc(100vw - 2 * max(16px, env(safe-area-inset-left)))); font: 600 13px/1.2 var(--vx-font, system-ui); }
-    .egg-player .top { display: flex; align-items: center; gap: 6px; min-inline-size: 0; }
-    .egg-player .top .stop { flex: none; }
-    .egg-player .now { flex: none; font-weight: 400; opacity: 0.72; }
-    .egg-player .title { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vx-link, inherit); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
-    .egg-player .title::after { content: " \\2197\\FE0E"; }
+    .vx-card.egg-player { --vx: 2px; --key: 36px; --line: 15px; position: absolute; display: grid; gap: 0 4px; padding: 7px 5px 5px 8px; margin: 0; border: 0; pointer-events: auto; box-sizing: border-box;
+      grid-template-columns: var(--key) minmax(0, 1fr) repeat(4, var(--key)); grid-template-rows: var(--line) calc(var(--key) - var(--line)); align-items: center;
+      top: max(18px, env(safe-area-inset-top)); right: calc(max(18px, env(safe-area-inset-right)) + 50px); inline-size: min(520px, 100vw - 260px);
+      font: 600 13px/1 var(--hud-font, var(--vx-font, system-ui)); color: var(--lit-legend, inherit); }
+    .vx-card.egg-player > * { margin: 0; }
+    .egg-player .vx-button { grid-row: 1 / span 2; inline-size: var(--key); min-inline-size: var(--key); block-size: var(--key); min-block-size: var(--key); padding: 0; justify-content: center; }
+    .egg-player .pause { grid-column: 1; } .egg-player .mute { grid-column: 3; } .egg-player .next { grid-column: 4; } .egg-player .stop { grid-column: 5; } .egg-player .tuck { grid-column: 6; }
+    /* Standing by the left (a desk, gone in): the hide key at the left end. */
+    .vx-card.egg-player[data-side="left"] { grid-template-columns: repeat(2, var(--key)) minmax(0, 1fr) repeat(3, var(--key)); }
+    .egg-player[data-side="left"] .tuck { grid-column: 1; } .egg-player[data-side="left"] .pause { grid-column: 2; } .egg-player[data-side="left"] :is(.line, .seek) { grid-column: 3; }
+    .egg-player[data-side="left"] .mute { grid-column: 4; } .egg-player[data-side="left"] .next { grid-column: 5; } .egg-player[data-side="left"] .stop { grid-column: 6; }
+    @media (pointer: fine) { html:not(.first) .vx-card.egg-player { left: max(18px, env(safe-area-inset-left)); right: auto; top: calc(max(18px, env(safe-area-inset-top)) + 46px); } }
+    .egg-player .line { grid-column: 2; grid-row: 1; display: flex; align-items: baseline; gap: 8px; min-inline-size: 0; padding-inline: 4px; }
+    .egg-player .seek { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 8px; align-self: stretch; min-inline-size: 0; padding-inline: 4px; container-type: inline-size; }
+    /* (A short row keeps its fader long: the time it has played alone, the fader shows how much is left.) */
+    @container (max-width: 200px) { .egg-player .time .whole { display: none; } }
+    .egg-player .vx-slider { flex: 1 1 auto; display: flex; align-items: center; align-self: stretch; min-inline-size: 0; }
+    .egg-player .vx-slider input { inline-size: 100%; block-size: 100%; margin: 0; accent-color: var(--vx-link, auto); }
+    .egg-player .title { flex: 0 1 auto; display: inline-flex; min-inline-size: 0; max-inline-size: 100%; color: var(--vx-link, inherit); text-decoration: none; }
+    .egg-player .title > span { min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+    /* (The arrow stays when the title is cut short: it says the title is a link out.) */
+    .egg-player .title::after { flex: none; content: "\\00A0\\2197\\FE0E"; }
     .egg-player .title:focus-visible { outline: 2px solid var(--vx-focus, currentColor); outline-offset: 2px; border-radius: 2px; }
-    .egg-player .seek { display: flex; align-items: center; gap: 8px; font: 400 12px/1 var(--vx-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
-    .egg-player .seek .vx-slider { flex: 1 1 auto; min-inline-size: 0; display: flex; }
-    .egg-player .seek input { inline-size: 100%; margin: 0; accent-color: var(--vx-link, auto); }
-    .egg-player .keys { display: flex; gap: 8px; }
-    .egg-player .keys button { flex: 1 1 0; min-inline-size: 0; justify-content: center; }
-    .egg-player .seek output { min-inline-size: 4ch; }
-    .egg-player .seek .of { text-align: end; }
+    .egg-player .time { flex: none; font: 400 11px/1 var(--vx-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; color: var(--vx-ink-quiet, inherit); }
+    .vx-card.egg-player.tucked { inline-size: auto !important; grid-template-columns: var(--key); }
+    .egg-player.tucked > :not(.tuck, .vx-canvas) { display: none; }
+    /* (Hidden, the key alone: no plate round it, and nothing but the key takes a tap.) */
+    .egg-player.tucked { pointer-events: none; } .egg-player.tucked > .vx-canvas { visibility: hidden; } .egg-player.tucked .tuck { pointer-events: auto; }
+    .egg-player.tucked .tuck { grid-column: 1; }
+    @media (pointer: fine) { .egg-player .title { font-size: 14px; } }
+    @media (pointer: coarse) {
+      .vx-card.egg-player { --key: 44px; --line: 16px; inline-size: min(440px, 100vw - 260px); }
+    }
+    /* Upright, as wide as the screen, in three rows on the same two edges: what plays, with Hide at the right; the
+       fader and the time the whole width under the thumb; and the keys in the order they have on a wide screen, the first
+       under the title's start and the last under Hide. */
     @media (pointer: coarse) and (max-aspect-ratio: 1/1) {
-      html.first .egg-player { top: calc(max(20px, calc(env(safe-area-inset-top) + 8px)) + 56px); }
-      html:not(.first) .egg-player { top: calc(env(safe-area-inset-top, 0px) + 164px); }
-      .egg-player .seek input { block-size: 44px; }
+      .vx-card.egg-player { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px 8px; padding: 9px 8px 8px 10px;
+        right: max(16px, env(safe-area-inset-right)); inline-size: calc(100vw - 2 * max(16px, env(safe-area-inset-right))); }
+      .egg-player .line { order: 1; flex: 1 1 0; align-items: center; padding-inline: 2px; }
+      .egg-player .title { font-size: 14px; }
+      .egg-player .tuck { order: 2; }
+      .egg-player .seek { order: 3; flex: 1 0 100%; block-size: 24px; padding-inline: 2px; box-sizing: border-box; }
+      .egg-player .pause { order: 4; } .egg-player .mute { order: 5; } .egg-player .next { order: 6; } .egg-player .stop { order: 7; }
+      html.first .vx-card.egg-player { top: calc(max(20px, calc(env(safe-area-inset-top) + 8px)) + 64px); }
+      html:not(.first) .vx-card.egg-player { top: calc(max(14px, env(safe-area-inset-top)) + 110px); }
     }
+    /* The first view, wide: at the bottom right, the video fitted above it (its top is the banner's round and the boards). */
+    @media (min-aspect-ratio: 1/1) { html.first .vx-card.egg-player { top: auto; left: auto; bottom: max(16px, env(safe-area-inset-bottom)); right: max(16px, env(safe-area-inset-right)); } }
+    /* By touch, held wide, in the first view: right of the BLOG board (which ends a little past the middle of the
+       picture), in two rows: the title, Sound and Stop over Pause, the fader, Next and Hide (Hide in the corner the row
+       stands by, so that hidden its key is where it was). */
     @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
-      html:not(.first) .egg-player { top: max(12px, env(safe-area-inset-top)); left: 0; right: 0; margin-inline: auto; inline-size: min(420px, 100vw - 240px); }
+      html.first .vx-card.egg-player { inline-size: calc(43vw - max(16px, env(safe-area-inset-right))); display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 6px 6px 9px; }
+      html.first .egg-player .line { order: 1; flex: 1 1 calc(100% - 2 * var(--key) - 12px); box-sizing: border-box; }
+      html.first .egg-player .mute { order: 2; } html.first .egg-player .stop { order: 3; }
+      html.first .egg-player .pause { order: 4; } html.first .egg-player .seek { order: 5; flex: 1 1 0; block-size: var(--key); }
+      html.first .egg-player .next { order: 6; } html.first .egg-player .tuck { order: 7; }
     }
-    .egg-player { transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1); }
-    .egg-player.tucked { transform: translateX(calc(env(safe-area-inset-left, 0px) - var(--tuck, 100vw))); }
-    .egg-player .tuck { flex: none; margin-inline-start: auto; padding-inline: 12px; font-size: 20px; }
-    .egg-player .tab { position: absolute; left: calc(100% + 16px); font-size: 22px; top: 50%; translate: 0 -50%; min-inline-size: 36px; min-block-size: 56px; padding: 0;
-      opacity: 0; visibility: hidden; transition: opacity 160ms ease-out, visibility 0s 160ms; }
-    .egg-player.tucked .tab { opacity: 1; visibility: visible; transition: opacity 160ms ease-out 120ms; }
-    @media (prefers-reduced-motion: reduce) { .egg-player, .egg-player .tab { transition: none; } }`
+    /* Held wide and gone in: in the top row, between the minimap and the column of the settings and tool keys. */
+    @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
+      html:not(.first) .vx-card.egg-player { top: max(7px, env(safe-area-inset-top)); right: calc(max(14px, env(safe-area-inset-right)) + 134px); inline-size: min(420px, 100vw - 2 * max(14px, env(safe-area-inset-left)) - 330px); }
+    }`
   document.head.append(placed)
-  // (Stop beside the title, as a window's close is: the kit's keys are wide, and four in a row are wider than a phone.)
-  player.innerHTML = `<div class="top"><span class="now">Now playing</span><a class="title" target="_blank" rel="noopener noreferrer"></a><button class="vx-button tuck" type="button" aria-label="Tuck the player away" title="Tuck the player away">‹</button><button class="vx-button stop" type="button" data-vx-kind="danger">Stop</button></div>
-    <div class="seek"><output class="at">0:00</output><span class="vx-slider"><input type="range" min="0" max="1" step="0.05" value="0" aria-label="Where in it"></span><output class="of">0:00</output></div>
-    <div class="keys"><button class="vx-button pause" type="button">Pause</button><button class="vx-button mute" type="button" aria-pressed="false">Mute</button><button class="vx-button next" type="button">Next</button></div>
-    <button class="vx-button tab" type="button" aria-label="Bring the player back" title="Bring the player back" inert>›</button>`
+  // (Each key is its picture alone, its name said to whoever cannot see it, with no tip over the picture.)
+  const key = (cls: string, icon: string, name: string, extra = '') => `<button class="vx-button ${cls}" type="button" data-vx-icon="${icon}" data-vx-icon-only aria-label="${name}"${extra}></button>`
+  player.innerHTML = `${key('pause', 'pause', 'Pause', ' data-vx-kind="main"')}
+    <div class="line"><a class="title" target="_blank" rel="noopener noreferrer"><span></span></a></div>
+    <div class="seek"><span class="vx-slider"><input type="range" min="0" max="1" step="0.05" value="0" aria-label="Where in it"></span><span class="time"><output class="at">0:00</output><span class="whole"> / <output class="of">0:00</output></span></span></div>
+    ${key('mute', 'sound', 'Mute')}${key('next', 'next', 'Next')}${key('stop', 'stop', 'Stop', ' data-vx-kind="danger"')}${key('tuck', 'minimize', 'Hide the player')}`
   realm.append(player)
+  // (The kit's voxels for the row, as the lockers' key has them, unless the page asks for plain keys, first.ts: the kit
+  // took the realm's controls before this row was made, so the row is given to it here.)
+  if (new URLSearchParams(location.search).get('kit') !== 'plain') void import(new URL('../kit/src/index.js', import.meta.url).href).then((k: { adopt(root?: Element): void }) => k.adopt(player)).catch(() => {})
   const $p = <T extends Element>(q: string) => player.querySelector<T>(q)!
-  const muteKey = $p<HTMLButtonElement>('.mute'), stopKey = $p<HTMLButtonElement>('.stop'), pauseKey = $p<HTMLButtonElement>('.pause'), nextKey = $p<HTMLButtonElement>('.next')
-  const link = $p<HTMLAnchorElement>('.title'), fader = $p<HTMLInputElement>('.seek input'), at = $p<HTMLOutputElement>('.at'), of = $p<HTMLOutputElement>('.of')
+  const muteKey = $p<HTMLButtonElement>('.mute'), stopKey = $p<HTMLButtonElement>('.stop'), pauseKey = $p<HTMLButtonElement>('.pause'), nextKey = $p<HTMLButtonElement>('.next'), tuckKey = $p<HTMLButtonElement>('.tuck')
+  const link = $p<HTMLAnchorElement>('.title'), fader = $p<HTMLInputElement>('.vx-slider input'), at = $p<HTMLOutputElement>('.at'), of = $p<HTMLOutputElement>('.of')
   const mmss = (t: number) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00')
+  /** A key's name, picture and kind, set only where they change: the kit builds a key again when its picture does. */
+  const keyed = (b: HTMLButtonElement, name: string, icon: string, kind = '') => {
+    if (b.getAttribute('aria-label') !== name) b.setAttribute('aria-label', name)
+    if (b.dataset.vxIcon !== icon) b.dataset.vxIcon = icon
+    if ((b.dataset.vxKind ?? '') !== kind) { if (kind) b.dataset.vxKind = kind; else delete b.dataset.vxKind }
+  }
   /** Whether the hand is on the fader: what it says is the hand's then, not the video's. */
   let scrubbing = false
   /** The fader and the times as the video has them. */
@@ -461,18 +514,46 @@ export function eggs(page: EggsPage) {
     if (!running?.media) return
     laidOn().append(player)
     player.hidden = false
-    if (tucked) measure()
+    settle()
+    anchor()
     const title = TITLES(running.egg), source = SOURCES[running.egg]
-    link.textContent = title
-    if (source) { link.href = `https://www.youtube.com/watch?v=${source}`; link.title = `${title}: the original on YouTube (opens a new tab)` }
-    else { link.removeAttribute('href'); link.removeAttribute('title') }
+    link.firstElementChild!.textContent = title
+    if (source) { link.href = `https://www.youtube.com/watch?v=${source}`; link.setAttribute('aria-label', `${title}: the original on YouTube (opens a new tab)`) }
+    else { link.removeAttribute('href'); link.removeAttribute('aria-label') }
     const muted = running.media.muted
-    muteKey.textContent = muted ? 'Unmute' : 'Mute'
-    muteKey.setAttribute('aria-pressed', String(muted))
-    pauseKey.textContent = running.paused ? 'Play' : 'Pause'
+    // (The sound held back by the browser: the key is cobalt, the tap it wants.)
+    keyed(muteKey, muted ? 'Unmute' : 'Mute', muted ? 'muted' : 'sound', running.blocked ? 'main' : '')
+    keyed(pauseKey, running.paused ? 'Play' : 'Pause', running.paused ? 'play' : 'pause', 'main')
+    folded()
     where()
   }
   const hidePlayer = () => { if (player.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); player.hidden = true }
+  /** How a video stands on the view (eggs-pictures.ts), once one has been asked for. */
+  let fitted: typeof import('./eggs-pictures.ts').videoRect | null = null
+  /**
+   * What of the view the video stays off (videoRect): the player's strip, top or bottom as it stands, with a gap; none
+   * where the player is beside the video, not over or under it (its key alone in a corner, as a rule). Hidden to its
+   * key, the picture has back the room the row took: that is what hiding it is for.
+   */
+  const strip = (): Clear | undefined => {
+    const m = running?.media
+    if (player.hidden || !player.isConnected || !m?.videoWidth) return undefined
+    const v = page.canvas.getBoundingClientRect(), p = player.getBoundingClientRect()
+    if (!v.height || !p.height) return undefined
+    if (fitted) {
+      const whole = fitted(page.aspect(), m.videoWidth / m.videoHeight), x0 = (p.left - v.left) / v.width, x1 = (p.right - v.left) / v.width
+      if (x1 <= whole.x || x0 >= whole.x + whole.w) return undefined
+    }
+    const GAP = 8
+    if (p.top < v.top + v.height / 2) {
+      // In the first view the banner's plane flies just over the top of a video with a sky (boards.ts `above`): a lane
+      // for it under the row, its 3% margin, its cloth (taller as it comes nearer on its round) and the room round its
+      // 44 px target.
+      const lane = document.documentElement.classList.contains('first') && running?.picture?.sky ? 0.03 * v.height + 72 : 0
+      return { top: (p.bottom + GAP + lane - v.top) / v.height, bottom: 1 }
+    }
+    return { top: 0, bottom: (p.top - GAP - v.top) / v.height }
+  }
   muteKey.addEventListener('click', () => {
     if (!running?.media) return
     const m = running.media
@@ -481,7 +562,7 @@ export function eggs(page: EggsPage) {
     // An unmute is a fresh tap: a video that started muted gets its sound here.
     if (!m.muted && m.paused && m.src && !running.paused && !running.waiting) run(running)
     showPlayer()
-    say(m.muted ? 'Muted.' : 'Sound on.')
+    tell(m.muted ? 'Muted.' : 'Sound on.')
   })
   pauseKey.addEventListener('click', () => {
     const r = running
@@ -491,26 +572,37 @@ export function eggs(page: EggsPage) {
     // (Played on before the screen was up: it plays once it is, as it would have.)
     else if (!r.waiting) run(r)
     showPlayer()
-    say(r.paused ? 'Paused.' : 'Playing.')
+    tell(r.paused ? 'Paused.' : 'Playing.')
   })
-  // Tucked: slid off the left edge to watch with nothing over the picture, a tab left at the edge to bring it back. It
-  // stays tucked for the next egg too, until the tab is tapped. Out of sight, its keys are out of reach (inert).
-  const tuckKey = $p<HTMLButtonElement>('.tuck'), tab = $p<HTMLButtonElement>('.tab'), parts = [...player.children].filter((e) => e !== tab) as HTMLElement[]
+  // Hidden: the row folds into its last key, where that key was, to watch with only that key over the picture; the
+  // key brings the row back. Once the key has been tapped the row stays as it was left, for the next egg too (or until
+  // the sound is held back, when the row comes back for its Unmute). Until then it starts hidden where the picture is
+  // short and the row would take much of it: the first view on a phone held wide (owner, November 27).
   let tucked = false
-  /** How far it slides: its right edge 16 px past the screen's left, its block's side and shadow too, the tab 16 px out to meet the edge (by layout, so the slide itself does not count). */
-  const measure = () => { const left = (player.offsetParent as HTMLElement | null)?.getBoundingClientRect().left ?? 0; player.style.setProperty('--tuck', `${left + player.offsetLeft + player.offsetWidth + 16}px`) }
+  /** Whether the row is hidden or shown by a hand (the key, or the sound held back), not by where the page is. */
+  let chosen = false
+  const wideTouch = matchMedia('(pointer: coarse) and (min-aspect-ratio: 1/1)')
+  /** Hidden or shown as the page asks, until a hand has chosen. */
+  const settle = () => { if (!chosen && !player.hidden) tuck(wideTouch.matches && document.documentElement.classList.contains('first')) }
   const tuck = (on: boolean) => {
-    const focused = player.contains(document.activeElement)
+    if (tucked === on) return
     tucked = on
-    if (on) measure()
     player.classList.toggle('tucked', on)
-    for (const e of parts) e.inert = on
-    tab.inert = !on
-    if (focused) (on ? tab : tuckKey).focus({ preventScroll: true })
+    folded()
   }
-  tuckKey.addEventListener('click', () => tuck(true))
-  tab.addEventListener('click', () => tuck(false))
-  addEventListener('resize', () => { if (tucked) measure() })
+  /** The hide key, and hidden the key that is all of it: cobalt while the video plays (something is on), plain while it is paused. */
+  const folded = () => keyed(tuckKey, tucked ? 'Show the player' : 'Hide the player', tucked ? 'playing' : 'minimize', tucked && !running?.paused ? 'main' : '')
+  /** Which end of the row the hide key is at: the end the row stands by (CSS), so that hidden, the key stays where it was. */
+  const anchor = () => {
+    if (tucked || player.hidden) return
+    const r = player.getBoundingClientRect(), left = r.left + r.width / 2 < innerWidth / 2 - 1
+    if (player.dataset.side !== (left ? 'left' : 'right')) player.dataset.side = left ? 'left' : 'right'
+  }
+  // (Again for the screen turned, and for the page gone in from the first view: its place is by the page's classes.)
+  const relay = () => { settle(); anchor() }
+  addEventListener('resize', relay)
+  new MutationObserver(relay).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+  tuckKey.addEventListener('click', () => { chosen = true; tuck(!tucked) })
   nextKey.addEventListener('click', () => act('meme'))
   stopKey.addEventListener('click', () => stop())
   fader.addEventListener('pointerdown', () => { scrubbing = true })
@@ -919,6 +1011,13 @@ export function eggs(page: EggsPage) {
     },
     /** For the checks: how many bytes of the video's sound were decoded (Chrome), and the picture's light where it is drawn. */
     get media() { return running?.media ?? null },
+    /** For the checks: where the video stands on the page now (client px), as its picture last drew it on the windows and the sky, or null with none. */
+    get screen() {
+      const m = running?.media, r = running?.picture?.rect
+      if (!m?.videoWidth || !r) return null
+      const v = page.canvas.getBoundingClientRect()
+      return { left: v.left + r[0] * v.width, top: v.top + r[1] * v.height, right: v.left + r[2] * v.width, bottom: v.top + r[3] * v.height }
+    },
     /** The things that start the eggs: where each is, and which is offered now. */
     things: found,
     /** What starts them from the first view (eggs-first.ts): where each spot is, and the banner's line. */

@@ -364,5 +364,41 @@ console.log('What it costs')
   }
 }
 
+console.log('Traffic horns match the player car horn')
+{
+  const { hearing, HORN_TONES } = await import('../page/sound/world.ts')
+  const held = [], played = []
+  const fakeVoice = {
+    context: { currentTime: 0 },
+    out: {},
+    running: true,
+    set() {},
+    listen() {},
+    hear() { return { dist: 0, pan: 0, gain: 1, lp: 20000, delay: 0, room: 0.2 } },
+    play(p, o) { played.push({ p, ...o }) },
+    hold(p, o) { held.push({ p, ...o }); return held.length },
+    release() {},
+    glide() {},
+    place() {},
+    forget() {},
+    hush() {},
+  }
+  const ears = hearing(fakeVoice, {
+    ground: () => 0, paving: () => 0, rain: () => 0, under: () => false,
+    flames: () => new Float32Array(0), bodies: () => 0, hour: () => 12,
+    making: () => false, kind: () => 0,
+  }, { music: false })
+  ears.horn(true)
+  ears.horn(false)
+  ears.trafficHorn([10, 20, 30], false)
+  const single = played.splice(0)
+  ears.trafficHorn([10, 20, 30], true)
+  const annoyed = played.splice(0)
+  const expectedPitches = HORN_TONES.map((t) => t.pitch)
+  check(held.length === HORN_TONES.length && held.every((h, i) => h.p === WORLD.carHorn && h.pitch === expectedPitches[i]), `player horn holds the ${expectedPitches.join('+')} Hz dual-tone pair`)
+  check(single.length === HORN_TONES.length && single.every((s, i) => s.p === WORLD.carHorn && s.pitch === expectedPitches[i] && s.gain === HORN_TONES[i].gain && s.force === HORN_TONES[i].force), 'single traffic horn plays the exact player dual-tone horn')
+  check(annoyed.length === HORN_TONES.length * 2 && annoyed.every((s) => s.p === WORLD.carHorn && expectedPitches.includes(s.pitch)), 'annoyed traffic double-honk reuses the exact player dual-tone pitches without detune')
+}
+
 if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
 console.log('sound: ok')

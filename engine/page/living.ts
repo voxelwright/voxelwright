@@ -7,9 +7,10 @@ import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
 import { cockpit, type CockpitState } from './cockpit.ts'
 import { VehicleDeformation, type DeformState } from './deform.ts'
 import { createDriveCam, DRIVE_CAM_LABELS, nextDriveCam, type DriveCamMode } from './drive-cam.ts'
-import { touchSteerCurve } from './gamepad.ts'
+import { driveTouch, type DriveTouch } from './drive-touch.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
+import type { LocalLightSink } from './lights.ts'
 import type { Answer, Ask } from './mover.ts'
 import type { Piece } from './pieces.ts'
 import type { Placed, Struck, Told } from './told.ts'
@@ -193,7 +194,11 @@ export interface Living {
   /** Makes a vehicle's look as it was made: no dents, scuffs or cracks, and its engine quiet. */
   repair(thing: Thing): void
   /** Live wheel-animation inputs while driving a wheeled vehicle, or null (wheels.ts). */
+  /** How a car is driven by touch (drive-touch.ts): its scheme, its settings and the Controls sheet. */
+  readonly touch: DriveTouch
   readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
+  /** Appends the active driven vehicle's dynamic lights (headlights, taillights, brake, reverse, boost) for unified scene lighting. */
+  lights(sink: LocalLightSink): void
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
@@ -338,13 +343,17 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { go: 0, brake: 0, rise: 0, boost: false, horn: false }
+  // (A car's own keys, its steering, pedals, drift and boost, are drive-touch.ts's; these are a hovering thing's and the horn.)
+  const held = { rise: 0, horn: false }
+  const touch = driveTouch({ input: o.input })
   const buttons = o.hud.panel('living')
   const cabin = cockpit(o.hud)
   // Sleek speed, gear, RPM bar, subtle boost bar, camera-mode toast and DRIFT indicator shown while driving a car.
   const drivePanel = o.hud.panel('drive-hud')
-  drivePanel.innerHTML = '<div class="dh-cam" hidden></div><div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div><div class="dh-boost"><i style="width:100%"></i></div>'
+  drivePanel.innerHTML = '<div class="dh-cam" hidden></div><div class="dh-note" hidden></div><div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div><div class="dh-boost"><i style="width:100%"></i></div>'
   const dhCam = drivePanel.querySelector<HTMLElement>('.dh-cam')!
+  const dhNote = drivePanel.querySelector<HTMLElement>('.dh-note')!
+  let lastNote = ''
   const dhSpd = drivePanel.querySelector<HTMLElement>('.dh-spd')!
   const dhGear = drivePanel.querySelector<HTMLElement>('.dh-gear')!
   const dhDrift = drivePanel.querySelector<HTMLElement>('.dh-drift')!
@@ -389,7 +398,9 @@ export function living(o: {
     telemetryNow = null
     wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
-    held.go = 0; held.brake = 0; held.rise = 0; held.boost = false; held.horn = false
+    held.rise = 0; held.horn = false
+    touch.release()
+    lastNote = ''; dhNote.hidden = true
     cabin.reset()
     o.lens?.(0, 0, 0, 0)
     o.audio?.drive(null)
@@ -454,28 +465,16 @@ export function living(o: {
     repairBtn.hidden = !isDamaged(riding)
   }
   const showButtons = (scheme: Scheme | null) => {
-    held.go = 0; held.brake = 0; held.rise = 0; held.boost = false; held.horn = false
+    held.rise = 0; held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
+    if (scheme?.name !== 'drive') touch.show(false)
     if (!scheme) { buttons.replaceChildren(); seat = null; repairBtn = null; return }
     if (scheme.name === 'drive') {
-      // Ergonomic two-zone touch driving layout (GTA Definitive Edition & CarX Street):
-      // bottom-right holds only the 4 driving action controls (Gas, Brake/Rev, Drift, Boost);
-      // top-right holds quiet icon-only utility keys (Horn, Radio, Cam, Exit, and contextual Repair when damaged).
+      // By touch the car's own keys are the scheme's (drive-touch.ts: steering under one thumb, pedals, drift and boost
+      // under the other); along the top right, quiet icon-only keys (Horn, Radio, Cam, Exit, and Repair when damaged).
       seat = null
-      const pedals = Object.assign(document.createElement('div'), { className: 'drive-pedals' })
       const util = Object.assign(document.createElement('div'), { className: 'drive-util' })
-      const gasBtn = button('gas', 'Gas', () => { held.go = 1 }, () => { held.go = 0 })
-      gasBtn.setAttribute('aria-label', 'Accelerate')
-      const brakeBtn = button('brake', 'Brake', () => { held.brake = 1 }, () => { held.brake = 0 })
-      brakeBtn.setAttribute('aria-label', 'Brake or reverse')
-      const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
-      driftBtn.dataset.vxKind = 'main'
-      driftBtn.setAttribute('aria-label', 'Handbrake drift')
-      const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
-      boostBtn.setAttribute('aria-label', 'Nitrous boost')
-      pedals.append(boostBtn, driftBtn, brakeBtn, gasBtn)
-
       const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
       hornBtn.setAttribute('aria-label', 'Honk horn')
       util.append(hornBtn)
@@ -497,7 +496,7 @@ export function living(o: {
       syncRepairBtn()
       util.append(repairBtn)
 
-      buttons.replaceChildren(util, pedals)
+      buttons.replaceChildren(util, ...touch.show(true))
       return
     }
     repairBtn = null
@@ -858,6 +857,7 @@ export function living(o: {
     get telemetry() { return telemetryNow },
     get cockpit() { return cabin.state },
     get wheelDrive() { return wheelDriveNow },
+    touch,
     look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, low: w.low, per: w.per, cracks: p.cracks ? p.cracks.map((c) => (c ? ([...c] as [number, number, number]) : null)) : null } }) }),
     get rider() {
       const at = riding && where(riding)
@@ -968,6 +968,35 @@ export function living(o: {
       }
     },
     repair: repairCar,
+    lights(sink) {
+      if (!riding || !riding.alive || (riding.controls ?? 'drive') !== 'drive') return
+      const at = where(riding)
+      if (!at) return
+      const dmg = dents.get(dentId(riding, 0))?.hoodDamage ?? 0
+      const headMul = Math.max(0.15, 1 - dmg * 0.85)
+      const head = lampState[2] * headMul
+      const brake = lampState[0]
+      const rev = lampState[1]
+      const boost = telemetryNow?.boosting ? 1 : 0
+      if (head <= 0.01 && brake <= 0.04 && rev <= 0.05 && boost <= 0.05) return
+      const fwd = turned(at.rot, FRONTS[riding.motor.front])
+      const up = turned(at.rot, [0, 1, 0])
+      const rx = fwd[1] * up[2] - fwd[2] * up[1]
+      const ry = fwd[2] * up[0] - fwd[0] * up[2]
+      const rz = fwd[0] * up[1] - fwd[1] * up[0]
+      const rl = Math.hypot(rx, ry, rz) || 1
+      const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
+      const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
+      const halfH = riding.size[1] * 0.5
+      sink.addVehicle(
+        at.at[0] - up[0] * halfH, at.at[1] - up[1] * halfH, at.at[2] - up[2] * halfH,
+        fwd[0], fwd[1], fwd[2],
+        rx / rl, ry / rl, rz / rl,
+        up[0], up[1], up[2],
+        halfLen, halfWide, riding.size[1],
+        head, brake, rev, 0, boost, true,
+      )
+    },
     frame(dt) {
       follow()
       // A struck engine steams, then smokes, then burns (#37), under the bonnet at its front: only near the eye, and
@@ -1009,29 +1038,25 @@ export function living(o: {
         const way = (o.input.held(line.keys[0]) ? 1 : 0) - (o.input.held(line.keys[1]) ? 1 : 0)
         for (const axis of ['go', 'turn', 'rise'] as const) if (line[axis]) axes[axis] += way * line[axis]
       }
-      // Gamepad full analog driving axes (triggers + curved left stick) and smooth-curved touch thumbstick + ergonomic pedals.
+      // A pad's analog axes (triggers and a curved left stick), and by touch the scheme's keys (drive-touch.ts), added to
+      // what the keys say. A car by touch never reads the move stick but through its scheme (slide steers by it, across only).
       const gp = o.input.driveAxes ?? null
-      const stick = o.input.stick
-      const hasTouch = o.input.thumb !== null
-      const pedalActive = isDrive && (held.go > 0 || held.brake > 0)
-      const pedalGo = isDrive ? held.go - held.brake : 0
-      if (isDrive && gp && !hasTouch && !pedalActive) {
-        axes.go = Math.max(-1, Math.min(1, axes.go + gp.go))
-        axes.turn = Math.max(-1, Math.min(1, axes.turn + gp.turn))
-        axes.rise = Math.max(-1, Math.min(1, axes.rise + gp.handbrake + held.rise))
+      const t = isDrive ? touch.read() : null
+      if (isDrive) { const n = touch.note(); if (n !== lastNote) { lastNote = n; dhNote.textContent = n; dhNote.hidden = !n } }
+      if (isDrive && t) {
+        axes.go = Math.max(-1, Math.min(1, axes.go + t.go + (gp?.go ?? 0)))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + t.turn + (gp?.turn ?? 0)))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + t.rise + (gp?.handbrake ?? 0)))
       } else {
-        const turnStick = isDrive ? touchSteerCurve(stick[0], 0) : stick[0]
-        // Dedicate the left thumb strictly to horizontal steering whenever right-thumb Gas/Brake pedals are pressed;
-        // keep left-stick vertical throttle/reverse as a graceful one-handed fallback when neither pedal is held.
-        const stickGo = pedalActive ? 0 : -stick[1]
-        axes.go = Math.max(-1, Math.min(1, axes.go + pedalGo + stickGo + (isDrive && gp ? gp.go : 0)))
-        axes.turn = Math.max(-1, Math.min(1, axes.turn + turnStick + (isDrive && gp ? gp.turn : 0)))
-        axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise + (isDrive && gp ? gp.handbrake : 0)))
+        const stick = o.input.stick
+        axes.go = Math.max(-1, Math.min(1, axes.go - stick[1]))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + stick[0]))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise))
       }
       const asked = once
       once = undefined
       if (asked === 'leave') { mount(null); return false }
-      const boostAsk = isDrive && (o.input.held('ShiftLeft') || o.input.held('ShiftRight') || held.boost || (gp?.boost ?? 0) > 0.5)
+      const boostAsk = isDrive && (o.input.held('ShiftLeft') || o.input.held('ShiftRight') || !!t?.boost || (gp?.boost ?? 0) > 0.5)
       const rainWet = isDrive && o.fx ? Math.max(0, Math.min(1, o.fx.rain())) : 0
       // Said when it changes, and again four times a second: what a thing is told holds for a second only.
       const now = `${Math.round(axes.go * 1000)},${Math.round(axes.turn * 1000)},${Math.round(axes.rise * 1000)},${boostAsk ? 1 : 0},${Math.round(rainWet * 10)}`
@@ -1230,38 +1255,6 @@ export function living(o: {
             else o.fx.lift(i)
             const puffLevel = Math.max(slipAmt, wet && horizSpeed > 55 ? Math.min(0.55, (horizSpeed - 50) / 140) : 0, !paved && horizSpeed > 30 ? Math.min(0.65, horizSpeed / 120) : 0)
             if (emitSmoke && puffLevel > 0.13) o.fx.smoke(p, [-velSm[0] * 0.16, 4.2 + puffLevel * 9, -velSm[2] * 0.16], puffLevel, smokeCol)
-          }
-          // Vivid crimson taillight/brake glow, fiery orange exhaust pop flash, cyan nitrous splash, white reverse pool, and two-stage headlight beams.
-          const dir2: readonly [number, number] = [at.front[0], at.front[2]]
-          const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
-          const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
-          if (boosting) {
-            const nosPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 12), at.at[1], at.at[2] - at.front[2] * (halfLen + 12)]
-            o.fx.light(nosPos, dir2, [20, halfWide + 13], [0.18, 0.74, 1.0], 0.48 + dark * 0.42 + (wet ? 0.18 : 0))
-          } else if (exhaustFlash > 0.02) {
-            const flashAnchor = rearTips[0] ?? ([at.at[0] - at.front[0] * (halfLen + 5), at.at[1], at.at[2] - at.front[2] * (halfLen + 5)] as const)
-            const flashPos: readonly [number, number, number] = [flashAnchor[0] - at.front[0] * 3.5, at.at[1], flashAnchor[2] - at.front[2] * 3.5]
-            o.fx.light(flashPos, dir2, [8.5, halfWide + 3.5], [1.0, 0.42, 0.06], (0.28 + dark * 0.42 + (wet ? 0.12 : 0)) * exhaustFlash)
-          }
-          if (lampBrake > 0) {
-            const backPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 9), at.at[1], at.at[2] - at.front[2] * (halfLen + 9)]
-            o.fx.light(backPos, dir2, [15, halfWide + 10], [1.0, 0.05, 0.015], (0.24 + dark * 0.36 + (wet ? 0.14 : 0)) * (handbraking ? 1.1 : Math.min(1.0, lampBrake)))
-          } else if (headLevel > 0) {
-            const tailPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 7), at.at[1], at.at[2] - at.front[2] * (halfLen + 7)]
-            o.fx.light(tailPos, dir2, [12, halfWide + 8], [1.0, 0.04, 0.015], (0.10 + dark * 0.28 + (wet ? 0.12 : 0)) * Math.min(1, headLevel))
-          }
-          if (lampRev > 0) {
-            const revPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 11), at.at[1], at.at[2] - at.front[2] * (halfLen + 11)]
-            o.fx.light(revPos, dir2, [13, halfWide + 7], [0.92, 0.96, 1.0], 0.12 + dark * 0.34 + (wet ? 0.12 : 0))
-          }
-          if (headLevel > 0) {
-            const hi = headLevel > 1.2
-            const nearReach = hi ? 32 : 24
-            const nearPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + nearReach), at.at[1], at.at[2] + at.front[2] * (halfLen + nearReach)]
-            o.fx.light(nearPos, dir2, [nearReach + 8, halfWide + (hi ? 18 : 14)], hi ? [1.0, 0.98, 0.92] : [1.0, 0.94, 0.80], (0.14 + dark * 0.78) * (hi ? 0.66 : 0.48) + (wet ? 0.14 * dark : 0))
-            const farReach = hi ? 108 : 76
-            const farPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + farReach), at.at[1], at.at[2] + at.front[2] * (halfLen + farReach)]
-            o.fx.light(farPos, dir2, [hi ? 114 : 82, halfWide + (hi ? 40 : 30)], hi ? [1.0, 0.97, 0.90] : [1.0, 0.92, 0.76], (0.10 + dark * 0.86) * (hi ? 0.56 : 0.38) + (wet ? 0.12 * dark : 0))
           }
         }
       } else if (telemetryNow || wheelDriveNow) {
