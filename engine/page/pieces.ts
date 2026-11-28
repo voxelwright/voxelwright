@@ -161,6 +161,13 @@ fn litBy(in: Out, rd: vec3f) -> vec3f {
   let n = normalize(in.lit);
   return normalize(mix(in.facing, n, smoothstep(0.0, 0.3, dot(n, -rd))));
 }
+// Smooth glass keeps its smooth normal much closer to grazing angles (#155): blending raw voxel stair normals
+// (in.facing, alternating +Y treads and -Z risers) back in at dot(n, -rd) < 0.3 created bright stair-step
+// reflection bands across sloped fastback rear windshields in the chase camera.
+fn litGlass(in: Out, rd: vec3f) -> vec3f {
+  let n = normalize(in.lit);
+  return normalize(mix(in.facing, n, smoothstep(0.0, 0.06, dot(n, -rd))));
+}
 ${PAINT}
 // A vehicle's paint (#450: the library's paint role, marked polished by street.ts; kinds.rs POLISHED): a clear coat
 // over the colour. It mirrors the sky as the hour colours it, a little face on and more at a glance (Schlick, from
@@ -180,17 +187,18 @@ fn carPaint(col: vec3f, n: vec3f, rd: vec3f, direct: f32) -> vec3f {
 // What a smooth panel of glass or clear coat mirrors (#38): the sky as the hour colours it, a bright band along the
 // horizon (the line down a car's flank), and below it the street: warm with light thrown up from the road near the
 // horizon, dark asphalt beneath. Only this body's own faces are asked, as above.
-fn street(back: vec3f, open: f32) -> vec3f {
+fn streetEnv(back: vec3f, open: f32, edge: f32) -> vec3f {
   let up = clamp(back.y, 0.0, 1.0);
   // (The sky's blue a third of the way to grey: at full strength a red bonnet mirrored purple and a dark one royal blue.)
   var sky = mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(up, g.skyZenith.a));
   sky = mix(sky, vec3f(dot(sky, vec3f(0.2126, 0.7152, 0.0722))), 0.35);
-  sky += g.skyHorizon.rgb * 0.4 * smoothstep(0.0, 0.025, back.y) * (1.0 - smoothstep(0.05, 0.14, back.y));
+  sky += g.skyHorizon.rgb * 0.4 * smoothstep(0.0, max(0.025, edge), back.y) * (1.0 - smoothstep(0.05, 0.14, back.y));
   let near = g.skyHorizon.rgb * vec3f(0.42, 0.37, 0.31);
   let road = g.skyHorizon.rgb * vec3f(0.07, 0.068, 0.066);
   let ground = mix(road, near, smoothstep(-0.2, 0.0, back.y)) * mix(0.65, 1.0, open);
-  return mix(ground, sky, smoothstep(-0.006, 0.006, back.y));
+  return mix(ground, sky, smoothstep(-edge, edge, back.y));
 }
+fn street(back: vec3f, open: f32) -> vec3f { return streetEnv(back, open, 0.006); }
 // A smooth car's paint: the clear coat mirrors as Schlick says, whatever the angle, the colour under it has a metal's
 // sheen, and the sun is a hard small spot in the coat.
 fn clearCoat(col: vec3f, albedo: vec3f, n: vec3f, rd: vec3f, direct: f32, open: f32) -> vec3f {
@@ -509,7 +517,7 @@ fn paneCrack(in: Out) -> vec2f {
   let rd = normalize(in.seen);
   // (A picture already toned: what lets a share through of the light lets about that share's root through of the picture.)
   let soft = smoothSeen(in, rd);
-  let n = select(in.facing, litBy(in, rd), soft);
+  let n = select(in.facing, litGlass(in, rd), soft);
   // A crack scatters light and lets less through; interior cabin glass keeps dark fracture contrast while staying drivable.
   let cracked = paneCrack(in).x;
   let block = select(0.74, 0.48, cracked > 0.0 && eyeInsidePiece());
@@ -522,7 +530,7 @@ fn paneCrack(in: Out) -> vec2f {
   let rd = normalize(in.seen);
   let m = looks.material[11];
   let soft = smoothSeen(in, rd);
-  var n = select(in.facing, litBy(in, rd), soft);
+  var n = select(in.facing, litGlass(in, rd), soft);
   let crackInfo = paneCrack(in);
   let cracked = crackInfo.x;
   let tilt = crackInfo.y;
@@ -532,9 +540,10 @@ fn paneCrack(in: Out) -> vec2f {
     n = normalize(n + side * (tilt * 0.22));
   }
   // What it mirrors: the sky as the hour colours it, lighter towards the horizon (a body's glass does not ask the
-  // world); a smooth pane, the street below the horizon too.
+  // world); a smooth pane, the street below the horizon too, with a softer horizon edge so grazing curved windshields
+  // don't strobe across adjacent voxel steps (#155).
   let back = reflect(rd, n);
-  let sky = select(mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(clamp(back.y, 0.0, 1.0), g.skyZenith.a)), street(back, in.open), soft);
+  let sky = select(mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(clamp(back.y, 0.0, 1.0), g.skyZenith.a)), streetEnv(back, in.open, 0.045), soft);
   var direct = max(dot(n, u.sun), 0.0);
   if (direct > 0.0) { let sunny = sunlit(in.seen + u.eye, in.facing, 0u); if (sunny >= 0.0) { direct *= sunny; } }
   // Its own faint film, and the sun's glint off it.

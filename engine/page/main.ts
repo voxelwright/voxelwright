@@ -472,7 +472,7 @@ async function main() {
   const steer = (budget: number, gap: number, calm = false) => {
     steerState.scale = scale
     steerState.held = held
-    steerScale(steerState, { budget, gap, frameMs, cpuMs, gpuMs, marchMs, clocked, calm, fixed })
+    steerScale(steerState, { budget, gap, frameMs, cpuMs, workCpuMs, gpuMs, marchMs, clocked, calm, fixed })
     scale = steerState.scale
     held = steerState.held
   }
@@ -754,8 +754,8 @@ async function main() {
   const off = new Set<string>()
   /** How fast the world goes (#264): 1 as it does. What this page moves and its dust and smoke go by it; in a shared world the world's process says it. */
   const tempo = { rate: 1 }
-  /** What a frame costs this thread, smoothed, in ms; and what each part of it costs, by name. `heard` is the mover's answers, summed. */
-  let cpuMs = 0, mark = 0
+  /** What a frame costs this thread, smoothed, in ms; split into real JS/encode work vs swapchain/submit wait (#155). `heard` is the mover's answers, summed. */
+  let cpuMs = 0, workCpuMs = 0, presentWaitMs = 0, mark = 0
   const spent: Record<string, number> = { heard: 0 }
   /** The same parts for the frame now being drawn, or the last one drawn, each as it was and not smoothed: one long frame shows here and hardly at all in `spent` (#367). */
   const laps: Record<string, number> = {}
@@ -984,9 +984,16 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
+    const texBegan = performance.now()
+    const backbufferView = context.getCurrentTexture().createView()
+    const texMs = performance.now() - texBegan
+    blit(encoder, to, backbufferView, march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy, driveDrift)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 6, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 48) }
+    const subBegan = performance.now()
     device.queue.submit([encoder.finish()])
+    const presentMs = texMs + (performance.now() - subBegan)
+    laps.present = presentMs
+    spent.present = (spent.present ?? 0) * 0.95 + presentMs * 0.05
     telemetry?.onPresented(canvas)
     lap('draw')
     over.frame(project, playedHud?.parts())
@@ -1022,7 +1029,11 @@ async function main() {
     if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && nearLevels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown(); nearPictured() }
     leaveLanding()
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
-    cpuMs += (performance.now() - began - cpuMs) * 0.05
+    const frameCpuMs = performance.now() - began
+    const workMs = Math.max(0, frameCpuMs - presentMs)
+    cpuMs += (frameCpuMs - cpuMs) * 0.05
+    workCpuMs += (workMs - workCpuMs) * 0.05
+    presentWaitMs += (presentMs - presentWaitMs) * 0.05
     requestAnimationFrame(frame)
   }
   /** When the first picture was drawn and when the world round the eye was first whole: ms since the page was asked for. */
@@ -2559,7 +2570,7 @@ async function main() {
     worldStats: () => world.stats,
     mended: () => ({ movers: moversLost, makers: world.stats.crashed }),
     tileFails: () => tally.failed,
-    perf: () => ({ frameMs, gpuMs, cpuMs, scale, bodies, loose: loose(), burning, resting, paused, mapOpen: !!mapSys?.opaque, firstStill: firstStill() }),
+    perf: () => ({ frameMs, gpuMs, cpuMs, workCpuMs, presentWaitMs, scale, bodies, loose: loose(), burning, resting, paused, mapOpen: !!mapSys?.opaque, firstStill: firstStill() }),
     settings: () => ({ hour, rain: march.rain, fog: marine.strength, graphics: preset, hud: (globalThis as unknown as { engine?: { playHud?: { mode: string | null } } }).engine?.playHud?.mode ?? null }),
     clock: () => folkClock.now(),
     groundAt: (x, z) => core.ground_at(x, z),
@@ -2570,6 +2581,7 @@ async function main() {
       tiles: { ...tally },
       mover: { ticking, waitMs: ticking && tickSentAt > 0 ? Math.round(performance.now() - tickSentAt) : 0, bodies, waiting },
       workers: { ...world.workerHealth(), crashed: world.stats.crashed, lacking: world.stats.lacking },
+      spent: Object.fromEntries(Object.entries(spent).map(([k, v]) => [k, Math.round(v * 10) / 10])),
       notes: report.notes.slice(-20),
     }),
     endpointBase: !LOCAL || query.get('telemetry') === '1' ? '' : null,

@@ -6,7 +6,8 @@
 import assert from 'node:assert/strict'
 import { steerScale } from '../page/steer.ts'
 import { clearWay } from '../page/eye.ts'
-import { street, trafficObstacleGap } from '../page/street.ts'
+import { street, trafficObstacleGap, stepDeepensOverlap } from '../page/street.ts'
+import { createRecorder } from '../page/recorder.ts'
 
 // ── 1. steerScale: CPU-bound guard, unclocked deadband, GPU-bound backoff, desktop fast-drop ──
 {
@@ -45,6 +46,16 @@ import { street, trafficObstacleGap } from '../page/street.ts'
   const dropped = steerScale(sDesk, { budget: 16.67, gap: 30, frameMs: 20, cpuMs: 4, gpuMs: 28, marchMs: 28, clocked: true, calm: false, fixed: false })
   assert.equal(dropped, true, 'clocked desktop fast-drop triggers on consecutive GPU-late frames')
   assert.ok(sDesk.scale <= 0.5, `desktop fast-drop fits GPU budget (got ${sDesk.scale})`)
+
+  // #155 iPhone swapchain-wait scenario: total cpuMs is 29.3 ms because getCurrentTexture() blocks on Metal,
+  // but real main-thread workCpuMs is 7.3 ms -> MUST scale down from 1.0 instead of locking at 1.0.
+  const sSwap = { scale: 1.0, held: 0, lateRun: 0, backoffs: 0, sinceDrop: 999 }
+  assert.equal(
+    steerScale(sSwap, { budget: 16.67, gap: 35, frameMs: 35.3, cpuMs: 29.3, workCpuMs: 7.3, gpuMs: 6.7, marchMs: 6.7, clocked: false, calm: false, fixed: false }),
+    true,
+    'GPU swapchain wait in cpuMs must not block render-scale backoff when workCpuMs is low (#155)',
+  )
+  assert.ok(sSwap.scale < 1.0, `scale must drop below 1.0 on GPU-bound phone frames (got ${sSwap.scale})`)
 }
 
 // ── 2. clearWay: deduplicates integer cells while never skipping a 1-cell wall ──
@@ -73,6 +84,14 @@ import { street, trafficObstacleGap } from '../page/street.ts'
   const bPen = { x: 25, z: 0, hx: 0, hz: 1, long: 23, wide: 10, v: 0, id: 20 }
   const gapPen = trafficObstacleGap(a, bPen)
   assert.ok(gapPen < 0, `penetrating car must still report negative gap (got ${gapPen})`)
+
+  // #155 Columbus Ave corner-sweep overlap: city bus in lane 2 bending onto a turn sweeps into stopped grey saloon in lane 1.
+  const saloon = { x: 522249.6, z: 664522.9, heading: -0.156, halfL: 23.5, halfW: 10.5 }
+  const busBefore = { x: 522257.0, z: 664556.0, heading: -0.156, halfL: 55, halfW: 13 }
+  const busTurning = { x: 522260.8, z: 664554.4, heading: -0.78, halfL: 55, halfW: 13 }
+  assert.equal(stepDeepensOverlap(busBefore, busTurning, saloon), true, 'turning bus sweeping into adjacent-lane saloon must be blocked (#155)')
+  const busStraight = { x: 522261.0, z: 664555.4, heading: -0.156, halfL: 55, halfW: 13 }
+  assert.equal(stepDeepensOverlap(busBefore, busStraight, saloon), false, 'parallel bus staying in lane 2 must not be blocked')
 }
 
 // ── 4. street() open(r): short building-stub rejection & lane-width building trim ──
@@ -163,4 +182,54 @@ import { street, trafficObstacleGap } from '../page/street.ts'
   }
 }
 
-console.log('iphone-perf-fixes: PASS (steerScale, clearWay, deadlock tie-breaker, short-stub & lane-width building clearance)')
+// ── 5. recorder.onPresented: async JPEG capture capped on longest edge (#155) ──
+{
+  const origDoc = globalThis.document
+  const origFR = globalThis.FileReader
+  let outW = 0, outH = 0, blobMime = '', syncResolved = false
+  globalThis.document = {
+    createElement(tag) {
+      assert.equal(tag, 'canvas')
+      return {
+        set width(v) { outW = v },
+        set height(v) { outH = v },
+        getContext() { return { drawImage() {} } },
+        toBlob(cb, mime) { blobMime = mime; cb({ size: 42 }) },
+      }
+    },
+  }
+  globalThis.FileReader = class {
+    readAsDataURL() { this.result = 'data:image/jpeg;base64,AA=='; this.onload?.() }
+  }
+  try {
+    const rec = createRecorder({
+      build: 'test', localRealm: null, bay: false,
+      env: () => ({}), release: async () => null, gpuFaults: () => [],
+      input: { top: 'play', held: () => false, stick: [0, 0] },
+      pose: { x: 0, y: 0, z: 0, yaw: 0, pitch: 0 }, fov: () => 60,
+      view: () => ({ eye: [0, 0, 0], forward: [0, 0, 1], right: [1, 0, 0], up: [0, 1, 0], tanHalf: 0.5 }),
+      march: { pick: async () => null },
+      me: { on: false, feet: null, aloft: false, canopy: false },
+      alive: { riding: null, things: [], where: () => null, telemetry: null, damage: () => null },
+      street: () => null,
+      worldStats: () => ({ wanted: 0, stale: 0, ready: 0, poolUsed: 0, poolWords: 1, full: 0, crashed: 0 }),
+      mended: () => ({ movers: 0, makers: 0 }), tileFails: () => 0,
+      perf: () => ({ frameMs: 16.7, gpuMs: 4, cpuMs: 12, workCpuMs: 6, presentWaitMs: 6, scale: 1, bodies: 0, loose: 0, burning: 0, resting: false, paused: false, mapOpen: false, firstStill: false }),
+      settings: () => ({ hour: 12, rain: 0, fog: 0, graphics: 'high', hud: null }),
+      clock: () => 0, groundAt: () => 0, topAt: () => 0, worldKind: () => 0, whereLabel: () => '',
+      endpointBase: null,
+    })
+    const p = rec.captureCanvas(960).then((u) => { syncResolved = true; return u })
+    rec.onPresented({ width: 1320, height: 2265 })
+    assert.equal(syncResolved, false, 'feedback screenshot encode must yield out of onPresented (no sync rAF stall)')
+    const url = await p
+    assert.equal(url, 'data:image/jpeg;base64,AA==')
+    assert.equal(blobMime, 'image/jpeg', 'feedback screenshot must encode as JPEG (no iOS WebP->double-PNG fallback)')
+    assert.ok(Math.max(outW, outH) === 960 && outW < 600, `portrait 1320x2265 must cap longest edge to 960 (got ${outW}x${outH})`)
+  } finally {
+    globalThis.document = origDoc
+    globalThis.FileReader = origFR
+  }
+}
+
+console.log('iphone-perf-fixes: PASS (steerScale, clearWay, deadlock tie-breaker, short-stub & lane-width building clearance, corner-sweep overlap, async JPEG capture)')
