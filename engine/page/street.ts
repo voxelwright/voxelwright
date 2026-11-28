@@ -22,7 +22,8 @@ import type { Living, Making, Motor, Thing } from './living.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Born } from './told.ts'
-import { chance, out as homeHours, type Shock } from './residents.ts'
+import { chance, type Shock } from './residents.ts'
+import { createWalkGraph, DEFAULT_RING_CAPS, hourly, REACH, RING3_RADIUS, type LodStats, type WalkGraph } from '../sf-walks.mjs'
 import { NAMED as NAMED_MOVES } from './moves.ts'
 import { unrun } from './runs.ts'
 import { POLISHED } from './spells.ts'
@@ -35,7 +36,6 @@ import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SE
 export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; top_at?(x: number, z: number): number }
 
 type Ring = Float64Array
-interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
 interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number; railShift?: number }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number; lights?: { s: number; node: number; dx: number; dz: number }[] }
@@ -101,15 +101,8 @@ const carName = (m: Model, paint: number): string => {
   if (COLOUR_PREFIX.test(m.name)) return m.name.replace(COLOUR_PREFIX, `${v} `)
   return `${v} ${m.name}`
 }
-/** How far off people are worked out and drawn (people.ts REACH), and how far a walk takes anyone from home. */
-const REACH = 1400, WALK_MOST = 1600
-/** How long a pair of steps is (people.ts STRIDE). */
-const STRIDE = 14.4
-/** The share of a busy street's people out at each hour: shops and offices, open from morning to late. */
-const SHOPS = [0.15, 0.08, 0.05, 0.04, 0.05, 0.1, 0.25, 0.5, 0.75, 0.85, 0.9, 1, 1, 1, 0.95, 0.95, 1, 1, 1, 0.95, 0.85, 0.7, 0.5, 0.3]
 /** How much traffic there is at each hour, against the most. */
 const TRAFFIC = [0.15, 0.1, 0.07, 0.07, 0.1, 0.25, 0.55, 0.9, 1, 0.85, 0.75, 0.8, 0.85, 0.8, 0.8, 0.85, 0.95, 1, 1, 0.85, 0.65, 0.5, 0.35, 0.22]
-const hourly = (table: readonly number[], hour: number) => { const h = ((hour % 24) + 24) % 24, a = Math.floor(h); return table[a] + (table[(a + 1) % 24] - table[a]) * (h - a) }
 const ease = (v: number) => { const c = Math.max(0, Math.min(1, v)); return c * c * (3 - 2 * c) }
 const mix = (a: number, b: number) => (Math.imul(a | 0, 73856093) ^ Math.imul(b | 0, 19349663)) | 0
 /** A number for an OSM node or way id (up to 2^53): the same always. */
@@ -319,15 +312,6 @@ function line(flat: readonly number[], from: number): { p: Ring; cum: Ring; len:
   return { p, cum, len: cum[n - 1] }
 }
 
-/** A walk out from home and back: the line it takes, its length so far, and what each piece of it is (a crossing is 1). */
-interface Route {
-  p: number[]; cum: number[]; kinds: number[]; sigs: number[]; len: number; used: number; P: Float64Array; C: Float64Array
-  /** The crossings on it that wait on lights: where each begins and ends along it, whose lights, and which way it crosses. */
-  crossings: { s0: number; s1: number; node: number; dx: number; dz: number }[]
-  /** When it is where (seconds from its round's start, and how far along): out, standing, back, waiting at kerbs on the way. */
-  plan?: { out: number[]; back: number[]; outEnd: number; backAt: number; backEnd: number }
-}
-
 /** High-speed clean close pass past a street vehicle (speed in km/h, lateral clearance in metres, world position in cells). */
 export interface NearMiss { speedKmh: number; clearance: number; at: [number, number, number] }
 /** Contact between the driven vehicle and a street vehicle (speed in cells/s, normalised force 0..1). */
@@ -387,6 +371,8 @@ export interface Street {
   /** What is on its way to life and which faces are made (for the checks). */
   readonly debug: unknown
   readonly red: unknown
+  /** Three-Ring Multi-Tier AI LOD counts and suppression telemetry (#164). */
+  readonly lod: LodStats
   trace(seed: number, times: number[]): unknown
   readonly ms: number
   readonly ready: boolean
@@ -404,6 +390,8 @@ export function street(o: {
   /** Seconds on the clock people walk by. */
   clock: () => number
   shocks: readonly Shock[]
+  /** Residents currently promoted to authoritative world actors: suppressed here so they never double-render (#164). */
+  taken?: { has(seed: number): boolean }
   /** Where the cutter cut (main.ts `cut`): the road there is looked at as a blast's is. */
   cuts?: readonly { at: readonly [number, number, number]; radius: number }[]
   /** Where everyone else stands (their feet): people go round them, cars wait for them. */
@@ -428,13 +416,13 @@ export function street(o: {
   onShout?: (info: CrowdShout) => void
 }): Street {
   // ── The graph, a square at a time ──
-  const walks: Walk[] = [], nodes = new Map<number, { x: number; z: number; walks: number[] }>()
+  const walkGraph: WalkGraph = createWalkGraph()
   const roads = new Map<string, Road>(), roadsFrom = new Map<number, Road[]>(), roadsTo = new Map<number, Road[]>(), ways = new Map<number, Set<number>>()
   const slots: Slot[] = [], lines: Line[] = []
   /** The signal heads (sf/life.py): where each post stands, and the road whose lights it shows. */
   const heads: { key: string; x: number; z: number; piece: Piece | null; shown: string; curbed?: boolean }[] = [], headGrid = new Map<number, number[]>()
   const GRID = 1000
-  const walkGrid = new Map<number, number[]>(), roadGrid = new Map<number, Road[]>(), slotGrid = new Map<number, number[]>()
+  const roadGrid = new Map<number, Road[]>(), slotGrid = new Map<number, number[]>()
   const cell = (gx: number, gz: number) => gx * 100003 + gz
   const file = (grid: Map<number, unknown[]>, x0: number, z0: number, x1: number, z1: number, v: unknown) => {
     for (let gx = Math.floor(x0 / GRID); gx <= Math.floor(x1 / GRID); gx++) for (let gz = Math.floor(z0 / GRID); gz <= Math.floor(z1 / GRID); gz++) { const k = cell(gx, gz); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(v) }
@@ -448,19 +436,9 @@ export function street(o: {
   let routed = false
   const squares = new Map<string, 'asked' | 'held'>()
   const rails: { a: number; b: number; p: Ring }[] = []
-  const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][]; heads?: number[][] }) => {
+  const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][]; heads?: number[][] }, name = '') => {
     for (const [way, a, b, x, z] of s.heads ?? []) { const n = heads.push({ key: `${way}/${a}/${b}`, x, z, piece: null, shown: '' }) - 1; file(headGrid, x, z, x, z, n) }
-    for (const w of s.walk) {
-      const [a, b, kind, busy, signal] = w, { p, cum, len } = line(w, 5)
-      if (len < 1) continue
-      // How many live along it: none on a crossing, a few on steps, and on a pavement more the busier it is.
-      const per = kind === 1 ? 0 : kind === 2 ? 0.4 : 0.5 + 0.045 * busy, seed = mix(idSeed(a), idSeed(b))
-      const homes = Math.floor((len / 1000) * per + chance(seed, 9))
-      const i = walks.push({ a, b, kind, busy, signal, p, cum, len, homes, seed, mx: (p[0] + p[p.length - 2]) / 2, mz: (p[1] + p[p.length - 1]) / 2 }) - 1
-      for (const [id, x, z] of [[a, p[0], p[1]], [b, p[p.length - 2], p[p.length - 1]]]) { let n = nodes.get(id); if (!n) nodes.set(id, n = { x, z, walks: [] }); n.walks.push(i) }
-      const [x0, z0, x1, z1] = box(p)
-      file(walkGrid, x0, z0, x1, z1, i)
-    }
+    walkGraph.addSquare(name || `sq:${squares.size}`, s)
     for (const r of s.roads) {
       const [way, a, b, lanes, flags, next, ctl] = r as [number, number, number, number, number, number[], number]
       const { p, cum, len } = line(r as number[], 7)
@@ -490,7 +468,7 @@ export function street(o: {
     for (const l of [...tramLines, ...lines]) { l.lights!.length = 0; lightsDone.delete(l) }
     // A junction on a seam is whole only now: walks timed against half of it are timed again, and the cable cars'
     // timetables.
-    routes.clear(); junctions.clear(); timetables.clear(); cableBases.clear()
+    junctions.clear(); timetables.clear(); cableBases.clear()
   }
   /** The cable car lines: track pieces joined end to end where only two meet, longest first. */
   const joinRails = () => {
@@ -545,7 +523,7 @@ export function street(o: {
       lifeComing++
       const packName = lifePacks?.life ? squarePackName('life', name, lifePacks.life) : null
       const packUrl = packName ? new URL(`${lifePacks!.dir ?? 'packs/'}${packName}`, lifeReleaseRoot).href : null
-      void lifeJson<Parameters<typeof take>[0]>(index.life[name].path, packUrl).then((s) => { if (s) { take(s); squares.set(name, 'held') } else squares.delete(name) }, () => squares.delete(name)).finally(() => { lifeComing-- })
+      void lifeJson<Parameters<typeof take>[0]>(index.life[name].path, packUrl).then((s) => { if (s) { take(s, name); squares.set(name, 'held') } else squares.delete(name) }, () => squares.delete(name)).finally(() => { lifeComing-- })
     }
   }
   /**
@@ -586,220 +564,13 @@ export function street(o: {
     }, () => {})
   }
 
-  // ── People ──
-  const routes = new Map<string, Route>()
-  /** A walk of the graph from where someone lives: each turn chosen by their number and the round, liking a straight way and a busy one. */
-  const route = (wi: number, u: number, seed: number, k: number, want: number): Route => {
-    const w = walks[wi]
-    const key = `${seed}:${k}`
-    let r = routes.get(key)
-    if (r) { r.used = k; return r }
-    if (routes.size > 6000) { let n = 0; for (const key of routes.keys()) { routes.delete(key); if (++n > 2000) break } }
-    r = { p: [], cum: [0], kinds: [], sigs: [], len: 0, used: k, P: new Float64Array(0), C: new Float64Array(0), crossings: [] }
-    const P = { x: 0, z: 0, tx: 0, tz: 0 }
-    along(w.p, w.cum, u, P)
-    r.p.push(P.x, P.z)
-    const push = (x: number, z: number, kind: number, sig = 0) => { const px = r!.p[r!.p.length - 2], pz = r!.p[r!.p.length - 1], d = Math.hypot(x - px, z - pz); if (d < 0.5) return; r!.p.push(x, z); r!.len += d; r!.cum.push(r!.len); r!.kinds.push(kind); r!.sigs.push(sig) }
-    // Along their own pavement first, one way or the other.
-    let edge = wi, forward = chance(seed, 40 + k * 7) < 0.5, node = forward ? w.b : w.a
-    const n0 = w.cum.length
-    if (forward) { for (let i = 0; i < n0; i++) if (w.cum[i] > u) push(w.p[2 * i], w.p[2 * i + 1], w.kind, w.signal) } else { for (let i = n0 - 1; i >= 0; i--) if (w.cum[i] < u) push(w.p[2 * i], w.p[2 * i + 1], w.kind, w.signal) }
-    for (let step = 0; r.len < want && step < 40; step++) {
-      const here = nodes.get(node)
-      if (!here) break
-      const last = r.p.length, hx = r.p[last - 2] - r.p[last - 4], hz = r.p[last - 1] - r.p[last - 3], hl = Math.hypot(hx, hz) || 1
-      let total = 0
-      const options: [number, number][] = []
-      for (const j of here.walks) {
-        if (j === edge && here.walks.length > 1) continue
-        const e = walks[j], out = e.a === node, nx = out ? e.p[2] - e.p[0] : e.p[e.p.length - 4] - e.p[e.p.length - 2], nz = out ? e.p[3] - e.p[1] : e.p[e.p.length - 3] - e.p[e.p.length - 1]
-        const straight = (hx * nx + hz * nz) / (hl * (Math.hypot(nx, nz) || 1))
-        const like = (e.kind === 1 ? 0.45 : e.kind === 2 ? 0.35 : 1 + e.busy / 40) * (0.25 + Math.max(0, straight) * 1.5)
-        options.push([j, like]); total += like
-      }
-      if (!options.length) break
-      let pick = chance(seed, 1000 + k * 53 + step) * total, j = options[0][0]
-      for (const [o, like] of options) { pick -= like; if (pick <= 0) { j = o; break } }
-      const e = walks[j], out = e.a === node, n = e.cum.length
-      for (let i = 1; i < n; i++) { const at = out ? i : n - 1 - i; push(e.p[2 * at], e.p[2 * at + 1], e.kind, e.signal) }
-      edge = j; node = out ? e.b : e.a
-    }
-    // Cut to how far they mean to go.
-    // A walk never ends on a crossing (they would stand in the road): it ends at the kerb before it.
-    if (r.len > want) { let i = r.cum.findIndex((c) => c >= want) - 1; if (r.kinds[i] === 1) { while (i > 0 && r.kinds[i - 1] === 1) i--; want = Math.max(1, r.cum[i] - 10) } }
-    if (r.len > want) { const P2 = { x: 0, z: 0, tx: 0, tz: 0 }, i = r.cum.findIndex((c) => c >= want); along(r.p, r.cum, want, P2); const kind = r.kinds[i - 1] ?? 0; r.p.length = i * 2; r.cum.length = i; r.kinds.length = i - 1; r.p.push(P2.x, P2.z); r.cum.push(want); r.kinds.push(kind); r.len = want }
-    // Its crossings that wait on lights (whose junction is known here): the pieces of one crossing, end to end, are one
-    // crossing timed by one junction's lights, though the survey may give its halves to two junctions. Past the second,
-    // the walk ends at the kerb: two waits each way are what a round leaves room for.
-    for (let i = 0; i < r.sigs.length;) {
-      if (r.kinds[i] !== 1) { i++; continue }
-      let j = i
-      while (j + 1 < r.kinds.length && r.kinds[j + 1] === 1) j++
-      let node = 0
-      for (let k = i; k <= j && !node; k++) if (r.sigs[k] && roadsTo.get(r.sigs[k])?.length) node = r.sigs[k]
-      if (!node) { i = j + 1; continue }
-      const dx = r.p[2 * j + 2] - r.p[2 * i], dz = r.p[2 * j + 3] - r.p[2 * i + 1], l = Math.hypot(dx, dz) || 1
-      if (r.crossings.length === 2) { cutAt(r, Math.max(1, r.cum[i] - 10)); break }
-      r.crossings.push({ s0: r.cum[i], s1: r.cum[j + 1], node, dx: dx / l, dz: dz / l })
-      i = j + 1
-    }
-    r.P = Float64Array.from(r.p); r.C = Float64Array.from(r.cum)
-    routes.set(key, r)
-    return r
-  }
-  /** Ends a walk at a distance along it (at the kerb, 1 m short of a crossing): what is past it is let go. */
-  const cutAt = (r: Route, cut: number) => {
-    const P2 = { x: 0, z: 0, tx: 0, tz: 0 }, at = r.cum.findIndex((c) => c >= cut)
-    along(r.p, r.cum, cut, P2)
-    r.p.length = at * 2; r.cum.length = at; r.kinds.length = at - 1; r.sigs.length = at - 1
-    r.p.push(P2.x, P2.z); r.cum.push(cut); r.kinds.push(0); r.sigs.push(0); r.len = cut
-    r.crossings = r.crossings.filter((c) => c.s1 <= cut)
-    r.P = Float64Array.from(r.p); r.C = Float64Array.from(r.cum)
-  }
-  /** One person at a second: where on their walk, which way they face, what they are doing. */
-  const W = { x: 0, z: 0, hx: 0, hz: 1, s: 0, walking: 0, still: false, far: false, stood: 0, crossing: false, kind: 0, waiting: false, sig: 0, cdx: 0, cdz: 0, pause: 0 }
-  /**
-   * A walk out and back, timed: at each crossing with lights they stop a step short of the kerb and wait for their
-   * walking sign (a rule of the clock, cycleAt), going only if what is left of it sees them across before the lights
-   * change. `start` is when the round began on the shared clock, so where anyone is stays a rule of place and time.
-   * The time in between, at the far end, is what the round has left; if waits leave none, the walk back is hurried.
-   */
-  const planOf = (r: Route, v0: number, T: number, rest: number, start: number) => {
-    const leg = (from: number, forward: boolean, t0: number, v = v0) => {
-      const pts = [0, from]
-      let t = 0, s = from
-      const order = forward ? r.crossings : [...r.crossings].reverse()
-      for (const c of order) {
-        // A step short of the kerb, or where they are if that is nearer (a walk that begins or ends at a crossing):
-        // no crossing with lights is ever crossed untimed.
-        const entry = forward ? Math.max(s, c.s0 - 8) : Math.min(s, c.s1 + 8)
-        t += Math.abs(entry - s) / v; s = entry; pts.push(t, s)
-        const j = junctionOf(c.node), across = (c.s1 - c.s0) / v
-        const ws = phaseOf(j, c.dx, c.dz) * (CYCLE / 2), last = Math.max(ws, Math.min(ws + WALK, ws + GREEN - across))
-        const u = cycleAt(j, start + t0 + t)
-        const wait = u >= ws && u <= last ? 0 : ((ws - u) % CYCLE + CYCLE) % CYCLE
-        if (wait > 0) { t += wait; pts.push(t, s) }
-        // Across before the lights change: a long crossing (the Embarcadero's) is hurried.
-        const exit = forward ? c.s1 : c.s0, gone = (((cycleAt(j, start + t0 + t) - ws) % CYCLE) + CYCLE) % CYCLE
-        t += Math.min(Math.abs(exit - s) / v, Math.max(4, GREEN + AMBER - 1 - gone)); s = exit; pts.push(t, s)
-      }
-      const end = forward ? r.len : 0
-      t += Math.abs(end - s) / v; pts.push(t, end)
-      return pts
-    }
-    const out = leg(0, true, 0), outEnd = out[out.length - 2]
-    let backAt = Math.max(outEnd + 3, T - rest - (r.len / v0) * 1.15), back = leg(r.len, false, backAt)
-    for (let n = 0; n < 3 && backAt + back[back.length - 2] > T - rest; n++) { backAt = Math.max(outEnd + 2, T - rest - back[back.length - 2]); back = leg(r.len, false, backAt) }
-    // Still over: the way back is walked more briskly (timed again, so every wait still ends on its walking sign),
-    // and the pause at home is what is left of the round.
-    for (let fast = 1.25; backAt + back[back.length - 2] > T - 1 && fast < 3; fast *= 1.25) back = leg(r.len, false, backAt, v0 * fast)
-    const room = T - 1 - backAt, took = back[back.length - 2]
-    // Hurrying more would cross on a red: the walk is shorter instead (placeOf).
-    if (took > room && r.crossings.length) return null
-    if (took > room) for (let i = 0; i < back.length; i += 2) back[i] *= room / took
-    return { out, back, outEnd, backAt, backEnd: backAt + Math.min(took, room) }
-  }
-  /** Where along a timed leg a moment is, whether they wait there, and how much of a walk it is (eased at each stop). */
-  const FOLLOW = { s: 0, waiting: false, walking: 0 }
-  const follow = (pts: number[], t: number) => {
-    let i = 0
-    while (i + 2 < pts.length - 1 && pts[i + 2] <= t) i += 2
-    const t0 = pts[i], s0 = pts[i + 1], t1 = pts[i + 2] ?? t0, s1 = pts[i + 3] ?? s0
-    const f = t1 > t0 ? Math.max(0, Math.min(1, (t - t0) / (t1 - t0))) : 1
-    FOLLOW.s = s0 + (s1 - s0) * f
-    FOLLOW.waiting = s1 === s0 && t1 > t0
-    FOLLOW.walking = FOLLOW.waiting ? 0 : ease(Math.min(t - t0, t1 - t) / 0.7)
-    return FOLLOW
-  }
-  const R = { x: 0, z: 0, tx: 0, tz: 0 }
-  const placeOf = (wi: number, seed: number, t: number) => {
-    const w = walks[wi]
-    const T = 180 + 180 * chance(seed, 1), v = 11 + 4 * chance(seed, 2), u = t + chance(seed, 3) * T, k = Math.floor(u / T), tau = u - k * T
-    const home = (0.05 + 0.9 * chance(seed, 4)) * w.len
-    // Room in the round for waiting at lights: a minute and a half each way at most.
-    const rest = 10 + 30 * chance(seed, 5 + k * 3), r = route(wi, home, seed, k, Math.max(200, Math.min(WALK_MOST, (v * (T - rest - 15 - 90)) / 2)))
-    // A round with no room for its waits ends its walk at the kerb before its last crossing with lights.
-    while (!r.plan) { const p = planOf(r, v, T, rest, k * T - chance(seed, 3) * T); if (p) r.plan = p; else cutAt(r, Math.max(1, r.crossings[r.crossings.length - 1].s0 - 10)) }
-    const plan = r.plan
-    let s = 0, back = false, stood = 0, waiting = false
-    W.still = false; W.far = false
-    if (tau < plan.outEnd) { const at = follow(plan.out, tau); s = at.s; waiting = at.waiting; W.walking = at.walking; W.s = s }
-    else if (tau < plan.backAt) { s = r.len; W.still = true; W.far = true; stood = tau - plan.outEnd; W.pause = plan.backAt - plan.outEnd; W.walking = 0; W.s = r.len }
-    else if (tau < plan.backEnd) { const at = follow(plan.back, tau - plan.backAt); s = at.s; waiting = at.waiting; back = true; W.walking = at.walking; W.s = 2 * r.len - s }
-    else { s = 0; W.still = true; stood = tau - plan.backEnd; W.pause = T - plan.backEnd; W.walking = 0; W.s = 2 * r.len }
-    W.stood = stood
-    W.waiting = waiting
-    const P = r.P, C = r.C
-    const segment = along(P, C, s, R)
-    let hx = R.tx, hz = R.tz
-    if (back) { hx = -hx; hz = -hz }
-    // The way they face over a few steps, so a corner is turned and not snapped.
-    const a = { x: 0, z: 0, tx: 0, tz: 0 }, b = { x: 0, z: 0, tx: 0, tz: 0 }
-    along(P, C, s - 6, a); along(P, C, s + 6, b)
-    if (Math.hypot(b.x - a.x, b.z - a.z) > 1) { hx = (b.x - a.x) * (back ? -1 : 1); hz = (b.z - a.z) * (back ? -1 : 1); const l = Math.hypot(hx, hz); hx /= l; hz /= l }
-    W.kind = r.kinds[segment] ?? 0; W.crossing = W.kind === 1 && !waiting
-    // Which lights the crossing they are on waits on, and which way it crosses as a whole (its pieces may bend).
-    const on = W.crossing ? r.crossings.find((c) => s >= c.s0 - 1 && s <= c.s1 + 1) : undefined
-    W.sig = on ? on.node : 0; W.cdx = on ? on.dx : 0; W.cdz = on ? on.dz : 0
-    // Keep right: half a metre to a metre to the right of their way, less on a crossing. Standing, they cross over
-    // to the other side slowly, to walk back on their right.
-    // Nearer the middle on a crossing, and drawing in over the 2 m before it, so the step onto it is not a jump.
-    let toCrossing = Infinity
-    for (let j = Math.max(0, segment - 6); j < Math.min(r.kinds.length, segment + 7); j++) if (r.kinds[j] === 1) toCrossing = Math.min(toCrossing, s < C[j] ? C[j] - s : s > C[j + 1] ? s - C[j + 1] : 0)
-    const side = 3 + (2 + 5 * chance(seed, 6)) * ease(toCrossing / 20)
-    let lateral = back ? -side : side
-    // (Over the pause they have: a short one is crossed in it, not jumped at its end.)
-    if (W.still) { const f = ease(Math.min((stood - 2) / 4, stood / Math.max(0.5, W.pause - 0.2))); lateral = W.far ? side * (1 - 2 * f) : -side * (1 - 2 * f) }
-    // At home they stand on the pavement's middle line, and keep to a side from 3 m out: the next round's walk may
-    // leave the other way along it, and its right is the other side.
-    lateral *= W.still && !W.far ? 0 : ease(s / 30)
-    // Right of the way out, taken over 3 m of it, so that at a corner the side turns with them and is not jumped.
-    const a3 = { x: 0, z: 0, tx: 0, tz: 0 }, b3 = { x: 0, z: 0, tx: 0, tz: 0 }
-    along(P, C, s - 15, a3); along(P, C, s + 15, b3)
-    let nx = b3.x - a3.x, nz = b3.z - a3.z
-    const nl = Math.hypot(nx, nz)
-    if (nl > 1) { nx /= nl; nz /= nl } else { nx = R.tx; nz = R.tz }
-    // Where the way turns back on itself (a path's dead end), the side shrinks to nothing as it turns: no flip.
-    lateral *= Math.min(1, (nl / 30) ** 2)
-    W.x = R.x - nz * lateral; W.z = R.z + nx * lateral; W.hx = hx; W.hz = hz
-    if (W.still) {
-      // Standing they turn to the houses or the street, whichever their number says.
-      const turn = ease((stood - 1) / 1.5) * ease((W.pause - stood - 0.3) / 1.2) * (chance(seed, 7 + k) < 0.5 ? 1 : -1) * Math.PI / 2, c = Math.cos(turn), sn = Math.sin(turn)
-      W.hx = hx * c - hz * sn; W.hz = hx * sn + hz * c
-    }
-  }
+  // ── People (delegated to shared deterministic sf-walks.mjs evaluator + Three-Ring AI LOD, #164) ──
   /** Feet on the ground: the Bay's footing, but never on a roof over the pavement (an arcade, an awning). */
   const feetAt = (x: number, z: number) => { const ix = Math.round(x), iz = Math.round(z), f = o.land.feet_at(ix, iz), g = o.land.ground_at(ix, iz); return f - g > 25 ? g + 1 : f }
-  const S = { when: 0, down: 0, flinch: 0, towards: 0, turned: 0, frozen: false }
   /** Crash-induced shocks for pedestrians (separate from bomb blasts in `o.shocks` so crashes never crater roads or toss unrelated cars). */
   const crashShocks: Shock[] = []
   /** Most recent player horn pulse while driving, for pedestrian startle/step-clear within 14 m. */
   let hornPulse: { x: number; y: number; z: number; fx: number; fz: number; t: number } | null = null
-  const startleFrom = (list: readonly Shock[], wi: number, seed: number, t: number, crash: boolean): boolean => {
-    for (let k = list.length - 1; k >= 0; k--) {
-      const shock = list[k], age = t - shock.t
-      if (age < 0 || age > (crash ? 18 : 45)) continue
-      placeOf(wi, seed, shock.t)
-      const far = Math.hypot(W.x - shock.at[0], W.z - shock.at[2], feetAt(W.x, W.z) + 9 - shock.at[1])
-      const close = crash ? far < 28 : far < shock.radius * 2.5 + 10
-      const reach = crash ? shock.radius * 4 + 50 : shock.radius * 6 + 60
-      if (!close && far >= reach) continue
-      const held = close ? (crash ? 2.4 : 4.4) + 1.4 * chance(seed, 31) : (crash ? 0.9 : 1.2) + 0.8 * chance(seed, 31)
-      if (age < held) {
-        S.when = shock.t; S.frozen = true
-        if (close) { S.down = ease(age / 0.3) * (1 - ease((age - held + 1.2) / 1.2)); S.turned = ease(age / 0.3) }
-        else { S.flinch = ease(age / 0.12) * (1 - ease((age - held + 0.6) / 0.6)); if (crash) S.turned = ease(age / 0.2) * (1 - ease((age - held + 0.6) / 0.6)) * 0.85 }
-        S.towards = Math.atan2(shock.at[0] - W.x, -(shock.at[2] - W.z))
-      } else S.when = Math.min(t, shock.t + (age - held) * 1.7)
-      return true
-    }
-    return false
-  }
-  const startle = (wi: number, seed: number, t: number) => {
-    S.when = t; S.down = 0; S.flinch = 0; S.towards = 0; S.turned = 0; S.frozen = false
-    if (o.shocks.length && startleFrom(o.shocks, wi, seed, t, false)) return
-    if (crashShocks.length) startleFrom(crashShocks, wi, seed, t, true)
-  }
   /** How far someone steps aside (to their right, cells; under 0 to their left) to go round whoever stands in their way. */
   const aside = (x: number, z: number, high: number, hx: number, hz: number, bodies: readonly (readonly [number, number, number])[]) => {
     let step = 0
@@ -816,9 +587,9 @@ export function street(o: {
   }
   const shown: Person[] = [], held = new Map<number, { x: number; z: number; at: number }>()
   const watching = new Map<number, { car: number; when: number; seen: number; left?: number }>()
-  const seenWalks: number[] = []
-  let stamp = 1, lastSeconds = 0
-  const walkStamp = new Map<number, number>()
+  let lastSeconds = 0
+  let lastLod: LodStats = { ring1: 0, ring2: 0, ring3: 0, total: 0, capped: 0, suppressedTaken: 0, caps: { ...DEFAULT_RING_CAPS } }
+  let macroAt = -99, macroRing3 = 0
   /** Where people were drawn last, for the cars to wait for them on a crossing. */
   const crossing: [number, number][] = []
   let lastCrowdShout = -99, crowdShoutsStat = 0, rtFilmersStat = 0, rtYellersStat = 0, stuckHonksStat = 0, lastStuckHorn = -99
@@ -826,21 +597,14 @@ export function street(o: {
   const folk = (view: View, seconds: number): readonly Person[] => {
     if (!on) { shown.length = 0; return shown }
     begin()
-    const t0 = performance.now(), t = o.clock(), hour = o.hour(), wet = o.rain() > 0.3, eye = view.eye, bodies = o.bodies()
+    const t0 = performance.now(), t = o.clock(), hour = o.hour(), rain = o.rain(), eye = view.eye, bodies = o.bodies()
     const dt = Math.max(0, Math.min(0.1, seconds - lastSeconds))
     lastSeconds = seconds
     wanted(eye)
-    stamp++
-    seenWalks.length = 0
-    const far = REACH + WALK_MOST
-    for (let gx = Math.floor((eye[0] - far) / GRID); gx <= Math.floor((eye[0] + far) / GRID); gx++) for (let gz = Math.floor((eye[2] - far) / GRID); gz <= Math.floor((eye[2] + far) / GRID); gz++) {
-      for (const i of walkGrid.get(cell(gx, gz)) ?? []) if (walkStamp.get(i) !== stamp) { walkStamp.set(i, stamp); seenWalks.push(i) }
-    }
-    const homeShare = homeHours(hour), shopShare = hourly(SHOPS, hour)
     const nowPerf = performance.now() / 1000
     const activeHorn = hornPulse && nowPerf - hornPulse.t < 2.6 ? hornPulse : null
     if (hornPulse && !activeHorn) hornPulse = null
-    // Stuck robotaxis that nearby sidewalk pedestrians react to (turning, yelling, and filming with phones).
+    // Stuck robotaxis that nearby Ring-1 sidewalk pedestrians react to (turning, yelling, and filming with phones).
     const stuckRT = traffic.filter((c) => c.rtStuck && nowPerf - c.rtStuck.at > 0.6 && Math.hypot(c.x - eye[0], c.z - eye[2]) < REACH + 250)
     const stuckIds = new Set(stuckRT.map((c) => c.id))
     const nearCars = stuckRT.length
@@ -922,38 +686,60 @@ export function street(o: {
       }
       return [sx, sy]
     }
+
+    const timeOf = watching.size
+      ? (seed: number, baseTime: number, st: { down: number; flinch: number; turned: number; frozen: boolean }) => {
+        const watch = watching.get(seed)
+        if (!watch) return baseTime
+        if (st.down || st.flinch || st.turned || st.frozen || t < watch.when) { watching.delete(seed); return baseTime }
+        if (!stuckIds.has(watch.car)) watch.left ??= t
+        // Hold the walk itself while watching. Resume along it and catch up as after a startle.
+        const rt = watch.left === undefined ? watch.when : Math.min(t, watch.when + (t - watch.left) * 1.7)
+        if (watch.left !== undefined && rt >= t) watching.delete(seed)
+        watch.seen = seconds
+        return rt
+      }
+      : undefined
+
+    // Shared deterministic pedestrian evaluation + Three-Ring AI LOD classification & taken suppression (#164).
+    const queried = walkGraph.query([eye[0], eye[2]], {
+      reach: REACH,
+      t,
+      hour,
+      rain,
+      taken: o.taken,
+      shocks: o.shocks,
+      crashShocks,
+      feetAt,
+      ring3Feet: true,
+      timeOf,
+    })
+
+    // Refresh Ring-3 macro city count (110–300 m) at throttled cadence so telemetry stays live at near-zero CPU cost.
+    if (seconds - macroAt >= 0.5 || seconds < macroAt) {
+      macroAt = seconds
+      const macro = walkGraph.query([eye[0], eye[2]], { reach: RING3_RADIUS, t, hour, rain, taken: o.taken })
+      macroRing3 = macro.stats.ring3
+    }
+    lastLod = { ...queried.stats, ring3: Math.max(queried.stats.ring3, macroRing3), total: queried.stats.ring1 + queried.stats.ring2 + Math.max(queried.stats.ring3, macroRing3) }
+
     let filmersNow = 0, yellersNow = 0
     let n = 0
     crossing.length = 0
-    for (const i of seenWalks) {
-      const w = walks[i]
-      if (!w.homes || Math.hypot(w.mx - eye[0], w.mz - eye[2]) - w.len / 2 > far) continue
-      const share = homeShare + (shopShare - homeShare) * Math.min(1, w.busy / 60)
-      for (let h = 0; h < w.homes; h++) {
-        const seed = mix(w.seed, h)
-        if (chance(seed, 20) >= share) continue
-        if (o.shocks.length || crashShocks.length) startle(i, seed, t)
-        else { S.when = t; S.down = 0; S.flinch = 0; S.turned = 0; S.frozen = false }
-        const { when, down, flinch, towards, turned, frozen } = S
-        let routeTime = when
-        const watch = watching.get(seed)
-        if (watch) {
-          if (down || flinch || turned || frozen || t < watch.when) watching.delete(seed)
-          else {
-            if (!stuckIds.has(watch.car)) watch.left ??= t
-            // Hold the walk itself while watching. Resume along it and catch up as after a startle.
-            routeTime = watch.left === undefined ? watch.when : Math.min(t, watch.when + (t - watch.left) * 1.7)
-            if (watch.left !== undefined && routeTime >= t) watching.delete(seed)
-            watch.seen = seconds
-          }
-        }
-        placeOf(i, seed, routeTime)
-        if (Math.abs(W.x - eye[0]) > REACH || Math.abs(W.z - eye[2]) > REACH) continue
-        let x = W.x, z = W.z, hx = W.hx, hz = W.hz
+    for (let idx = 0; idx < queried.people.length; idx++) {
+      const ev = queried.people[idx]
+      const { seed, down, flinch, turned, frozen, lod } = ev
+      let x = ev.x, z = ev.z, y = ev.at[1], yaw = ev.yaw
+      const hx = ev.hx, hz = ev.hz
+      let hornFlinch = 0, hornTurn = 0, hornToward = 0, hornGlance = 0
+      let rtReact: { car: Car; env: number; toward: number; dist: number } | null = null
+      let glance = 0
+
+      // Ring 1 (<= 35 m): full detail — obstacle avoidance, horn & robotaxi micro-reactions, and head-turn gaze.
+      if (lod === 1) {
         const high = feetAt(x, z)
-        // Going round whoever is in the way, plus stepping clear of a honking car's lane within 14 m.
         const want = bodies.length && !down ? aside(x, z, high, hx, hz, bodies) : 0
-        let hdx = 0, hdz = 0, hornFlinch = 0, hornTurn = 0, hornToward = 0, hornGlance = 0
+        let hdx = 0, hdz = 0
         if (activeHorn && !down) {
           const dx = x - activeHorn.x, dz = z - activeHorn.z, d = Math.hypot(dx, dz)
           if (d < 140 && Math.abs(high - activeHorn.y) < 30) {
@@ -976,9 +762,8 @@ export function street(o: {
         }
         // Crowd reaction to a stuck robotaxi blocking an intersection or narrow street:
         // Sidewalk pedestrians within 28 m step out from shaded storefronts/awnings to the open curb edge, turn toward it, film with phones, or gesture & yell!
-        let rtReact: { car: Car; env: number; toward: number; dist: number } | null = null
         let rtdx = 0, rtdz = 0
-        if (stuckRT.length && !down && !flinch && !W.crossing) {
+        if (stuckRT.length && !down && !flinch && !ev.crossing) {
           let bestD = 280, bestC: Car | null = null
           for (const sc of stuckRT) {
             const d = Math.hypot(sc.x - x, sc.z - z)
@@ -989,8 +774,9 @@ export function street(o: {
             const env = ease((age - 0.5) / 0.7) * (1 - ease((bestD - 200) / 80))
             if (env > 0.05) {
               rtReact = { car: bestC, env, toward: Math.atan2(bestC.x - x, -(bestC.z - z)), dist: bestD }
+              const watch = watching.get(seed)
               if (!watch || watch.car !== bestC.id || watch.left !== undefined) {
-                watching.set(seed, { car: bestC.id, when: routeTime, seen: seconds })
+                watching.set(seed, { car: bestC.id, when: ev.routeTime, seen: seconds })
               }
               const vx = bestC.x - x, vz = bestC.z - z, vl = Math.hypot(vx, vz) || 1
               const ux = vx / vl, uz = vz / vl
@@ -1030,64 +816,18 @@ export function street(o: {
           const tx = -hz * want + hdx + rtdx, tz = hx * want + hdz + rtdz, k = 1 - Math.exp(-dt * 9), dx = (tx - a.x) * k, dz = (tz - a.z) * k, d = Math.hypot(dx, dz), most = (hdx || hdz || rtdx || rtdz ? 18 : 11) * dt
           a.x += d > most ? (dx * most) / d : dx; a.z += d > most ? (dz * most) / d : dz; a.at = seconds
           x += a.x; z += a.z
+          y = (feetAt(x + hx * 2, z + hz * 2) + feetAt(x - hx * 2, z - hz * 2) + feetAt(x, z)) / 3
           if (!want && !hdx && !hdz && !rtdx && !rtdz && Math.abs(a.x) + Math.abs(a.z) < 0.05) held.delete(seed)
         }
-        const p = (shown[n] ??= { at: [0, 0, 0], yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }
-        const at = (p.at as [number, number, number])
-        at[0] = x; at[2] = z
-        at[1] = (feetAt(x + hx * 2, z + hz * 2) + feetAt(x - hx * 2, z - hz * 2) + high) / 3
-        let yaw = Math.atan2(hx, -hz)
-        if (turned) { let by = towards - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * turned }
-        else if (rtReact) { let by = rtReact.toward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * Math.min(1, rtReact.env * 1.15) }
-        else if (hornTurn) { let by = hornToward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * hornTurn }
-        p.yaw = yaw; p.seed = seed
-        p.stride = W.s / STRIDE; p.walking = frozen || rtReact ? 0 : W.walking; p.pace = 11 + 4 * chance(seed, 2)
-        p.reading = !rtReact && W.still && W.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((W.stood - 2.5) / 1.2) : 0
-        p.filming = 0
-        p.robotaxiId = rtReact?.car.id
-        p.move = undefined
-        p.name = undefined
-        p.says = undefined
-        if (rtReact) {
-          const svc = serviceOf(rtReact.car)
-          const isFilmer = chance(seed, 71) < 0.46
-          const phaseIdx = Math.floor((nowPerf + chance(seed, 72) * 10) / 5.5)
-          if (isFilmer) {
-            p.filming = rtReact.env
-            filmersNow++
-            if (rtReact.dist < 260 && chance(seed, 75 + (phaseIdx % 4)) < 0.72 && svc.filmLines.length) {
-              const bp = bubblePos(x, at[1], z)
-              if (bp) {
-                p.says = svc.filmLines[Math.abs(mix(seed, phaseIdx)) % svc.filmLines.length]
-                bubblePts.push([x, z, bp[0], bp[1]])
-              }
-            }
-          } else {
-            p.move = { move: NAMED_MOVES.yell, t: (seconds + chance(seed, 73) * 5) % 120 }
-            yellersNow++
-            const line = svc.yellLines[Math.abs(mix(seed, phaseIdx)) % svc.yellLines.length] ?? 'MOVE IT!'
-            if (rtReact.dist < 265 && chance(seed, 76 + (phaseIdx % 4)) < 0.88) {
-              const bp = bubblePos(x, at[1], z)
-              if (bp) {
-                p.says = line
-                bubblePts.push([x, z, bp[0], bp[1]])
-              }
-            }
-            const shoutSlot = Math.floor(nowPerf / 2.8)
-            if (o.onShout && nowPerf - lastCrowdShout > 2.4 && Math.hypot(x - eye[0], z - eye[2]) < 360 && chance(seed, 79 + (shoutSlot & 15)) < 0.78) {
-              lastCrowdShout = nowPerf
-              crowdShoutsStat++
-              o.onShout({ service: svc.id, serviceName: svc.name, name: `Bystander ${(seed >>> 0) % 64}`, text: line, at: [x, at[1] + 15, z] })
-            }
-          }
+        if (!turned) {
+          if (rtReact) { let by = rtReact.toward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * Math.min(1, rtReact.env * 1.15) }
+          else if (hornTurn) { let by = hornToward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * hornTurn }
         }
-        p.umbrella = wet && chance(seed, 30) < 0.6; p.time = seconds; p.flinch = Math.max(flinch, hornFlinch); p.down = down
         // They look at whoever is within three metres and not behind them, or glance toward a nearby honking car.
-        let glance = 0
         if (!rtReact) {
           for (const b of bodies) {
             const dx = b[0] - x, dz = b[2] - z, d = Math.hypot(dx, dz)
-            if (d > 32 || d < 1 || Math.abs(b[1] - at[1]) > 25) continue
+            if (d > 32 || d < 1 || Math.abs(b[1] - y) > 25) continue
             let to = Math.atan2(dx, -dz) - yaw
             to -= Math.round(to / (Math.PI * 2)) * Math.PI * 2
             const keen = (1 - ease((d - 12) / 20)) * (1 - ease((Math.abs(to) - 1.3) / 0.9))
@@ -1099,12 +839,63 @@ export function street(o: {
             glance = Math.max(-1, Math.min(1, to)) * hornGlance
           }
         }
-        p.glance = glance
-        const q = p as { waiting?: boolean; sig?: number; cdx?: number; cdz?: number }
-        q.waiting = W.waiting; q.sig = W.sig; q.cdx = W.cdx; q.cdz = W.cdz
-        if (W.crossing || W.kind === 1) crossing.push([x, z])
-        n++
       }
+
+      const p = (shown[n] ??= { at: [0, 0, 0], yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }
+      const at = (p.at as [number, number, number])
+      at[0] = x; at[1] = y; at[2] = z
+      p.yaw = yaw; p.seed = seed
+      p.stride = ev.stride
+      p.walking = frozen || rtReact ? 0 : ev.walking
+      p.pace = ev.speed
+      p.running = ev.speed > 16.5 ? Math.min(1, (ev.speed - 16.5) / 8) : 0
+      // Ring 3 skips phone reading & micro-animations; Ring 1 & 2 show posture/reading/umbrella cleanly.
+      p.reading = lod <= 2 && !rtReact && ev.still && ev.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((ev.stood - 2.5) / 1.2) : 0
+      p.filming = 0
+      p.robotaxiId = rtReact?.car.id
+      p.move = undefined
+      p.name = undefined
+      p.says = undefined
+      if (rtReact) {
+        const svc = serviceOf(rtReact.car)
+        const isFilmer = chance(seed, 71) < 0.46
+        const phaseIdx = Math.floor((nowPerf + chance(seed, 72) * 10) / 5.5)
+        if (isFilmer) {
+          p.filming = rtReact.env
+          filmersNow++
+          if (rtReact.dist < 260 && chance(seed, 75 + (phaseIdx % 4)) < 0.72 && svc.filmLines.length) {
+            const bp = bubblePos(x, at[1], z)
+            if (bp) {
+              p.says = svc.filmLines[Math.abs(mix(seed, phaseIdx)) % svc.filmLines.length]
+              bubblePts.push([x, z, bp[0], bp[1]])
+            }
+          }
+        } else {
+          p.move = { move: NAMED_MOVES.yell, t: (seconds + chance(seed, 73) * 5) % 120 }
+          yellersNow++
+          const line = svc.yellLines[Math.abs(mix(seed, phaseIdx)) % svc.yellLines.length] ?? 'MOVE IT!'
+          if (rtReact.dist < 265 && chance(seed, 76 + (phaseIdx % 4)) < 0.88) {
+            const bp = bubblePos(x, at[1], z)
+            if (bp) {
+              p.says = line
+              bubblePts.push([x, z, bp[0], bp[1]])
+            }
+          }
+          const shoutSlot = Math.floor(nowPerf / 2.8)
+          if (o.onShout && nowPerf - lastCrowdShout > 2.4 && Math.hypot(x - eye[0], z - eye[2]) < 360 && chance(seed, 79 + (shoutSlot & 15)) < 0.78) {
+            lastCrowdShout = nowPerf
+            crowdShoutsStat++
+            o.onShout({ service: svc.id, serviceName: svc.name, name: `Bystander ${(seed >>> 0) % 64}`, text: line, at: [x, at[1] + 15, z] })
+          }
+        }
+      }
+      p.umbrella = ev.umbrella; p.time = seconds; p.flinch = Math.max(flinch, hornFlinch); p.down = down
+      p.glance = glance
+      const q = p as { waiting?: boolean; sig?: number; cdx?: number; cdz?: number; lod?: number; archetype?: string; activity?: string; phase?: string }
+      q.waiting = ev.waiting; q.sig = ev.sig; q.cdx = ev.cdx; q.cdz = ev.cdz
+      q.lod = lod; q.archetype = ev.archetype; q.activity = ev.activity; q.phase = ev.phase
+      if (ev.crossing || ev.kind === 1) crossing.push([x, z])
+      n++
     }
     shown.length = n
     rtFilmersStat = filmersNow
@@ -1977,7 +1768,7 @@ export function street(o: {
     for (const r of ins) near.add(r.a)
     for (const r of outs) near.add(r.b)
     // The main axis: the way in of the highest class (the longest of those), as a direction; its lights go green first.
-    const main = [...ins].sort((a, b) => b.cls - a.cls || b.len - a.len)[0]
+    const main = [...ins].sort((a, b) => b.cls - a.cls || b.len - a.len || a.way - b.way || a.a - b.a)[0]
     let ax = 1, az = 0, x = 0, z = 0
     if (main) { along(main.p, main.cum, main.len, P); ax = P.tx; az = P.tz; x = P.x; z = P.z }
     j = { x, z, ax, az, offset: chance(idSeed(node), 11) * CYCLE, lights: ins.some((r) => r.ctl >= 2), stops: ins.some((r) => r.ctl === 1), allway: ins.length > 0 && ins.every((r) => r.ctl === 1), size: near.size }
@@ -3686,9 +3477,9 @@ export function street(o: {
       }
       return showcase.map((c) => c.model.name)
     },
+    get lod() { return lastLod },
     trace(seed: number, times: number[]) {
-      for (let wi = 0; wi < walks.length; wi++) for (let h = 0; h < walks[wi].homes; h++) if (mix(walks[wi].seed, h) === seed) return times.map((t) => { placeOf(wi, seed, t); return { t, x: Math.round(W.x), z: Math.round(W.z), s: Math.round(W.s), still: W.still, far: W.far, waiting: W.waiting, crossing: W.crossing, kind: W.kind, walking: Math.round(W.walking * 100) / 100 } })
-      return null
+      return walkGraph.trace(seed, times, o.hour(), o.rain())
     },
     audit(seconds) {
       const t = o.clock()
