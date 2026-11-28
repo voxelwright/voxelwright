@@ -1155,8 +1155,9 @@ const CLEAVE_LIFT: f32 = 24.0;
 const CLEAVE_SLIDE: f32 = 6.5;
 const CLEAVE_HOP: f32 = 9.0;
 const CLEAVE_TIP: f32 = 0.32;
-/// The most boxes asked what a cut let go (each `SETTLE` across): a cut wider than that frees only what is in them.
-const CLEAVE_BOXES: usize = 6;
+/// The most boxes asked what a cut let go (each `SETTLE` across, one over each tile of the cut, nearest first): a cut
+/// wider than that frees only what is in the nearest.
+const CLEAVE_BOXES: usize = 16;
 
 pub struct ActiveRagdoll {
     pub id: u32,
@@ -1704,8 +1705,9 @@ impl Bodies {
         id
     }
 
-    /// Adds a breakable weld between `a` and `b` (`0` = static world) anchored at world points `world_a` and `world_b`,
-    /// holding the two as they are turned now. `break_force` / `break_torque` (`<= 0` or not finite: unbreakable);
+    /// Adds a breakable weld between `a` and `b` (`0` = static world) anchored at `local_a` on `a` and `local_b` on
+    /// `b`, each from that body's middle of mass in its own frame (world coordinates for the static world), holding the
+    /// two as they are turned now. `break_force` / `break_torque` (`<= 0` or not finite: unbreakable);
     /// `yield_torque` makes it plastic (it bends past it and stays bent) and `break_bend` is how far it bends before it
     /// snaps (`<= 0` or not finite: never). Returns the joint ID, or `0` if an endpoint body was not found.
     #[allow(clippy::too_many_arguments)]
@@ -1713,8 +1715,8 @@ impl Bodies {
         &mut self,
         a: u32,
         b: u32,
-        world_a: [f32; 3],
-        world_b: [f32; 3],
+        local_a: [f32; 3],
+        local_b: [f32; 3],
         break_force: f32,
         break_torque: f32,
         yield_torque: f32,
@@ -1725,8 +1727,6 @@ impl Bodies {
         }
         let rot_of = |id: u32| if id == 0 { Some([0.0, 0.0, 0.0, 1.0]) } else { self.list.iter().find(|x| x.id == id).map(|x| x.rot) };
         let (Some(qa), Some(qb)) = (rot_of(a), rot_of(b)) else { return 0 };
-        let Some(local_a) = self.world_point_to_body_local(a, world_a) else { return 0 };
-        let Some(local_b) = self.world_point_to_body_local(b, world_b) else { return 0 };
         let limit = |v: f32| if v.is_finite() && v > 0.0 { v } else { f32::INFINITY };
         let rel = crate::joints::quat_mul(crate::joints::quat_conj(qa), qb);
         let cfg = crate::joints::FixedJoint::default().with_rel_rot(rel).plastic(limit(yield_torque), limit(break_bend));
@@ -4329,25 +4329,38 @@ impl Bodies {
             }
             self.change(runs);
 
-            // 3. What the cut left unheld comes loose: boxes over the cut, as few as cover it.
+            // 3. What the cut left unheld comes loose. The cut's cells are bucketed into tiles a box across, and a box
+            // is asked over each tile that holds any, the nearest the eye first: each is centred on its own tile's cut
+            // and stands from a little under it, so what stands over a sloping sheet is inside its box.
             let side = SETTLE[0] as i32;
-            let span = |a: usize| ((hi[a] - lo[a] + 32 + side - 1) / side).max(1);
-            let (nx, nz) = (span(0), span(2));
-            let mut boxes = 0;
-            'boxes: for bz in 0..nz {
-                for bx in 0..nx {
-                    if boxes >= CLEAVE_BOXES {
-                        break 'boxes;
+            let tile = side - 32;
+            let mut tiles: Vec<([i32; 2], [i32; 3], [i32; 3])> = Vec::new();
+            for (c, _) in &cut {
+                let key = [c[0].div_euclid(tile), c[2].div_euclid(tile)];
+                match tiles.iter_mut().find(|t| t.0 == key) {
+                    Some(t) => {
+                        for a in 0..3 {
+                            t.1[a] = t.1[a].min(c[a]);
+                            t.2[a] = t.2[a].max(c[a] + 1);
+                        }
                     }
-                    boxes += 1;
-                    let low = [lo[0] - 16 + bx * side, lo[1] - 48, lo[2] - 16 + bz * side];
-                    let size = [SETTLE[0], SETTLE[1], SETTLE[2]];
-                    let top = [low[0] + side, low[1] + SETTLE[1] as i32, low[2] + SETTLE[2] as i32];
-                    self.wake_in_aabb(low.map(|v| v as f32 - 2.0), top.map(|v| v as f32 + 2.0));
-                    let mut region = self.ground.region(low, size);
-                    let (pieces, dust) = support::release(&mut region, None);
-                    made += self.take(pieces, dust, None, usize::MAX);
+                    None => tiles.push((key, *c, [c[0] + 1, c[1] + 1, c[2] + 1])),
                 }
+            }
+            let far = |t: &([i32; 2], [i32; 3], [i32; 3])| {
+                let m = [(t.1[0] + t.2[0]) as f32 * 0.5 - eye[0], (t.1[2] + t.2[2]) as f32 * 0.5 - eye[2]];
+                m[0] * m[0] + m[1] * m[1]
+            };
+            tiles.sort_by(|a, b| far(a).total_cmp(&far(b)).then(a.0.cmp(&b.0)));
+            for (_, tlo, thi) in tiles.into_iter().take(CLEAVE_BOXES) {
+                let mid = [(tlo[0] + thi[0]) / 2, (tlo[2] + thi[2]) / 2];
+                let low = [mid[0] - side / 2, tlo[1] - 48, mid[1] - side / 2];
+                let size = [SETTLE[0], SETTLE[1], SETTLE[2]];
+                let top = [low[0] + side, low[1] + SETTLE[1] as i32, low[2] + SETTLE[2] as i32];
+                self.wake_in_aabb(low.map(|v| v as f32 - 2.0), top.map(|v| v as f32 + 2.0));
+                let mut region = self.ground.region(low, size);
+                let (pieces, dust) = support::release(&mut region, None);
+                made += self.take(pieces, dust, None, usize::MAX);
             }
         }
         let _ = made;
@@ -5857,6 +5870,45 @@ mod tests {
     }
 
     #[test]
+    fn a_long_sloping_cleave_lifts_the_top_off_the_yard_chimney() {
+        use crate::city::{BLOCK_X, BLOCK_Z, YARD, YARD_CHIMNEY};
+        let (x, z) = (YARD.0 * BLOCK_X + YARD_CHIMNEY.0, YARD.1 * BLOCK_Z + YARD_CHIMNEY.1);
+        let g = city::ground(x, z);
+        let mut bodies = Bodies::new();
+        // A pillar 25 m to one side, so the cut is wider than one box: each tile of it must get its own.
+        let (px, pz) = (x, z - 250);
+        let gp = city::ground(px, pz);
+        assert!(gp < g + 50);
+        let mut runs = Vec::new();
+        for y in gp + 1..g + 150 {
+            for dz in 0..10 {
+                runs.push(Run { x0: px, x1: px + 10, y, z: pz + dz, kind: kind(CONCRETE, OWN) });
+            }
+        }
+        bodies.change(runs);
+        // From 30 m off, a sheet sloping down away from the eye that crosses the chimney 60 cells up, reaching 45 m,
+        // swept from past the pillar to past the chimney.
+        let eye = [(x - 300) as f32, (g + 90) as f32, z as f32];
+        let along = unit([300.0, -30.0, 0.0]);
+        let n = unit(cross([0.0, 0.0, 1.0], along));
+        let across = cross(n, along);
+        // `across` is the sheet's own +z or -z: start the fan on the pillar's side of it.
+        let toward_pillar = if across[2] < 0.0 { across } else { scale(across, -1.0) };
+        let (c, s) = (0.85f32.cos(), 0.85f32.sin());
+        let e1 = add(scale(along, c), scale(toward_pillar, s));
+        let e2 = cross(n, e1);
+        let e2 = if dot(e2, along) > 0.0 { e2 } else { scale(e2, -1.0) };
+        let hung = bodies.cleave_wedge(eye, n, e1, e2, 1.0, 450.0, [0.0; 3]);
+        let biggest = |cx: i32, cz: i32| bodies.list.iter().filter(|b| bodies.hang_of(b.id).is_some() && (b.pos[0] - cx as f32).abs() < 20.0 && (b.pos[2] - cz as f32).abs() < 20.0).map(|b| b.count).max();
+        let chimney = biggest(x, z);
+        assert!(chimney.is_some_and(|n| n > 2000), "the chimney's top hangs ({hung} hung, biggest over it {chimney:?})");
+        // The pillar (it may come away joined to what stands beside it): gone from the world above the cut, standing below.
+        let column: Vec<bool> = (g + 70..g + 140).map(|y| bodies.ground.solid(px + 5, y, pz + 5)).collect();
+        assert!(column.iter().all(|s| !s), "the pillar's top came away");
+        assert!(bodies.ground.solid(px + 5, g + 45, pz + 5), "below the cut the pillar stands");
+    }
+
+    #[test]
     fn the_cleave_slices_a_moving_body_and_lifts_its_upper_half() {
         let ground = city::ground(X, Z);
         let mut bodies = Bodies::new();
@@ -5941,7 +5993,8 @@ mod tests {
         let size = [20, 4, 4];
         bodies.list.push(Body::new(1, block(size, kind(WOOD, OWN)), size, [X, ground + 100, Z]));
         let root = [X as f32, (ground + 102) as f32, Z as f32 + 2.0];
-        let id = bodies.add_fixed(0, 1, root, root, 0.0, 0.0, 5_000.0, 0.15);
+        let local = back(bodies.list[0].rot, sub(root, bodies.list[0].pos));
+        let id = bodies.add_fixed(0, 1, root, local, 0.0, 0.0, 5_000.0, 0.15);
         assert!(id > 0 && bodies.joint_bend(id) == 0.0);
         let mut broke = false;
         for _ in 0..240 {

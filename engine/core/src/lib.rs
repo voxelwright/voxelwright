@@ -808,8 +808,9 @@ pub extern "C" fn joints_set_winch(joint_id: u32, speed: f32) -> u32 {
     INSTANCE.with_borrow_mut(|i| moving(i).set_winch(joint_id, speed) as u32)
 }
 
-/// Adds a breakable weld between `a` and `b` (`0` = static world) anchored at world points `(lax, lay, laz)` on `a`
-/// and `(lbx, lby, lbz)` on `b`, holding them as they are turned now. `break_force` / `break_torque` (`<= 0` =
+/// Adds a breakable weld between `a` and `b` (`0` = static world) anchored at `(lax, lay, laz)` on `a` and
+/// `(lbx, lby, lbz)` on `b`: each from that body's middle of mass in its own frame (world coordinates on a static
+/// side), as `MOVES` tells where each body is and how it is turned. It holds them as they are turned now. `break_force` / `break_torque` (`<= 0` =
 /// unbreakable); `yield_torque > 0` makes it plastic (it bends past it and stays bent) and `break_bend > 0` is how far
 /// (radians) it bends before it snaps. Returns the non-zero joint ID, or `0` if an endpoint body was not found.
 #[unsafe(no_mangle)]
@@ -1942,12 +1943,14 @@ mod tests {
         assert!(bodies_throw(700.0, y0, 4070.0, 0.0, 0.0, 0.0, 3, wood) > 0);
         assert!(bodies_throw(760.0, y0, 4070.0, 0.0, 0.0, 0.0, 3, wood) > 0);
         // Body 1 welded to the world five cells to its side, with a tiny yield: its own weight bends it.
-        let (pos, _) = INSTANCE.with_borrow(|i| {
+        let (pos, rot) = INSTANCE.with_borrow(|i| {
             let b = i.bodies.as_ref().unwrap().list.iter().find(|b| b.id == 1).unwrap();
             (b.pos, b.rot)
         });
+        assert_eq!(rot, [0.0, 0.0, 0.0, 1.0]);
+        // (body 1 is unturned: its local offset to the anchor is the world one)
         let anchor = [pos[0] - 5.0, pos[1], pos[2]];
-        let weld = joints_add_fixed(0, 1, anchor[0], anchor[1], anchor[2], anchor[0], anchor[1], anchor[2], 0.0, 0.0, 1.0, 0.0);
+        let weld = joints_add_fixed(0, 1, anchor[0], anchor[1], anchor[2], -5.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
         assert!(weld > 0);
         assert_eq!(joints_add_fixed(0, 999, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 0, "a missing body makes no weld");
         assert_eq!(joints_bend(weld), 0.0);
