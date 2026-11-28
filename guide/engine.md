@@ -61,14 +61,15 @@ The core in each place is the same `page/core.wasm`. The page instantiates it wi
 
 `frame` in `engine/page/main.ts` runs once per animation frame. It skips the frame while the page is paused or the full-screen map covers the picture.
 
-1. Move the eye and step what the page simulates itself: an active walkable store interior (`interiors.ts`), the car or body you control (or the free eye), stunts, the handheld smartphone OS and DoorSmash delivery loop (`phone.ts`, `delivery.ts`), the wand, sound and (when outdoors) street life and neighborhood streaming.
-2. `world.update` decides which sectors each box needs around the eye (staying anchored to the street outside while indoors). It sends asks to the sector workers and uploads finished trees into the GPU pool.
-3. One command encoder records the drawing, in this order: single-dispatch compute sun-map tiles (`march.tend`), 512-light GPU 3D frustum clustering (`localLights.dispatchCluster`, `?cluster_lights=0` falls back to 48-light uniform path), dirty-tracked physically based Sky & Aerial Perspective LUTs (`sky-lut.ts`, `?sky_lut=0`), quarter-res temporally amortized volumetric 3D cloud trace/reproject (`volumetric-clouds.ts`, `?vol_clouds=0`), 2-cascade dynamic-object directional shadow maps for cars, pieces, and people (`dynamic-shadows.ts`, `?dyn_shadows=0`), `march.draw` (beam pre-pass, visibility pass, half-res compute GTAO, and deferred PBR shading sampling clustered lights, dynamic shadows, and Sky LUTs), a portal's window into another world, the far model of distant tiles, sky-only volumetric 3D cloud compositing (`volClouds.compositeSky`), sky eggs, legacy sea fog (when `?froxel_fog=0` or Low preset), water, the merged `overlay-tbdr` pass (shade under things, skidmarks and light on the road, vehicle wheels, falling pieces, storefront, plaza and interior signs, people, crumbs), smoke, 3D froxel volumetric fog (`froxel-fog.ts`, `?froxel_fog=0`), every plugin pass (`pluginDraws.draw`), the wand's marker, then `march.patchVelocity` and native-resolution linear HDR TAA/TSR-lite upscaling (`taa.ts`). While an interior is active at `y = 420 m`, outdoor-only passes (sun tiling, dynamic shadows, volumetric clouds, froxel fog, far model, water, marine, sky eggs, outdoor lights, outdoor signs/particles, outdoor folk, and street-level pieces below `3800` cells) are skipped.
-4. A final pass (`glow.ts`) extracts bloom from the resolved linear HDR target, applies AgX tonemapping and grading onto the canvas, and `device.queue.submit` sends it.
+1. Step the spells by the wall's clock (`stepSpells`): the Cleave (`cleave.ts`) and time stopped or wound back (`rewind.ts`) say how fast the world goes this frame, and the Cleave widens and shakes the eye. Everything the world moves (the mover's step, crumbs, smoke, skidmarks, wheels, the weapons) goes at `tempo.rate` times that. While time is stopped or wound back the mover is not stepped; what the Cleave holds up is moved on by real time with each step (`hang`).
+2. Move the eye and step what the page simulates itself: an active walkable store interior (`interiors.ts`), the car or body you control (or the free eye), stunts, the handheld smartphone OS and DoorSmash delivery loop (`phone.ts`, `delivery.ts`), the wand, sound and (when outdoors) street life and neighborhood streaming.
+3. `world.update` decides which sectors each box needs around the eye (staying anchored to the street outside while indoors). It sends asks to the sector workers and uploads finished trees into the GPU pool.
+4. One command encoder records the drawing, in this order: single-dispatch compute sun-map tiles (`march.tend`), 512-light GPU 3D frustum clustering (`localLights.dispatchCluster`, `?cluster_lights=0` falls back to 48-light uniform path), dirty-tracked physically based Sky & Aerial Perspective LUTs (`sky-lut.ts`, `?sky_lut=0`), quarter-res temporally amortized volumetric 3D cloud trace/reproject (`volumetric-clouds.ts`, `?vol_clouds=0`), 2-cascade dynamic-object directional shadow maps for cars, pieces, and people (`dynamic-shadows.ts`, `?dyn_shadows=0`), `march.draw` (beam pre-pass, visibility pass, half-res compute GTAO, shared half-res G-Buffer + High-preset 3-cascade voxel clipmap GI + SVGF (`gi-world.ts`, `gi.ts`, `?gi=0`/`?gi=1`) + High-preset ReSTIR-DI 64-tree shadowed local lights (`restir.ts`, `?restir=0`/`?restir=1`, skipped when 0 local lights are active), and deferred PBR shading sampling bilateral-upsampled GI/ReSTIR, clustered lights, dynamic shadows, and Sky LUTs), a portal's window into another world, the far model of distant tiles, sky-only volumetric 3D cloud compositing (`volClouds.compositeSky`), sky eggs, legacy sea fog (when `?froxel_fog=0` or Low preset), water, grass (`grass.ts`) and GPU rubble (`avbd-rubble.ts`), the merged `overlay-tbdr` pass (shade under things, skidmarks and light on the road, vehicle wheels, falling pieces, storefront, plaza and interior signs, people, crumbs), smoke with its billows (`billows.ts`), the weapons (`combat-tools.ts`), 3D froxel volumetric fog (`froxel-fog.ts`, `?froxel_fog=0`), every plugin pass (`pluginDraws.draw`), the wand's marker, the Cleave's seam and time's motes, then `march.patchVelocity` and native-resolution linear HDR TAA/TSR-lite upscaling (`taa.ts`). While an interior is active at `y = 420 m`, outdoor-only passes (sun tiling, dynamic shadows, volumetric clouds, froxel fog, far model, water, grass, rubble, marine, sky eggs, outdoor lights, outdoor signs/particles, smoke, outdoor folk, and street-level pieces below `3800` cells) are skipped.
+5. A final pass (`glow.ts`) extracts bloom from the resolved linear HDR target, applies AgX tonemapping and grading onto the canvas, and `device.queue.submit` sends it. When a spell or a blast is on the picture (`PostFx`: the Cleave's lens, beats, rings and cooling seam, time's silver and its wind back, a blast's frame of ink and its ring in the air), the spells' pass draws instead, reading the scene's depth. `blit.warmFx` builds it at boot.
 
 Falling pieces include vehicles and other things built in finer cells. A curved panel in 2.5 cm cells is a staircase, and lit by each face's square normal it showed every step as bands, like a 3D print. Those things carry four extra words per face, one for each corner (`Born.smooth`, from `fine.ts` `facesWithSmooth`): a normal fitted to the shape round the corner, and how open the corner is to light. Faces that meet at a corner share it, and a face blends its corners across itself, so a curve has no steps in its light. Narrow seams such as door gaps are filled for the normals, so panels either side read as one surface, but still darken. The outside air is found by a flood fill, so a car's cabin counts as solid and its panels' normals point outward. Faces in the cabin keep their square normals, so the inside stays sharp from the driver's seat. `pieces.ts` lights a face by its smooth normals, darkens its hollows, and gives polished paint a clear coat and smooth glass true reflections of the sky, horizon and street. Bodies the core makes have no smooth words and draw as before. Turn smooth words off from the console with `engine.falling.smooth = false` to compare.
 
-Above a fixed height the planet view replaces the march. To measure what one drawing step costs, turn it off from the browser console, for example `engine.off.add('people')`. The names are `water`, `under` (shade under things, skidmarks and light on the road), `wheels` (driven cars' wheels, which also stops stepping them), `pieces`, `signs`, `people`, `crumbs`, `puffs`, `flames`, `lights`, `clusterLights`, `dynShadows`, `skyLut`, `volClouds`, `froxelFog`, `taa` and `spoil`.
+Above a fixed height the planet view replaces the march. To measure what one drawing step costs, turn it off from the browser console, for example `engine.off.add('people')`. The names are `water`, `under` (shade under things, skidmarks and light on the road), `wheels` (driven cars' wheels, which also stops stepping them), `pieces`, `signs`, `people`, `crumbs`, `puffs`, `flames`, `lights`, `clusterLights`, `dynShadows`, `skyLut`, `volClouds`, `froxelFog`, `gi`, `restir`, `taa`, `spoil`, `grass`, `avbd`, `billows`, `combat`, `crumbdepth` (crumbs no longer bounce off the picture's depth) and `postfx`.
 
 ## Glass
 
@@ -84,6 +85,42 @@ A released city's first frames can show opaque glass while the GPU compiles the 
 ## A shared world
 
 `node serve.mjs --world FILE` (in `engine/`) keeps one world in a file and runs `world.mjs` behind the server. Pages open it with `/city?shared=1`. The page then uses `engine/page/link.ts` in place of the mover. The world process applies each ask, then sends the result down `GET /world/stream` as binary frames. Each frame has a 12-byte header (kind, number, length). The kinds are the constants in `engine/page/frames.ts`. A page applies only what the stream says, in the stream's order.
+
+### Anchor zones
+
+A world server can heal what people do to a world, except inside zones that someone keeps. It is off unless the server starts with `--anchor-regen-ttl`:
+
+```sh
+cd engine
+node serve.mjs --world /tmp/world.log --anchor-regen-ttl 600
+```
+
+| Flag | Default | What it sets |
+| --- | --- | --- |
+| `--anchor-regen-ttl` | none: nothing heals | Seconds a changed cell outside every zone is left alone before it is healed. A number over 0. |
+| `--anchor-regen-cells` | 256 | The most cells one step, once a second, puts back in each world |
+| `--anchor-compact-interval` | 60 | The fewest seconds between compactions of a world's file |
+
+A zone is a sphere of 10 cm cells with an id, a name, an owner, a `center` and a `radius`. `engine/anchor-zones.mjs` holds the rules, `engine/world.mjs` applies them and `engine/serve.mjs` keeps what they remember.
+
+- A cell changed inside a zone stays. A cell changed outside every zone is remembered with what it was before its first change. Each later change restarts its wait.
+- Healing puts back the lowest cells first, as an ordinary edit by `the world` that every page receives. No cell becomes solid where someone stands or a living thing is. It waits.
+- Some changes always stay: cells that a made thing is put into, taken from or held out of, what rules build, cells finer than 10 cm, and an edit too large to heal (more than one blast of radius 40, or rows over `CELLS_MOST` cells).
+- Adding a zone keeps what is waiting inside it as it is now. Taking a zone out does not heal what already stood there: only later changes do.
+- After heals, the server compacts the world's file: rows that a later heal made worthless are cut. Zones and pending cells are kept beside it in `<world file>.anchors.json`.
+- A server started without `--anchor-regen-ttl` keeps the zones in that file and forgets the pending cells. If the file cannot be read, nothing heals in that world.
+- A world keeps at most 64 zones of radius 1 to 2000 cells, and remembers at most 500,000 cells to heal. Changes past that stay.
+- `--release` and `--anchor-regen-ttl` cannot be combined yet, and the [dedicated server](/hosting) does not take the anchor flags.
+
+| Request | Answer |
+| --- | --- |
+| `GET /world/anchors` | `{enabled, anchors, ephemeralCells, healedTotal, untrackedCells, policy}`. With healing off: `enabled: false`, no zones and zero counts. |
+| `POST /world/anchors` with `{by, id, name, center: [x, y, z], radius}` | 201 `{anchor, promoted}`. A zone with the same id is replaced. `promoted` counts the waiting cells it now keeps. |
+| `DELETE /world/anchors/<id>` | `{removed: true}`, or 404 for an unknown id |
+
+An `id` is up to 40 lower-case letters, digits and dashes, and `center` and `radius` are whole cells. A bad zone gets 400. A 65th zone, or a change with healing off, gets 409. Another realm answers the same under `/realm/<id>/world/anchors`. The door does not pass these routes, so a lobby's visitors cannot reach them.
+
+`node test/anchor-zones.mjs` (in `engine/`) checks the rules alone and then a real server.
 
 ## Check a change
 

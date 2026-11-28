@@ -43,6 +43,7 @@ import { inferAffordances } from './make/affordances.mjs'
 import { directorCityBrief } from './make/director.mjs'
 import { text } from './text.mjs'
 import { reading } from './ground.mjs'
+import { AnchorZoneManager, ballRows, blocksOf, healable, rowsOf as cellRows, worldRows } from './anchor-zones.mjs'
 import { dropped, forget, ground as groundOf, hold, holding as tilesHeld, holds, owned, owning, prepare, shares, unpin } from './page/bay.ts'
 
 // ── The ground (#526) ──────────────────────────────────────────────────────
@@ -185,11 +186,83 @@ if (GROUND) await prepare(core)
 let swapping = null
 /** Where the core last said some of its fire was (three numbers a cell), or null when nothing burns: to light it again in another core. */
 let fireSeen = null
+// ── Anchor zones (#226) ──────────────────────────────────────────────────
+// Where the server turns it on (serve.mjs --anchor-regen-ttl), what is done outside every anchor zone is healed back
+// once it has been left alone for a while (anchor-zones.mjs has the rules). Without it all of this does nothing.
+// The core says only what cells have become, so two more cores are kept: `mirror`, which is done everything the
+// world's own is, each change after it has been asked what its cells were; and `bare`, to which nothing is done, which
+// says whether what a cell is put back to is the ground's own.
+const ZONES = workerData.anchorZones ?? null
+const zones = !ZONES ? null : ZONES.kept ? AnchorZoneManager.deserialize(ZONES.kept, ZONES.policy) : new AnchorZoneManager(ZONES.policy)
+/** The mark of a cell that holds finer cells (core kinds.rs `FINE`): never written. */
+const FINE_MARK = 64
+async function witnesses(path) {
+  const bytes = await readFile(path)
+  const one = async () => { const c = (await WebAssembly.instantiate(bytes, {})).instance.exports; c.fine_cells(1); return c }
+  return { mirror: await one(), bare: await one() }
+}
+let seen = zones ? await witnesses(workerData.core) : null
+/** Whether what the zones remember has changed since the server was last given it, and when that was. */
+let zonesDirty = false, zonesKept = Date.now()
+/** Does an edit in a core's own form (page/edits.ts), put last. */
+function put(c, words) {
+  // The room first, then the memory: making room may grow it, and what was read before is then gone.
+  const room = c.edits_room(words.length)
+  new Int32Array(c.memory.buffer, room, words.length).set(words)
+  c.world_edit(-1)
+}
+/**
+ * Tells the zones of an edit the world's core has done. `how`: 'loose', it may be healed back; 'kept', it stays as it
+ * is (a made thing's cells, a rule's building: healing them would make two of a thing, or take it down); 'replay', it
+ * is the world's history or a heal, and nothing is to be remembered. Answers the rows of the cells a loose one changed.
+ */
+function witness(words, how) {
+  if (!zones) return []
+  if (how === 'replay') { put(seen.mirror, words); return [] }
+  const now = Date.now(), changed = []
+  for (const block of blocksOf(words)) {
+    const touched = block.ball ? ballRows(...block.ball) : worldRows(block.runs, block.per)
+    // (Finer cells are not healed: put back as the world's own cells they would not be what they were.)
+    if (how === 'kept' || block.per > 1) { if (zones.forget(touched)) { zonesDirty = true; zonesKept = 0 } put(seen.mirror, block.words); continue }
+    const was = []
+    for (const [x0, x1, y, z] of touched) for (let x = x0; x < x1; x++) was.push(seen.mirror.world_kind(x, y, z))
+    put(seen.mirror, block.words)
+    // A blast only takes away: what was air before it still is.
+    const blast = block.ball?.[4] === 0, cells = [], base = new Map()
+    let k = 0
+    for (const [x0, x1, y, z] of touched) for (let x = x0; x < x1; x++, k++) {
+      if (blast && !was[k]) continue
+      const kind = seen.mirror.world_kind(x, y, z)
+      if (kind === was[k]) continue
+      cells.push({ x, y, z, kind })
+      base.set(`${x},${y},${z}`, was[k])
+    }
+    if (!cells.length) continue
+    const runs = cellRows(cells)
+    zones.recordEdit(runs, (x, y, z) => base.get(`${x},${y},${z}`), now)
+    for (const run of runs) changed.push(run)
+    zonesDirty = true
+  }
+  return changed
+}
+/** Rows as one of the core's records of cells changed (bodies.rs): its tag, its length, the box round them, the rows. */
+function rowsRecord(runs) {
+  const box = boxRound(runs), out = new Uint32Array(8 + runs.length * 5)
+  out.set([1, 6 + runs.length * 5, ...box])
+  runs.forEach((r, i) => out.set(r, 8 + i * 5))
+  return out
+}
+/** The box of cells round rows, high corner not included. */
+function boxRound(runs) {
+  const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
+  for (const [x0, x1, y, z] of runs) [x0, y, z, x1, y + 1, z + 1].forEach((v, a) => { box[a] = a < 3 ? Math.min(box[a], v) : Math.max(box[a], v) })
+  return box
+}
 /** The core's records (bodies.rs): which are log and which are state. */
 const STATE = new Set([5, 7, 8, 10, 11])   // 10 what struck what and 11 how living things are doing (#245): heard as they happen, never kept
 
-/** The words of the last call, parted into what is log and what is state. */
-function told(n, released) {
+/** The words of the last call, parted into what is log and what is state. `how` the cells it changed are to the anchor zones (`witness`); `also` are rows to be logged ahead of them. */
+function told(n, released, how = 'loose', also = []) {
   const at = core.bodies_words()
   const words = new Uint32Array(core.memory.buffer, at, n)
   const log = [], state = []
@@ -202,6 +275,8 @@ function told(n, released) {
   }
   const join = (parts) => { const out = new Uint32Array(parts.reduce((sum, p) => sum + p.length, 0)); let at = 0; for (const p of parts) { out.set(p, at); at += p.length } return out }
   const counts = [core.bodies_count(), core.bodies_burning(), core.bodies_flowing(), released ? 1 : 0]
+  if (zones) for (const r of log) if (r[0] === 1) { const rows = new Int32Array(r.length - 6); rows.set([1, (r.length - 8) / 5]); rows.set(new Int32Array(r.buffer, r.byteOffset + 32, r.length - 8), 2); witness(rows, how) }
+  if (also.length) log.unshift(rowsRecord(also))
   parentPort.postMessage({ log: join(log), state: join(state), counts })
   if (alive.size) heed(words)
   blow.heed(words, Date.now())
@@ -258,10 +333,10 @@ function rise(id, a, fresh, g = grid(a.rows, false)) {
   const n = core.living_spawn(g.size[0], g.size[1], g.size[2], g.low[0], g.low[1], g.low[2], fresh ? 1 : 0), body = core.living_last()
   if (!body) return false
   // A motor the core will not take (a number past what it reads) is no living thing: the body is taken out again, and nothing is said to be alive with a motor it does not have.
-  if (!motorOf(body, numbers(a.controls.motor))) { told(n, false); told(core.living_vanish(body), false); return false }
+  if (!motorOf(body, numbers(a.controls.motor))) { told(n, false, 'kept'); told(core.living_vanish(body), false, 'kept'); return false }
   a.body = body; a.awake = true
   if (!fresh && a.controls.rest) core.living_place(body, ...a.controls.rest.at, ...a.controls.rest.rot)
-  told(n, false)
+  told(n, false, 'kept')
   parentPort.postMessage({ living: { thing: id, body } })
   nudged = true
   return true
@@ -321,12 +396,10 @@ function heed(words) {
   }
 }
 
-/** Edits in the core's own form (page/edits.ts), put last. */
-function edit(words) {
-  // The room first, then the memory: making room may grow it, and what was read before is then gone.
-  const room = core.edits_room(words.length)
-  new Int32Array(core.memory.buffer, room, words.length).set(words)
-  core.world_edit(-1)
+/** Edits in the core's own form (page/edits.ts), put last. `how` they are to the anchor zones, and the answer: `witness`. */
+function edit(words, how = 'kept') {
+  put(core, words)
+  return witness(words, how)
 }
 
 /** How far a look goes, in cells. */
@@ -959,7 +1032,7 @@ const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => {
   take: (id) => {
     const a = alive.get(id)
     if (!a) return
-    told(core.living_vanish(a.body), false)
+    told(core.living_vanish(a.body), false, 'kept')
     alive.delete(id)
     parentPort.postMessage({ living: { thing: id, body: 0 } })
     parentPort.postMessage({ echo: { by: 'the world', gone: id } })
@@ -1107,16 +1180,16 @@ grasp = holding({ folk, kind: (x, y, z) => core.world_kind(x, y, z), hear: (even
 does.set('give', grasp.give)
 does.set('take', grasp.take)
 /** An ask the world's process made itself (what someone who left held is put down): done as any ask is, and told. */
-const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessage({ echo: ask }); edit(ask.edit); told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true); nudged = true }
+const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessage({ echo: ask }); edit(ask.edit); told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true, 'kept'); nudged = true }
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).
 const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell, seated: () => driven.seated(), kept: (by) => away.has(by) })
 does.set('person', body.person)
 // Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
 // Thrown, what a hand held is a body of its own cells: in the air its record says nobody can hold it (THROWN), and where it comes to rest it is the made thing again (rules/holding.mjs `letGo`, rules/blows.mjs `rested`).
 const THROWN = '(thrown)'
-const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id }, blast: (at, radius, spark) => { shock(at, radius); told(core.bodies_blast(at[0], at[1], at[2], radius, -1, spark ? 1 : 0), true); nudged = true }, ignite: (at, radius) => { core.bodies_ignite(at[0], at[1], at[2], radius); told(core.bodies_advance(0), false); nudged = true } , letGo: (by) => { const h = grasp?.letGo(by); if (!h) return null; const g = grid(h.rows, false); parentPort.postMessage({ echo: { by, thing: { id: h.thing, held: THROWN } } }); return { ...g, thing: h.thing, called: h.called } },
+const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id }, blast: (at, radius, spark) => { shock(at, radius); witness([0, ...at, radius, 0], 'loose'); told(core.bodies_blast(at[0], at[1], at[2], radius, -1, spark ? 1 : 0), true); nudged = true }, ignite: (at, radius) => { core.bodies_ignite(at[0], at[1], at[2], radius); told(core.bodies_advance(0), false); nudged = true } , letGo: (by) => { const h = grasp?.letGo(by); if (!h) return null; const g = grid(h.rows, false); parentPort.postMessage({ echo: { by, thing: { id: h.thing, held: THROWN } } }); return { ...g, thing: h.thing, called: h.called } },
   // Come to rest, a thrown thing is the made thing again where it lies (its record says where, and its cells are those rows): it can be picked up again. Broken, or never come to rest, its record goes.
-  rested: (id, by, rows) => { const box = boxOf(rows); parentPort.postMessage({ echo: { by: by ?? 'the world', put: id, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1], edit: [1, rows.length / 5, ...rows], box, thing: { id, held: null, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1] } } }) },
+  rested: (id, by, rows) => { const box = boxOf(rows); witness([1, rows.length / 5].concat(Array.from(rows)), 'kept'); parentPort.postMessage({ echo: { by: by ?? 'the world', put: id, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1], edit: [1, rows.length / 5, ...rows], box, thing: { id, held: null, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1] } } }) },
   lost: (id, by) => parentPort.postMessage({ echo: { by: by ?? 'the world', gone: id } }) })
 does.set('throw', blow.throw)
 does.set('push', blow.push)
@@ -1244,7 +1317,7 @@ does.set('smartObject', (rule, w, now, wrong) => {
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
 // what it may do with every call, and one started again must find what it used.
 // What rules have built (rules/built.mjs, the BUILD lane): cells a rule put into the world, and what each replaced, so that they can be taken out again. Its edits are done as an ask's are: echoed, put into the core, and what they left unheld let fall.
-const builds = built({ core: () => core, folk, lives: () => livesNow().map((l) => l.at), footing, stand, tell, busy: () => !!swapping, apply: (echo) => { parentPort.postMessage({ echo }); edit(echo.edit) }, settle: (at) => { told(at ? core.bodies_release(at[0], at[1], at[2], 0) : 0, true); nudged = true } })
+const builds = built({ core: () => core, folk, lives: () => livesNow().map((l) => l.at), footing, stand, tell, busy: () => !!swapping, apply: (echo) => { parentPort.postMessage({ echo }); edit(echo.edit) }, settle: (at) => { told(at ? core.bodies_release(at[0], at[1], at[2], 0) : 0, true, 'kept'); nudged = true } })
 const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { builds, core: () => core, folk, living: (id) => alive.get(id)?.pose?.at ?? null, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
 let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
@@ -1323,8 +1396,9 @@ function livesNow() {
   })
 }
 function handle(said) {
-  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle, city, social, made } = said
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle, city, social, made, anchors } = said
   if (city) return parentPort.postMessage({ id, city: citySnapshot(Date.now(), true) })
+  if (anchors) return parentPort.postMessage({ id, ...anchored(anchors) })
   if (social) return parentPort.postMessage({ id, ...handleSocial(social) })
   if (made) return syncMadeThingToCity(made, { emit: false, now: Date.now() })
   // A thing a world started again finds still held by nobody: put down where it was taken from.
@@ -1347,7 +1421,7 @@ function handle(said) {
     // what it had logged is on its way to the server ahead of the answer to this, and is in what the server sends back.
     swapping = { held: [], began, fire: fireSeen }
     alive.clear()
-    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(async ({ instance }) => { const next = instance.exports; next.fine_cells(1); if (GROUND) { await prepare(next); await Promise.all(owners(Date.now(), next).map((b) => groundOf(next, b[0], b[1], b[2], b[3], 1))); dropped(core) } core = next; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
+    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(async ({ instance }) => { const next = instance.exports; next.fine_cells(1); if (GROUND) { await prepare(next); await Promise.all(owners(Date.now(), next).map((b) => groundOf(next, b[0], b[1], b[2], b[3], 1))); dropped(core) } if (zones) seen = await witnesses(swap); core = next; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
     return
   }
   // While the swap is under way: the world's own history is taken as it comes (the server sends it once the new
@@ -1405,7 +1479,7 @@ function handle(said) {
   // A question, answered at once: what a cell is made of, and how high the ground's rule puts the land there.
   if (at) return parentPort.postMessage({ id, kind: core.world_kind(at[0], at[1], at[2]), ground: core.ground_at(at[0], at[2]) })
   // What was done before this process began: the edits only, with nothing thrown and nothing let fall.
-  if (replay) { if (said.built) builds.replayed(said.built, replay); return edit(replay) }
+  if (replay) { if (said.built) builds.replayed(said.built, replay); return void edit(replay, 'replay') }
   // A thing picked up or put down: the ask is made whole here (its edit, what the hand carries), or said why not.
   // A hand that is full puts down what it holds, at its owner's feet, before it takes another: nobody is told no.
   // Someone throws what they hold, themselves: nothing of the ask is kept (the thing's going is, when it leaves the hand).
@@ -1415,12 +1489,18 @@ function handle(said) {
   // A living thing taken out, awake or asleep: its body goes, wherever it has gone, and nothing of where it was made is
   // emptied (its cells left the world when it first lived).
   if (ask.gone && !ask.thing && alive.has(ask.gone)) unplace(ask)
+  // Whether what this ask does may be healed back (anchor-zones.mjs): not what a made thing is put, taken or held by.
+  // Nor an edit too big to be healed (`healable`).
+  const loose = !ask.thing && ask.gone === undefined && ask.put === undefined && ask.hold === undefined && !(zones && ask.edit && !healable(ask.edit)) ? 'loose' : 'kept'
+  // A blast or a ball of cells is told again as the rows it changed, so that a heal can take their place in the world's
+  // file: the echo says so, and compacting drops it (serve.mjs).
+  if (zones && loose === 'loose' && (ask.blast || (ask.edit && [...blocksOf(ask.edit)].some((b) => b.ball) && [...blocksOf(ask.edit)].every((b) => b.ball || b.per === 1)))) ask.restated = true
   parentPort.postMessage({ echo: ask })
   // A thing taken out that lives: its body goes, wherever it has gone, as a rule's thing taken away does. (Its record goes with the echo.)
   if (ask.gone && !ask.edit) {
     const a = alive.get(ask.gone)
     // (Its rule hears it broke: the core says so of a body that vanishes, and `heed` tells the rule.)
-    if (a) { told(core.living_vanish(a.body), false); alive.delete(ask.gone); parentPort.postMessage({ living: { thing: ask.gone, body: 0 } }); nudged = true }
+    if (a) { told(core.living_vanish(a.body), false, 'kept'); alive.delete(ask.gone); parentPort.postMessage({ living: { thing: ask.gone, body: 0 } }); nudged = true }
     removeMadeThingFromCity(ask.gone)
     if (id !== undefined) parentPort.postMessage({ id, laid: true, loose: 0 })
     return
@@ -1431,13 +1511,16 @@ function handle(said) {
   if (ask.unrule) return drop(ask.unrule)
   if (ask.realm) return
   if (ask.blast) shock(ask.blast, ask.radius, ask.by)
-  if (ask.blast) told(core.bodies_blast(ask.blast[0], ask.blast[1], ask.blast[2], ask.radius, -1, ask.spark ? 1 : 0), true)
+  if (ask.blast) {
+    const torn = witness([0, ...ask.blast, ask.radius, 0], 'loose')
+    told(core.bodies_blast(ask.blast[0], ask.blast[1], ask.blast[2], ask.radius, -1, ask.spark ? 1 : 0), true, 'loose', torn)
+  }
   else if (ask.ignite) { core.bodies_ignite(ask.ignite[0], ask.ignite[1], ask.ignite[2], ask.radius); told(core.bodies_advance(0), false) }
   else if (ask.ball) told(core.bodies_throw(...ask.ball.from, ...ask.ball.speed, ask.ball.radius, ask.ball.kind), false)
   // Asked to say it was done (`wait`): it was.
   if ((ask.blast || ask.ignite || ask.ball) && id !== undefined) parentPort.postMessage({ id, done: true })
   else if (ask.edit) {
-    edit(ask.edit)
+    const changed = edit(ask.edit, loose)
     // A thing that comes with its controls lives at once: before the world is asked what the edit left unheld, or a
     // car set down on a sloping street would be let fall as loose cells first.
     if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, ask.edit.slice(2), true, text(ask.thing.name ?? '', 40))
@@ -1445,7 +1528,7 @@ function handle(said) {
     const before = core.bodies_count(), n = core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0)
     // Asked to say how it went (an ask with `wait`, make/place.mjs `send`): how many bodies the edit left loose, now that it is laid.
     if (id !== undefined) parentPort.postMessage({ id, laid: true, loose: Math.max(0, core.bodies_count() - before), ...(ask.thing?.controls !== undefined ? { alive: alive.has(ask.thing.id) } : {}) })
-    told(n, true)
+    told(n, true, loose, ask.restated ? changed : [])
   }
   // A thing that is there, given controls with a motor, lives from now on (the server sent its cells with the ask).
   else if (ask.thing) {
@@ -1663,12 +1746,73 @@ function sleep(id, a) {
   // Out of `alive`'s bodies first: the core says the body is gone, and that is not its breaking (`heed`).
   const body = a.body
   a.body = 0; a.out = undefined; a.pose = { at, rot }; a.born = { at, rot }; a.rested = false
-  told(core.living_vanish(body), false)
+  told(core.living_vanish(body), false, 'kept')
   parentPort.postMessage({ living: { thing: id, body: 0 } })
   nudged = true
 }
 /** What this process holds of the ground now (serve.mjs `/world/ground`): tiles by level, how many finest are people's own and how many more, who has a place, and how many living things sleep. */
 const groundHeld = () => (GROUND ? { tiles: tilesHeld(core), ...shares(core), players: players.size, asleep: [...alive.values()].filter((a) => !a.body).length } : null)
+
+// ── Anchor zones: what is asked of them, and healing (#226) ─────────────
+/** What serve.mjs asks of the zones: how they stand, one kept, one taken out. */
+function anchored({ op, zone, remove }) {
+  if (!zones) return { error: 'anchor zones are not on here' }
+  if (op === 'add') {
+    const before = zones.ephemeralCells
+    let added
+    try { added = zones.addAnchor({ ...zone, createdAt: Date.now() }) } catch (e) { return { error: e.message } }
+    keepZones()
+    return { added, promoted: before - zones.ephemeralCells }
+  }
+  if (op === 'remove') {
+    const removed = zones.removeAnchor(remove)
+    if (removed) keepZones()
+    return { removed }
+  }
+  return { stats: { ...zones.stats(), policy: zones.policy } }
+}
+/** Gives the server what the zones remember, to be written beside the world's file. */
+function keepZones() { zonesDirty = false; zonesKept = Date.now(); parentPort.postMessage({ anchorsKept: zones.serialize() }) }
+/** Whether a cell may be made solid again now: not where someone stands or a living thing is. */
+function clear(lives, x, y, z) {
+  for (const p of folk.values()) if (Math.abs(p.at[0] - x - 0.5) < 3 && Math.abs(p.at[2] - z - 0.5) < 3 && y >= p.at[1] - 1 && y < p.at[1] + TALL) return false
+  return !lives.some((l) => l.over(x + 0.5, z + 0.5) && Math.abs(y - l.at[1]) <= l.top - l.at[1] + 1)
+}
+/**
+ * Puts back what has waited its time: an ask of the world's own, told to every page and kept like any edit, and
+ * nothing is let fall by it. What goes back to the ground's own cells and what goes back to something made there are
+ * said apart (`heal`), since a world's file need keep only the second (anchor-zones.mjs `compactLogEntries`).
+ */
+function heal(now) {
+  const lives = livesNow()
+  const { runs, healedCount } = zones.stepRegen(now, undefined, (x, y, z, kind) => !kind || clear(lives, x, y, z))
+  if (!healedCount) return false
+  const to = { ground: [], built: [] }
+  for (const [x0, x1, y, z, kind] of runs) for (let x = x0; x < x1; x++) to[seen.bare.world_kind(x, y, z) === kind ? 'ground' : 'built'].push({ x, y, z, kind: kind & ~FINE_MARK })
+  for (const [what, cells] of Object.entries(to)) {
+    if (!cells.length) continue
+    const rows = cellRows(cells), words = [1, rows.length, ...rows.flat()]
+    parentPort.postMessage({ echo: { by: 'the world', edit: words, box: boxRound(rows), heal: what } })
+    edit(words, 'replay')
+    // A page counts an answer for each edit it is told of (page/main.ts `asked`), as for one the world lays itself.
+    told(core.bodies_advance(0), true)
+  }
+  zonesDirty = true
+  nudged = true
+  return true
+}
+if (zones) {
+  // Healed since the server was last asked to compact the world's file (and perhaps before this process began).
+  let healed = zones.healedTotal > 0, compacted = Date.now()
+  setInterval(() => {
+    if (swapping || stopped) return
+    const now = Date.now()
+    healed = heal(now) || healed
+    if (healed && now - compacted >= zones.policy.compactIntervalMs) { healed = false; compacted = now; parentPort.postMessage({ compact: true }) }
+    // A long memory is written less often: a hundred cells to a millisecond between writes.
+    if (zonesDirty && now - zonesKept >= zones.ephemeralCells / 100) keepZones()
+  }, 1000)
+}
 
 // Its own clock: sixty times a second while anything moves, burns or flows.
 let last = performance.now()

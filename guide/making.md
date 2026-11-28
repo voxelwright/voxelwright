@@ -147,6 +147,21 @@ When the maker finalises a static creation (`attachAffordances` in `engine/make/
 
 The unified living-city coordinator (`createLivingCity` in `engine/rules/living-city.mjs`) registers those player-made affordances alongside city slots and geometric overhangs, composes StateTrees, Stimulus Bus, LOD Sight, localized memory/gossip, non-omniscient witness chains, 0 ms contextual barks, and the `engine/mind` Blackboard bridge, and emits a bounded `directorSummary()`. `directorCityBrief` in `engine/make/director.mjs` formats that telemetry into a sanitized plain-text block so realm directors can turn street heat, witness alerts, crowd mood, and player-built objects into organic plot beats.
 
+## Placement QA
+
+`make` and `put` take an optional `qa: {worldSampler, ...}` (#226). `worldSampler(x, y, z)` answers whether the world has something solid in a cell before the thing is added. The result then carries `qa`, a list of findings about the placed rows in 10 cm cells. Findings are advice: they change nothing about what is sent. No caller passes `qa` yet.
+
+`engine/make/qa-probes.mjs` does the probing:
+
+| Finding | What it means |
+| --- | --- |
+| `floating` | Fewer than two of five points under the thing (the centre and four corners) rest on something, or the centre and at least three corners hang over a drop |
+| `cantilevered` | The thing is supported, but a corner is not |
+| `wall_embedded` | Sampled cells of the thing are already solid in the world. Its bottom layer is left out. |
+| `prop_overlap` | Two oriented boxes intersect, with the penetration depth in cells |
+
+`probePlacedObjects` takes any list of oriented boxes. `probeMadeRows`, which `make` and `put` use, wraps made rows in one tight box and checks overlap only against `neighbors` that the caller passes. `node test/maker-qa.mjs` (in `engine/`) checks the probes and the review cameras.
+
 ## Choosing a visitor's model
 
 When a visitor connects a key (`engine/page/connect.ts`), the page lists the models that key can use and offers one first (`models` and `preferred` in `engine/page/models.ts`). The ranking is by the model's id alone, so it needs no list kept by hand:

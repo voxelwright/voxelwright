@@ -76,6 +76,93 @@ export class SmokeGrid {
   private invOpen: Float32Array<ArrayBuffer> = new Float32Array(TOTAL)
   private sampleIdx: Int32Array<ArrayBuffer> = new Int32Array(TOTAL)
 
+  // Two root words, then two words per brick. Both levels use X, Z, Y bit order.
+  // Each leaf covers 2x2x2 smoke cells.
+  private occupancy = new Uint32Array(130)
+  private maskDirty = false
+
+  private markOccupied(x: number, y: number, z: number): void {
+    const brick = (x >> 3) + ((z >> 3) << 2) + ((y >> 3) << 4)
+    const leaf = ((x >> 1) & 3) + (((z >> 1) & 3) << 2) + (((y >> 1) & 3) << 4)
+    this.occupancy[brick >> 5] |= 1 << (brick & 31)
+    this.occupancy[2 + brick * 2 + (leaf >> 5)] |= 1 << (leaf & 31)
+  }
+
+  private syncOccupancy(): void {
+    if (!this.maskDirty) return
+    this.occupancy.fill(0)
+    for (let i = 0; i < TOTAL; i++) {
+      if (this.density[i] >= MIN_VISIBLE_DENSITY && !this.solid[i]) {
+        this.markOccupied(i & 31, i >> 10, (i >> 5) & 31)
+      }
+    }
+    this.maskDirty = false
+  }
+
+  /** Snapshot in GPU upload order, root first and then 64 leaf masks. */
+  exportBitmask(): Uint32Array<ArrayBuffer> {
+    this.syncOccupancy()
+    return this.occupancy.slice()
+  }
+
+  /** Conservative plume interval in ray parameter units (world cells for a unit direction). */
+  rayInterval(origin: readonly number[], dir: readonly number[], tMax: number) {
+    this.syncOccupancy()
+    const result = { hit: false, tEnter: 0, tExit: 0, visitedBricks: 0 }
+    if (!(this.occupancy[0] | this.occupancy[1]) || !(tMax > 0)) return result
+    const local = [origin[0] - this.originX, origin[1] - this.originY, origin[2] - this.originZ]
+    let start = 0, end = tMax
+    const bounds = [this.actMinX, this.actMinY, this.actMinZ]
+    const upper = [this.actMaxX, this.actMaxY, this.actMaxZ]
+    for (let a = 0; a < 3; a++) {
+      const lo = bounds[a] * SMOKE_CELL_SIZE
+      const hi = (upper[a] + 1) * SMOKE_CELL_SIZE
+      if (dir[a] === 0) {
+        if (local[a] < lo || local[a] >= hi) return result
+      } else {
+        const u = (lo - local[a]) / dir[a], v = (hi - local[a]) / dir[a]
+        start = Math.max(start, Math.min(u, v))
+        end = Math.min(end, Math.max(u, v))
+      }
+    }
+    if (!(start < end) || !dir.some(v => v !== 0)) return result
+
+    // Traverse one aligned lattice at a time. Advancing integer coordinates on ties
+    // also handles axis-aligned rays and starts exactly on a negative-going face.
+    const walk = (size: number, t: number, limit: number, parent: number) => {
+      const cellAt = (a: number) => {
+        const pos = (local[a] + dir[a] * t) / size
+        const cell = dir[a] < 0 ? Math.ceil(pos) - 1 : Math.floor(pos)
+        return Math.max(0, Math.min(N * SMOKE_CELL_SIZE / size - 1, cell))
+      }
+      const faceTime = (c: number, a: number) => dir[a] === 0 ? Infinity :
+        ((c + Number(dir[a] > 0)) * size - local[a]) / dir[a]
+      let x = cellAt(0), y = cellAt(1), z = cellAt(2)
+      let tx = faceTime(x, 0), ty = faceTime(y, 1), tz = faceTime(z, 2)
+      while (t < limit) {
+        const stop = Math.min(limit, tx, ty, tz)
+        const bit = (x & 3) + ((z & 3) << 2) + ((y & 3) << 4)
+        const word = parent < 0 ? 0 : 2 + parent * 2
+        if (parent < 0) result.visitedBricks++
+        if (stop > t && (this.occupancy[word + (bit >> 5)] & (1 << (bit & 31)))) {
+          if (parent < 0) walk(size / 4, t, stop, bit)
+          else {
+            if (!result.hit) result.tEnter = t
+            result.hit = true
+            result.tExit = stop
+          }
+        }
+        if (stop === limit) break
+        if (tx === stop) { x += Math.sign(dir[0]); tx = faceTime(x, 0) }
+        if (ty === stop) { y += Math.sign(dir[1]); ty = faceTime(y, 1) }
+        if (tz === stop) { z += Math.sign(dir[2]); tz = faceTime(z, 2) }
+        t = Math.max(t, stop)
+      }
+    }
+    walk(8 * SMOKE_CELL_SIZE, start, end, -1)
+    return result
+  }
+
   originX = 0
   originY = 0
   originZ = 0
@@ -95,6 +182,8 @@ export class SmokeGrid {
 
   /** Resets all smoke, temperature, velocity and pressure (keeps obstacle map). */
   clear(): void {
+    this.maskDirty = false
+    this.occupancy.fill(0)
     this.density.fill(0)
     this.temp.fill(0)
     this.vx.fill(0)
@@ -130,6 +219,7 @@ export class SmokeGrid {
     if (idx < 0) return
     const v = isSolid ? 1 : 0
     if (this.solid[idx] === v) return
+    this.maskDirty = true
     this.solid[idx] = v
     if (v) {
       this.density[idx] = 0
@@ -142,6 +232,7 @@ export class SmokeGrid {
 
   /** Resamples obstacle solidity for the whole grid or a world-cell bounding box (e.g. after a blast opens a wall). */
   refreshSolids(isSolid: SolidSampler, bounds?: SmokeBounds): void {
+    this.maskDirty = true
     const x0 = bounds ? Math.max(0, Math.floor((bounds.minX - this.originX) / SMOKE_CELL_SIZE)) : 0
     const x1 = bounds ? Math.min(N - 1, Math.floor((bounds.maxX - this.originX) / SMOKE_CELL_SIZE)) : N - 1
     const y0 = bounds ? Math.max(0, Math.floor((bounds.minY - this.originY) / SMOKE_CELL_SIZE)) : 0
@@ -206,6 +297,7 @@ export class SmokeGrid {
       return
     }
 
+    this.maskDirty = true
     const dSrc = this.density, tSrc = this.temp
     const vxSrc = this.vx, vySrc = this.vy, vzSrc = this.vz
     const sSrc = this.solid
@@ -280,9 +372,11 @@ export class SmokeGrid {
     if (idx < 0 || this.solid[idx]) return
     const nextD = Math.min(4.0, this.density[idx] + density)
     if (nextD > 0.005 && this.density[idx] <= 0.005) this._activeCount++
+    if (density < 0) this.maskDirty = true
     this.density[idx] = nextD
     this.temp[idx] = Math.min(6.0, Math.max(this.temp[idx], temp) + temp * 0.25)
     const x = idx & 31, z = (idx >> 5) & 31, y = idx >> 10
+    if (this.density[idx] >= MIN_VISIBLE_DENSITY) this.markOccupied(x, y, z)
     if (x < this.actMinX) this.actMinX = x; if (x > this.actMaxX) this.actMaxX = x
     if (y < this.actMinY) this.actMinY = y; if (y > this.actMaxY) this.actMaxY = y
     if (z < this.actMinZ) this.actMinZ = z; if (z > this.actMaxZ) this.actMaxZ = z
@@ -430,6 +524,8 @@ export class SmokeGrid {
     //    avoiding 3x redundant velocity trilinear interpolations and cutting numerical dissipation.
     const dDst = this.densityNext
     const tDst = this.tempNext
+    this.occupancy.fill(0)
+    this.maskDirty = false
     dDst.fill(0)
     tDst.fill(0)
 
@@ -457,6 +553,7 @@ export class SmokeGrid {
             const t = temp[i] * tDecay
             if (d > 1e-4) {
               dDst[i] = d
+              if (dDst[i] >= MIN_VISIBLE_DENSITY) this.markOccupied(x, y, z)
               if (d > 0.005) activeCount++
               if (x < minX) minX = x; if (x > maxX) maxX = x
               if (y < minY) minY = y; if (y > maxY) maxY = y
@@ -523,6 +620,7 @@ export class SmokeGrid {
 
           if (d > 1e-4) {
             dDst[i] = d
+            if (dDst[i] >= MIN_VISIBLE_DENSITY) this.markOccupied(x, y, z)
             if (d > 0.005) activeCount++
             if (x < minX) minX = x; if (x > maxX) maxX = x
             if (y < minY) minY = y; if (y > maxY) maxY = y

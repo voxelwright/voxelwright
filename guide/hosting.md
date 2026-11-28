@@ -125,7 +125,7 @@ When someone joins it prints `Ada (v4034f0e55) joined`, and `left` when they go.
 | `--tiles-most <n>` | 16 | Tiles the world holds beyond its players' own ground |
 | `--ground-wait <ms>` | 3000 | How long a request waits for its ground before it is refused |
 
-A flag the server does not know stops it.
+A flag the server does not know stops it. That includes the world server's [anchor-zone](/engine#anchor-zones) flags: a dedicated server heals nothing yet.
 
 ## 3. See it listed and join
 

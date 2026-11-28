@@ -64,19 +64,11 @@ const FLAG_ENABLE_SPATIAL = 1 << 2
 const FLAG_USE_ALIAS = 1 << 3
 const FLAG_USE_CLUSTERS = 1 << 4
 const FLAG_VIEW_NORMALS = 1 << 5
+const FLAG_SCENE_EVAL = 1 << 6
 
 const RIS_PASS_DESC: GPUComputePassDescriptor = { label: 'restir-ris-initial' }
 const TEMPORAL_PASS_DESC: GPUComputePassDescriptor = { label: 'restir-temporal-reuse' }
 const SPATIAL_PASS_DESC: GPUComputePassDescriptor = { label: 'restir-spatial-shade' }
-
-const OUTPUT_USAGE =
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.TEXTURE_BINDING |
-  GPUTextureUsage.COPY_SRC
-
-const GEOM_USAGE =
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.TEXTURE_BINDING
 
 /**
  * Reusable WGSL structs & PBR direct-illumination math matching the 64-byte `ClusterLight`
@@ -255,6 +247,108 @@ fn restirTargetPdf(
 ) -> f32 {
   return restirLuma(evalRestirLightGGX(light, worldPos, N, V, albedo, roughness, metallic));
 }
+
+struct RestirSceneEval {
+  diffuse: vec3f,
+  specLuma: f32,
+}
+
+// Scene-calibrated local-light evaluator matching lights.ts / march-shade.ts evalClusteredLocalLights:
+//   - lights.ts scales colorType.rgb by dHalf^2 and packs dHalf in extra.x, kind in extra.z, beam focus in extra.w.
+//   - Returns albedo-demodulated diffuse irradiance (.diffuse) and specular+wet streak luma (.specLuma) so full-res
+//     march-shade.ts preserves razor-sharp procedural paint/road marks after bilateral upsampling.
+fn evalRestirLightScene(
+  light: ClusterLight,
+  worldPos: vec3f,
+  N: vec3f,
+  V: vec3f,
+  roughness: f32,
+  wetSurface: f32,
+  wetness: f32,
+) -> RestirSceneEval {
+  let toL = light.posRange.xyz - worldPos;
+  let d2 = dot(toL, toL);
+  let radius = max(light.posRange.w, 1e-4);
+  let r2 = radius * radius;
+  if (d2 <= 1e-6 || d2 >= r2) { return RestirSceneEval(vec3f(0.0), 0.0); }
+
+  let invD = inverseSqrt(d2);
+  let L = toL * invD;
+  var spot = 1.0;
+  let cosOuter = light.colorType.w;
+  if (cosOuter > -1.5) {
+    let cosAngle = dot(-L, light.dirInner.xyz);
+    if (cosAngle <= cosOuter) { return RestirSceneEval(vec3f(0.0), 0.0); }
+    let invSpan = 1.0 / max(light.dirInner.w - cosOuter, 0.001);
+    let u = clamp((cosAngle - cosOuter) * invSpan, 0.0, 1.0);
+    let cone = u * u * (3.0 - 2.0 * u);
+    spot = mix(cone, cone * (0.38 + 0.62 * cone * cone), light.extra.w);
+  }
+
+  let norm2 = d2 / r2;
+  let win = clamp(1.0 - norm2 * norm2, 0.0, 1.0);
+  let dHalf = max(light.extra.x, 1.0);
+  let att = (win * win) / (dHalf * dHalf + d2);
+  let ndl = dot(N, L);
+  if (ndl <= -0.04) { return RestirSceneEval(vec3f(0.0), 0.0); }
+
+  let diff = pow(max(ndl, 0.0), 0.72);
+  let rad = light.colorType.rgb * (att * spot);
+  let diffuseIrr = rad * diff;
+
+  var specRgb = vec3f(0.0);
+  if (ndl > 0.0) {
+    let rd = -V;
+    let hRaw = L + V;
+    let hLen = length(hRaw);
+    let H = select(N, hRaw / hLen, hLen > 1e-5);
+    let ndh = max(dot(N, H), 0.0);
+    let specBoost = select(1.0, 1.15, light.extra.w > 0.5);
+    let smoothness = max(1.0 - roughness, 0.0);
+    let shininess = mix(8.0, 64.0, smoothness);
+    let spec = pow(ndh, shininess) * smoothness * smoothness * 0.38;
+    specRgb += rad * (spec * specBoost);
+
+    let wet = wetness * wetSurface;
+    if (wet > 0.02) {
+      let back = reflect(rd, vec3f(0.0, 1.0, 0.0));
+      let side = normalize(vec2f(-rd.z, rd.x) + vec2f(0.00001, 0.0));
+      let off = back - L;
+      let across = dot(off.xz, side);
+      let streak = exp(-across * across * 420.0 - max(dot(off, off) - across * across, 0.0) * 6.5);
+      let sheen = pow(ndh, 24.0) * 0.22 + streak * 0.52;
+      specRgb += rad * (sheen * wet * specBoost * 0.65);
+    }
+  }
+  return RestirSceneEval(diffuseIrr, restirLuma(specRgb));
+}
+
+fn restirTargetPdfMode(
+  light: ClusterLight,
+  worldPos: vec3f,
+  N: vec3f,
+  V: vec3f,
+  albedo: vec3f,
+  roughness: f32,
+  metallic: f32,
+  wetSurface: f32,
+  wetness: f32,
+  isScene: bool,
+) -> f32 {
+  if (isScene) {
+    let ev = evalRestirLightScene(light, worldPos, N, V, roughness, wetSurface, wetness);
+    return restirLuma(ev.diffuse) * 0.55 + ev.specLuma;
+  }
+  return restirTargetPdf(light, worldPos, N, V, albedo, roughness, metallic);
+}
+
+fn restirSourceRadius(light: ClusterLight, isScene: bool) -> f32 {
+  if (!isScene) { return max(light.extra.x, 0.0); }
+  // Scene mode stores dHalf in extra.x and light kind in extra.z (0=car, 1=street, 2=extra).
+  if (light.extra.z < 0.5) { return 0.6; }
+  if (light.extra.z < 1.5) { return 2.0; }
+  return 1.2;
+}
 `
 
 const DEFAULT_OCCLUSION_WGSL = /* wgsl */ `
@@ -360,6 +454,7 @@ fn traceLightVisibility(
   light: ClusterLight,
   shadowBias: f32,
   sampleId: u32,
+  isScene: bool,
 ) -> f32 {
   let origin = worldPos + N * shadowBias;
   let toCenter = light.posRange.xyz - origin;
@@ -368,7 +463,7 @@ fn traceLightVisibility(
     return 1.0;
   }
   var targetPos = light.posRange.xyz;
-  let sourceRadius = max(light.extra.x, 0.0);
+  let sourceRadius = restirSourceRadius(light, isScene);
   if (sourceRadius > 1e-4 && centerDist > sourceRadius * 1.05) {
     let dirC = toCenter / centerDist;
     let refUp = select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(dirC.y) > 0.9);
@@ -387,12 +482,14 @@ fn traceLightVisibility(
   }
   let toTarget = targetPos - origin;
   let dist = length(toTarget);
-  let maxDist = dist - max(shadowBias * 0.5, 0.02);
+  let startNudge = select(0.0, 1.4, isScene);
+  let endPullback = select(max(shadowBias * 0.5, 0.02), max(shadowBias * 0.5, 6.5), isScene);
+  let maxDist = dist - endPullback - startNudge;
   if (maxDist <= 1e-4) {
     return 1.0;
   }
   let dir = toTarget / dist;
-  return clamp(traceShadowRay(origin, dir, maxDist), 0.0, 1.0);
+  return clamp(traceShadowRay(origin + dir * startNudge, dir, maxDist), 0.0, 1.0);
 }
 `
 
@@ -480,11 +577,14 @@ fn cs_ris_initial(@builtin(global_invocation_id) gid: vec3u) {
     return;
   }
 
+  let isScene = (params.configU.w & ${FLAG_SCENE_EVAL}u) != 0u;
+  let wetness = params.clusterFloat.y;
   let V = normalize(params.eyeTanHalf.xyz - worldPos);
-  let albedo = max(textureLoad(albedoTex, px, 0).rgb, vec3f(0.0));
+  let albedo = select(max(textureLoad(albedoTex, px, 0).rgb, vec3f(0.0)), vec3f(1.0), isScene);
   let mat = textureLoad(materialTex, px, 0);
   let roughness = clamp(mat.r, 0.045, 1.0);
   let metallic = clamp(mat.g, 0.0, 1.0);
+  let wetSurface = clamp(mat.b, 0.0, 1.0);
 
   let frameIdx = params.frameU.w;
   var rng = pcgInit(gid.xy, frameIdx, 1u);
@@ -512,7 +612,7 @@ fn cs_ris_initial(@builtin(global_invocation_id) gid: vec3u) {
         for (var i = 0u; i < safeCount; i++) {
           let candIdx = clusterIndices[cell.offset + i];
           if (candIdx >= lightCount) { continue; }
-          let pHat = restirTargetPdf(lights[candIdx], worldPos, N, V, albedo, roughness, metallic);
+          let pHat = restirTargetPdfMode(lights[candIdx], worldPos, N, V, albedo, roughness, metallic, wetSurface, wetness, isScene);
           if (pHat > RESTIR_PHAT_EPS) {
             wSum += pHat;
             if (randF32(&rng) * wSum < pHat) {
@@ -527,7 +627,7 @@ fn cs_ris_initial(@builtin(global_invocation_id) gid: vec3u) {
           let slot = min(u32(randF32(&rng) * f32(safeCount)), safeCount - 1u);
           let candIdx = clusterIndices[cell.offset + slot];
           if (candIdx >= lightCount) { continue; }
-          let pHat = restirTargetPdf(lights[candIdx], worldPos, N, V, albedo, roughness, metallic);
+          let pHat = restirTargetPdfMode(lights[candIdx], worldPos, N, V, albedo, roughness, metallic, wetSurface, wetness, isScene);
           let w = pHat * invClusterPdf;
           if (w > 0.0) {
             wSum += w;
@@ -556,7 +656,7 @@ fn cs_ris_initial(@builtin(global_invocation_id) gid: vec3u) {
         candIdx = min(u32(randF32(&rng) * fCount), lightCount - 1u);
       }
       if (srcPdf <= 1e-12) { continue; }
-      let pHat = restirTargetPdf(lights[candIdx], worldPos, N, V, albedo, roughness, metallic);
+      let pHat = restirTargetPdfMode(lights[candIdx], worldPos, N, V, albedo, roughness, metallic, wetSurface, wetness, isScene);
       let w = pHat / srcPdf;
       if (w > 0.0) {
         wSum += w;
@@ -579,7 +679,7 @@ fn cs_ris_initial(@builtin(global_invocation_id) gid: vec3u) {
     W = restirCleanWeight(wSum / (normDivisor * selectedPHat));
     if (W > 0.0) {
       // Trace 1 shadow visibility ray toward the winning light (supporting soft penumbra disk jitter).
-      let vis = traceLightVisibility(worldPos, N, winLight, params.tuning.x, sampleId);
+      let vis = traceLightVisibility(worldPos, N, winLight, params.tuning.x, sampleId, isScene);
       if (vis <= 0.001) {
         W = 0.0;
         visOk = false;
@@ -703,10 +803,13 @@ fn cs_temporal_reuse(@builtin(global_invocation_id) gid: vec3u) {
   );
   let prevV = normalize(params.prevEyeTanHalf.xyz - prevWorldPos);
 
-  let albedo = max(textureLoad(albedoTex, px, 0).rgb, vec3f(0.0));
+  let isScene = (flags & ${FLAG_SCENE_EVAL}u) != 0u;
+  let wetness = params.clusterFloat.y;
+  let albedo = select(max(textureLoad(albedoTex, px, 0).rgb, vec3f(0.0)), vec3f(1.0), isScene);
   let mat = textureLoad(materialTex, px, 0);
   let roughness = clamp(mat.r, 0.045, 1.0);
   let metallic = clamp(mat.g, 0.0, 1.0);
+  let wetSurface = clamp(mat.b, 0.0, 1.0);
 
   let maxM = max(params.configU.y, 1u);
   let frameIdx = params.frameU.w;
@@ -732,7 +835,7 @@ fn cs_temporal_reuse(@builtin(global_invocation_id) gid: vec3u) {
       prevLightHash = curHash;
       prevM = min(prevM, 2u);
       if (prevW > 0.0) {
-        let vis = traceLightVisibility(curWorldPos, curN, lights[prevY], params.tuning.x, prevSampleId);
+        let vis = traceLightVisibility(curWorldPos, curN, lights[prevY], params.tuning.x, prevSampleId, isScene);
         if (vis <= 0.001) {
           prevW = 0.0;
           prevVis = false;
@@ -762,8 +865,8 @@ fn cs_temporal_reuse(@builtin(global_invocation_id) gid: vec3u) {
 
   if (curY != RESTIR_INVALID_LIGHT && curY < lightCount && curW > 0.0) {
     let lCur = lights[curY];
-    let pCurAtCur = restirTargetPdf(lCur, curWorldPos, curN, curV, albedo, roughness, metallic);
-    let pCurAtPrev = restirTargetPdf(lCur, prevWorldPos, prevN, prevV, albedo, roughness, metallic);
+    let pCurAtCur = restirTargetPdfMode(lCur, curWorldPos, curN, curV, albedo, roughness, metallic, wetSurface, wetness, isScene);
+    let pCurAtPrev = restirTargetPdfMode(lCur, prevWorldPos, prevN, prevV, albedo, roughness, metallic, wetSurface, wetness, isScene);
     let denom = cCur * pCurAtCur + cPrev * pCurAtPrev;
     if (pCurAtCur > RESTIR_PHAT_EPS && denom > 1e-12) {
       let misCur = (cCur * pCurAtCur) / denom;
@@ -786,8 +889,8 @@ fn cs_temporal_reuse(@builtin(global_invocation_id) gid: vec3u) {
 
   if (prevY != RESTIR_INVALID_LIGHT && prevY < lightCount && prevW > 0.0) {
     let lPrev = lights[prevY];
-    let pPrevAtCur = restirTargetPdf(lPrev, curWorldPos, curN, curV, albedo, roughness, metallic);
-    let pPrevAtPrev = restirTargetPdf(lPrev, prevWorldPos, prevN, prevV, albedo, roughness, metallic);
+    let pPrevAtCur = restirTargetPdfMode(lPrev, curWorldPos, curN, curV, albedo, roughness, metallic, wetSurface, wetness, isScene);
+    let pPrevAtPrev = restirTargetPdfMode(lPrev, prevWorldPos, prevN, prevV, albedo, roughness, metallic, wetSurface, wetness, isScene);
     let denom = cCur * pPrevAtCur + cPrev * pPrevAtPrev;
     if (pPrevAtCur > RESTIR_PHAT_EPS && denom > 1e-12) {
       let misPrev = (cPrev * pPrevAtPrev) / denom;
@@ -850,9 +953,11 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
   let geomC = textureLoad(geomCurrTex, px, 0);
   let curZ = geomC.w;
   let lightCount = params.frameU.z;
+  let flags = params.configU.w;
+  let isScene = (flags & ${FLAG_SCENE_EVAL}u) != 0u;
   if (curZ <= 0.0 || lightCount == 0u) {
     reservoirOut[idx] = rCenter;
-    textureStore(outputTex, px, vec4f(0.0, 0.0, 0.0, 1.0));
+    textureStore(outputTex, px, vec4f(0.0, 0.0, 0.0, select(1.0, 0.0, isScene)));
     return;
   }
 
@@ -869,12 +974,13 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
     params.fwdAspect.w,
   );
   let curV = normalize(params.eyeTanHalf.xyz - curWorldPos);
-  let curAlbedo = max(textureLoad(albedoTex, px, 0).rgb, vec3f(0.0));
+  let wetness = params.clusterFloat.y;
+  let curAlbedo = select(max(textureLoad(albedoTex, px, 0).rgb, vec3f(0.0)), vec3f(1.0), isScene);
   let curMat = textureLoad(materialTex, px, 0);
   let curRough = clamp(curMat.r, 0.045, 1.0);
   let curMetal = clamp(curMat.g, 0.0, 1.0);
+  let curWet = clamp(curMat.b, 0.0, 1.0);
 
-  let flags = params.configU.w;
   let enableSpatial = (flags & ${FLAG_ENABLE_SPATIAL}u) != 0u;
   let spatialK = select(0u, min(params.configU.z, MAX_SPATIAL_K), enableSpatial);
   let spatialRadius = max(params.tuning.y, 1.0);
@@ -918,7 +1024,7 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
     var p0At0: f32 = 0.0;
     if (hasCur) {
       l0 = lights[curY];
-      p0At0 = restirTargetPdf(l0, curWorldPos, curN, curV, curAlbedo, curRough, curMetal);
+      p0At0 = restirTargetPdfMode(l0, curWorldPos, curN, curV, curAlbedo, curRough, curMetal, curWet, wetness, isScene);
     }
     let curEvalOk = hasCur && p0At0 > RESTIR_PHAT_EPS;
 
@@ -993,13 +1099,14 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
       totalM += rNb.M;
       let ci = f32(rNb.M);
       let nbV = normalize(params.eyeTanHalf.xyz - nbWorldPos);
-      let nbAlbedo = max(textureLoad(albedoTex, nPx, 0).rgb, vec3f(0.0));
+      let nbAlbedo = select(max(textureLoad(albedoTex, nPx, 0).rgb, vec3f(0.0)), vec3f(1.0), isScene);
       let nbMetal = clamp(nbMat.g, 0.0, 1.0);
+      let nbWet = clamp(nbMat.b, 0.0, 1.0);
 
       // Canonical center MIS contribution paired against this neighbor.
       var p0AtI: f32 = 0.0;
       if (curEvalOk) {
-        p0AtI = restirTargetPdf(l0, nbWorldPos, nbN, nbV, nbAlbedo, nbRough, nbMetal);
+        p0AtI = restirTargetPdfMode(l0, nbWorldPos, nbN, nbV, nbAlbedo, nbRough, nbMetal, nbWet, wetness, isScene);
         let denom0 = c0 * p0At0 + fK * ci * p0AtI;
         mis0Accum += select(1.0, (c0 * p0At0) / denom0, denom0 > 1e-12);
       } else {
@@ -1018,9 +1125,9 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
         pAtI = p0AtI;
       } else {
         let lNb = lights[nbY];
-        pAt0 = restirTargetPdf(lNb, curWorldPos, curN, curV, curAlbedo, curRough, curMetal);
+        pAt0 = restirTargetPdfMode(lNb, curWorldPos, curN, curV, curAlbedo, curRough, curMetal, curWet, wetness, isScene);
         if (pAt0 > RESTIR_PHAT_EPS) {
-          pAtI = restirTargetPdf(lNb, nbWorldPos, nbN, nbV, nbAlbedo, nbRough, nbMetal);
+          pAtI = restirTargetPdfMode(lNb, nbWorldPos, nbN, nbV, nbAlbedo, nbRough, nbMetal, nbWet, wetness, isScene);
         }
       }
       if (pAt0 <= RESTIR_PHAT_EPS || pAtI <= RESTIR_PHAT_EPS) { continue; }
@@ -1070,10 +1177,11 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
   // shadow smearing and light bleed across corners and walls while preserving soft penumbras).
   if (outY != RESTIR_INVALID_LIGHT && outY < lightCount && outW > 0.0) {
     let winLight = lights[outY];
+    let hasArea = restirSourceRadius(winLight, isScene) > 1e-4;
     let sameVerifiedPoint = !fromNeighbor
-      || (curVis && outY == curY && (winLight.extra.x <= 1e-4 || outSampleId == curSampleId));
+      || (curVis && outY == curY && (!hasArea || outSampleId == curSampleId));
     if (!sameVerifiedPoint || !outVis) {
-      let vis = traceLightVisibility(curWorldPos, curN, winLight, params.tuning.x, outSampleId);
+      let vis = traceLightVisibility(curWorldPos, curN, winLight, params.tuning.x, outSampleId, isScene);
       if (vis <= 0.001) {
         outW = 0.0;
         outVis = false;
@@ -1084,14 +1192,27 @@ fn cs_spatial_reuse_and_shade(@builtin(global_invocation_id) gid: vec3u) {
     }
   }
 
+  let outFlags = restirPackAgeFlags(outVis && outW > 0.0, outSampleId, outHash);
+  reservoirOut[idx] = Reservoir(outY, bitcast<u32>(outW), outM, outFlags);
+
+  if (isScene) {
+    var diffIrr = vec3f(0.0);
+    var specLum = 0.0;
+    if (outY != RESTIR_INVALID_LIGHT && outY < lightCount && outW > 0.0) {
+      let effW = min(outW, 64.0);
+      let ev = evalRestirLightScene(lights[outY], curWorldPos, curN, curV, curRough, curWet, wetness);
+      diffIrr = restirCleanRgb(ev.diffuse * effW);
+      specLum = min(max(ev.specLuma * effW, 0.0), 65000.0);
+    }
+    textureStore(outputTex, px, vec4f(diffIrr, specLum));
+    return;
+  }
+
   var directRgb = vec3f(0.0);
   if (outY != RESTIR_INVALID_LIGHT && outY < lightCount && outW > 0.0) {
     let shaded = evalRestirLightGGX(lights[outY], curWorldPos, curN, curV, curAlbedo, curRough, curMetal);
     directRgb = restirCleanRgb(shaded * outW);
   }
-
-  let outFlags = restirPackAgeFlags(outVis && outW > 0.0, outSampleId, outHash);
-  reservoirOut[idx] = Reservoir(outY, bitcast<u32>(outW), outM, outFlags);
   textureStore(outputTex, px, vec4f(directRgb, 1.0));
 }
 `
@@ -1112,6 +1233,8 @@ export interface RestirDIOptions {
   readonly shadowBias?: number
   /** Coordinate space of `input.normal` (`'world'` default, or `'view'`). */
   readonly normalSpace?: 'world' | 'view'
+  /** Shading evaluator: `'physical'` (default standalone GGX) or `'scene'` (calibrated to `lights.ts` + demodulated diffuse/spec output). */
+  readonly evalMode?: 'physical' | 'scene'
   /** Custom WGSL snippet providing `fn traceShadowRay(origin: vec3f, dir: vec3f, maxDist: f32) -> f32`. */
   readonly occlusionWgsl?: string
   /** Optional `@group(1)` bind group layout for resources used by `occlusionWgsl`. */
@@ -1164,6 +1287,7 @@ export interface RestirDispatchInput {
   readonly enableTemporal?: boolean
   readonly enableSpatial?: boolean
   readonly shadowBias?: number
+  readonly wetness?: number
   readonly frameIndex?: number
 }
 
@@ -1197,6 +1321,176 @@ export interface RestirDIPass {
   readonly outputTexture: GPUTexture
   /** Releases all GPU resources owned by this ReSTIR-DI pass. */
   destroy(): void
+}
+
+function buildSceneDenoiseTempWgsl(): string {
+  return /* wgsl */ `
+${COMMON_COMPUTE_WGSL}
+${DEFAULT_OCCLUSION_WGSL}
+
+@group(0) @binding(0) var<uniform> params: RestirParams;
+@group(0) @binding(1) var rawTex: texture_2d<f32>;
+@group(0) @binding(2) var histIn: texture_2d<f32>;
+@group(0) @binding(3) var geomCurr: texture_2d<f32>;
+@group(0) @binding(4) var geomPrev: texture_2d<f32>;
+@group(0) @binding(5) var velTex: texture_2d<f32>;
+@group(0) @binding(6) var histOut: texture_storage_2d<rgba16float, write>;
+
+@compute @workgroup_size(8, 8, 1)
+fn cs_restir_denoise_temp(@builtin(global_invocation_id) gid: vec3u) {
+  let renderW = i32(params.sizeU.z);
+  let renderH = i32(params.sizeU.w);
+  let px = vec2i(i32(gid.x), i32(gid.y));
+  if (px.x >= renderW || px.y >= renderH) { return; }
+
+  let gC = textureLoad(geomCurr, px, 0);
+  let curZ = gC.w;
+  if (curZ <= 0.0) {
+    textureStore(histOut, px, vec4f(0.0));
+    return;
+  }
+  let curN = gC.xyz;
+  let rawC = max(textureLoad(rawTex, px, 0), vec4f(0.0));
+
+  // Fast 3x3 same-plane neighborhood firefly clamp (kills single-pixel high-weight spikes without losing energy).
+  var meanV = rawC;
+  var wMean = 1.0;
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      if (dx == 0 && dy == 0) { continue; }
+      let q = px + vec2i(dx, dy);
+      if (q.x < 0 || q.y < 0 || q.x >= renderW || q.y >= renderH) { continue; }
+      let gQ = textureLoad(geomCurr, q, 0);
+      if (gQ.w <= 0.0 || dot(curN, gQ.xyz) < 0.88) { continue; }
+      if (abs(gQ.w - curZ) / max(curZ, 1.0) > 0.045) { continue; }
+      meanV += max(textureLoad(rawTex, q, 0), vec4f(0.0));
+      wMean += 1.0;
+    }
+  }
+  let avgV = meanV / wMean;
+  let avgL = restirLuma(avgV.rgb);
+  let curL = restirLuma(rawC.rgb);
+  let maxL = avgL * 8.5 + 1.5;
+  let maxSpec = avgV.a * 8.5 + 1.5;
+  var curV = rawC;
+  if (curL > maxL && curL > 1e-4) {
+    curV = vec4f(rawC.rgb * (maxL / curL), min(rawC.a, maxSpec));
+  } else if (curV.a > maxSpec) {
+    curV.a = maxSpec;
+  }
+
+  let hasHistory = (params.configU.w & ${FLAG_HAS_HISTORY}u) != 0u;
+  if (!hasHistory || params.prevRenderInfo.x < 0.5 || params.prevRenderInfo.y < 0.5) {
+    textureStore(histOut, px, curV);
+    return;
+  }
+
+  let curUV = (vec2f(px) + 0.5) * params.renderInfo.zw;
+  let velRaw = textureLoad(velTex, px, 0).xy;
+  let velOk = all(velRaw >= vec2f(-100.0)) && all(velRaw <= vec2f(100.0));
+  let prevUV = curUV + select(vec2f(0.0), velRaw, velOk);
+  if (any(prevUV < vec2f(0.0)) || any(prevUV >= vec2f(1.0))) {
+    textureStore(histOut, px, curV);
+    return;
+  }
+
+  let prevSizeF = params.prevRenderInfo.xy;
+  let prevSizeI = vec2i(prevSizeF);
+  let prevPos = prevUV * prevSizeF - 0.5;
+  let baseI = vec2i(floor(prevPos));
+  let frac = clamp(prevPos - vec2f(baseI), vec2f(0.0), vec2f(1.0));
+  let bW = array<f32, 4>(
+    (1.0 - frac.x) * (1.0 - frac.y),
+    frac.x * (1.0 - frac.y),
+    (1.0 - frac.x) * frac.y,
+    frac.x * frac.y,
+  );
+  let offs = array<vec2i, 4>(vec2i(0, 0), vec2i(1, 0), vec2i(0, 1), vec2i(1, 1));
+  var sumH = vec4f(0.0);
+  var sumW = 0.0;
+  for (var i = 0u; i < 4u; i++) {
+    let tc = baseI + offs[i];
+    if (tc.x < 0 || tc.y < 0 || tc.x >= prevSizeI.x || tc.y >= prevSizeI.y) { continue; }
+    let gP = textureLoad(geomPrev, tc, 0);
+    if (gP.w <= 0.0 || dot(curN, gP.xyz) < 0.88) { continue; }
+    if (abs(gP.w - curZ) / max(curZ, 1.0) > 0.05) { continue; }
+    let w = bW[i];
+    sumH += max(textureLoad(histIn, tc, 0), vec4f(0.0)) * w;
+    sumW += w;
+  }
+  if (sumW > 0.01) {
+    let prevV = sumH / sumW;
+    // Fast 0.24 EMA smooths 1-spp chromatic variance while keeping moving headlights crisp and ghost-free.
+    textureStore(histOut, px, mix(prevV, curV, 0.24));
+  } else {
+    textureStore(histOut, px, curV);
+  }
+}
+`
+}
+
+function buildSceneDenoiseAtrousWgsl(): string {
+  return /* wgsl */ `
+struct DenoiseCfg {
+  // x: renderW, y: renderH, z: stepSize (1 or 2), w: pad
+  info: vec4i,
+}
+
+@group(0) @binding(0) var<uniform> cfg: DenoiseCfg;
+@group(0) @binding(1) var srcTex: texture_2d<f32>;
+@group(0) @binding(2) var geomCurr: texture_2d<f32>;
+@group(0) @binding(3) var dstTex: texture_storage_2d<rgba16float, write>;
+
+@compute @workgroup_size(8, 8, 1)
+fn cs_restir_denoise_atrous(@builtin(global_invocation_id) gid: vec3u) {
+  let renderW = cfg.info.x;
+  let renderH = cfg.info.y;
+  let stepSz = cfg.info.z;
+  let px = vec2i(i32(gid.x), i32(gid.y));
+  if (px.x >= renderW || px.y >= renderH) { return; }
+
+  let gC = textureLoad(geomCurr, px, 0);
+  let curZ = gC.w;
+  if (curZ <= 0.0) {
+    textureStore(dstTex, px, vec4f(0.0));
+    return;
+  }
+  let curN = gC.xyz;
+  let invSigZ = 1.0 / max(curZ * 0.025, 1.2);
+  let k1d = array<f32, 3>(0.375, 0.25, 0.0625);
+
+  let c0 = max(textureLoad(srcTex, px, 0), vec4f(0.0));
+  var sumV = c0 * (k1d[0] * k1d[0]);
+  var sumW = k1d[0] * k1d[0];
+
+  for (var dy = -2; dy <= 2; dy++) {
+    let ky = k1d[abs(dy)];
+    for (var dx = -2; dx <= 2; dx++) {
+      if (dx == 0 && dy == 0) { continue; }
+      let q = px + vec2i(dx * stepSz, dy * stepSz);
+      if (q.x < 0 || q.y < 0 || q.x >= renderW || q.y >= renderH) { continue; }
+      let gQ = textureLoad(geomCurr, q, 0);
+      if (gQ.w <= 0.0) { continue; }
+      let nd = dot(curN, gQ.xyz);
+      if (nd < 0.85) { continue; }
+      let nd2 = nd * nd;
+      let nd4 = nd2 * nd2;
+      let nd8 = nd4 * nd4;
+      let wN = nd8 * nd8 * nd8 * nd8;
+      let dz = abs(gQ.w - curZ);
+      let wZ = exp(-dz * invSigZ);
+      let w = k1d[abs(dx)] * ky * wN * wZ;
+      if (w > 1e-5) {
+        sumV += max(textureLoad(srcTex, q, 0), vec4f(0.0)) * w;
+        sumW += w;
+      }
+    }
+  }
+
+  let outV = sumV / max(sumW, 1e-6);
+  textureStore(dstTex, px, min(max(outV, vec4f(0.0)), vec4f(65000.0)));
+}
+`
 }
 
 /**
@@ -1423,6 +1717,13 @@ export async function createRestirDI(
   device: GPUDevice,
   options: RestirDIOptions = {},
 ): Promise<RestirDIPass> {
+  const OUTPUT_USAGE =
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.COPY_SRC
+  const GEOM_USAGE =
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.TEXTURE_BINDING
   const initMax = options.maxSize ?? DEFAULT_RESTIR_MAX_SIZE
   const defaultCandidates = Math.max(1, Math.min(64, Math.round(options.initialCandidates ?? DEFAULT_RESTIR_CANDIDATES)))
   const defaultMaxM = Math.max(1, Math.min(64, Math.round(options.maxTemporalM ?? DEFAULT_RESTIR_MAX_TEMPORAL_M)))
@@ -1430,13 +1731,16 @@ export async function createRestirDI(
   const defaultSpatialRadius = Math.max(1, Math.min(64, options.spatialRadius ?? DEFAULT_RESTIR_SPATIAL_RADIUS))
   const defaultShadowBias = Math.max(0.001, options.shadowBias ?? DEFAULT_RESTIR_SHADOW_BIAS)
   const viewSpaceNormals = options.normalSpace === 'view'
+  const sceneEval = options.evalMode === 'scene'
   const occlusionWgsl = options.occlusionWgsl ?? DEFAULT_OCCLUSION_WGSL
   const hasOcclusionBgl = !!options.occlusionBindGroupLayout
 
-  const [risMod, temporalMod, spatialMod] = await Promise.all([
+  const [risMod, temporalMod, spatialMod, denoiseTempMod, denoiseAtrousMod] = await Promise.all([
     shader(device, 'restir-ris-initial', buildRisInitialWgsl(occlusionWgsl)),
     shader(device, 'restir-temporal-reuse', buildTemporalReuseWgsl(occlusionWgsl)),
     shader(device, 'restir-spatial-shade', buildSpatialShadeWgsl(occlusionWgsl)),
+    sceneEval ? shader(device, 'restir-denoise-temp', buildSceneDenoiseTempWgsl()) : Promise.resolve(null),
+    sceneEval ? shader(device, 'restir-denoise-atrous', buildSceneDenoiseAtrousWgsl()) : Promise.resolve(null),
   ])
 
   const risBgl = device.createBindGroupLayout({
@@ -1486,8 +1790,34 @@ export async function createRestirDI(
     ],
   })
 
+  const denoiseTempBgl = sceneEval
+    ? device.createBindGroupLayout({
+        label: 'restir-denoise-temp-bgl',
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 4, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 5, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 6, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float', viewDimension: '2d' } },
+        ],
+      })
+    : null
+  const denoiseAtrousBgl = sceneEval
+    ? device.createBindGroupLayout({
+        label: 'restir-denoise-atrous-bgl',
+        entries: [
+          { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+          { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'unfilterable-float', viewDimension: '2d' } },
+          { binding: 3, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float', viewDimension: '2d' } },
+        ],
+      })
+    : null
+
   const occBgls = options.occlusionBindGroupLayout ? [options.occlusionBindGroupLayout] : []
-  const [risPipe, temporalPipe, spatialPipe] = await Promise.all([
+  const [risPipe, temporalPipe, spatialPipe, denoiseTempPipe, denoiseAtrousPipe] = await Promise.all([
     device.createComputePipelineAsync({
       label: 'restir-ris-initial',
       layout: device.createPipelineLayout({ bindGroupLayouts: [risBgl, ...occBgls] }),
@@ -1503,7 +1833,29 @@ export async function createRestirDI(
       layout: device.createPipelineLayout({ bindGroupLayouts: [spatialBgl, ...occBgls] }),
       compute: { module: spatialMod, entryPoint: 'cs_spatial_reuse_and_shade' },
     }),
+    sceneEval && denoiseTempBgl && denoiseTempMod
+      ? device.createComputePipelineAsync({
+          label: 'restir-denoise-temp',
+          layout: device.createPipelineLayout({ bindGroupLayouts: [denoiseTempBgl] }),
+          compute: { module: denoiseTempMod, entryPoint: 'cs_restir_denoise_temp' },
+        })
+      : Promise.resolve(null),
+    sceneEval && denoiseAtrousBgl && denoiseAtrousMod
+      ? device.createComputePipelineAsync({
+          label: 'restir-denoise-atrous',
+          layout: device.createPipelineLayout({ bindGroupLayouts: [denoiseAtrousBgl] }),
+          compute: { module: denoiseAtrousMod, entryPoint: 'cs_restir_denoise_atrous' },
+        })
+      : Promise.resolve(null),
   ])
+
+  const denoiseCfgUbos: [GPUBuffer, GPUBuffer] | null = sceneEval
+    ? [
+        device.createBuffer({ label: 'restir-denoise-cfg-1', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+        device.createBuffer({ label: 'restir-denoise-cfg-2', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+      ]
+    : null
+  const denoiseCfgI32 = new Int32Array(4)
 
   const paramsBuffer = device.createBuffer({
     label: 'restir-params',
@@ -1555,6 +1907,18 @@ export async function createRestirDI(
   let geomView: [GPUTextureView, GPUTextureView] = [geomTex[0].createView(), geomTex[1].createView()]
   let outputTex = makeOutputTex(capW, capH)
   let outputView = outputTex.createView()
+  const makeDenoiseTex = (label: string, w: number, h: number) =>
+    device.createTexture({ label, size: [w, h], format: 'rgba16float', usage: OUTPUT_USAGE })
+  let denoiseHistTex: [GPUTexture, GPUTexture] | null = sceneEval
+    ? [makeDenoiseTex('restir-denoise-h0', capW, capH), makeDenoiseTex('restir-denoise-h1', capW, capH)]
+    : null
+  let denoiseHistView: [GPUTextureView, GPUTextureView] | null = denoiseHistTex
+    ? [denoiseHistTex[0].createView(), denoiseHistTex[1].createView()]
+    : null
+  let denoiseTmpTex: GPUTexture | null = sceneEval ? makeDenoiseTex('restir-denoise-tmp', capW, capH) : null
+  let denoiseTmpView: GPUTextureView | null = denoiseTmpTex ? denoiseTmpTex.createView() : null
+  let denoiseOutTex: GPUTexture | null = sceneEval ? makeDenoiseTex('restir-denoise-out', capW, capH) : null
+  let denoiseOutView: GPUTextureView | null = denoiseOutTex ? denoiseOutTex.createView() : null
 
   // Cached bind groups (ping=0 and ping=1) for zero steady-state allocations.
   let cachedRis: [GPUBindGroup, GPUBindGroup] | null = null
@@ -1578,10 +1942,18 @@ export async function createRestirDI(
   let cachedSpatKeyAlbedo: GPUTextureView | null = null
   let cachedSpatKeyMat: GPUTextureView | null = null
 
+  let cachedDenoiseTemp: [GPUBindGroup, GPUBindGroup] | null = null
+  let cachedDenoiseKeyVel: GPUTextureView | null = null
+  let cachedDenoiseA1: [GPUBindGroup, GPUBindGroup] | null = null
+  let cachedDenoiseA2: [GPUBindGroup, GPUBindGroup] | null = null
+
   const invalidateBindGroups = () => {
     cachedRis = null
     cachedTemporal = null
     cachedSpatial = null
+    cachedDenoiseTemp = null
+    cachedDenoiseA1 = null
+    cachedDenoiseA2 = null
   }
 
   let ping: 0 | 1 = 0
@@ -1612,6 +1984,9 @@ export async function createRestirDI(
     geomTex[0].destroy()
     geomTex[1].destroy()
     outputTex.destroy()
+    if (denoiseHistTex) { denoiseHistTex[0].destroy(); denoiseHistTex[1].destroy() }
+    denoiseTmpTex?.destroy()
+    denoiseOutTex?.destroy()
     resInitial = makeReservoirBuf('restir-res-initial', capW, capH)
     resTemporal = [
       makeReservoirBuf('restir-res-temporal-0', capW, capH),
@@ -1622,6 +1997,14 @@ export async function createRestirDI(
     geomView = [geomTex[0].createView(), geomTex[1].createView()]
     outputTex = makeOutputTex(capW, capH)
     outputView = outputTex.createView()
+    if (sceneEval) {
+      denoiseHistTex = [makeDenoiseTex('restir-denoise-h0', capW, capH), makeDenoiseTex('restir-denoise-h1', capW, capH)]
+      denoiseHistView = [denoiseHistTex[0].createView(), denoiseHistTex[1].createView()]
+      denoiseTmpTex = makeDenoiseTex('restir-denoise-tmp', capW, capH)
+      denoiseTmpView = denoiseTmpTex.createView()
+      denoiseOutTex = makeDenoiseTex('restir-denoise-out', capW, capH)
+      denoiseOutView = denoiseOutTex.createView()
+    }
     invalidateBindGroups()
     historyValid = false
     reallocs++
@@ -1757,9 +2140,62 @@ export async function createRestirDI(
     return cachedSpatial
   }
 
+  const getDenoiseBindGroups = (velocity: GPUTextureView) => {
+    if (!denoiseTempBgl || !denoiseAtrousBgl || !denoiseHistView || !denoiseTmpView || !denoiseOutView || !denoiseCfgUbos) return null
+    if (!cachedDenoiseTemp || cachedDenoiseKeyVel !== velocity) {
+      cachedDenoiseKeyVel = velocity
+      const makeT = (currIdx: 0 | 1) => {
+        const prevIdx: 0 | 1 = currIdx === 0 ? 1 : 0
+        return device.createBindGroup({
+          label: `restir-denoise-temp-bg-${currIdx}`,
+          layout: denoiseTempBgl,
+          entries: [
+            { binding: 0, resource: { buffer: paramsBuffer } },
+            { binding: 1, resource: outputView },
+            { binding: 2, resource: denoiseHistView![prevIdx] },
+            { binding: 3, resource: geomView[currIdx] },
+            { binding: 4, resource: geomView[prevIdx] },
+            { binding: 5, resource: velocity },
+            { binding: 6, resource: denoiseHistView![currIdx] },
+          ],
+        })
+      }
+      cachedDenoiseTemp = [makeT(0), makeT(1)]
+    }
+    if (!cachedDenoiseA1) {
+      const makeA1 = (currIdx: 0 | 1) =>
+        device.createBindGroup({
+          label: `restir-denoise-a1-bg-${currIdx}`,
+          layout: denoiseAtrousBgl,
+          entries: [
+            { binding: 0, resource: { buffer: denoiseCfgUbos[0] } },
+            { binding: 1, resource: denoiseHistView![currIdx] },
+            { binding: 2, resource: geomView[currIdx] },
+            { binding: 3, resource: denoiseTmpView! },
+          ],
+        })
+      cachedDenoiseA1 = [makeA1(0), makeA1(1)]
+    }
+    if (!cachedDenoiseA2) {
+      const makeA2 = (currIdx: 0 | 1) =>
+        device.createBindGroup({
+          label: `restir-denoise-a2-bg-${currIdx}`,
+          layout: denoiseAtrousBgl,
+          entries: [
+            { binding: 0, resource: { buffer: denoiseCfgUbos[1] } },
+            { binding: 1, resource: denoiseTmpView! },
+            { binding: 2, resource: geomView[currIdx] },
+            { binding: 3, resource: denoiseOutView! },
+          ],
+        })
+      cachedDenoiseA2 = [makeA2(0), makeA2(1)]
+    }
+    return { temp: cachedDenoiseTemp, a1: cachedDenoiseA1, a2: cachedDenoiseA2 }
+  }
+
   return {
-    get outputView() { return outputView },
-    get outputTexture() { return outputTex },
+    get outputView() { return denoiseOutView ?? outputView },
+    get outputTexture() { return denoiseOutTex ?? outputTex },
 
     dispatch(encoder, input, timing) {
       if (destroyed) throw new Error('RestirDIPass was destroyed')
@@ -1794,7 +2230,7 @@ export async function createRestirDI(
       const jy = cam.jitter?.[1] ?? 0
 
       if (doReset) {
-        prevEyeX = eyeX; prevEyeY = eyeY; prevEyeZ = eyeZ; prevTanHalf = cam.tanHalf
+        prevEyeX = cam.eye[0]; prevEyeY = cam.eye[1]; prevEyeZ = cam.eye[2]; prevTanHalf = cam.tanHalf
         prevFwdX = fwdX; prevFwdY = fwdY; prevFwdZ = fwdZ; prevAspect = cam.aspect
         prevRightX = rightX; prevRightY = rightY; prevRightZ = rightZ; prevNear = zNear
         prevUpX = upX; prevUpY = upY; prevUpZ = upZ; prevFar = zFar
@@ -1807,6 +2243,7 @@ export async function createRestirDI(
       const spatialNeighbors = Math.max(0, Math.min(8, Math.round(input.spatialNeighbors ?? defaultSpatialK)))
       const spatialRadius = Math.max(1, Math.min(64, input.spatialRadius ?? defaultSpatialRadius))
       const shadowBias = Math.max(0.001, input.shadowBias ?? defaultShadowBias)
+      const wetness = Math.max(0, Math.min(1, input.wetness ?? 0))
       const enableTemporal = input.enableTemporal ?? true
       const enableSpatial = input.enableSpatial ?? true
       const useClusters = !!input.cluster
@@ -1829,14 +2266,16 @@ export async function createRestirDI(
       if (useAlias) flags |= FLAG_USE_ALIAS
       if (useClusters) flags |= FLAG_USE_CLUSTERS
       if (viewSpaceNormals) flags |= FLAG_VIEW_NORMALS
+      if (sceneEval) flags |= FLAG_SCENE_EVAL
 
       // Pack 272-byte RestirParams uniform buffer (zero GC).
+      // Express previous eye relative to the CURRENT anchor so temporal reprojection never breaks on 64-cell anchor hops.
       paramsF32[0] = eyeX; paramsF32[1] = eyeY; paramsF32[2] = eyeZ; paramsF32[3] = cam.tanHalf
       paramsF32[4] = fwdX; paramsF32[5] = fwdY; paramsF32[6] = fwdZ; paramsF32[7] = cam.aspect
       paramsF32[8] = rightX; paramsF32[9] = rightY; paramsF32[10] = rightZ; paramsF32[11] = zNear
       paramsF32[12] = upX; paramsF32[13] = upY; paramsF32[14] = upZ; paramsF32[15] = zFar
 
-      paramsF32[16] = prevEyeX; paramsF32[17] = prevEyeY; paramsF32[18] = prevEyeZ; paramsF32[19] = prevTanHalf
+      paramsF32[16] = prevEyeX - ax; paramsF32[17] = prevEyeY - ay; paramsF32[18] = prevEyeZ - az; paramsF32[19] = prevTanHalf
       paramsF32[20] = prevFwdX; paramsF32[21] = prevFwdY; paramsF32[22] = prevFwdZ; paramsF32[23] = prevAspect
       paramsF32[24] = prevRightX; paramsF32[25] = prevRightY; paramsF32[26] = prevRightZ; paramsF32[27] = prevNear
       paramsF32[28] = prevUpX; paramsF32[29] = prevUpY; paramsF32[30] = prevUpZ; paramsF32[31] = prevFar
@@ -1845,7 +2284,7 @@ export async function createRestirDI(
       paramsF32[36] = lastRenderW; paramsF32[37] = lastRenderH; paramsF32[38] = 1 / lastRenderW; paramsF32[39] = 1 / lastRenderH
       paramsF32[40] = jx; paramsF32[41] = jy; paramsF32[42] = prevJitterX; paramsF32[43] = prevJitterY
       paramsF32[44] = shadowBias; paramsF32[45] = spatialRadius; paramsF32[46] = clusterZNear; paramsF32[47] = clusterZFar
-      paramsF32[48] = clusterZScale; paramsF32[49] = 0; paramsF32[50] = 0; paramsF32[51] = 0
+      paramsF32[48] = clusterZScale; paramsF32[49] = wetness; paramsF32[50] = 0; paramsF32[51] = 0
 
       paramsU32[52] = capW; paramsU32[53] = capH; paramsU32[54] = renderW; paramsU32[55] = renderH
       paramsU32[56] = lastRenderW; paramsU32[57] = lastRenderH; paramsU32[58] = lightCount; paramsU32[59] = frameIdx
@@ -1890,14 +2329,56 @@ export async function createRestirDI(
       p2.end()
 
       // Pass 3: Spatial Reservoir Reuse (Pairwise MIS + Visibility Check) + Final Linear HDR Shading.
+      const runSceneDenoise = Boolean(sceneEval && denoiseTempPipe && denoiseAtrousPipe && denoiseCfgUbos && denoiseOutView)
+      const p3Ts = runSceneDenoise
+        ? (timing?.spatialShade?.beginningOfPassWriteIndex !== undefined
+            ? { querySet: timing.spatialShade.querySet, beginningOfPassWriteIndex: timing.spatialShade.beginningOfPassWriteIndex }
+            : undefined)
+        : timing?.spatialShade
       const p3 = encoder.beginComputePass(
-        timing?.spatialShade ? { label: 'restir-spatial-shade', timestampWrites: timing.spatialShade } : SPATIAL_PASS_DESC,
+        p3Ts ? { label: 'restir-spatial-shade', timestampWrites: p3Ts } : SPATIAL_PASS_DESC,
       )
       p3.setPipeline(spatialPipe)
       p3.setBindGroup(0, spatBgs[currIdx])
       if (hasOcclusionBgl && input.occlusionBindGroup) p3.setBindGroup(1, input.occlusionBindGroup)
       p3.dispatchWorkgroups(gx, gy)
       p3.end()
+
+      // Pass 4 (evalMode === 'scene' only): Fast temporal firefly-clamped EMA + 2-pass normal/depth
+      // edge-stopping à-trous filter (steps 1, 2) eliminating 1-spp multi-light chromatic speckle
+      // while preserving crisp 64-tree voxel shadows and zero wall light bleed.
+      if (runSceneDenoise && denoiseTempPipe && denoiseAtrousPipe && denoiseCfgUbos) {
+        const dbgs = getDenoiseBindGroups(input.velocity)
+        if (dbgs) {
+          denoiseCfgI32[0] = renderW; denoiseCfgI32[1] = renderH; denoiseCfgI32[2] = 1; denoiseCfgI32[3] = 0
+          device.queue.writeBuffer(denoiseCfgUbos[0], 0, denoiseCfgI32)
+          denoiseCfgI32[2] = 2
+          device.queue.writeBuffer(denoiseCfgUbos[1], 0, denoiseCfgI32)
+
+          const pt = encoder.beginComputePass({ label: 'restir-denoise-temp' })
+          pt.setPipeline(denoiseTempPipe)
+          pt.setBindGroup(0, dbgs.temp[currIdx])
+          pt.dispatchWorkgroups(gx, gy)
+          pt.end()
+
+          const pa1 = encoder.beginComputePass({ label: 'restir-denoise-1' })
+          pa1.setPipeline(denoiseAtrousPipe)
+          pa1.setBindGroup(0, dbgs.a1[currIdx])
+          pa1.dispatchWorkgroups(gx, gy)
+          pa1.end()
+
+          const endTs = timing?.spatialShade?.endOfPassWriteIndex !== undefined
+            ? { querySet: timing.spatialShade.querySet, endOfPassWriteIndex: timing.spatialShade.endOfPassWriteIndex }
+            : undefined
+          const pa2 = encoder.beginComputePass(
+            endTs ? { label: 'restir-denoise-2', timestampWrites: endTs } : { label: 'restir-denoise-2' },
+          )
+          pa2.setPipeline(denoiseAtrousPipe)
+          pa2.setBindGroup(0, dbgs.a2[currIdx])
+          pa2.dispatchWorkgroups(gx, gy)
+          pa2.end()
+        }
+      }
 
       // Advance ping-pong & store camera state for next frame's temporal reprojection.
       ping = currIdx === 0 ? 1 : 0
@@ -1907,13 +2388,13 @@ export async function createRestirDI(
       lastRenderH = renderH
       lastLightCount = lightCount
 
-      prevEyeX = eyeX; prevEyeY = eyeY; prevEyeZ = eyeZ; prevTanHalf = cam.tanHalf
+      prevEyeX = cam.eye[0]; prevEyeY = cam.eye[1]; prevEyeZ = cam.eye[2]; prevTanHalf = cam.tanHalf
       prevFwdX = fwdX; prevFwdY = fwdY; prevFwdZ = fwdZ; prevAspect = cam.aspect
       prevRightX = rightX; prevRightY = rightY; prevRightZ = rightZ; prevNear = zNear
       prevUpX = upX; prevUpY = upY; prevUpZ = upZ; prevFar = zFar
       prevJitterX = jx; prevJitterY = jy
 
-      return outputView
+      return denoiseOutView ?? outputView
     },
 
     reset() {
@@ -1943,6 +2424,10 @@ export async function createRestirDI(
       geomTex[0].destroy()
       geomTex[1].destroy()
       outputTex.destroy()
+      if (denoiseHistTex) { denoiseHistTex[0].destroy(); denoiseHistTex[1].destroy() }
+      denoiseTmpTex?.destroy()
+      denoiseOutTex?.destroy()
+      if (denoiseCfgUbos) { denoiseCfgUbos[0].destroy(); denoiseCfgUbos[1].destroy() }
       paramsBuffer.destroy()
       dummyClusterGrid.destroy()
       dummyClusterIndices.destroy()

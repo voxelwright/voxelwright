@@ -1016,11 +1016,19 @@ export function createSocial(opts: SocialOptions): SocialController {
     if (!promptEl || promptEl.hidden) return
     promptEl.style.setProperty('--soc-dx', '0px')
     promptEl.style.setProperty('--soc-dy', '0px')
-    const bodies = opts.avoidBoxes?.()
-    if (!bodies?.length) return
     const r = promptEl.getBoundingClientRect?.()
     if (!r || r.width <= 0 || r.height <= 0) return
     const box: HudBox = { left: r.left, top: r.top, right: r.right, bottom: r.bottom }
+    // The bars along the foot of the picture (the tools, then the ask bar over them) are not covered: the prompt stands above them.
+    let lift = 0
+    for (const bar of [doc?.querySelector?.('#tools'), doc?.querySelector?.('#ask')]) {
+      const b = (bar as HTMLElement | null | undefined)?.getBoundingClientRect?.()
+      if (!b || b.width <= 0 || b.height <= 0 || b.left >= box.right || b.right <= box.left || b.top >= box.bottom - lift) continue
+      lift = box.bottom - b.top + 8
+    }
+    if (lift > 0) { box.top -= lift; box.bottom -= lift; promptEl.style.setProperty('--soc-dy', `${-lift}px`) }
+    const bodies = opts.avoidBoxes?.()
+    if (!bodies?.length) return
     if (!bodies.some((b) => rectsMeet(box, b, 8))) return
 
     const vw = typeof innerWidth === 'number' && innerWidth > 0 ? innerWidth : 1280
@@ -1045,7 +1053,7 @@ export function createSocial(opts: SocialOptions): SocialController {
       if (moved.left < 10 || moved.right > vw - 10 || moved.top < 10 || moved.bottom > vh - 10) continue
       if (!bodies.some((b) => rectsMeet(moved, b, 6))) {
         promptEl.style.setProperty('--soc-dx', `${dx}px`)
-        promptEl.style.setProperty('--soc-dy', `${dy}px`)
+        promptEl.style.setProperty('--soc-dy', `${dy - lift}px`)
         return
       }
     }

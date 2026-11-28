@@ -4,7 +4,7 @@
 //
 // Body strikes are reported directly by the core (`told.struck` records), and turned into material-specific
 // impact sounds here.
-import { SET, type Sound } from './sound.ts'
+import { BUS, SET, type Play, type Sound } from './sound.ts'
 import { BREAK, HIT, MATERIALS, WORLD } from './kinds.ts'
 import { LIKES } from './likes.ts'
 import { toned, patch as readPatch, type Patch } from './patch.ts'
@@ -94,6 +94,84 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
     grind = Math.max(grind, Math.min(0.5, radius / 50)); grindPan = voice.hear(at).pan
     // A charge near by is danger; a hammer blow is not, nor a blast a long way off.
     if (radius >= 10) threat = Math.max(threat, Math.min(1, voice.hear(at, reach).gain * 3))
+  }
+
+  // ── The Cleave and Time (#226) ──────────────────────────────────────────
+  // Their own sounds are heard in the head (BUS.head): the world's bus is hushed and dulled round them, and they are not.
+  /** How far the world is hushed for the Cleave's instant and for a blast's landing (each with how long it holds before it eases back), how dull a blast has left the ears, and how much the hills send back. */
+  let cutHush = 0, cutFor = 0, blastHush = 0, blastFor = 0, deaf = 0, hills = 0
+  let drawing = 0, time: 'live' | 'frozen' | 'rewinding' = 'live', wound = 1, tockIn = 0, tockAlt = false
+  const inHead = (p: Patch, how: Play = {}) => voice.play(p, { ...how, bus: BUS.head })
+  /** How hard the seam's held tone is begun, and how loud the synthesiser then makes it (dsp.ts `hold`: half the patch's gain times its force to the power 1.2). */
+  const DRAWN = 0.8, DRAW_BEGAN = 0.5 * WORLD.cleaveDraw.gain * DRAWN ** 1.2
+  const stopDrawing = () => { if (drawing) voice.release(drawing); drawing = 0 }
+  /** How hushed the world's bus is now, and how dull (Hz), and what the hills send back: told to the synthesiser. */
+  const tellWorldBus = () => {
+    const hush = Math.max(cutHush, blastHush, time === 'live' ? 0 : 0.7)
+    voice.set(SET.worldHush, hush < 0.004 ? 0 : hush)
+    voice.set(SET.earMuffle, Math.min(time === 'live' ? 20000 : 380, 20000 * (700 / 20000) ** deaf))
+    voice.set(SET.hillGain, hills < 0.004 ? 0 : hills)
+  }
+  /**
+   * The Cleave, beat by beat (page/cleave.ts): 'aim' the point taken out; 'draw' the seam being opened (told again as
+   * it lengthens, `intensity` 0 to 1 of its span: the one held note is bent); 'cancel' put away; 'strike' let go (the
+   * world is hushed for the frozen instant, steel is drawn and struck); 'hit' the cut lands (`intensity`: how much it cut).
+   */
+  const cleave = (phase: 'aim' | 'draw' | 'cancel' | 'strike' | 'hit', intensity = 0.5) => {
+    const k = Math.min(1, Math.max(0, intensity))
+    if (phase === 'aim') { stopDrawing(); inHead(WORLD.cleaveAim, { force: 0.6, gain: 0.5, room: 0.15 }) }
+    else if (phase === 'draw') {
+      if (!drawing) drawing = voice.hold(WORLD.cleaveDraw, { bus: BUS.head, force: DRAWN, gain: 0.6, room: 0.2 })
+      // (a glide's loudness is the tone's own, not a share of how it began: from a little under how it began to twice that)
+      if (drawing) voice.glide(drawing, 660 * 2 ** (0.6 * k), DRAW_BEGAN * (0.8 + 1.2 * k))
+    } else if (phase === 'cancel') { stopDrawing(); inHead(WORLD.cleaveAim, { force: 0.3, size: 1.5, gain: 0.25 }) }
+    else if (phase === 'strike') {
+      stopDrawing()
+      cutHush = 0.92; cutFor = 0.42; tellWorldBus()
+      // Drawn as it is let go, so that it is at its sharpest just as the cut is made (a sixth of a second on); there, struck once; and the blade rings on.
+      inHead(WORLD.cleaveStrike, { force: 0.9, gain: 0.7, room: 0.25 })
+      inHead(WORLD.cleaveStrike, { after: 0.127, pitch: 2850, force: 1, gain: 0.45 })
+      inHead(WORLD.cleaveAim, { after: 0.03, pitch: 3136, force: 0.55, gain: 0.3, room: 0.3 })
+    } else {
+      // The cut lands: a deep heavy hit in the head; out in the world stone gives, and the hills answer.
+      inHead(WORLD.boom, { force: 0.85, size: 1.1, gain: 0.4 + 0.25 * k })
+      if (k > 0.05) voice.play(BREAK.concrete, { after: 0.08, force: 0.45 + 0.45 * k, size: 2.2, gain: 0.55, room: 0.3 })
+      hills = Math.max(hills, 0.2 + 0.25 * k); threat = Math.max(threat, 0.3 * k)
+    }
+  }
+  /**
+   * Time (page/rewind.ts): 'frozen' stopped, 'rewinding' wound back (`speed`: seconds of the world a second), 'live'
+   * let go. While it is not live the world's bus is dulled and set back as through thick glass, and a heavy clock
+   * goes in the head: slowly while time stands, fast while it is wound back.
+   */
+  const rewind = (state: 'live' | 'frozen' | 'rewinding', speed = 1) => {
+    wound = Math.max(0.2, speed)
+    if (state === time) return
+    if (time === 'live') { inHead(WORLD.rewind, { size: 3.2, force: 0.9, gain: 0.8, room: 0.2 }); inHead(WORLD.boom, { force: 0.6, size: 0.9, gain: 0.4 }); tockIn = 1 }
+    else if (state === 'live') inHead(WORLD.rewind, { size: 0.6, force: 0.8, gain: 0.6, room: 0.2 })
+    else if (state === 'rewinding') tockIn = 0
+    time = state
+    tellWorldBus()
+  }
+  /** A blast lands near the ears (0 to 1: how hard): the world goes silent for the instant, the ears are dull after and come back over seconds, and the hills answer. */
+  const blastHushed = (strength: number) => {
+    const k = Math.min(1, Math.max(0, strength))
+    if (k <= 0) return
+    blastHush = Math.max(blastHush, k); blastFor = Math.max(blastFor, 0.05 + 0.25 * k); deaf = Math.max(deaf, k); hills = Math.max(hills, 0.2 + 0.25 * k)
+    tellWorldBus()
+  }
+  /** Each frame, by the clock on the wall: the hushes ease back, the ears clear, the hills' answer dies away, and the clock of stopped time goes. */
+  const worldBus = (dt: number) => {
+    cutFor = Math.max(0, cutFor - dt); if (cutFor <= 0) cutHush *= Math.exp(-dt / 0.1)
+    blastFor = Math.max(0, blastFor - dt); if (blastFor <= 0) blastHush *= Math.exp(-dt / 0.3)
+    deaf *= Math.exp(-dt / (1.2 + 2 * deaf)); if (deaf < 0.004) deaf = 0
+    hills *= Math.exp(-dt / 3)
+    if (time !== 'live' && (tockIn -= dt) <= 0) {
+      const back = time === 'rewinding'
+      inHead(WORLD.rewind, { size: (tockAlt ? 1.3 : 1.05) * (back ? 0.8 : 1), force: 0.9, gain: back ? 0.75 : 1, pan: tockAlt ? -0.15 : 0.15 })
+      tockAlt = !tockAlt; tockIn = back ? Math.max(0.085, 0.34 / wound) : 1
+    }
+    tellWorldBus()
   }
 
   /** Patches rules wrote, by their JSON: the last 96 that were played. A rule can write without end; these places cannot grow. */
@@ -220,6 +298,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
   }
   return {
     voice, blast, count, music, radio, combat, sounded, tuned, follows,
+    cleave, rewind, blastHush: blastHushed,
     /** Updates the driven vehicle's continuous engine, tire screech, and road roll beds (null silences them). */
     drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null) {
       voice.set(SET.engineRpm, v ? v.rpm : 0)
@@ -286,7 +365,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
       if (tool === 'Hammer') { voice.play(own ?? HIT[name] ?? HIT.brick, { at: hit.at, ...vary, reach: 5, travels: false }); voice.play(ownBreak ?? BREAK[name] ?? BREAK.brick, { at: hit.at, force: 0.55, size: vary.size, reach: 6, travels: false }) }
       else if (tool === 'Charge' || tool === 'Big charge') voice.play(ownBreak ?? BREAK[name] ?? BREAK.brick, { at: hit.at, force: 0.9, size: tool === 'Charge' ? 2 : 3.5, reach: tool === 'Charge' ? 20 : 45 })
       else if (tool === 'Torch') voice.play(WORLD.catch, { at: hit.at, force: 0.7, reach: 4 })
-      else if (tool === 'Cutter') voice.play(WORLD.cut, { at: hit.at, force: 0.8, dur: 0.6, reach: 8 })
+      // The Cleave's own sounds are in the head (`cleave`): what it met answers here, as the cutter it replaces did.
+      else if (tool === 'Cleave' || tool === 'Cutter') voice.play(WORLD.cut, { at: hit.at, force: 0.8, dur: 0.6, reach: 8 })
       else if (tool === 'Brick') voice.play(WORLD.place, { at: hit.at, force: 0.6, reach: 4 })
     },
     /** What the solver said, as it happens (never what a shared world kept from before): bodies loose, moving, struck, at rest; glass gone to dust; something gone up. */
@@ -445,6 +525,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
         radio.frame(eye, yaw, dt, speed * 3.6, scene.kind)
       }
       followed(eye, dt)
+      worldBus(dt)
       voice.listen(eye, yaw)
     },
   }
