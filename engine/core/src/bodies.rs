@@ -11,6 +11,7 @@
 //! This is not exact, and it is not the same on every machine to the last bit: what a world
 //! process decides is what everyone sees.
 
+use crate::broadphase::{Aabb, Broadphase, IslandSolver};
 use crate::hash::hash3;
 use crate::kinds::{ASPHALT, BRICK, CONCRETE, EARTH, GLASS, GRASS, LEAVES, PLASTER, ROCK, ROOFING, SAND, WATER, WOOD, breaks_at, burns, charged, material, rubble, weighs};
 use crate::scratch::{Run, Scratch};
@@ -20,6 +21,7 @@ use crate::{Edit, SETTLE, WIDE, city, fill_of};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
+pub mod carve;
 mod hull;
 mod living;
 #[cfg(test)]
@@ -37,6 +39,12 @@ const LUMP_POINTS: usize = 36;
 /// A body under this many cells does not meet other small bodies: lumps and shards land on the world and on big
 /// things, and a heap of them is the world, not bodies on bodies. There is a lot of rubble.
 const SMALL: usize = 160;
+/// Brittle masonry rubble under this cell count pours back into world cells even when hybrid persistent sleeping
+/// debris is enabled (#166).
+pub const MASONRY_POUR_THRESHOLD: usize = 250;
+/// Number of 120 Hz substeps a recent body-body contact stays linked in the island graph (0.125 s), preventing
+/// momentary contact micro-chatter from splitting a resting stack into separate sleeping islands.
+const CONTACT_TTL: u8 = 15;
 /// The most steps one call takes: when the solver cannot keep up, things move slower, they do not pile up work.
 const STEPS: f32 = 3.0;
 /// With no more bodies awake than `MANY`, a call takes as many steps as a tenth of a second holds.
@@ -735,46 +743,51 @@ pub struct Body {
     /// Its cells, laid out flat from its own low corner: x + across * (z + deep * y).
     pub cells: Vec<Kind>,
     pub count: usize,
-    inv_mass: f32,
+    pub(crate) inv_mass: f32,
     /// Its middle of mass, from its own low corner.
     pub com: V,
     /// What resists its turning, inverted, in its own axes.
-    inv_inertia: [V; 3],
+    pub(crate) inv_inertia: [V; 3],
     /// Where its middle of mass is in the world, and how it is turned.
     pub pos: V,
     pub rot: Q,
     pub vel: V,
     pub spin: V,
     /// Where it meets things: corners of its cells, from its middle of mass.
-    points: Vec<V>,
+    pub(crate) points: Vec<V>,
     /// The same as they are turned in this step, from its middle.
-    turned: Vec<V>,
-    radius: f32,
-    still: f32,
-    age: f32,
+    pub(crate) turned: Vec<V>,
+    pub(crate) radius: f32,
+    pub(crate) still: f32,
+    pub(crate) age: f32,
     /// How long since it last touched anything.
-    apart: f32,
+    pub(crate) apart: f32,
     /// The stretch its touches cover this step, from its middle of mass: least and most along x and z.
-    footing: [f32; 4],
+    pub(crate) footing: [f32; 4],
     /// The hardest single knock it took in the last step, as a change of speed; and how many times it has broken already.
-    knock: f32,
-    broken: u8,
+    pub(crate) knock: f32,
+    pub(crate) broken: u8,
     /// Rolling chassis damage, accumulated from substantial impacts; one means structural collapse.
-    wear: f32,
+    pub(crate) wear: f32,
     /// What most of it is made of.
-    stuff: u8,
+    pub(crate) stuff: u8,
     /// Whether it is a lump a blast threw out: these are many, and are not tried against each other however big.
-    lump: bool,
+    pub(crate) lump: bool,
     /// Whether a blast threw it (and not merely let it go).
-    thrown: bool,
+    pub(crate) thrown: bool,
     /// Whether it passes: come to rest it is gone, and is cells of nothing. A shot is not litter in the street.
     pub passing: bool,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
     pub born: [i32; 3],
     /// What makes it a living thing (living.rs), if it is one: it is then never put down as cells for lying still.
     pub live: Option<Box<Live>>,
-    /// Whether it sleeps: a living thing left alone is not stepped until something stirs it.
+    /// Whether it sleeps: a living thing or persistent rigid body left alone is not stepped until something stirs it.
     pub asleep: bool,
+    /// When true, this body sleeps in place as an oriented rigid body at rest (0 CPU cost until disturbed) instead
+    /// of pouring/snapping back into world cells (#166).
+    pub persist_sleep: bool,
+    /// Non-zero id of the sleeping simulation island this body belongs to (`0` while awake or unassigned).
+    island_id: u32,
 }
 
 impl Body {
@@ -787,10 +800,19 @@ impl Body {
     }
 
     /// Keep collision samples distributed over the whole fragment, not just its first face.
-    fn limit_points(&mut self, limit: usize) {
+    pub(crate) fn limit_points(&mut self, limit: usize) {
         if self.points.len() > limit {
             let all = std::mem::take(&mut self.points);
             self.points = (0..limit).map(|k| all[k * all.len() / limit]).collect();
+        }
+    }
+
+    /// Rebuilds the vehicle collision hull (`bodies/hull.rs`) after in-place cell edits.
+    pub(crate) fn refresh_hull(&mut self) {
+        let has_hull = self.live.as_ref().is_some_and(|live| live.hull.is_some());
+        if has_hull {
+            let next_hull = (self.count > 0).then(|| Box::new(hull::Hull::of(self)));
+            self.live.as_mut().unwrap().hull = next_hull;
         }
     }
 
@@ -806,7 +828,7 @@ impl Body {
     pub fn new(id: u32, cells: Vec<Kind>, size: [usize; 3], low: [i32; 3]) -> Body {
         let mut b = Body {
             id, size, cells, count: 0, inv_mass: 0.0, com: [0.0; 3], inv_inertia: [[0.0; 3]; 3], pos: [0.0; 3], rot: [0.0, 0.0, 0.0, 1.0],
-            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, wear: 0.0, stuff: 0, lump: false, thrown: false, passing: false, born: low, live: None, asleep: false,
+            vel: [0.0; 3], spin: [0.0; 3], points: Vec::new(), turned: Vec::new(), radius: 0.0, still: 0.0, age: 0.0, apart: 1.0, footing: [0.0; 4], knock: 0.0, broken: 0, wear: 0.0, stuff: 0, lump: false, thrown: false, passing: false, born: low, live: None, asleep: false, persist_sleep: false, island_id: 0,
         };
         // Mass and its middle.
         let (mut mass, mut sum) = (0.0f32, [0.0f32; 3]);
@@ -907,6 +929,37 @@ impl Body {
     fn cell_at(&self, world: V) -> ([i32; 3], V) {
         let q = add(back(self.rot, sub(world, self.pos)), self.com);
         ([q[0].floor() as i32, q[1].floor() as i32, q[2].floor() as i32], q)
+    }
+
+    /// Whether this body qualifies for Teardown-style persistent rigid sleeping under the hybrid rest policy:
+    /// non-lump structural/prop bodies with `count >= SMALL`, not `passing`, and not small brittle masonry rubble
+    /// under `MASONRY_POUR_THRESHOLD` (250) cells.
+    #[inline]
+    pub fn qualifies_for_persist_sleep(&self) -> bool {
+        !self.lump
+            && !self.passing
+            && self.count >= SMALL
+            && !(brittle(self.stuff) && self.count < MASONRY_POUR_THRESHOLD)
+    }
+
+    /// Conservative world-space AABB enclosing every solid cell and hull point of this oriented body.
+    #[inline]
+    pub fn world_aabb(&self) -> Aabb {
+        let half = [self.size[0] as f32 * 0.5, self.size[1] as f32 * 0.5, self.size[2] as f32 * 0.5];
+        let local_mid = [half[0] - self.com[0], half[1] - self.com[1], half[2] - self.com[2]];
+        let mid = add(self.pos, turn(self.rot, local_mid));
+        let ax = turn(self.rot, [half[0], 0.0, 0.0]);
+        let ay = turn(self.rot, [0.0, half[1], 0.0]);
+        let az = turn(self.rot, [0.0, 0.0, half[2]]);
+        let ext = [
+            ax[0].abs() + ay[0].abs() + az[0].abs() + 0.05,
+            ax[1].abs() + ay[1].abs() + az[1].abs() + 0.05,
+            ax[2].abs() + ay[2].abs() + az[2].abs() + 0.05,
+        ];
+        Aabb::new(
+            [mid[0] - ext[0], mid[1] - ext[1], mid[2] - ext[2]],
+            [mid[0] + ext[0], mid[1] + ext[1], mid[2] + ext[2]],
+        )
     }
 }
 
@@ -1025,6 +1078,19 @@ pub struct Bodies {
     struck: Vec<Struck>,
     /// The id of the living thing last made, 0 if the last asked for could not be.
     pub spawned: u32,
+    /// Spatial broadphase (`SpatialHash` + flat `DynamicBvh`) over active and sleeping bodies (#166).
+    broadphase: Broadphase,
+    broadphase_stale: bool,
+    pairs: Vec<(usize, usize)>,
+    query_buf: Vec<usize>,
+    /// Union-Find simulation island solver and persistent contact-graph memory for island sleeping.
+    islands: IslandSolver,
+    recent_contacts: Map<(u32, u32), u8>,
+    id_to_idx: Map<u32, usize>,
+    next_island: u32,
+    /// Opt-in hybrid rest policy: when true, newly released/shattered bodies qualifying under
+    /// `Body::qualifies_for_persist_sleep` sleep in place as oriented rigid bodies while brittle rubble pours.
+    pub persist_debris: bool,
 }
 
 /// A wide box that is to be asked what stands in it (`Bodies::far`): its low corner, how many seconds it still
@@ -1047,7 +1113,242 @@ struct Found {
 
 impl Bodies {
     pub fn new() -> Self {
-        Bodies { ground: Ground::new(), list: Vec::new(), next: 1, out: Vec::new(), touches: Vec::new(), parted: Vec::new(), owed: 0.0, steps: 0, tried: 0, paired: 0, crushes: 0, rested: Vec::new(), since_crush: 1.0, fire: crate::fire::Fire::default(), water: crate::water::Water::default(), far: Vec::new(), scars: Vec::new(), fuses: Vec::new(), since_lit: 0.0, struck: Vec::new(), spawned: 0 }
+        Bodies {
+            ground: Ground::new(),
+            list: Vec::new(),
+            next: 1,
+            out: Vec::new(),
+            touches: Vec::new(),
+            parted: Vec::new(),
+            owed: 0.0,
+            steps: 0,
+            tried: 0,
+            paired: 0,
+            crushes: 0,
+            rested: Vec::new(),
+            since_crush: 1.0,
+            fire: crate::fire::Fire::default(),
+            water: crate::water::Water::default(),
+            far: Vec::new(),
+            scars: Vec::new(),
+            fuses: Vec::new(),
+            since_lit: 0.0,
+            struck: Vec::new(),
+            spawned: 0,
+            broadphase: Broadphase::new(),
+            broadphase_stale: true,
+            pairs: Vec::new(),
+            query_buf: Vec::new(),
+            islands: IslandSolver::new(),
+            recent_contacts: Map::default(),
+            id_to_idx: Map::default(),
+            next_island: 1,
+            persist_debris: false,
+        }
+    }
+
+    /// Rebuilds both the spatial hash and flat BVH over all bodies in `self.list`.
+    pub fn rebuild_broadphase(&mut self) {
+        self.broadphase.clear();
+        for (i, b) in self.list.iter().enumerate() {
+            self.broadphase.insert(i, b.world_aabb());
+        }
+        self.broadphase.rebuild();
+        self.broadphase_stale = false;
+    }
+
+    /// Fast O(N) spatial-hash-only rebuild used inside 120 Hz physics substeps.
+    fn rebuild_broadphase_hash(&mut self) {
+        self.broadphase.clear_hash_only();
+        for (i, b) in self.list.iter().enumerate() {
+            self.broadphase.insert_hash_only(i, b.world_aabb());
+        }
+        self.broadphase.rebuild_hash();
+    }
+
+    /// Queries the broadphase for all body indices whose world AABB intersects `aabb` (sorted, deduplicated).
+    pub fn broadphase_query_aabb(&self, aabb: Aabb, out: &mut Vec<usize>) {
+        if !self.broadphase_stale && self.broadphase.len() == self.list.len() {
+            self.broadphase.query_aabb(aabb, out);
+        } else {
+            out.clear();
+            for (i, b) in self.list.iter().enumerate() {
+                if b.world_aabb().intersects(&aabb) {
+                    out.push(i);
+                }
+            }
+        }
+    }
+
+    /// Raycasts against all body world AABBs via the broadphase BVH (sorted, deduplicated indices).
+    pub fn broadphase_raycast(&self, origin: [f32; 3], inv_dir: [f32; 3], max_t: f32, out: &mut Vec<usize>) {
+        if !self.broadphase_stale && self.broadphase.len() == self.list.len() {
+            self.broadphase.raycast(origin, inv_dir, max_t, out);
+        } else {
+            out.clear();
+            for (i, b) in self.list.iter().enumerate() {
+                if b.world_aabb().ray_hit(origin, inv_dir, max_t).is_some() {
+                    out.push(i);
+                }
+            }
+        }
+    }
+
+    fn wake_island_id(&mut self, id: u32) {
+        if id == 0 {
+            return;
+        }
+        for b in &mut self.list {
+            if b.island_id == id {
+                b.asleep = false;
+                b.still = 0.0;
+                b.island_id = 0;
+            }
+        }
+    }
+
+    fn wake_body_and_island(&mut self, idx: usize) {
+        let Some(b) = self.list.get_mut(idx) else { return };
+        let id = b.island_id;
+        b.asleep = false;
+        b.still = 0.0;
+        b.island_id = 0;
+        if id != 0 {
+            self.wake_island_id(id);
+        }
+    }
+
+    /// Propagates any wake triggered externally (e.g. direct `b.asleep = false`, `kick`, `drive`, `stir`, `shove`)
+    /// to every body in the same sleeping simulation island before the step runs.
+    fn propagate_wakes(&mut self) {
+        let mut woken: Vec<u32> = Vec::new();
+        for b in &mut self.list {
+            if !b.asleep && b.island_id != 0 {
+                woken.push(b.island_id);
+                b.island_id = 0;
+                b.still = 0.0;
+            }
+        }
+        for id in woken {
+            self.wake_island_id(id);
+        }
+    }
+
+    /// Wakes every sleeping body intersecting `[lo, hi]` and immediately wakes each hit body's entire sleeping island.
+    pub fn wake_in_aabb(&mut self, lo: [f32; 3], hi: [f32; 3]) {
+        if self.list.is_empty() || !self.list.iter().any(|b| b.asleep || b.island_id != 0) {
+            return;
+        }
+        if self.broadphase_stale || self.broadphase.len() != self.list.len() {
+            self.rebuild_broadphase();
+        }
+        let aabb = Aabb::new(lo, hi);
+        let mut hits = std::mem::take(&mut self.query_buf);
+        self.broadphase.query_aabb(aabb, &mut hits);
+        for &idx in &hits {
+            if let Some(b) = self.list.get(idx) {
+                if b.asleep || b.island_id != 0 {
+                    self.wake_body_and_island(idx);
+                }
+            }
+        }
+        self.query_buf = hits;
+    }
+
+    /// Builds simulation islands over active contacts and applies island-wide sleep: an island sleeps ONLY when every
+    /// non-ghost body in the island meets its stillness threshold for `STILL_FOR` seconds.
+    fn settle_islands(&mut self) {
+        let n = self.list.len();
+        if n == 0 {
+            self.recent_contacts.clear();
+            return;
+        }
+        self.id_to_idx.clear();
+        for (i, b) in self.list.iter().enumerate() {
+            self.id_to_idx.insert(b.id, i);
+        }
+        // Drop contact edges whose bodies disappeared or have separated beyond a 1-cell margin.
+        let list = &self.list;
+        let id_to_idx = &self.id_to_idx;
+        self.recent_contacts.retain(|&(id_a, id_b), _| {
+            let (Some(&ia), Some(&ib)) = (id_to_idx.get(&id_a), id_to_idx.get(&id_b)) else {
+                return false;
+            };
+            list[ia].world_aabb().expand(1.0).intersects(&list[ib].world_aabb())
+        });
+        self.islands.reset(n);
+        for &(id_a, id_b) in self.recent_contacts.keys() {
+            if let (Some(&ia), Some(&ib)) = (self.id_to_idx.get(&id_a), self.id_to_idx.get(&id_b)) {
+                self.islands.union(ia, ib);
+            }
+        }
+        let mut next_island = self.next_island;
+        let islands = self.islands.build_islands(n);
+        let mut slept_ids: Vec<u32> = Vec::new();
+        for island in islands {
+            let mut has_dynamic = false;
+            let mut all_already_asleep = true;
+            let mut all_ready = true;
+            for &m in &island.members {
+                let b = &self.list[m];
+                if b.live.as_ref().is_some_and(|live| live.ghost) {
+                    continue;
+                }
+                has_dynamic = true;
+                if !(b.asleep && b.island_id != 0) {
+                    all_already_asleep = false;
+                }
+                let ready = if b.live.is_some() {
+                    b.asleep
+                } else if b.persist_sleep {
+                    b.asleep || b.still >= STILL_FOR
+                } else {
+                    false
+                };
+                if !ready {
+                    all_ready = false;
+                }
+            }
+            if !has_dynamic || all_already_asleep {
+                continue;
+            }
+            if all_ready {
+                let island_id = next_island;
+                next_island = next_island.wrapping_add(1).max(1);
+                for &m in &island.members {
+                    let b = &mut self.list[m];
+                    if b.live.as_ref().is_some_and(|live| live.ghost) {
+                        continue;
+                    }
+                    b.asleep = true;
+                    b.vel = [0.0; 3];
+                    b.spin = [0.0; 3];
+                    b.still = 0.0;
+                    b.island_id = island_id;
+                    slept_ids.push(b.id);
+                }
+            } else {
+                // Keep every dynamic member of an active island awake together.
+                for &m in &island.members {
+                    let b = &mut self.list[m];
+                    if b.live.as_ref().is_some_and(|live| live.ghost) {
+                        continue;
+                    }
+                    if b.asleep {
+                        b.asleep = false;
+                        b.island_id = 0;
+                    }
+                }
+            }
+        }
+        self.next_island = next_island;
+        if !slept_ids.is_empty() {
+            self.recent_contacts.retain(|&(a, b), _| {
+                let a_asleep = self.id_to_idx.get(&a).is_some_and(|&i| self.list[i].asleep);
+                let b_asleep = self.id_to_idx.get(&b).is_some_and(|&i| self.list[i].asleep);
+                !(a_asleep && b_asleep)
+            });
+        }
     }
 
     /// How many bodies move, and wide boxes still to be asked about: while it is not nothing the solver is to be
@@ -1075,17 +1376,105 @@ impl Bodies {
             words.extend_from_slice(&[r.x0 as u32, r.x1 as u32, r.y as u32, r.z as u32, r.kind as u32]);
         }
         self.record(EDIT, &words);
+        self.wake_in_aabb(lo.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
         self.stir(lo, hi);
         self.ground.push(Edit::Runs(runs), true, None);
     }
 
-    fn born(&mut self, body: &Body) {
-        let faces = support::faces_of(&body.cells, body.size);
-        let mut words = vec![body.id, body.count as u32, body.size[0] as u32, body.size[1] as u32, body.size[2] as u32];
-        words.extend(body.com.iter().map(|v| v.to_bits()));
-        words.extend(body.born.iter().map(|&v| v as u32));
+    fn emit_born(&mut self, id: u32, count: usize, size: [usize; 3], com: V, born: [i32; 3], faces: Vec<u32>) {
+        let mut words = Vec::with_capacity(11 + faces.len());
+        words.extend_from_slice(&[id, count as u32, size[0] as u32, size[1] as u32, size[2] as u32]);
+        words.extend(com.iter().map(|v| v.to_bits()));
+        words.extend(born.iter().map(|&v| v as u32));
         words.extend(faces);
         self.record(BORN, &words);
+    }
+
+    fn born(&mut self, body: &Body) {
+        let faces = support::faces_of(&body.cells, body.size);
+        self.emit_born(body.id, body.count, body.size, body.com, body.born, faces);
+    }
+
+    /// Carves a world-space sphere out of a moving body, updating or splitting it in place.
+    /// Returns the number of cells removed.
+    pub fn carve_sphere(&mut self, body_id: u32, center: [f32; 3], radius: f32) -> usize {
+        self.carve_body(body_id, |b, next| carve::carve_sphere(b, center, radius, next))
+    }
+
+    /// Carves a world-space sphere out of a moving body with material-resistance options.
+    pub fn carve_sphere_with(&mut self, body_id: u32, center: [f32; 3], radius: f32, opts: carve::CarveOptions) -> usize {
+        self.carve_body(body_id, |b, next| carve::carve_sphere_with(b, center, radius, opts, next))
+    }
+
+    /// Carves a world-space capsule (swept blade or bullet tunnel) out of a moving body.
+    /// Returns the number of cells removed.
+    pub fn carve_capsule(&mut self, body_id: u32, a: [f32; 3], b: [f32; 3], radius: f32) -> usize {
+        self.carve_body(body_id, |body, next| carve::carve_capsule(body, a, b, radius, next))
+    }
+
+    /// Slices a moving body along a world-space plane of given kerf thickness.
+    /// Returns the number of cells removed.
+    pub fn carve_plane(&mut self, body_id: u32, point: [f32; 3], normal: [f32; 3], thickness: f32) -> usize {
+        self.carve_body(body_id, |body, next| carve::carve_plane(body, point, normal, thickness, next))
+    }
+
+    fn carve_body(&mut self, body_id: u32, f: impl FnOnce(&mut Body, &mut u32) -> carve::CarveReport) -> usize {
+        let Some(idx) = self.list.iter().position(|b| b.id == body_id) else {
+            return 0;
+        };
+        let (old_pos, old_rot, old_com, old_radius) = {
+            let b = &self.list[idx];
+            (b.pos, b.rot, b.com, b.radius)
+        };
+        let mut next = self.next;
+        let report = f(&mut self.list[idx], &mut next);
+        self.next = next;
+        if report.removed == 0 {
+            return 0;
+        }
+        let n = report.removed_cells.len();
+        let chunks = (n / 16).clamp(1, 8);
+        let step = n.div_ceil(chunks);
+        for chunk in report.removed_cells.chunks(step) {
+            let mut sum = [0.0f32; 3];
+            for &(c, _) in chunk {
+                let local = [c[0] as f32 + 0.5, c[1] as f32 + 0.5, c[2] as f32 + 0.5];
+                let world = add(old_pos, turn(old_rot, sub(local, old_com)));
+                sum = add(sum, world);
+            }
+            let p = scale(sum, 1.0 / chunk.len() as f32);
+            let kind = chunk[0].1;
+            self.record(DUST, &[p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), kind as u32, chunk.len() as u32]);
+        }
+        let reach = old_radius.ceil() as i32 + 2;
+        let center = old_pos.map(|v| v.round() as i32);
+        self.stir(center.map(|c| c - reach), center.map(|c| c + reach));
+
+        if report.destroyed {
+            let body = self.list.swap_remove(idx);
+            let mut words = vec![body.id];
+            words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
+            self.record(GONE, &words);
+            return report.removed;
+        }
+
+        self.list[idx].asleep = false;
+        self.list[idx].still = 0.0;
+        carve::sync_hull_after_carve(&mut self.list[idx]);
+        self.record(BROKE, &[body_id]);
+        let (id, count, size, com, born, faces) = {
+            let b = &self.list[idx];
+            (b.id, b.count, b.size, b.com, b.born, carve::rebuild_faces(b))
+        };
+        self.emit_born(id, count, size, com, born, faces);
+        for mut island in report.split_bodies {
+            island.asleep = false;
+            island.still = 0.0;
+            let faces = carve::rebuild_faces(&island);
+            self.emit_born(island.id, island.count, island.size, island.com, island.born, faces);
+            self.list.push(island);
+        }
+        report.removed
     }
 
     /// What is no longer held round a point comes loose and is a body. `radius` is how big the blast there was:
@@ -1106,6 +1495,8 @@ impl Bodies {
     fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3], max_bodies: usize) -> usize {
         let side = size[0];
         let low = [at[0] - side as i32 / 2, at[1] - 48.min(size[1] as i32 / 2), at[2] - side as i32 / 2];
+        let hi = [low[0] + size[0] as i32, low[1] + size[1] as i32, low[2] + size[2] as i32];
+        self.wake_in_aabb(low.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
         #[cfg(test)]
         let t0 = std::time::Instant::now();
         let mut region = self.ground.region(low, size);
@@ -1160,11 +1551,15 @@ impl Bodies {
                 body.lump = true;
                 body.passing = body.count < 40;
             }
+            if self.persist_debris {
+                body.persist_sleep = body.qualifies_for_persist_sleep();
+            }
             if let Some((at, radius)) = thrown {
                 self.throw(&mut body, at, radius);
             }
             self.born(&body);
             self.list.push(body);
+            self.broadphase_stale = true;
         }
         made
     }
@@ -1274,6 +1669,7 @@ impl Bodies {
         #[cfg(test)]
         let t2 = std::time::Instant::now();
         self.caught(&before, at, radius);
+        self.wake_in_aabb(at.map(|c| (c - far) as f32), at.map(|c| (c + far + 1) as f32));
         self.shove(at, radius);
         let made = self.lumps(&before, &left, at, radius, usize::MAX);
         #[cfg(test)]
@@ -1382,6 +1778,8 @@ impl Bodies {
     /// `push` is how hard it struck: its weight times the speed it lost.
     fn crush(&mut self, at: [i32; 3], push: f32, fragments: bool) {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
+        let far = radius * 3 + 4;
+        self.wake_in_aabb(at.map(|c| (c - far) as f32), at.map(|c| (c + far + 1) as f32));
         // Falling intact structures still need the wider support query and solid rubble to topple correctly.
         // Vehicles and already loose fragments use a bounded, cheap impact path.
         let budget = if fragments { CRASH_LUMPS } else { usize::MAX };
@@ -1570,9 +1968,13 @@ impl Bodies {
             body.passing = whole.passing || body.count < 40;
             body.lump = whole.lump || body.count < 80;
             body.limit_points(if body.count < 80 { LUMP_POINTS } else { 48 });
+            if self.persist_debris || whole.persist_sleep {
+                body.persist_sleep = body.qualifies_for_persist_sleep();
+            }
             debris += 1;
             self.born(&body);
             self.list.push(body);
+            self.broadphase_stale = true;
         }
     }
 
@@ -1603,6 +2005,9 @@ impl Bodies {
             self.owed -= STEP;
             self.step(STEP);
             self.steps += 1;
+        }
+        if self.steps > 0 {
+            self.rebuild_broadphase();
         }
         if !self.list.iter().any(|b| !b.asleep) {
             self.owed = 0.0;
@@ -1645,6 +2050,12 @@ impl Bodies {
         let mut lap = std::time::Instant::now();
         #[cfg(test)]
         let mut mark = |k: usize| { SPENT.with(|s| s.borrow_mut()[k] += lap.elapsed().as_secs_f64()); lap = std::time::Instant::now(); };
+        // Propagate any external wake (direct `asleep = false`, `kick`, `drive`, `stir`, `shove`) to its entire island.
+        self.propagate_wakes();
+        self.recent_contacts.retain(|_, ttl| {
+            *ttl = ttl.saturating_sub(1);
+            *ttl > 0
+        });
         // What lives is moved by its motor; then what pulls and what touches.
         self.motors(h);
         self.touches.clear();
@@ -1709,61 +2120,71 @@ impl Bodies {
         }
         #[cfg(test)]
         mark(0);
-        // Body against body: the points of each tried in the cells of the other. Only pairs with a big body in them
-        // are tried, so each big body is asked which others are near it.
-        // A living thing meets every other body, however small either is: a frog is not passed through.
-        let is_big = |b: &Body| (b.count >= SMALL && !b.lump) || b.live.is_some();
-        let big: Vec<usize> = (0..self.list.len()).filter(|&i| is_big(&self.list[i])).collect();
-        for &i in &big {
-            for j in 0..self.list.len() {
-                // Two big bodies are a pair once. What a blast threw out meets only the world: a house coming down in
-                // forty panels among a thousand lumps tried each panel against every lump near it.
-                if j == i || (is_big(&self.list[j]) && j < i) || (self.list[j].lump && self.list[i].live.is_none()) || (self.list[i].asleep && self.list[j].asleep) {
-                    continue;
-                }
-                let (a, b) = (&self.list[i], &self.list[j]);
-                let apart = sub(b.pos, a.pos);
-                let reach = a.radius + b.radius;
-                if dot(apart, apart) > reach * reach {
-                    continue;
-                }
-                // Two rolling vehicles meet as whole hulls, parted one way (hull.rs): cell by cell a car in another's
-                // hollow cabin touched nothing, and its shell was pushed the short way, into the cabin or up over the roof.
-                let hulls = a.live.as_ref().and_then(|live| live.hull.as_ref()).zip(b.live.as_ref().and_then(|live| live.hull.as_ref()));
-                if let Some((ha, hb)) = hulls {
-                    self.paired += (a.points.len() + b.points.len()) as u32;
-                    if let Some((n, deep)) = hull::meet(a, ha, b, hb, &mut found) {
-                        self.parted.push((i, j, n, deep));
-                    }
-                }
-                for (one, other, flip) in [(i, j, false), (j, i, true)].into_iter().take(if hulls.is_some() { 0 } else { 2 }) {
-                    let (a, b) = (&self.list[one], &self.list[other]);
-                    self.paired += a.points.len() as u32;
-                    for &ra in &a.turned {
-                        let p = add(a.pos, ra);
-                        let rb = sub(p, b.pos);
-                        if dot(rb, rb) > b.radius * b.radius {
-                            continue;
-                        }
-                        let (cell, q) = b.cell_at(p);
-                        if !b.solid(cell) {
-                            continue;
-                        }
-                        let (n, deep) = way_out(q, cell, |c| b.solid(c)).unwrap_or_else(|| (unit(back(b.rot, rb)), 1.0));
-                        let n = turn(b.rot, n);
-                        // Always told as: the first body of the pair is pushed along n.
-                        if flip { found.push((rb, ra, scale(n, -1.0), deep)) } else { found.push((ra, rb, n, deep)) }
-                    }
-                }
-                if !found.is_empty() {
-                    for k in [i, j] {
-                        self.list[k].apart = 0.0;
-                        self.list[k].asleep = false;
-                    }
-                }
-                keep(&mut found, i, j, &mut self.touches);
+        // Body against body via spatial broadphase (#166): eliminates O(N*M) scanning while preserving exact filters
+        // (lumps vs non-living, sleeping pairs, living hull checks, deterministic ordering).
+        let is_big = |b: &Body| ((b.count >= SMALL || b.persist_sleep) && !b.lump) || b.live.is_some();
+        self.rebuild_broadphase_hash();
+        let mut pairs = std::mem::take(&mut self.pairs);
+        self.broadphase.query_pairs(&mut pairs);
+        for &(p, q) in &pairs {
+            let big_p = is_big(&self.list[p]);
+            let big_q = is_big(&self.list[q]);
+            if !big_p && !big_q {
+                continue;
             }
+            // Keep exact pair orientation: big body first if only one is big, lower index first if both are big.
+            let (i, j) = if big_p { (p, q) } else { (q, p) };
+            if (self.list[j].lump && self.list[i].live.is_none()) || (self.list[i].asleep && self.list[j].asleep) {
+                continue;
+            }
+            let (a, b) = (&self.list[i], &self.list[j]);
+            let apart = sub(b.pos, a.pos);
+            let reach = a.radius + b.radius;
+            if dot(apart, apart) > reach * reach {
+                continue;
+            }
+            // Two rolling vehicles meet as whole hulls, parted one way (hull.rs): cell by cell a car in another's
+            // hollow cabin touched nothing, and its shell was pushed the short way, into the cabin or up over the roof.
+            let hulls = a.live.as_ref().and_then(|live| live.hull.as_ref()).zip(b.live.as_ref().and_then(|live| live.hull.as_ref()));
+            if let Some((ha, hb)) = hulls {
+                self.paired += (a.points.len() + b.points.len()) as u32;
+                if let Some((n, deep)) = hull::meet(a, ha, b, hb, &mut found) {
+                    self.parted.push((i, j, n, deep));
+                }
+            }
+            for (one, other, flip) in [(i, j, false), (j, i, true)].into_iter().take(if hulls.is_some() { 0 } else { 2 }) {
+                let (a, b) = (&self.list[one], &self.list[other]);
+                self.paired += a.points.len() as u32;
+                for &ra in &a.turned {
+                    let p = add(a.pos, ra);
+                    let rb = sub(p, b.pos);
+                    if dot(rb, rb) > b.radius * b.radius {
+                        continue;
+                    }
+                    let (cell, q) = b.cell_at(p);
+                    if !b.solid(cell) {
+                        continue;
+                    }
+                    let (n, deep) = way_out(q, cell, |c| b.solid(c)).unwrap_or_else(|| (unit(back(b.rot, rb)), 1.0));
+                    let n = turn(b.rot, n);
+                    // Always told as: the first body of the pair is pushed along n.
+                    if flip { found.push((rb, ra, scale(n, -1.0), deep)) } else { found.push((ra, rb, n, deep)) }
+                }
+            }
+            if !found.is_empty() {
+                let (id_a, id_b) = (self.list[i].id, self.list[j].id);
+                let edge = if id_a < id_b { (id_a, id_b) } else { (id_b, id_a) };
+                self.recent_contacts.insert(edge, CONTACT_TTL);
+                for k in [i, j] {
+                    self.list[k].apart = 0.0;
+                    if self.list[k].asleep || self.list[k].island_id != 0 {
+                        self.wake_body_and_island(k);
+                    }
+                }
+            }
+            keep(&mut found, i, j, &mut self.touches);
         }
+        self.pairs = pairs;
         #[cfg(test)]
         mark(1);
         // What each body stands on: the stretch its touches cover.
@@ -1992,18 +2413,22 @@ impl Bodies {
             let q = [q[0] + dq[0], q[1] + dq[1], q[2] + dq[2], q[3] + dq[3]];
             let l = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
             b.rot = [q[0] / l, q[1] / l, q[2] / l, q[3] / l];
-            // The longer a body has been about, the less still it need be: something rocking in a corner is put down.
-            let ease = 1.0 + (b.age - 2.5).max(0.0) * 0.8;
+            // The longer a non-persistent body has been about, the less still it need be: something rocking in a
+            // corner is put down. Persistent rigid bodies use strict low-velocity stillness thresholds and sleep
+            // together by simulation island in `settle_islands`.
+            let ease = if b.persist_sleep { 1.0 } else { 1.0 + (b.age - 2.5).max(0.0) * 0.8 };
             let slow = dot(b.vel, b.vel) < (STILL_SPEED * ease).powi(2) && dot(b.spin, b.spin) < (STILL_SPIN * ease).powi(2);
             // And it is at rest only if its weight is over what it touches: a chimney starting to go over is slow, not still.
             let f = b.footing;
             // Asked only of big things: a lump lies as it lands, propped on whatever is under it.
             let over = b.count < 1500 || (f[0] <= 0.5 && f[1] >= -0.5 && f[2] <= 0.5 && f[3] >= -0.5);
-            b.still = if slow && b.apart < 0.1 && (over || b.age > OLD) { b.still + h } else { 0.0 };
+            b.still = if slow && b.apart < 0.1 && (over || (!b.persist_sleep && b.age > OLD)) { b.still + h } else { 0.0 };
             // Old and still on its way (a chimney going over takes its time) is left to it, up to a point.
-            let stuck = b.age >= OLD && dot(b.vel, b.vel) < 400.0 && dot(b.spin, b.spin) < 0.25;
+            let stuck = !b.persist_sleep && b.age >= OLD && dot(b.vel, b.vel) < 400.0 && dot(b.spin, b.spin) < 0.25;
             if b.live.is_some() {
                 Self::drowse(b, h);
+                i += 1;
+            } else if b.persist_sleep {
                 i += 1;
             } else if b.still >= STILL_FOR || stuck || b.age >= OLD * 3.0 {
                 let body = self.list.swap_remove(i);
@@ -2013,6 +2438,8 @@ impl Bodies {
                 i += 1;
             }
         }
+        self.settle_islands();
+        self.broadphase_stale = true;
         #[cfg(test)]
         mark(5);
     }
@@ -3196,5 +3623,136 @@ mod tests {
         // No cell is made by falling, and under a tenth are lost: what lands hard breaks, and the smallest bits of that are dust.
         let after = built(&mut bodies);
         assert!(after <= before && (before - after) * 10 < loose, "{before} cells were built before {loose} of them came loose, and {after} when they lay down")
+    }
+
+    #[test]
+    fn island_stack_of_three_persistent_bodies_sleeps_and_wakes_together() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let size = [10, 4, 10];
+        for level in 0..3 {
+            let mut b = Body::new(level + 1, block(size, kind(crate::kinds::WOOD, OWN)), size, [X, ground + 1 + level as i32 * 4, Z]);
+            b.persist_sleep = true;
+            bodies.list.push(b);
+        }
+        // Let the stack settle and fall asleep together as one island.
+        let mut t = 0.0f32;
+        while bodies.busy() > 0 && t < 8.0 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            t += 1.0 / 60.0;
+        }
+        assert_eq!(bodies.list.len(), 3, "persistent bodies must stay as oriented rigid bodies rather than converting to world cells");
+        assert!(bodies.list.iter().all(|b| b.asleep), "all 3 stacked bodies must sleep together: {:?}", bodies.list.iter().map(|b| (b.id, b.asleep, b.vel, b.still, b.island_id)).collect::<Vec<_>>());
+        let island_id = bodies.list[0].island_id;
+        assert_ne!(island_id, 0, "sleeping stack must have a non-zero island id");
+        assert!(bodies.list.iter().all(|b| b.island_id == island_id), "all 3 stacked bodies must share one island id: {:?}", bodies.list.iter().map(|b| b.island_id).collect::<Vec<_>>());
+        assert_eq!(bodies.busy(), 0);
+
+        // Verify 0 velocity/position updates while asleep, even when an unrelated awake body elsewhere forces `step()` to run.
+        let saved: Vec<(V, Q)> = bodies.list.iter().map(|b| (b.pos, b.rot)).collect();
+        let mut distant = Body::new(99, block([6, 6, 6], kind(crate::kinds::WOOD, OWN)), [6, 6, 6], [X + 400, ground + 80, Z + 400]);
+        distant.persist_sleep = true;
+        bodies.list.push(distant);
+        for _ in 0..30 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            for (k, &(pos, rot)) in saved.iter().enumerate() {
+                assert!(bodies.list[k].asleep, "sleeping stack body {k} must stay asleep");
+                assert_eq!(bodies.list[k].vel, [0.0; 3], "sleeping stack body {k} must have 0 velocity updates");
+                assert_eq!(bodies.list[k].spin, [0.0; 3], "sleeping stack body {k} must have 0 spin updates");
+                assert_eq!(bodies.list[k].pos, pos, "sleeping stack body {k} must not drift while asleep");
+                assert_eq!(bodies.list[k].rot, rot, "sleeping stack body {k} must not rotate while asleep");
+            }
+        }
+        bodies.list.pop();
+
+        // Wake ONLY the bottom body via `wake_in_aabb` covering strictly the bottom half of body 0 (well below body 1 & 2).
+        let bottom_aabb = bodies.list[0].world_aabb();
+        let bottom_lo = bottom_aabb.min;
+        let bottom_hi = [bottom_aabb.max[0], bottom_aabb.min[1] + 1.0, bottom_aabb.max[2]];
+        assert!(!bodies.list[1].world_aabb().intersects(&Aabb::new(bottom_lo, bottom_hi)), "query box must not touch middle body");
+        assert!(!bodies.list[2].world_aabb().intersects(&Aabb::new(bottom_lo, bottom_hi)), "query box must not touch top body");
+        bodies.wake_in_aabb(bottom_lo, bottom_hi);
+        assert!(bodies.list.iter().all(|b| !b.asleep), "waking the bottom body must wake all 3 bodies in its island immediately");
+
+        // Let them sleep again, then verify direct wake (`list[0].asleep = false`) wakes all 3 in the exact same step.
+        t = 0.0;
+        while bodies.busy() > 0 && t < 8.0 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            t += 1.0 / 60.0;
+        }
+        assert!(bodies.list.iter().all(|b| b.asleep));
+        bodies.list[0].asleep = false;
+        bodies.step(STEP);
+        assert!(bodies.list.iter().all(|b| !b.asleep), "waking the bottom body must wake all 3 in the same step");
+    }
+
+    #[test]
+    fn hybrid_persist_policy_keeps_structural_bodies_and_pours_brittle_rubble() {
+        let ground = city::ground(X, Z);
+        // Unit policy checks on `qualifies_for_persist_sleep`.
+        let wood_prop = Body::new(1, block([6, 6, 6], kind(crate::kinds::WOOD, OWN)), [6, 6, 6], [X, ground + 10, Z]); // 216 cells wood
+        assert!(wood_prop.qualifies_for_persist_sleep());
+
+        let small_brick = Body::new(2, block([6, 6, 6], kind(BRICK, OWN)), [6, 6, 6], [X, ground + 10, Z]); // 216 cells brittle < 250
+        assert!(!small_brick.qualifies_for_persist_sleep());
+
+        let big_brick = Body::new(3, block([8, 6, 6], kind(BRICK, OWN)), [8, 6, 6], [X, ground + 10, Z]); // 288 cells brittle >= 250
+        assert!(big_brick.qualifies_for_persist_sleep());
+
+        let mut lump = Body::new(4, block([8, 6, 6], kind(crate::kinds::WOOD, OWN)), [8, 6, 6], [X, ground + 10, Z]);
+        lump.lump = true;
+        assert!(!lump.qualifies_for_persist_sleep());
+
+        let mut passing = Body::new(5, block([8, 6, 6], kind(crate::kinds::WOOD, OWN)), [8, 6, 6], [X, ground + 10, Z]);
+        passing.passing = true;
+        assert!(!passing.qualifies_for_persist_sleep());
+
+        let tiny = Body::new(6, block([4, 4, 4], kind(crate::kinds::WOOD, OWN)), [4, 4, 4], [X, ground + 10, Z]); // 64 < SMALL
+        assert!(!tiny.qualifies_for_persist_sleep());
+
+        // End-to-end check: structural prop sleeps in place while small brittle masonry converts back to world cells.
+        let mut bodies = Bodies::new();
+        bodies.persist_debris = true;
+        let mut prop = wood_prop;
+        prop.persist_sleep = prop.qualifies_for_persist_sleep();
+        let mut rubble_block = Body::new(7, block([6, 6, 6], kind(BRICK, OWN)), [6, 6, 6], [X + 30, ground + 10, Z]);
+        rubble_block.persist_sleep = rubble_block.qualifies_for_persist_sleep();
+        bodies.list.push(prop);
+        bodies.list.push(rubble_block);
+
+        let mut t = 0.0f32;
+        while bodies.busy() > 0 && t < 8.0 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            t += 1.0 / 60.0;
+        }
+        assert_eq!(bodies.list.len(), 1, "brittle masonry < 250 cells must pour into world cells while structural prop persists");
+        assert_eq!(bodies.list[0].id, 1);
+        assert!(bodies.list[0].asleep);
+    }
+
+    #[test]
+    fn bodies_broadphase_query_and_raycast_find_expected_bodies() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        bodies.list.push(Body::new(1, block([8, 8, 8], kind(crate::kinds::WOOD, OWN)), [8, 8, 8], [X, ground + 10, Z]));
+        bodies.list.push(Body::new(2, block([8, 8, 8], kind(crate::kinds::WOOD, OWN)), [8, 8, 8], [X + 40, ground + 10, Z]));
+        bodies.list.push(Body::new(3, block([8, 8, 8], kind(crate::kinds::WOOD, OWN)), [8, 8, 8], [X + 20, ground + 50, Z]));
+        bodies.rebuild_broadphase();
+
+        let mut hits = Vec::new();
+        bodies.broadphase_query_aabb(
+            Aabb::new([X as f32 - 2.0, (ground + 8) as f32, Z as f32 - 2.0], [X as f32 + 12.0, (ground + 20) as f32, Z as f32 + 12.0]),
+            &mut hits,
+        );
+        assert_eq!(hits, vec![0]);
+
+        let origin = [X as f32 - 10.0, (ground + 14) as f32, (Z + 4) as f32];
+        let inv_dir = [1.0, f32::INFINITY, f32::INFINITY];
+        bodies.broadphase_raycast(origin, inv_dir, 100.0, &mut hits);
+        assert_eq!(hits, vec![0, 1], "horizontal +X ray must hit bodies 0 and 1 and skip elevated body 2");
     }
 }

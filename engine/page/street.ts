@@ -22,7 +22,8 @@ import type { Living, Making, Motor, Thing } from './living.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Born } from './told.ts'
-import { chance, out as homeHours, type Shock } from './residents.ts'
+import { chance, type Shock } from './residents.ts'
+import { createWalkGraph, DEFAULT_RING_CAPS, hourly, REACH, RING3_RADIUS, type LodStats, type WalkGraph } from '../sf-walks.mjs'
 import { NAMED as NAMED_MOVES } from './moves.ts'
 import { unrun } from './runs.ts'
 import { POLISHED } from './spells.ts'
@@ -30,12 +31,32 @@ import { faces as facesOf } from './fine.ts'
 import { LOCAL } from './local.ts'
 import { PACKS_ENABLED, readPackedJson, squarePackName } from './pack.ts'
 import { buildLidarDomeBorns, buildRobotaxiModel, buildStationBorns, ROBOTAXI_SERVICES, type RobotaxiModel, type RobotaxiService, type StationBorns } from './robotaxi.ts'
+import {
+  blockedSetKey,
+  createDetourCache,
+  crosswalkYieldBuffer,
+  detectPedestrianNearMiss,
+  driverProfile,
+  EMERGENCY_SPAWN_SHARE,
+  emitEmergencyFlashers,
+  evaluateSirenYield,
+  isLaneClear,
+  planLocalDetour,
+  rainDrivingFactors,
+  stepLateralShift,
+  type DetourGraph,
+  type DriverProfile,
+  type EmergencyEmitter,
+  type EmergencyKind,
+  type ObstacleBox,
+  type PedestrianNearMissCue,
+  type TrafficAiStats,
+} from './traffic-ai.ts'
 
 /** What street life asks of the land (the core's exports). */
 export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; top_at?(x: number, z: number): number }
 
 type Ring = Float64Array
-interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
 interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number; railShift?: number }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number; lights?: { s: number; node: number; dx: number; dz: number }[] }
@@ -87,6 +108,32 @@ interface Car {
   annoyedAt?: number; beamFlash?: number
   /** Robotaxi charging-station depot circulation state: charging in a bay, exiting to the street, or entering a bay. */
   depot?: { serviceId: string; phase: 'charging' | 'exiting' | 'entering'; bay: number; until: number; pts: [number, number][]; cum: number[]; s: number; retryRoadAt?: number }
+  /** Individualized seed-derived driver profile (#164 Phase 3A). */
+  profile?: DriverProfile
+  /** Smooth lateral offset from nominal lane center (cells; + right, - left) for zero-snap lane changes. */
+  laneShift?: number
+  /** Smooth lateral offset for single-lane shoulder/opposing-lane overtaking around stalled cars/craters. */
+  overtakeShift?: number
+  /** Active lateral overtake target around a lane obstruction on narrow/blocked roads. */
+  overtake?: { shiftTarget: number; clearS: number; roadKey: string; aroundId?: number }
+  /** Smooth right-kerb pull offset (cells, >= 0) while yielding inside an emergency acoustic siren cone. */
+  sirenYieldShift?: number
+  /** Instantaneous lateral velocity (cells/s) for steering yaw during lane transitions and kerb yields. */
+  latVel?: number
+  /** Emergency vehicle class and active acoustic siren state. */
+  emergency?: EmergencyKind
+  sirenActive?: boolean
+  sirenYielding?: boolean
+  /** Accumulated sim time (seconds) held behind a lane obstruction (crater, stalled robotaxi, or stopped car). */
+  blockedAheadTime?: number
+  /** True when queued behind an obstructed lane so trailing cars proactively change lanes or detour. */
+  blockedByObstruction?: boolean
+  /** True while executing an overtake or detour away from a blockage (credits `deadlocksResolved` once clear). */
+  resolvingBlock?: boolean
+  /** Accumulated sim time (seconds) held up by a pedestrian at a crosswalk. */
+  pedBlockedTime?: number
+  /** Sim-time cooldown timestamp before another lane change or overtake maneuver. */
+  laneChangeCoolAt?: number
 }
 /** A piece of a bus route in these squares: its roads in order, and its stops as [road index, cells along that road]. */
 interface BusPiece { keys: string[]; stops: [number, number][]; seed: number; apart: number; kind: 'bus' | 'trolley'; hours: [number, number]; ref: string }
@@ -101,15 +148,8 @@ const carName = (m: Model, paint: number): string => {
   if (COLOUR_PREFIX.test(m.name)) return m.name.replace(COLOUR_PREFIX, `${v} `)
   return `${v} ${m.name}`
 }
-/** How far off people are worked out and drawn (people.ts REACH), and how far a walk takes anyone from home. */
-const REACH = 1400, WALK_MOST = 1600
-/** How long a pair of steps is (people.ts STRIDE). */
-const STRIDE = 14.4
-/** The share of a busy street's people out at each hour: shops and offices, open from morning to late. */
-const SHOPS = [0.15, 0.08, 0.05, 0.04, 0.05, 0.1, 0.25, 0.5, 0.75, 0.85, 0.9, 1, 1, 1, 0.95, 0.95, 1, 1, 1, 0.95, 0.85, 0.7, 0.5, 0.3]
 /** How much traffic there is at each hour, against the most. */
 const TRAFFIC = [0.15, 0.1, 0.07, 0.07, 0.1, 0.25, 0.55, 0.9, 1, 0.85, 0.75, 0.8, 0.85, 0.8, 0.8, 0.85, 0.95, 1, 1, 0.85, 0.65, 0.5, 0.35, 0.22]
-const hourly = (table: readonly number[], hour: number) => { const h = ((hour % 24) + 24) % 24, a = Math.floor(h); return table[a] + (table[(a + 1) % 24] - table[a]) * (h - a) }
 const ease = (v: number) => { const c = Math.max(0, Math.min(1, v)); return c * c * (3 - 2 * c) }
 const mix = (a: number, b: number) => (Math.imul(a | 0, 73856093) ^ Math.imul(b | 0, 19349663)) | 0
 /** A number for an OSM node or way id (up to 2^53): the same always. */
@@ -319,15 +359,6 @@ function line(flat: readonly number[], from: number): { p: Ring; cum: Ring; len:
   return { p, cum, len: cum[n - 1] }
 }
 
-/** A walk out from home and back: the line it takes, its length so far, and what each piece of it is (a crossing is 1). */
-interface Route {
-  p: number[]; cum: number[]; kinds: number[]; sigs: number[]; len: number; used: number; P: Float64Array; C: Float64Array
-  /** The crossings on it that wait on lights: where each begins and ends along it, whose lights, and which way it crosses. */
-  crossings: { s0: number; s1: number; node: number; dx: number; dz: number }[]
-  /** When it is where (seconds from its round's start, and how far along): out, standing, back, waiting at kerbs on the way. */
-  plan?: { out: number[]; back: number[]; outEnd: number; backAt: number; backEnd: number }
-}
-
 /** High-speed clean close pass past a street vehicle (speed in km/h, lateral clearance in metres, world position in cells). */
 export interface NearMiss { speedKmh: number; clearance: number; at: [number, number, number] }
 /** Contact between the driven vehicle and a street vehicle (speed in cells/s, normalised force 0..1). */
@@ -361,7 +392,13 @@ export interface Street {
   /** Vehicles near a place: where each stands, which way it heads, and what it is (`id` is its own for as long as it is there). */
   cars(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; service: string; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean; wait: string; stuck: number }[]
   /** Full vehicle state snapshot within `r` cells for black-box telemetry, overlap detection, and replay. */
-  snapshot(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; name: string; x: number; y: number; z: number; heading: number; v: number; long: number; wide: number; road: string; lane: number; s: number; wait: string; stuck: number; blocked: boolean; living: boolean }[]
+  snapshot(x: number, z: number, r: number): { id: number; kind: Car['kind']; model: string; name: string; x: number; y: number; z: number; heading: number; v: number; long: number; wide: number; road: string; lane: number; s: number; wait: string; stuck: number; blocked: boolean; living: boolean; emergency?: EmergencyKind; archetype?: string; laneShift?: number; sirenYieldShift?: number }[]
+  /** Traffic AI telemetry counters (#164 Phase 3A). */
+  trafficAiStats(): TrafficAiStats
+  /** Spawns an emergency vehicle (`police` | `ambulance`) with active siren cone and roof flashers (#164 Phase 3A). */
+  spawnEmergency(opts?: { kind?: EmergencyKind; at?: readonly [number, number]; siren?: boolean; roadKey?: string; lane?: number; s?: number }): { id: number; kind: EmergencyKind; x: number; y: number; z: number; heading: number; road: string; sirenActive: boolean } | null
+  /** Recent pedestrian near-miss reaction cues readable by street/HUD/sound (#164 Phase 3A). */
+  readonly nearMissCues: readonly PedestrianNearMissCue[]
   /** Deterministic xorshift32 PRNG state for traffic replay. */
   rng: number
   /** Seconds from now on the clock people walk by until a cable car is nearest a place, and how near it comes (cells); null with no line. */
@@ -387,6 +424,8 @@ export interface Street {
   /** What is on its way to life and which faces are made (for the checks). */
   readonly debug: unknown
   readonly red: unknown
+  /** Three-Ring Multi-Tier AI LOD counts and suppression telemetry (#164). */
+  readonly lod: LodStats
   trace(seed: number, times: number[]): unknown
   readonly ms: number
   readonly ready: boolean
@@ -404,6 +443,8 @@ export function street(o: {
   /** Seconds on the clock people walk by. */
   clock: () => number
   shocks: readonly Shock[]
+  /** Residents currently promoted to authoritative world actors: suppressed here so they never double-render (#164). */
+  taken?: { has(seed: number): boolean }
   /** Where the cutter cut (main.ts `cut`): the road there is looked at as a blast's is. */
   cuts?: readonly { at: readonly [number, number, number]; radius: number }[]
   /** Where everyone else stands (their feet): people go round them, cars wait for them. */
@@ -428,13 +469,13 @@ export function street(o: {
   onShout?: (info: CrowdShout) => void
 }): Street {
   // ── The graph, a square at a time ──
-  const walks: Walk[] = [], nodes = new Map<number, { x: number; z: number; walks: number[] }>()
+  const walkGraph: WalkGraph = createWalkGraph()
   const roads = new Map<string, Road>(), roadsFrom = new Map<number, Road[]>(), roadsTo = new Map<number, Road[]>(), ways = new Map<number, Set<number>>()
   const slots: Slot[] = [], lines: Line[] = []
   /** The signal heads (sf/life.py): where each post stands, and the road whose lights it shows. */
   const heads: { key: string; x: number; z: number; piece: Piece | null; shown: string; curbed?: boolean }[] = [], headGrid = new Map<number, number[]>()
   const GRID = 1000
-  const walkGrid = new Map<number, number[]>(), roadGrid = new Map<number, Road[]>(), slotGrid = new Map<number, number[]>()
+  const roadGrid = new Map<number, Road[]>(), slotGrid = new Map<number, number[]>()
   const cell = (gx: number, gz: number) => gx * 100003 + gz
   const file = (grid: Map<number, unknown[]>, x0: number, z0: number, x1: number, z1: number, v: unknown) => {
     for (let gx = Math.floor(x0 / GRID); gx <= Math.floor(x1 / GRID); gx++) for (let gz = Math.floor(z0 / GRID); gz <= Math.floor(z1 / GRID); gz++) { const k = cell(gx, gz); let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(v) }
@@ -448,19 +489,9 @@ export function street(o: {
   let routed = false
   const squares = new Map<string, 'asked' | 'held'>()
   const rails: { a: number; b: number; p: Ring }[] = []
-  const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][]; heads?: number[][] }) => {
+  const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][]; heads?: number[][] }, name = '') => {
     for (const [way, a, b, x, z] of s.heads ?? []) { const n = heads.push({ key: `${way}/${a}/${b}`, x, z, piece: null, shown: '' }) - 1; file(headGrid, x, z, x, z, n) }
-    for (const w of s.walk) {
-      const [a, b, kind, busy, signal] = w, { p, cum, len } = line(w, 5)
-      if (len < 1) continue
-      // How many live along it: none on a crossing, a few on steps, and on a pavement more the busier it is.
-      const per = kind === 1 ? 0 : kind === 2 ? 0.4 : 0.5 + 0.045 * busy, seed = mix(idSeed(a), idSeed(b))
-      const homes = Math.floor((len / 1000) * per + chance(seed, 9))
-      const i = walks.push({ a, b, kind, busy, signal, p, cum, len, homes, seed, mx: (p[0] + p[p.length - 2]) / 2, mz: (p[1] + p[p.length - 1]) / 2 }) - 1
-      for (const [id, x, z] of [[a, p[0], p[1]], [b, p[p.length - 2], p[p.length - 1]]]) { let n = nodes.get(id); if (!n) nodes.set(id, n = { x, z, walks: [] }); n.walks.push(i) }
-      const [x0, z0, x1, z1] = box(p)
-      file(walkGrid, x0, z0, x1, z1, i)
-    }
+    walkGraph.addSquare(name || `sq:${squares.size}`, s)
     for (const r of s.roads) {
       const [way, a, b, lanes, flags, next, ctl] = r as [number, number, number, number, number, number[], number]
       const { p, cum, len } = line(r as number[], 7)
@@ -490,7 +521,7 @@ export function street(o: {
     for (const l of [...tramLines, ...lines]) { l.lights!.length = 0; lightsDone.delete(l) }
     // A junction on a seam is whole only now: walks timed against half of it are timed again, and the cable cars'
     // timetables.
-    routes.clear(); junctions.clear(); timetables.clear(); cableBases.clear()
+    junctions.clear(); timetables.clear(); cableBases.clear()
   }
   /** The cable car lines: track pieces joined end to end where only two meet, longest first. */
   const joinRails = () => {
@@ -545,7 +576,7 @@ export function street(o: {
       lifeComing++
       const packName = lifePacks?.life ? squarePackName('life', name, lifePacks.life) : null
       const packUrl = packName ? new URL(`${lifePacks!.dir ?? 'packs/'}${packName}`, lifeReleaseRoot).href : null
-      void lifeJson<Parameters<typeof take>[0]>(index.life[name].path, packUrl).then((s) => { if (s) { take(s); squares.set(name, 'held') } else squares.delete(name) }, () => squares.delete(name)).finally(() => { lifeComing-- })
+      void lifeJson<Parameters<typeof take>[0]>(index.life[name].path, packUrl).then((s) => { if (s) { take(s, name); squares.set(name, 'held') } else squares.delete(name) }, () => squares.delete(name)).finally(() => { lifeComing-- })
     }
   }
   /**
@@ -586,220 +617,13 @@ export function street(o: {
     }, () => {})
   }
 
-  // ── People ──
-  const routes = new Map<string, Route>()
-  /** A walk of the graph from where someone lives: each turn chosen by their number and the round, liking a straight way and a busy one. */
-  const route = (wi: number, u: number, seed: number, k: number, want: number): Route => {
-    const w = walks[wi]
-    const key = `${seed}:${k}`
-    let r = routes.get(key)
-    if (r) { r.used = k; return r }
-    if (routes.size > 6000) { let n = 0; for (const key of routes.keys()) { routes.delete(key); if (++n > 2000) break } }
-    r = { p: [], cum: [0], kinds: [], sigs: [], len: 0, used: k, P: new Float64Array(0), C: new Float64Array(0), crossings: [] }
-    const P = { x: 0, z: 0, tx: 0, tz: 0 }
-    along(w.p, w.cum, u, P)
-    r.p.push(P.x, P.z)
-    const push = (x: number, z: number, kind: number, sig = 0) => { const px = r!.p[r!.p.length - 2], pz = r!.p[r!.p.length - 1], d = Math.hypot(x - px, z - pz); if (d < 0.5) return; r!.p.push(x, z); r!.len += d; r!.cum.push(r!.len); r!.kinds.push(kind); r!.sigs.push(sig) }
-    // Along their own pavement first, one way or the other.
-    let edge = wi, forward = chance(seed, 40 + k * 7) < 0.5, node = forward ? w.b : w.a
-    const n0 = w.cum.length
-    if (forward) { for (let i = 0; i < n0; i++) if (w.cum[i] > u) push(w.p[2 * i], w.p[2 * i + 1], w.kind, w.signal) } else { for (let i = n0 - 1; i >= 0; i--) if (w.cum[i] < u) push(w.p[2 * i], w.p[2 * i + 1], w.kind, w.signal) }
-    for (let step = 0; r.len < want && step < 40; step++) {
-      const here = nodes.get(node)
-      if (!here) break
-      const last = r.p.length, hx = r.p[last - 2] - r.p[last - 4], hz = r.p[last - 1] - r.p[last - 3], hl = Math.hypot(hx, hz) || 1
-      let total = 0
-      const options: [number, number][] = []
-      for (const j of here.walks) {
-        if (j === edge && here.walks.length > 1) continue
-        const e = walks[j], out = e.a === node, nx = out ? e.p[2] - e.p[0] : e.p[e.p.length - 4] - e.p[e.p.length - 2], nz = out ? e.p[3] - e.p[1] : e.p[e.p.length - 3] - e.p[e.p.length - 1]
-        const straight = (hx * nx + hz * nz) / (hl * (Math.hypot(nx, nz) || 1))
-        const like = (e.kind === 1 ? 0.45 : e.kind === 2 ? 0.35 : 1 + e.busy / 40) * (0.25 + Math.max(0, straight) * 1.5)
-        options.push([j, like]); total += like
-      }
-      if (!options.length) break
-      let pick = chance(seed, 1000 + k * 53 + step) * total, j = options[0][0]
-      for (const [o, like] of options) { pick -= like; if (pick <= 0) { j = o; break } }
-      const e = walks[j], out = e.a === node, n = e.cum.length
-      for (let i = 1; i < n; i++) { const at = out ? i : n - 1 - i; push(e.p[2 * at], e.p[2 * at + 1], e.kind, e.signal) }
-      edge = j; node = out ? e.b : e.a
-    }
-    // Cut to how far they mean to go.
-    // A walk never ends on a crossing (they would stand in the road): it ends at the kerb before it.
-    if (r.len > want) { let i = r.cum.findIndex((c) => c >= want) - 1; if (r.kinds[i] === 1) { while (i > 0 && r.kinds[i - 1] === 1) i--; want = Math.max(1, r.cum[i] - 10) } }
-    if (r.len > want) { const P2 = { x: 0, z: 0, tx: 0, tz: 0 }, i = r.cum.findIndex((c) => c >= want); along(r.p, r.cum, want, P2); const kind = r.kinds[i - 1] ?? 0; r.p.length = i * 2; r.cum.length = i; r.kinds.length = i - 1; r.p.push(P2.x, P2.z); r.cum.push(want); r.kinds.push(kind); r.len = want }
-    // Its crossings that wait on lights (whose junction is known here): the pieces of one crossing, end to end, are one
-    // crossing timed by one junction's lights, though the survey may give its halves to two junctions. Past the second,
-    // the walk ends at the kerb: two waits each way are what a round leaves room for.
-    for (let i = 0; i < r.sigs.length;) {
-      if (r.kinds[i] !== 1) { i++; continue }
-      let j = i
-      while (j + 1 < r.kinds.length && r.kinds[j + 1] === 1) j++
-      let node = 0
-      for (let k = i; k <= j && !node; k++) if (r.sigs[k] && roadsTo.get(r.sigs[k])?.length) node = r.sigs[k]
-      if (!node) { i = j + 1; continue }
-      const dx = r.p[2 * j + 2] - r.p[2 * i], dz = r.p[2 * j + 3] - r.p[2 * i + 1], l = Math.hypot(dx, dz) || 1
-      if (r.crossings.length === 2) { cutAt(r, Math.max(1, r.cum[i] - 10)); break }
-      r.crossings.push({ s0: r.cum[i], s1: r.cum[j + 1], node, dx: dx / l, dz: dz / l })
-      i = j + 1
-    }
-    r.P = Float64Array.from(r.p); r.C = Float64Array.from(r.cum)
-    routes.set(key, r)
-    return r
-  }
-  /** Ends a walk at a distance along it (at the kerb, 1 m short of a crossing): what is past it is let go. */
-  const cutAt = (r: Route, cut: number) => {
-    const P2 = { x: 0, z: 0, tx: 0, tz: 0 }, at = r.cum.findIndex((c) => c >= cut)
-    along(r.p, r.cum, cut, P2)
-    r.p.length = at * 2; r.cum.length = at; r.kinds.length = at - 1; r.sigs.length = at - 1
-    r.p.push(P2.x, P2.z); r.cum.push(cut); r.kinds.push(0); r.sigs.push(0); r.len = cut
-    r.crossings = r.crossings.filter((c) => c.s1 <= cut)
-    r.P = Float64Array.from(r.p); r.C = Float64Array.from(r.cum)
-  }
-  /** One person at a second: where on their walk, which way they face, what they are doing. */
-  const W = { x: 0, z: 0, hx: 0, hz: 1, s: 0, walking: 0, still: false, far: false, stood: 0, crossing: false, kind: 0, waiting: false, sig: 0, cdx: 0, cdz: 0, pause: 0 }
-  /**
-   * A walk out and back, timed: at each crossing with lights they stop a step short of the kerb and wait for their
-   * walking sign (a rule of the clock, cycleAt), going only if what is left of it sees them across before the lights
-   * change. `start` is when the round began on the shared clock, so where anyone is stays a rule of place and time.
-   * The time in between, at the far end, is what the round has left; if waits leave none, the walk back is hurried.
-   */
-  const planOf = (r: Route, v0: number, T: number, rest: number, start: number) => {
-    const leg = (from: number, forward: boolean, t0: number, v = v0) => {
-      const pts = [0, from]
-      let t = 0, s = from
-      const order = forward ? r.crossings : [...r.crossings].reverse()
-      for (const c of order) {
-        // A step short of the kerb, or where they are if that is nearer (a walk that begins or ends at a crossing):
-        // no crossing with lights is ever crossed untimed.
-        const entry = forward ? Math.max(s, c.s0 - 8) : Math.min(s, c.s1 + 8)
-        t += Math.abs(entry - s) / v; s = entry; pts.push(t, s)
-        const j = junctionOf(c.node), across = (c.s1 - c.s0) / v
-        const ws = phaseOf(j, c.dx, c.dz) * (CYCLE / 2), last = Math.max(ws, Math.min(ws + WALK, ws + GREEN - across))
-        const u = cycleAt(j, start + t0 + t)
-        const wait = u >= ws && u <= last ? 0 : ((ws - u) % CYCLE + CYCLE) % CYCLE
-        if (wait > 0) { t += wait; pts.push(t, s) }
-        // Across before the lights change: a long crossing (the Embarcadero's) is hurried.
-        const exit = forward ? c.s1 : c.s0, gone = (((cycleAt(j, start + t0 + t) - ws) % CYCLE) + CYCLE) % CYCLE
-        t += Math.min(Math.abs(exit - s) / v, Math.max(4, GREEN + AMBER - 1 - gone)); s = exit; pts.push(t, s)
-      }
-      const end = forward ? r.len : 0
-      t += Math.abs(end - s) / v; pts.push(t, end)
-      return pts
-    }
-    const out = leg(0, true, 0), outEnd = out[out.length - 2]
-    let backAt = Math.max(outEnd + 3, T - rest - (r.len / v0) * 1.15), back = leg(r.len, false, backAt)
-    for (let n = 0; n < 3 && backAt + back[back.length - 2] > T - rest; n++) { backAt = Math.max(outEnd + 2, T - rest - back[back.length - 2]); back = leg(r.len, false, backAt) }
-    // Still over: the way back is walked more briskly (timed again, so every wait still ends on its walking sign),
-    // and the pause at home is what is left of the round.
-    for (let fast = 1.25; backAt + back[back.length - 2] > T - 1 && fast < 3; fast *= 1.25) back = leg(r.len, false, backAt, v0 * fast)
-    const room = T - 1 - backAt, took = back[back.length - 2]
-    // Hurrying more would cross on a red: the walk is shorter instead (placeOf).
-    if (took > room && r.crossings.length) return null
-    if (took > room) for (let i = 0; i < back.length; i += 2) back[i] *= room / took
-    return { out, back, outEnd, backAt, backEnd: backAt + Math.min(took, room) }
-  }
-  /** Where along a timed leg a moment is, whether they wait there, and how much of a walk it is (eased at each stop). */
-  const FOLLOW = { s: 0, waiting: false, walking: 0 }
-  const follow = (pts: number[], t: number) => {
-    let i = 0
-    while (i + 2 < pts.length - 1 && pts[i + 2] <= t) i += 2
-    const t0 = pts[i], s0 = pts[i + 1], t1 = pts[i + 2] ?? t0, s1 = pts[i + 3] ?? s0
-    const f = t1 > t0 ? Math.max(0, Math.min(1, (t - t0) / (t1 - t0))) : 1
-    FOLLOW.s = s0 + (s1 - s0) * f
-    FOLLOW.waiting = s1 === s0 && t1 > t0
-    FOLLOW.walking = FOLLOW.waiting ? 0 : ease(Math.min(t - t0, t1 - t) / 0.7)
-    return FOLLOW
-  }
-  const R = { x: 0, z: 0, tx: 0, tz: 0 }
-  const placeOf = (wi: number, seed: number, t: number) => {
-    const w = walks[wi]
-    const T = 180 + 180 * chance(seed, 1), v = 11 + 4 * chance(seed, 2), u = t + chance(seed, 3) * T, k = Math.floor(u / T), tau = u - k * T
-    const home = (0.05 + 0.9 * chance(seed, 4)) * w.len
-    // Room in the round for waiting at lights: a minute and a half each way at most.
-    const rest = 10 + 30 * chance(seed, 5 + k * 3), r = route(wi, home, seed, k, Math.max(200, Math.min(WALK_MOST, (v * (T - rest - 15 - 90)) / 2)))
-    // A round with no room for its waits ends its walk at the kerb before its last crossing with lights.
-    while (!r.plan) { const p = planOf(r, v, T, rest, k * T - chance(seed, 3) * T); if (p) r.plan = p; else cutAt(r, Math.max(1, r.crossings[r.crossings.length - 1].s0 - 10)) }
-    const plan = r.plan
-    let s = 0, back = false, stood = 0, waiting = false
-    W.still = false; W.far = false
-    if (tau < plan.outEnd) { const at = follow(plan.out, tau); s = at.s; waiting = at.waiting; W.walking = at.walking; W.s = s }
-    else if (tau < plan.backAt) { s = r.len; W.still = true; W.far = true; stood = tau - plan.outEnd; W.pause = plan.backAt - plan.outEnd; W.walking = 0; W.s = r.len }
-    else if (tau < plan.backEnd) { const at = follow(plan.back, tau - plan.backAt); s = at.s; waiting = at.waiting; back = true; W.walking = at.walking; W.s = 2 * r.len - s }
-    else { s = 0; W.still = true; stood = tau - plan.backEnd; W.pause = T - plan.backEnd; W.walking = 0; W.s = 2 * r.len }
-    W.stood = stood
-    W.waiting = waiting
-    const P = r.P, C = r.C
-    const segment = along(P, C, s, R)
-    let hx = R.tx, hz = R.tz
-    if (back) { hx = -hx; hz = -hz }
-    // The way they face over a few steps, so a corner is turned and not snapped.
-    const a = { x: 0, z: 0, tx: 0, tz: 0 }, b = { x: 0, z: 0, tx: 0, tz: 0 }
-    along(P, C, s - 6, a); along(P, C, s + 6, b)
-    if (Math.hypot(b.x - a.x, b.z - a.z) > 1) { hx = (b.x - a.x) * (back ? -1 : 1); hz = (b.z - a.z) * (back ? -1 : 1); const l = Math.hypot(hx, hz); hx /= l; hz /= l }
-    W.kind = r.kinds[segment] ?? 0; W.crossing = W.kind === 1 && !waiting
-    // Which lights the crossing they are on waits on, and which way it crosses as a whole (its pieces may bend).
-    const on = W.crossing ? r.crossings.find((c) => s >= c.s0 - 1 && s <= c.s1 + 1) : undefined
-    W.sig = on ? on.node : 0; W.cdx = on ? on.dx : 0; W.cdz = on ? on.dz : 0
-    // Keep right: half a metre to a metre to the right of their way, less on a crossing. Standing, they cross over
-    // to the other side slowly, to walk back on their right.
-    // Nearer the middle on a crossing, and drawing in over the 2 m before it, so the step onto it is not a jump.
-    let toCrossing = Infinity
-    for (let j = Math.max(0, segment - 6); j < Math.min(r.kinds.length, segment + 7); j++) if (r.kinds[j] === 1) toCrossing = Math.min(toCrossing, s < C[j] ? C[j] - s : s > C[j + 1] ? s - C[j + 1] : 0)
-    const side = 3 + (2 + 5 * chance(seed, 6)) * ease(toCrossing / 20)
-    let lateral = back ? -side : side
-    // (Over the pause they have: a short one is crossed in it, not jumped at its end.)
-    if (W.still) { const f = ease(Math.min((stood - 2) / 4, stood / Math.max(0.5, W.pause - 0.2))); lateral = W.far ? side * (1 - 2 * f) : -side * (1 - 2 * f) }
-    // At home they stand on the pavement's middle line, and keep to a side from 3 m out: the next round's walk may
-    // leave the other way along it, and its right is the other side.
-    lateral *= W.still && !W.far ? 0 : ease(s / 30)
-    // Right of the way out, taken over 3 m of it, so that at a corner the side turns with them and is not jumped.
-    const a3 = { x: 0, z: 0, tx: 0, tz: 0 }, b3 = { x: 0, z: 0, tx: 0, tz: 0 }
-    along(P, C, s - 15, a3); along(P, C, s + 15, b3)
-    let nx = b3.x - a3.x, nz = b3.z - a3.z
-    const nl = Math.hypot(nx, nz)
-    if (nl > 1) { nx /= nl; nz /= nl } else { nx = R.tx; nz = R.tz }
-    // Where the way turns back on itself (a path's dead end), the side shrinks to nothing as it turns: no flip.
-    lateral *= Math.min(1, (nl / 30) ** 2)
-    W.x = R.x - nz * lateral; W.z = R.z + nx * lateral; W.hx = hx; W.hz = hz
-    if (W.still) {
-      // Standing they turn to the houses or the street, whichever their number says.
-      const turn = ease((stood - 1) / 1.5) * ease((W.pause - stood - 0.3) / 1.2) * (chance(seed, 7 + k) < 0.5 ? 1 : -1) * Math.PI / 2, c = Math.cos(turn), sn = Math.sin(turn)
-      W.hx = hx * c - hz * sn; W.hz = hx * sn + hz * c
-    }
-  }
+  // ── People (delegated to shared deterministic sf-walks.mjs evaluator + Three-Ring AI LOD, #164) ──
   /** Feet on the ground: the Bay's footing, but never on a roof over the pavement (an arcade, an awning). */
   const feetAt = (x: number, z: number) => { const ix = Math.round(x), iz = Math.round(z), f = o.land.feet_at(ix, iz), g = o.land.ground_at(ix, iz); return f - g > 25 ? g + 1 : f }
-  const S = { when: 0, down: 0, flinch: 0, towards: 0, turned: 0, frozen: false }
   /** Crash-induced shocks for pedestrians (separate from bomb blasts in `o.shocks` so crashes never crater roads or toss unrelated cars). */
   const crashShocks: Shock[] = []
   /** Most recent player horn pulse while driving, for pedestrian startle/step-clear within 14 m. */
   let hornPulse: { x: number; y: number; z: number; fx: number; fz: number; t: number } | null = null
-  const startleFrom = (list: readonly Shock[], wi: number, seed: number, t: number, crash: boolean): boolean => {
-    for (let k = list.length - 1; k >= 0; k--) {
-      const shock = list[k], age = t - shock.t
-      if (age < 0 || age > (crash ? 18 : 45)) continue
-      placeOf(wi, seed, shock.t)
-      const far = Math.hypot(W.x - shock.at[0], W.z - shock.at[2], feetAt(W.x, W.z) + 9 - shock.at[1])
-      const close = crash ? far < 28 : far < shock.radius * 2.5 + 10
-      const reach = crash ? shock.radius * 4 + 50 : shock.radius * 6 + 60
-      if (!close && far >= reach) continue
-      const held = close ? (crash ? 2.4 : 4.4) + 1.4 * chance(seed, 31) : (crash ? 0.9 : 1.2) + 0.8 * chance(seed, 31)
-      if (age < held) {
-        S.when = shock.t; S.frozen = true
-        if (close) { S.down = ease(age / 0.3) * (1 - ease((age - held + 1.2) / 1.2)); S.turned = ease(age / 0.3) }
-        else { S.flinch = ease(age / 0.12) * (1 - ease((age - held + 0.6) / 0.6)); if (crash) S.turned = ease(age / 0.2) * (1 - ease((age - held + 0.6) / 0.6)) * 0.85 }
-        S.towards = Math.atan2(shock.at[0] - W.x, -(shock.at[2] - W.z))
-      } else S.when = Math.min(t, shock.t + (age - held) * 1.7)
-      return true
-    }
-    return false
-  }
-  const startle = (wi: number, seed: number, t: number) => {
-    S.when = t; S.down = 0; S.flinch = 0; S.towards = 0; S.turned = 0; S.frozen = false
-    if (o.shocks.length && startleFrom(o.shocks, wi, seed, t, false)) return
-    if (crashShocks.length) startleFrom(crashShocks, wi, seed, t, true)
-  }
   /** How far someone steps aside (to their right, cells; under 0 to their left) to go round whoever stands in their way. */
   const aside = (x: number, z: number, high: number, hx: number, hz: number, bodies: readonly (readonly [number, number, number])[]) => {
     let step = 0
@@ -816,31 +640,34 @@ export function street(o: {
   }
   const shown: Person[] = [], held = new Map<number, { x: number; z: number; at: number }>()
   const watching = new Map<number, { car: number; when: number; seen: number; left?: number }>()
-  const seenWalks: number[] = []
-  let stamp = 1, lastSeconds = 0
-  const walkStamp = new Map<number, number>()
-  /** Where people were drawn last, for the cars to wait for them on a crossing. */
+  let lastSeconds = 0
+  let lastLod: LodStats = { ring1: 0, ring2: 0, ring3: 0, total: 0, capped: 0, suppressedTaken: 0, caps: { ...DEFAULT_RING_CAPS } }
+  let macroAt = -99, macroRing3 = 0
+  /** Where people were drawn last, for the cars to wait for them on a crossing, plus Ring-1 sidewalk pedestrians for near-miss reactions. */
   const crossing: [number, number][] = []
+  const nearPeds: [number, number][] = []
+  /** Living City Traffic AI state (#164 Phase 3A): sim clock, stats, detour cache, & pedestrian near-miss reaction cues. */
+  let simTime = 0
+  const aiStats: TrafficAiStats = { laneChanges: 0, detours: 0, sirenYields: 0, activeEmergency: 0, deadlocksResolved: 0 }
+  const detourCache = createDetourCache(256)
+  const nearMissCues: PedestrianNearMissCue[] = []
+  const pedNearMissCool = new Map<string, number>()
+  let nextNearMissCueId = 1
+  let activeCongested = new Set<string>()
+  let activeBlockedSig = ''
   let lastCrowdShout = -99, crowdShoutsStat = 0, rtFilmersStat = 0, rtYellersStat = 0, stuckHonksStat = 0, lastStuckHorn = -99
   let peopleMs = 0
   const folk = (view: View, seconds: number): readonly Person[] => {
     if (!on) { shown.length = 0; return shown }
     begin()
-    const t0 = performance.now(), t = o.clock(), hour = o.hour(), wet = o.rain() > 0.3, eye = view.eye, bodies = o.bodies()
+    const t0 = performance.now(), t = o.clock(), hour = o.hour(), rain = o.rain(), eye = view.eye, bodies = o.bodies()
     const dt = Math.max(0, Math.min(0.1, seconds - lastSeconds))
     lastSeconds = seconds
     wanted(eye)
-    stamp++
-    seenWalks.length = 0
-    const far = REACH + WALK_MOST
-    for (let gx = Math.floor((eye[0] - far) / GRID); gx <= Math.floor((eye[0] + far) / GRID); gx++) for (let gz = Math.floor((eye[2] - far) / GRID); gz <= Math.floor((eye[2] + far) / GRID); gz++) {
-      for (const i of walkGrid.get(cell(gx, gz)) ?? []) if (walkStamp.get(i) !== stamp) { walkStamp.set(i, stamp); seenWalks.push(i) }
-    }
-    const homeShare = homeHours(hour), shopShare = hourly(SHOPS, hour)
     const nowPerf = performance.now() / 1000
     const activeHorn = hornPulse && nowPerf - hornPulse.t < 2.6 ? hornPulse : null
     if (hornPulse && !activeHorn) hornPulse = null
-    // Stuck robotaxis that nearby sidewalk pedestrians react to (turning, yelling, and filming with phones).
+    // Stuck robotaxis that nearby Ring-1 sidewalk pedestrians react to (turning, yelling, and filming with phones).
     const stuckRT = traffic.filter((c) => c.rtStuck && nowPerf - c.rtStuck.at > 0.6 && Math.hypot(c.x - eye[0], c.z - eye[2]) < REACH + 250)
     const stuckIds = new Set(stuckRT.map((c) => c.id))
     const nearCars = stuckRT.length
@@ -922,38 +749,61 @@ export function street(o: {
       }
       return [sx, sy]
     }
+
+    const timeOf = watching.size
+      ? (seed: number, baseTime: number, st: { down: number; flinch: number; turned: number; frozen: boolean }) => {
+        const watch = watching.get(seed)
+        if (!watch) return baseTime
+        if (st.down || st.flinch || st.turned || st.frozen || t < watch.when) { watching.delete(seed); return baseTime }
+        if (!stuckIds.has(watch.car)) watch.left ??= t
+        // Hold the walk itself while watching. Resume along it and catch up as after a startle.
+        const rt = watch.left === undefined ? watch.when : Math.min(t, watch.when + (t - watch.left) * 1.7)
+        if (watch.left !== undefined && rt >= t) watching.delete(seed)
+        watch.seen = seconds
+        return rt
+      }
+      : undefined
+
+    // Shared deterministic pedestrian evaluation + Three-Ring AI LOD classification & taken suppression (#164).
+    const queried = walkGraph.query([eye[0], eye[2]], {
+      reach: REACH,
+      t,
+      hour,
+      rain,
+      taken: o.taken,
+      shocks: o.shocks,
+      crashShocks,
+      feetAt,
+      ring3Feet: true,
+      timeOf,
+    })
+
+    // Refresh Ring-3 macro city count (110–300 m) at throttled cadence so telemetry stays live at near-zero CPU cost.
+    if (seconds - macroAt >= 0.5 || seconds < macroAt) {
+      macroAt = seconds
+      const macro = walkGraph.query([eye[0], eye[2]], { reach: RING3_RADIUS, t, hour, rain, taken: o.taken })
+      macroRing3 = macro.stats.ring3
+    }
+    lastLod = { ...queried.stats, ring3: Math.max(queried.stats.ring3, macroRing3), total: queried.stats.ring1 + queried.stats.ring2 + Math.max(queried.stats.ring3, macroRing3) }
+
     let filmersNow = 0, yellersNow = 0
     let n = 0
     crossing.length = 0
-    for (const i of seenWalks) {
-      const w = walks[i]
-      if (!w.homes || Math.hypot(w.mx - eye[0], w.mz - eye[2]) - w.len / 2 > far) continue
-      const share = homeShare + (shopShare - homeShare) * Math.min(1, w.busy / 60)
-      for (let h = 0; h < w.homes; h++) {
-        const seed = mix(w.seed, h)
-        if (chance(seed, 20) >= share) continue
-        if (o.shocks.length || crashShocks.length) startle(i, seed, t)
-        else { S.when = t; S.down = 0; S.flinch = 0; S.turned = 0; S.frozen = false }
-        const { when, down, flinch, towards, turned, frozen } = S
-        let routeTime = when
-        const watch = watching.get(seed)
-        if (watch) {
-          if (down || flinch || turned || frozen || t < watch.when) watching.delete(seed)
-          else {
-            if (!stuckIds.has(watch.car)) watch.left ??= t
-            // Hold the walk itself while watching. Resume along it and catch up as after a startle.
-            routeTime = watch.left === undefined ? watch.when : Math.min(t, watch.when + (t - watch.left) * 1.7)
-            if (watch.left !== undefined && routeTime >= t) watching.delete(seed)
-            watch.seen = seconds
-          }
-        }
-        placeOf(i, seed, routeTime)
-        if (Math.abs(W.x - eye[0]) > REACH || Math.abs(W.z - eye[2]) > REACH) continue
-        let x = W.x, z = W.z, hx = W.hx, hz = W.hz
+    nearPeds.length = 0
+    for (let idx = 0; idx < queried.people.length; idx++) {
+      const ev = queried.people[idx]
+      const { seed, down, flinch, turned, frozen, lod } = ev
+      let x = ev.x, z = ev.z, y = ev.at[1], yaw = ev.yaw
+      const hx = ev.hx, hz = ev.hz
+      let hornFlinch = 0, hornTurn = 0, hornToward = 0, hornGlance = 0
+      let rtReact: { car: Car; env: number; toward: number; dist: number } | null = null
+      let glance = 0
+
+      // Ring 1 (<= 35 m): full detail — obstacle avoidance, horn & robotaxi micro-reactions, and head-turn gaze.
+      if (lod === 1) {
         const high = feetAt(x, z)
-        // Going round whoever is in the way, plus stepping clear of a honking car's lane within 14 m.
         const want = bodies.length && !down ? aside(x, z, high, hx, hz, bodies) : 0
-        let hdx = 0, hdz = 0, hornFlinch = 0, hornTurn = 0, hornToward = 0, hornGlance = 0
+        let hdx = 0, hdz = 0
         if (activeHorn && !down) {
           const dx = x - activeHorn.x, dz = z - activeHorn.z, d = Math.hypot(dx, dz)
           if (d < 140 && Math.abs(high - activeHorn.y) < 30) {
@@ -974,11 +824,30 @@ export function street(o: {
             }
           }
         }
+        // Pedestrian-vehicle near-miss micro-reactions (#164 Phase 3A): visibly flinch and step back away from close passing cars.
+        if (nearMissCues.length && !down) {
+          for (let ci = 0; ci < nearMissCues.length; ci++) {
+            const cue = nearMissCues[ci]
+            const age = simTime - cue.at
+            if (age < 0 || age > 2.2) continue
+            const distC = Math.hypot(x - cue.pedX, z - cue.pedZ)
+            if (distC > 38) continue
+            const nearEnv = 1 - ease((distC - 12) / 26)
+            const flinchEnv = ease(age / 0.12) * (1 - ease((age - 0.55) / 0.9)) * cue.severity * nearEnv * 0.85
+            if (flinchEnv > hornFlinch) {
+              hornFlinch = flinchEnv
+              hornToward = Math.atan2(cue.carX - x, -(cue.carZ - z))
+              hornGlance = Math.max(hornGlance, Math.min(1, flinchEnv * 1.1))
+            }
+            const stepAmt = ease(age / 0.16) * (1 - ease((age - 0.75) / 1.1)) * (10 + 10 * cue.severity) * nearEnv
+            hdx += cue.stepDirX * stepAmt
+            hdz += cue.stepDirZ * stepAmt
+          }
+        }
         // Crowd reaction to a stuck robotaxi blocking an intersection or narrow street:
         // Sidewalk pedestrians within 28 m step out from shaded storefronts/awnings to the open curb edge, turn toward it, film with phones, or gesture & yell!
-        let rtReact: { car: Car; env: number; toward: number; dist: number } | null = null
         let rtdx = 0, rtdz = 0
-        if (stuckRT.length && !down && !flinch && !W.crossing) {
+        if (stuckRT.length && !down && !flinch && !ev.crossing) {
           let bestD = 280, bestC: Car | null = null
           for (const sc of stuckRT) {
             const d = Math.hypot(sc.x - x, sc.z - z)
@@ -989,8 +858,9 @@ export function street(o: {
             const env = ease((age - 0.5) / 0.7) * (1 - ease((bestD - 200) / 80))
             if (env > 0.05) {
               rtReact = { car: bestC, env, toward: Math.atan2(bestC.x - x, -(bestC.z - z)), dist: bestD }
+              const watch = watching.get(seed)
               if (!watch || watch.car !== bestC.id || watch.left !== undefined) {
-                watching.set(seed, { car: bestC.id, when: routeTime, seen: seconds })
+                watching.set(seed, { car: bestC.id, when: ev.routeTime, seen: seconds })
               }
               const vx = bestC.x - x, vz = bestC.z - z, vl = Math.hypot(vx, vz) || 1
               const ux = vx / vl, uz = vz / vl
@@ -1030,64 +900,18 @@ export function street(o: {
           const tx = -hz * want + hdx + rtdx, tz = hx * want + hdz + rtdz, k = 1 - Math.exp(-dt * 9), dx = (tx - a.x) * k, dz = (tz - a.z) * k, d = Math.hypot(dx, dz), most = (hdx || hdz || rtdx || rtdz ? 18 : 11) * dt
           a.x += d > most ? (dx * most) / d : dx; a.z += d > most ? (dz * most) / d : dz; a.at = seconds
           x += a.x; z += a.z
+          y = (feetAt(x + hx * 2, z + hz * 2) + feetAt(x - hx * 2, z - hz * 2) + feetAt(x, z)) / 3
           if (!want && !hdx && !hdz && !rtdx && !rtdz && Math.abs(a.x) + Math.abs(a.z) < 0.05) held.delete(seed)
         }
-        const p = (shown[n] ??= { at: [0, 0, 0], yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }
-        const at = (p.at as [number, number, number])
-        at[0] = x; at[2] = z
-        at[1] = (feetAt(x + hx * 2, z + hz * 2) + feetAt(x - hx * 2, z - hz * 2) + high) / 3
-        let yaw = Math.atan2(hx, -hz)
-        if (turned) { let by = towards - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * turned }
-        else if (rtReact) { let by = rtReact.toward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * Math.min(1, rtReact.env * 1.15) }
-        else if (hornTurn) { let by = hornToward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * hornTurn }
-        p.yaw = yaw; p.seed = seed
-        p.stride = W.s / STRIDE; p.walking = frozen || rtReact ? 0 : W.walking; p.pace = 11 + 4 * chance(seed, 2)
-        p.reading = !rtReact && W.still && W.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((W.stood - 2.5) / 1.2) : 0
-        p.filming = 0
-        p.robotaxiId = rtReact?.car.id
-        p.move = undefined
-        p.name = undefined
-        p.says = undefined
-        if (rtReact) {
-          const svc = serviceOf(rtReact.car)
-          const isFilmer = chance(seed, 71) < 0.46
-          const phaseIdx = Math.floor((nowPerf + chance(seed, 72) * 10) / 5.5)
-          if (isFilmer) {
-            p.filming = rtReact.env
-            filmersNow++
-            if (rtReact.dist < 260 && chance(seed, 75 + (phaseIdx % 4)) < 0.72 && svc.filmLines.length) {
-              const bp = bubblePos(x, at[1], z)
-              if (bp) {
-                p.says = svc.filmLines[Math.abs(mix(seed, phaseIdx)) % svc.filmLines.length]
-                bubblePts.push([x, z, bp[0], bp[1]])
-              }
-            }
-          } else {
-            p.move = { move: NAMED_MOVES.yell, t: (seconds + chance(seed, 73) * 5) % 120 }
-            yellersNow++
-            const line = svc.yellLines[Math.abs(mix(seed, phaseIdx)) % svc.yellLines.length] ?? 'MOVE IT!'
-            if (rtReact.dist < 265 && chance(seed, 76 + (phaseIdx % 4)) < 0.88) {
-              const bp = bubblePos(x, at[1], z)
-              if (bp) {
-                p.says = line
-                bubblePts.push([x, z, bp[0], bp[1]])
-              }
-            }
-            const shoutSlot = Math.floor(nowPerf / 2.8)
-            if (o.onShout && nowPerf - lastCrowdShout > 2.4 && Math.hypot(x - eye[0], z - eye[2]) < 360 && chance(seed, 79 + (shoutSlot & 15)) < 0.78) {
-              lastCrowdShout = nowPerf
-              crowdShoutsStat++
-              o.onShout({ service: svc.id, serviceName: svc.name, name: `Bystander ${(seed >>> 0) % 64}`, text: line, at: [x, at[1] + 15, z] })
-            }
-          }
+        if (!turned) {
+          if (rtReact) { let by = rtReact.toward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * Math.min(1, rtReact.env * 1.15) }
+          else if (hornTurn) { let by = hornToward - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * hornTurn }
         }
-        p.umbrella = wet && chance(seed, 30) < 0.6; p.time = seconds; p.flinch = Math.max(flinch, hornFlinch); p.down = down
         // They look at whoever is within three metres and not behind them, or glance toward a nearby honking car.
-        let glance = 0
         if (!rtReact) {
           for (const b of bodies) {
             const dx = b[0] - x, dz = b[2] - z, d = Math.hypot(dx, dz)
-            if (d > 32 || d < 1 || Math.abs(b[1] - at[1]) > 25) continue
+            if (d > 32 || d < 1 || Math.abs(b[1] - y) > 25) continue
             let to = Math.atan2(dx, -dz) - yaw
             to -= Math.round(to / (Math.PI * 2)) * Math.PI * 2
             const keen = (1 - ease((d - 12) / 20)) * (1 - ease((Math.abs(to) - 1.3) / 0.9))
@@ -1099,12 +923,64 @@ export function street(o: {
             glance = Math.max(-1, Math.min(1, to)) * hornGlance
           }
         }
-        p.glance = glance
-        const q = p as { waiting?: boolean; sig?: number; cdx?: number; cdz?: number }
-        q.waiting = W.waiting; q.sig = W.sig; q.cdx = W.cdx; q.cdz = W.cdz
-        if (W.crossing || W.kind === 1) crossing.push([x, z])
-        n++
       }
+
+      const p = (shown[n] ??= { at: [0, 0, 0], yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }
+      const at = (p.at as [number, number, number])
+      at[0] = x; at[1] = y; at[2] = z
+      p.yaw = yaw; p.seed = seed
+      p.stride = ev.stride
+      p.walking = frozen || rtReact ? 0 : ev.walking
+      p.pace = ev.speed
+      p.running = ev.speed > 16.5 ? Math.min(1, (ev.speed - 16.5) / 8) : 0
+      // Ring 3 skips phone reading & micro-animations; Ring 1 & 2 show posture/reading/umbrella cleanly.
+      p.reading = lod <= 2 && !rtReact && ev.still && ev.far && chance(seed, 29) < 0.45 && !hornFlinch ? ease((ev.stood - 2.5) / 1.2) : 0
+      p.filming = 0
+      p.robotaxiId = rtReact?.car.id
+      p.move = undefined
+      p.name = undefined
+      p.says = undefined
+      if (rtReact) {
+        const svc = serviceOf(rtReact.car)
+        const isFilmer = chance(seed, 71) < 0.46
+        const phaseIdx = Math.floor((nowPerf + chance(seed, 72) * 10) / 5.5)
+        if (isFilmer) {
+          p.filming = rtReact.env
+          filmersNow++
+          if (rtReact.dist < 260 && chance(seed, 75 + (phaseIdx % 4)) < 0.72 && svc.filmLines.length) {
+            const bp = bubblePos(x, at[1], z)
+            if (bp) {
+              p.says = svc.filmLines[Math.abs(mix(seed, phaseIdx)) % svc.filmLines.length]
+              bubblePts.push([x, z, bp[0], bp[1]])
+            }
+          }
+        } else {
+          p.move = { move: NAMED_MOVES.yell, t: (seconds + chance(seed, 73) * 5) % 120 }
+          yellersNow++
+          const line = svc.yellLines[Math.abs(mix(seed, phaseIdx)) % svc.yellLines.length] ?? 'MOVE IT!'
+          if (rtReact.dist < 265 && chance(seed, 76 + (phaseIdx % 4)) < 0.88) {
+            const bp = bubblePos(x, at[1], z)
+            if (bp) {
+              p.says = line
+              bubblePts.push([x, z, bp[0], bp[1]])
+            }
+          }
+          const shoutSlot = Math.floor(nowPerf / 2.8)
+          if (o.onShout && nowPerf - lastCrowdShout > 2.4 && Math.hypot(x - eye[0], z - eye[2]) < 360 && chance(seed, 79 + (shoutSlot & 15)) < 0.78) {
+            lastCrowdShout = nowPerf
+            crowdShoutsStat++
+            o.onShout({ service: svc.id, serviceName: svc.name, name: `Bystander ${(seed >>> 0) % 64}`, text: line, at: [x, at[1] + 15, z] })
+          }
+        }
+      }
+      p.umbrella = ev.umbrella; p.time = seconds; p.flinch = Math.max(flinch, hornFlinch); p.down = down
+      p.glance = glance
+      const q = p as { waiting?: boolean; sig?: number; cdx?: number; cdz?: number; lod?: number; archetype?: string; activity?: string; phase?: string }
+      q.waiting = ev.waiting; q.sig = ev.sig; q.cdx = ev.cdx; q.cdz = ev.cdz
+      q.lod = lod; q.archetype = ev.archetype; q.activity = ev.activity; q.phase = ev.phase
+      if (ev.crossing || ev.kind === 1) crossing.push([x, z])
+      else if (lod === 1 && !down) nearPeds.push([x, z])
+      n++
     }
     shown.length = n
     rtFilmersStat = filmersNow
@@ -1913,13 +1789,27 @@ export function street(o: {
     r.open = false
     return false
   }
-  /** The road a vehicle takes next at a road's end: liking a straight way and a wide one; a trolleybus keeps under its wires where it can, a bus to the main streets, a truck off the small ones. */
+  const ensureProfile = (c: Car): DriverProfile => (c.profile ??= driverProfile(c.seed, c.model.kind, c.emergency))
+  const detourGraph: DetourGraph = {
+    getRoad: (k) => roads.get(k),
+    isOpen: (r) => open(r as Road),
+    tangentAt: (r, atEnd) => {
+      const rr = r as Road
+      const tmp = { x: 0, z: 0, tx: 1, tz: 0 }
+      along(rr.p, rr.cum, atEnd ? rr.len : 0, tmp)
+      return { tx: tmp.tx, tz: tmp.tz }
+    },
+  }
+  /** The road a vehicle takes next at a road's end: liking a straight way and a wide one; detours locally around blocked/congested outgoing roads. */
   const choose = (r: Road, kind = 'car'): Road | null => {
+    let anyBlocked = false
     let total = 0
     const all: [Road, number, number][] = []
     for (const k of r.next) {
       const n = roads.get(k)
-      if (!n || !open(n)) continue
+      if (!n) continue
+      if (n.blocked || activeCongested.has(n.key)) { anyBlocked = true; continue }
+      if (!open(n)) continue
       along(r.p, r.cum, r.len, P); along(n.p, n.cum, 0, Q)
       const straight = P.tx * Q.tx + P.tz * Q.tz
       let like = (0.3 + Math.max(0, straight) * 2) * (n.flags & 4 ? 0.3 : 1) * (n.lanes)
@@ -1927,6 +1817,13 @@ export function street(o: {
       else if (kind === 'bus') like *= n.cls >= 3 ? 8 : n.cls === 2 ? 1 : 0.05
       else if (kind === 'truck') like *= n.cls >= 2 ? 3 : n.flags & 4 ? 0.02 : 0.5
       all.push([n, like, straight])
+    }
+    if (anyBlocked) {
+      const detour = planLocalDetour(detourGraph, r, activeCongested, { kind, cache: detourCache, blockedSignature: activeBlockedSig })
+      if (detour) {
+        const picked = roads.get(detour.nextKey)
+        if (picked) { aiStats.detours++; return picked }
+      }
     }
     if (!all.length) return null
     // Avoid sharp hairpin/acute turns (> ~115°, e.g. diagonal Columbus Ave turn-backs across adjacent lanes) whenever any gentler continuation exists.
@@ -1937,32 +1834,64 @@ export function street(o: {
     for (const [n, like] of options) { pick -= like; if (pick <= 0) return n }
     return options[options.length - 1][0]
   }
-  /** The road a vehicle takes next: a bus its route's next road (none at its piece's end, where it leaves its route), anything else as `choose` likes. */
+  /** The road a vehicle takes next: a bus its route's next road (detouring if blocked/congested), anything else as `choose` likes. */
   const nextOf = (c: Car, r: Road): Road | null => {
     if (!c.route) return choose(r, c.model.kind)
     const n = roads.get(c.route.piece.keys[c.route.i + 1] ?? '')
-    return n && n.a === r.b && open(n) ? n : null
+    if (n && n.a === r.b && !n.blocked && !activeCongested.has(n.key) && open(n)) return n
+    if (n && (n.blocked || activeCongested.has(n.key))) {
+      const detour = planLocalDetour(detourGraph, r, activeCongested, { kind: c.model.kind, cache: detourCache, blockedSignature: activeBlockedSig })
+      if (detour) {
+        const alt = roads.get(detour.nextKey)
+        if (alt) { c.route = undefined; aiStats.detours++; return alt }
+      }
+    }
+    return null
   }
   /** Which way a road turns into the next at its end: 1 left, -1 right, 0 on (in the frame, x east and z south, a left turn is a negative cross). */
   const turning = (r: Road, n: Road) => { along(r.p, r.cum, r.len, P); along(n.p, n.cum, 0, Q); const cross = P.tx * Q.tz - P.tz * Q.tx, dot = P.tx * Q.tx + P.tz * Q.tz; return dot > 0.8 ? 0 : cross < 0 ? 1 : -1 }
-  /** Where a driving car is and which way it faces: along its lane, and round a corner on a curve from one road's lane to the next's. */
+  /** Where a driving car is and which way it faces: along its lane plus smooth lateral lane-change, overtake, and emergency kerb-yield offsets. */
   const pose = (c: Car) => {
     const r = c.road!, s = c.s!, lane = c.lane!
+    const totalShift = (c.laneShift ?? 0) + (c.overtakeShift ?? 0) + (c.sirenYieldShift ?? 0)
+    const steerYaw = c.latVel ? Math.max(-0.28, Math.min(0.28, Math.atan2(c.latVel, Math.max(c.v, 24)))) : 0
     const bend = (from: Road, to: Road, u: number) => {
       const lf = Math.min(lane, from.lanes - 1), lt = Math.min(lane, to.lanes - 1), cf = Math.min(CURVE, from.len / 2), ct = Math.min(CURVE, to.len / 2)
       lanePoint(from, lf, from.len - cf, P); const ax = P.x, az = P.z
-      lanePoint(from, lf, from.len, P); const ex = P.x, ez = P.z
-      lanePoint(to, lt, 0, Q); const sx = Q.x, sz = Q.z
+      lanePoint(from, lf, from.len, P); const ex = P.x, ez = P.z, ftx = P.tx, ftz = P.tz
+      lanePoint(to, lt, 0, Q); const sx = Q.x, sz = Q.z, ttx = Q.tx, ttz = Q.tz
       lanePoint(to, lt, ct, Q); const bx = Q.x, bz = Q.z
-      const cx = (ex + sx) / 2, cz = (ez + sz) / 2, v = 1 - u
+      let cx = (ex + sx) / 2, cz = (ez + sz) / 2
+      // On multi-lane turns, intersect the incoming and outgoing lane lines so outer lanes turn concentrically
+      // instead of bowing across inner lanes.
+      const det = ftx * ttz - ftz * ttx
+      if (Math.abs(det) > 0.35) {
+        const ti = ((sx - ex) * ttz - (sz - ez) * ttx) / det
+        const ix = ex + ftx * ti, iz = ez + ftz * ti
+        if (Math.hypot(ix - cx, iz - cz) < 90 && (ix - ax) * ftx + (iz - az) * ftz >= -5 && (bx - ix) * ttx + (bz - iz) * ttz >= -5) {
+          cx = ix; cz = iz
+        }
+      }
+      const v = 1 - u
       c.x = v * v * ax + 2 * u * v * cx + u * u * bx; c.z = v * v * az + 2 * u * v * cz + u * u * bz
       const dx = 2 * v * (cx - ax) + 2 * u * (bx - cx), dz = 2 * v * (cz - az) + 2 * u * (bz - cz)
       if (Math.hypot(dx, dz) > 1e-3) c.heading = Math.atan2(dz, dx)
+      if (totalShift !== 0) {
+        const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+        c.x += -sh * totalShift
+        c.z += ch * totalShift
+      }
+      if (steerYaw) c.heading += steerYaw * 0.5
     }
     const cf = Math.min(CURVE, r.len / 2)
     if (c.next && s > r.len - cf) bend(r, c.next, (s - (r.len - cf)) / (cf + Math.min(CURVE, c.next.len / 2)))
     else if (c.prev && s < Math.min(CURVE, r.len / 2)) { const cp = Math.min(CURVE, c.prev.len / 2), cr = Math.min(CURVE, r.len / 2); bend(c.prev, r, (cp + s) / (cp + cr)) }
-    else { lanePoint(r, lane, s, P); c.x = P.x; c.z = P.z; c.heading = Math.atan2(P.tz, P.tx) }
+    else {
+      lanePoint(r, lane, s, P)
+      c.x = P.x - P.tz * totalShift
+      c.z = P.z + P.tx * totalShift
+      c.heading = Math.atan2(P.tz, P.tx) + steerYaw
+    }
     settle(c)
   }
   const limit = (r: Road) => (r.flags & 4 ? SLOW : r.lanes >= 2 ? FAST : ORDINARY)
@@ -1977,7 +1906,7 @@ export function street(o: {
     for (const r of ins) near.add(r.a)
     for (const r of outs) near.add(r.b)
     // The main axis: the way in of the highest class (the longest of those), as a direction; its lights go green first.
-    const main = [...ins].sort((a, b) => b.cls - a.cls || b.len - a.len)[0]
+    const main = [...ins].sort((a, b) => b.cls - a.cls || b.len - a.len || a.way - b.way || a.a - b.a)[0]
     let ax = 1, az = 0, x = 0, z = 0
     if (main) { along(main.p, main.cum, main.len, P); ax = P.tx; az = P.tz; x = P.x; z = P.z }
     j = { x, z, ax, az, offset: chance(idSeed(node), 11) * CYCLE, lights: ins.some((r) => r.ctl >= 2), stops: ins.some((r) => r.ctl === 1), allway: ins.length > 0 && ins.every((r) => r.ctl === 1), size: near.size }
@@ -2045,10 +1974,19 @@ export function street(o: {
       const d = Math.hypot(P.x - eye[0], P.z - eye[2])
       if (d > DRIVEN || (!any && (d < 1200 || !unseen(P.x, P.z, view)))) continue
       if (traffic.some((c) => c.road === r && c.lane === lane && Math.abs(c.s! - s) < 120)) continue
-      const m = cars.length ? mixOf(r, cars) : firstRobotaxi!
-      const paint = !m.variants.length || random() < 0.3 ? -1 : Math.floor(random() * m.variants.length)
+      const m0 = cars.length ? mixOf(r, cars) : firstRobotaxi!
+      let emergency: EmergencyKind | undefined
+      let m = m0
+      if (m.kind !== 'robotaxi' && m.kind !== 'truck' && random() < EMERGENCY_SPAWN_SHARE && traffic.filter((t2) => !!t2.emergency).length < 3) {
+        emergency = random() < 0.58 ? 'police' : 'ambulance'
+        if (emergency === 'ambulance' && ready.get('van')) m = ready.get('van')!
+        else if (emergency === 'police' && ready.get('suv')) m = ready.get('suv')!
+      }
+      const paint = emergency ? -1 : !m.variants.length || random() < 0.3 ? -1 : Math.floor(random() * m.variants.length)
       if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 40, m.wide / 2, 2)) continue
-      const c: Car = { id: ids++, model: m, paint, kind: 'traffic', seed: ids, x: P.x, y: 0, z: P.z, heading: 0, pitch: 0, v: limit(r) * (0.5 + random() * 0.4), piece: null, shown: '', road: r, prev: null, next: null, lane, s, hold: null, stuck: 0, lidarAngle: random() * Math.PI * 2 }
+      const seedId = ids + 1
+      const prof = driverProfile(seedId, m.kind, emergency)
+      const c: Car = { id: ids++, model: m, paint, kind: 'traffic', seed: seedId, x: P.x, y: 0, z: P.z, heading: 0, pitch: 0, v: limit(r) * prof.speedBias * (0.5 + random() * 0.4), piece: null, shown: '', road: r, prev: null, next: null, lane, s, hold: null, stuck: 0, lidarAngle: random() * Math.PI * 2, profile: prof, emergency, sirenActive: !!emergency }
       c.next = choose(r, m.kind)
       pose(c)
       traffic.push(c)
@@ -2463,7 +2401,7 @@ export function street(o: {
   }
 
   /** The things in the way of cars: other cars, people on crossings and anyone standing in a lane, living things, cable cars. */
-  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; car?: Car; alive?: boolean }[] = []
+  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; car?: Car; alive?: boolean; isCrater?: boolean; isPedestrian?: boolean; stalled?: boolean }[] = []
   /**
    * Whether any of an obstacle's outline lies in the path straight ahead of a vehicle at a place heading a way, a
    * path `half` wide each side of its middle line; and if so how far ahead of the vehicle's middle that part of it
@@ -2477,50 +2415,162 @@ export function street(o: {
   /** How long a vehicle is, halved, from which it is a streetcar, a cable car or a bus (cells): in the way by where its sides are (`inPath`), not its middle. */
   const LONG = 40
   const drive = (dt: number, view: View, t: number) => {
+    simTime += dt
+    for (let k = nearMissCues.length - 1; k >= 0; k--) {
+      if (simTime - nearMissCues[k].at > 2.4) nearMissCues.splice(k, 1)
+    }
+    const rainNow = o.rain()
     obstacles.length = 0
-    for (const c of traffic) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
-    for (const c of depotCars) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
+    const aiObstacles: ObstacleBox[] = []
+    const emitters: EmergencyEmitter[] = []
+    const pedPts: [number, number][] = []
+    const stalledPerRoad = new Map<string, number>()
+    activeCongested = new Set<string>()
+    for (const r of roads.values()) if (r.blocked) activeCongested.add(r.key)
+
+    for (const c of traffic) {
+      const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      const stalled = !!c.rtStuck || (c.v < 2 && !c.queued && (c.stuck ?? 0) > 1.2)
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c, stalled })
+      aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, stalled })
+      // Reserve destination lane slot for cars mid-lane-change or mid-overtake so queued cars never merge into the same spot.
+      if (c.road && (Math.abs(c.laneShift ?? 0) > 2 || c.overtake)) {
+        lanePoint(c.road, c.lane!, c.s!, P)
+        const targetSh = c.overtake ? c.overtake.shiftTarget : 0
+        aiObstacles.push({
+          x: P.x - P.tz * targetSh, z: P.z + P.tx * targetSh,
+          halfL: c.model.long / 2 + 4, halfW: c.model.wide / 2 + 1,
+          v: c.v, hx: P.tx, hz: P.tz, id: c.id,
+        })
+      }
+      if (c.emergency && c.sirenActive) {
+        emitters.push({ id: c.id, kind: c.emergency, x: c.x, y: c.y, z: c.z, hx: ch, hz: sh, v: c.v, active: true })
+      }
+      if (c.road) {
+        if (c.rtStuck) {
+          if (c.road.lanes === 1) activeCongested.add(c.road.key)
+          else stalledPerRoad.set(c.road.key, (stalledPerRoad.get(c.road.key) ?? 0) + 2)
+        } else if (c.blockedByObstruction && c.v < 4) {
+          stalledPerRoad.set(c.road.key, (stalledPerRoad.get(c.road.key) ?? 0) + 1)
+        }
+      }
+    }
+    for (const [rKey, cnt] of stalledPerRoad) {
+      if (cnt >= 3) activeCongested.add(rKey)
+    }
+    activeBlockedSig = blockedSetKey(activeCongested)
+    aiStats.activeEmergency = emitters.length
+
+    for (const c of depotCars) {
+      const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c })
+      aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
+    }
     // Parked cars, which no place puts in a lane (inLane); and the holes blasts made in the road.
-    for (const c of parked.values()) if (!c.thing) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: Math.cos(c.heading), hz: Math.sin(c.heading) })
-    for (const h of craters) obstacles.push({ x: h.x, z: h.z, long: h.r, wide: h.r, v: 0, hx: 1, hz: 0 })
-    for (const c of [...cables, ...trams]) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
-    for (const t of o.alive.things) { const w = o.alive.where(t); if (w) obstacles.push({ x: w.at[0], z: w.at[2], long: Math.max(t.size[0], t.size[2]) / 2, wide: Math.min(t.size[0], t.size[2]) / 2, v: t.state ? Math.abs(t.state.speed ?? 0) : 0, hx: w.front[0], hz: w.front[2], alive: true }) }
-    for (const [x, z] of crossing) obstacles.push({ x, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
-    for (const b of o.bodies()) obstacles.push({ x: b[0], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
+    for (const c of parked.values()) if (!c.thing) {
+      const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: ch, hz: sh })
+      aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: 0, hx: ch, hz: sh })
+    }
+    for (const h of craters) {
+      obstacles.push({ x: h.x, z: h.z, long: h.r, wide: h.r, v: 0, hx: 1, hz: 0, isCrater: true })
+      aiObstacles.push({ x: h.x, z: h.z, halfL: h.r, halfW: h.r, v: 0, hx: 1, hz: 0, isCrater: true })
+    }
+    for (const c of [...cables, ...trams]) {
+      const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c })
+      aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
+    }
+    for (const th of o.alive.things) {
+      const w = o.alive.where(th)
+      if (w) {
+        const hl = Math.max(th.size[0], th.size[2]) / 2, hw = Math.min(th.size[0], th.size[2]) / 2
+        const v = th.state ? Math.abs(th.state.speed ?? 0) : 0
+        obstacles.push({ x: w.at[0], z: w.at[2], long: hl, wide: hw, v, hx: w.front[0], hz: w.front[2], alive: true })
+        aiObstacles.push({ x: w.at[0], z: w.at[2], halfL: hl, halfW: hw, v, hx: w.front[0], hz: w.front[2] })
+      }
+    }
+    for (const [x, z] of crossing) {
+      obstacles.push({ x, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0, isPedestrian: true })
+      pedPts.push([x, z])
+    }
+    for (const b of o.bodies()) {
+      obstacles.push({ x: b[0], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0, isPedestrian: true })
+      pedPts.push([b[0], b[2]])
+    }
+    const nearMissPeds = nearPeds.length ? pedPts.concat(nearPeds) : pedPts
+
     for (let i = traffic.length - 1; i >= 0; i--) {
       const c = traffic[i], r = c.road!, hx = Math.cos(c.heading), hz = Math.sin(c.heading)
-      let gap = Infinity, lead = 0, why = '', leadCar: Car | undefined
+      const profile = ensureProfile(c)
+      const rf = rainDrivingFactors(profile, rainNow)
+      const pedYieldBuf = crosswalkYieldBuffer(profile, c.v, rainNow)
+      let gap = Infinity, lead = 0, why = '', leadCar: Car | undefined, hitCrater = false
       const meCar = { x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, id: c.id }
       for (const ob of obstacles) {
         if (ob.car === c) continue
-        const g = trafficObstacleGap(meCar, ob.car ? { ...ob, id: ob.car.id } : ob)
-        if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz); why = ob.car ? 'car' : ob.long === 3 ? 'person' : 'vehicle'; leadCar = ob.car }
+        let g = trafficObstacleGap(meCar, ob.car ? { ...ob, id: ob.car.id } : ob)
+        if (g === Infinity) continue
+        if (ob.isPedestrian && g > 4) g = Math.max(0.5, g - pedYieldBuf)
+        if (g < gap) {
+          gap = g
+          lead = ob.v * (ob.hx * hx + ob.hz * hz)
+          why = ob.car ? 'car' : ob.isPedestrian ? 'person' : ob.isCrater ? 'crater' : 'vehicle'
+          leadCar = ob.car
+          hitCrater = !!ob.isCrater
+        }
       }
+      // Emergency acoustic siren yielding (#164 Phase 3A): regular vehicles in the forward siren cone pull smoothly toward right kerb and slow down.
+      const sy = evaluateSirenYield({ id: c.id, x: c.x, y: c.y, z: c.z, hx, hz, lane: c.lane, lanes: r.lanes, emergency: c.emergency }, emitters)
+      if (sy.yielding && !c.sirenYielding) {
+        c.sirenYielding = true
+        aiStats.sirenYields++
+      } else if (!sy.yielding && c.sirenYielding) {
+        c.sirenYielding = false
+      }
+      let safeSirenTarget = sy.targetShift
+      if (safeSirenTarget > 0.5) {
+        const deltaNeed = safeSirenTarget - (c.sirenYieldShift ?? 0)
+        if (deltaNeed > 0.5 && !isLaneClear({ id: c.id, x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, lateralShift: deltaNeed, forwardClear: 12, rearClear: 8, margin: 2 }, aiObstacles)) {
+          safeSirenTarget = Math.max(c.sirenYieldShift ?? 0, safeSirenTarget * 0.45)
+        }
+      }
+      const isEmergencyActive = !!(c.emergency && c.sirenActive)
       // At a junction of three ways or more: as its lights say, after a full stop at a sign, or by turns where nothing
-      // controls it. Whoever crosses it holds it; those whose way crosses theirs wait at the line.
+      // controls it. Emergency vehicles with active siren slow briefly for caution then proceed through red lights.
       const left = r.len - c.s!
       let held = false
+      let emergencyCaution = false
       const line = (at: number, because: string) => { if (left - at < gap) { gap = left - at; lead = 0; why = because } held = true }
       if (left < 150 && busyJunction(r.b)) {
         const j = junctionOf(r.b)
         along(r.p, r.cum, r.len, P)
         const ax = P.tx, az = P.tz
         if (r.ctl >= 2) {
-          // Lights: through on green; on amber only if it cannot stop short of the line.
+          // Lights: through on green; on amber only if it cannot stop short of the line (rain elongates stopping distance).
           const light = lightFor(j, ax, az, t)
-          if (light === 'red' || (light === 'amber' && left - 35 > (c.v * c.v) / (2 * BRAKE * 0.8))) line(35, 'lights')
-          // Turning left on green: it waits at the line for whatever comes the other way and goes on or right across
-          // its path (about to cross, or crossing now). Two turning left from opposite ways pass and wait for nobody.
-          else if (light === 'green' && yieldLeft && left > 30 && c.next && turning(r, c.next) === 1 && (c.held ?? 0) < 45 && oncoming(c, r, ax, az)) line(35, 'oncoming')
+          const effBrakeStop = (BRAKE / rf.brakeMult) * 0.8
+          if (isEmergencyActive) {
+            if (light === 'red' && left < 95 && left > 12) emergencyCaution = true
+          } else if (light === 'red' || (light === 'amber' && left - 35 > (c.v * c.v) / (2 * effBrakeStop))) {
+            line(35, 'lights')
+          } else if (light === 'green' && yieldLeft && left > 30 && c.next && turning(r, c.next) === 1 && (c.held ?? 0) < 45 && oncoming(c, r, ax, az)) {
+            line(35, 'oncoming')
+          }
           // (Counted as it crosses the line: a left turn on green, and whether anything came the other way then.)
           if (light !== 'red' && left >= 30 && left - c.v * dt < 30 && c.next && turning(r, c.next) === 1) { leftTurns++; if (oncoming(c, r, ax, az)) leftConflicts++ }
         } else {
           if (r.ctl === 1 && c.stopped !== r.b) {
-            // A stop sign: a full stop at the line first.
-            if (c.v < 1.5 && left < 60) { c.stopped = r.b; signStops++ }
-            else line(30, 'stop sign')
+            if (isEmergencyActive) {
+              if (left < 60 && left > 10) emergencyCaution = true
+              c.stopped = r.b
+            } else {
+              // A stop sign: a full stop at the line first.
+              if (c.v < 1.5 && left < 60) { c.stopped = r.b; signStops++ }
+              else line(30, 'stop sign')
+            }
           }
-          if (!held) {
+          if (!held && !isEmergencyActive) {
             let h = holds.get(r.b)
             if (!h) holds.set(r.b, h = new Map())
             if (!h.has(c)) {
@@ -2529,9 +2579,9 @@ export function street(o: {
               for (const k of h.keys()) if (!traffic.includes(k)) h.delete(k)
               // On the way with no sign where others have one, it goes and they wait: it only says it is crossing.
               const priority = j.stops && r.ctl === 0
-              const clear = priority || [...h.values()].every((o) => straight && o.straight && Math.abs(o.ax * ax + o.az * az) > 0.8)
+              const clear = priority || [...h.values()].every((o2) => straight && o2.straight && Math.abs(o2.ax * ax + o2.az * az) > 0.8)
               // A sign's way yields to anyone on the way without one who is about to cross.
-              const yielding = !priority && j.stops && !j.allway && traffic.some((o) => o !== c && o.road && o.road.b === r.b && o.road.ctl === 0 && o.road.len - o.s! < 200 && o.v > 5)
+              const yielding = !priority && j.stops && !j.allway && traffic.some((o2) => o2 !== c && o2.road && o2.road.b === r.b && o2.road.ctl === 0 && o2.road.len - o2.s! < 200 && o2.v > 5)
               // Waited long (whoever holds it is held up in turn): it goes when it can.
               if ((clear && !yielding) || (c.held ?? 0) > 25) h.set(c, { ax, az, straight })
               else line(30, 'its turn')
@@ -2555,18 +2605,37 @@ export function street(o: {
           break
         }
       }
-      if (!c.next && left < 200) { if (c.route && c.route.i + 1 >= c.route.piece.keys.length) c.route = undefined; c.next = nextOf(c, r); if (!c.next && left - 10 < gap) { gap = left - 10; lead = 0; why = 'end' } }
-      // A turn is taken slowly; after a blast near it, not at all for a while; a horn nudge encourages stopped traffic to ease ahead.
-      let v0 = limit(r)
+      // Budgeted local junction detour (#164 Phase 3A): if our planned outgoing road became blocked or congested, re-plan before entering it!
+      if (c.next && left > 14 && left < 240 && (c.next.blocked || activeCongested.has(c.next.key))) {
+        const detour = planLocalDetour(detourGraph, r, activeCongested, { kind: c.model.kind, cache: detourCache, blockedSignature: activeBlockedSig })
+        if (detour) {
+          const alt = roads.get(detour.nextKey)
+          if (alt && alt !== c.next) {
+            c.next = alt
+            if (c.route) c.route = undefined
+            c.resolvingBlock = true
+            aiStats.detours++
+          }
+        }
+      }
+      if (!c.next && left < 220) { if (c.route && c.route.i + 1 >= c.route.piece.keys.length) c.route = undefined; c.next = nextOf(c, r); if (!c.next && left - 10 < gap) { gap = left - 10; lead = 0; why = 'end' } }
+      // Individualized driver speed, rain wet-surface scaling, cornering slowdown, siren yield cap, and blast shock.
+      let v0 = limit(r) * profile.speedBias * rf.topSpeedScale
       const nowDrive = performance.now() / 1000
       const isRT = c.model.kind === 'robotaxi'
       const nudged = !!c.honked && nowDrive - c.honked < 2.5
-      if (nudged && c.shaken) c.shaken = undefined
-      if (c.shaken && nowDrive - c.shaken < 5) { v0 = 0.01; gap = Math.min(gap, 1); why = why || 'blast' }
-      if (c.next && left < 200) { along(r.p, r.cum, r.len, P); along(c.next.p, c.next.cum, 0, Q); if (P.tx * Q.tx + P.tz * Q.tz < 0.8) v0 = Math.min(v0, 45) }
+      if (nudged && c.shaken !== undefined) c.shaken = undefined
+      if (c.shaken !== undefined && simTime - c.shaken < 5) { v0 = 0.01; gap = Math.min(gap, 1); why = why || 'blast' }
+      if (c.next && left < 200) {
+        along(r.p, r.cum, r.len, P); along(c.next.p, c.next.cum, 0, Q)
+        if (P.tx * Q.tx + P.tz * Q.tz < 0.8) {
+          v0 = Math.min(v0, 45 * rf.cornerSpeedScale * Math.max(0.75, 1.12 - 0.14 * profile.caution))
+        }
+      }
+      if (sy.yielding) v0 = Math.min(v0, Math.max(6, limit(r) * sy.speedCapScale))
+      if (emergencyCaution) v0 = Math.min(v0, 46)
       if (isRT) {
         // Autonomous robotaxi driving: extra smooth & polite — usually! Sometimes freezes at intersections or on narrow streets.
-        v0 *= 0.92
         c.lidarAngle = (c.lidarAngle ?? 0) + dt * (c.rtStuck ? Math.sin(nowDrive * 5.2 + c.seed) * 7.5 + 1.5 : 4.8)
         const dEye = Math.hypot(c.x - view.eye[0], c.z - view.eye[2])
         if (c.rtStuck) {
@@ -2606,20 +2675,56 @@ export function street(o: {
         }
       }
       if (nudged && !c.rtStuck && why !== 'lights' && gap > 6) v0 *= 1.18
-      const want = (isRT ? 31 : 25) + c.v * (isRT ? 1.45 : 1.3) + (c.v * (c.v - lead)) / (2 * Math.sqrt(GATHER * BRAKE))
-      const acc = (isRT ? GATHER * 0.86 : GATHER) * (1 - (c.v / v0) ** 4 - (gap < Infinity ? (Math.max(0, want) / Math.max(1, gap)) ** 2 : 0))
-      c.v = Math.max(0, Math.min(v0 * 1.05, c.v + Math.max(-BRAKE * 3, acc) * dt))
+      const effBrake = BRAKE / rf.brakeMult
+      const effGather = (isRT ? GATHER * 0.86 : GATHER * (0.82 + 0.36 * profile.aggression)) * (isEmergencyActive ? 1.25 : 1)
+      const headway = (0.95 + 0.55 * profile.caution) * rf.gapMult
+      const minGap = profile.followGapCells * rf.gapMult
+      const want = minGap + c.v * headway + (c.v * (c.v - lead)) / (2 * Math.sqrt(effGather * effBrake))
+      const acc = effGather * (1 - (c.v / Math.max(0.01, v0)) ** 4 - (gap < Infinity ? (Math.max(0, want) / Math.max(1, gap)) ** 2 : 0))
+      c.v = Math.max(0, Math.min(v0 * 1.05, c.v + Math.max(-effBrake * 3, acc) * dt))
       if (nudged && !c.rtStuck && why !== 'lights' && gap > 8 && c.v < 18) c.v = Math.min(gap * 1.4, c.v + GATHER * 1.6 * dt)
       if (gap < 5) c.v = Math.min(c.v, Math.max(0, gap) * 2)
-      const prevPose = { x: c.x, z: c.z, y: c.y, heading: c.heading, pitch: c.pitch, roll: c.roll, s: c.s!, road: c.road, prev: c.prev, next: c.next, lane: c.lane, route: c.route ? { ...c.route } : undefined }
+      const prevPose = {
+        x: c.x, z: c.z, y: c.y, heading: c.heading, pitch: c.pitch, roll: c.roll,
+        s: c.s!, road: c.road, prev: c.prev, next: c.next, lane: c.lane,
+        laneShift: c.laneShift ?? 0, overtakeShift: c.overtakeShift ?? 0, sirenYieldShift: c.sirenYieldShift ?? 0,
+        route: c.route ? { ...c.route } : undefined,
+      }
       c.s! += c.v * dt
+
+      // Pedestrian near-miss emission (#164 Phase 3A): close fast passes emit structured cues so nearby pedestrians flinch/step back.
+      if (c.v >= 28 && nearMissPeds.length) {
+        const cues = detectPedestrianNearMiss(
+          { id: c.id, x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v },
+          nearMissPeds, simTime, pedNearMissCool, () => nextNearMissCueId++,
+        )
+        for (const cue of cues) {
+          nearMissCues.push(cue)
+          if (nearMissCues.length > 32) nearMissCues.shift()
+        }
+      }
+
       // Waiting on a control — or queued behind a vehicle waiting on one (red light, stop sign, bus stop, turn, or frozen robotaxi) — is not stuck.
       const queued = held || why === 'bus stop' || why === 'lights' || why === 'stop sign' || why === 'oncoming' || why === 'its turn' || (why === 'car' && !!(leadCar?.queued || leadCar?.rtStuck))
       c.queued = c.v < 2 && queued
       c.held = held && c.v < 2 ? (c.held ?? 0) + dt : 0
       c.stuck = c.v < 2 && !queued && !c.rtStuck ? c.stuck! + dt : 0
       c.wait = c.v < 2 ? (why === 'car' && (leadCar?.queued || leadCar?.rtStuck) ? 'queue' : why) : ''
-      // Annoyed nearby cars honk and flash high beams when blocked behind or around a stuck robotaxi!
+
+      // Pedestrian crosswalk impatience: hurried drivers honk earlier when held up by pedestrians.
+      if (!c.rtStuck && why === 'person' && c.v < 8) {
+        c.pedBlockedTime = (c.pedBlockedTime ?? 0) + dt
+        if (c.pedBlockedTime > profile.hornImpatience && nowDrive - (c.honkedBack ?? -99) > 4.5 && Math.hypot(c.x - view.eye[0], c.z - view.eye[2]) < 560) {
+          c.honkedBack = nowDrive
+          const heavy = c.model.kind === 'bus' || c.model.kind === 'trolley' || c.model.kind === 'truck'
+          const pitch = heavy ? 235 + chance(c.seed, 47) * 65 : 350 + chance(c.seed, 47) * 140
+          hornQueue.push({ at: [c.x, c.y + 8, c.z], pitch, annoyed: profile.aggression > 0.55, when: nowDrive + 0.04 })
+        }
+      } else {
+        c.pedBlockedTime = Math.max(0, (c.pedBlockedTime ?? 0) - dt * 1.5)
+      }
+
+      // Annoyed nearby cars honk and flash high beams when blocked behind or around a stuck robotaxi (respects per-driver hornImpatience)!
       if (!c.rtStuck && c.v < 10) {
         const blockedByRT = traffic.some((sc) => {
           if (sc === c || !sc.rtStuck || nowDrive - sc.rtStuck.at < 0.9) return false
@@ -2630,7 +2735,7 @@ export function street(o: {
         })
         if (blockedByRT) {
           c.annoyedAt = (c.annoyedAt ?? 0) + dt
-          if (c.annoyedAt > 1.1 && nowDrive - (c.honkedBack ?? -99) > 5.0 && nowDrive - lastStuckHorn > 2.0 && Math.hypot(c.x - view.eye[0], c.z - view.eye[2]) < 560) {
+          if (c.annoyedAt > profile.hornImpatience && nowDrive - (c.honkedBack ?? -99) > 5.0 && nowDrive - lastStuckHorn > 2.0 && Math.hypot(c.x - view.eye[0], c.z - view.eye[2]) < 560) {
             c.honkedBack = nowDrive
             lastStuckHorn = nowDrive
             c.beamFlash = nowDrive + 0.65
@@ -2645,6 +2750,7 @@ export function street(o: {
       } else if (c.annoyedAt) {
         c.annoyedAt = Math.max(0, c.annoyedAt - dt)
       }
+
       // Returning city robotaxi turns cleanly into its own service's charging station when a bay is free!
       const homeDepot = isRT && !c.rtStuck && c.model.serviceId ? depotByService.get(c.model.serviceId) : undefined
       if (homeDepot?.shown && Math.hypot(c.x - homeDepot.service.station.inRoad[0], c.z - homeDepot.service.station.inRoad[1]) < 95 && !depotCars.some((dc) => dc.depot?.serviceId === homeDepot.service.id && dc.depot.phase === 'entering')) {
@@ -2661,34 +2767,136 @@ export function street(o: {
           continue
         }
       }
-      // A hole ahead in its road: it turns round where it waits, onto the other way if there is one.
-      if (r.blocked && c.stuck! > 3) {
-        const back = roads.get(`${r.way}/${r.b}/${r.a}`)
-        if (back && !back.blocked) { c.prev = null; c.road = back; c.s = Math.max(0, back.len - c.s!); c.lane = 0; c.route = undefined; c.next = choose(back, c.model.kind); c.stuck = 0; letGo(c) }
-        else if (unseen(c.x, c.z, view)) { letGo(c); hide(c); traffic.splice(i, 1); continue }
-      }
-      // Multi-lane unblock (#129): if held up behind a stopped vehicle on a multi-lane street, shift into a clear adjacent lane.
-      if (!c.rtStuck && r.lanes > 1 && c.stuck! > 3.5 && (why === 'car' || why === 'vehicle')) {
-        for (const delta of [-1, 1]) {
-          const alt = c.lane! + delta
-          if (alt < 0 || alt >= r.lanes) continue
-          lanePoint(r, alt, c.s!, Q)
-          if (!taken(Q.x, Q.z, Q.tx, Q.tz, c.model.long / 2 + 12, c.model.wide / 2 + 2, 2)) {
-            c.lane = alt; c.stuck = 0; letGo(c); break
+
+      // ── Dynamic Obstruction Detection, Smooth Adjacent Lane-Changing & Single-Lane Overtaking (#164 Phase 3A) ──
+      const leadIsObstruction = !!(leadCar && (leadCar.rtStuck || leadCar.blockedByObstruction || (leadCar.v < 2.5 && !leadCar.queued && (leadCar.stuck ?? 0) > 1.2)))
+      const craterObstruction = (r.blocked && (hitCrater || c.v < 12 || gap < 150)) || (hitCrater && gap < 160)
+      const laneObstructed = !c.rtStuck && !held && !sy.yielding && why !== 'lights' && why !== 'stop sign' && why !== 'bus stop' && why !== 'oncoming' && why !== 'its turn' && (
+        craterObstruction ||
+        (why === 'car' && leadIsObstruction && gap < 185) ||
+        ((why === 'car' || why === 'vehicle') && c.v < 6 && gap < 75 && !leadCar?.queued)
+      )
+      c.blockedByObstruction = laneObstructed && (c.v < 16 || gap < 130)
+      if (laneObstructed) c.blockedAheadTime = (c.blockedAheadTime ?? 0) + dt
+      else c.blockedAheadTime = Math.max(0, (c.blockedAheadTime ?? 0) - dt * 1.5)
+
+      const reactDelay = isEmergencyActive ? 0.2 : 0.25 + (1 - profile.laneChangeWillingness) * 0.95
+      const onStraightSegment = c.s! >= CURVE && left >= CURVE
+      if (!c.rtStuck && !sy.yielding && onStraightSegment && Math.abs(c.laneShift ?? 0) < 2 && !c.overtake && (c.blockedAheadTime ?? 0) >= reactDelay && simTime >= (c.laneChangeCoolAt ?? 0)) {
+        let shifted = false
+        // 1) Multi-lane adjacent lane change with smooth lateral interpolation (ZERO snapping, ZERO overlaps).
+        if (r.lanes > 1) {
+          for (const delta of [-1, 1]) {
+            const alt = c.lane! + delta
+            if (alt < 0 || alt >= r.lanes) continue
+            const deltaOff = laneOff(r, alt) - laneOff(r, c.lane!)
+            if (isLaneClear({
+              id: c.id, x: c.x, z: c.z, hx, hz,
+              halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v,
+              lateralShift: deltaOff, margin: 4.5,
+            }, aiObstacles)) {
+              c.lane = alt
+              c.laneShift = (c.laneShift ?? 0) - deltaOff
+              c.blockedAheadTime = 0
+              c.stuck = 0
+              c.resolvingBlock = true
+              c.laneChangeCoolAt = simTime + 1.3
+              aiStats.laneChanges++
+              letGo(c)
+              // Reserve new lane spot immediately for trailing cars evaluated later in the same tick.
+              lanePoint(r, alt, c.s!, Q)
+              aiObstacles.push({ x: Q.x, z: Q.z, halfL: c.model.long / 2 + 4, halfW: c.model.wide / 2 + 1, v: c.v, hx: Q.tx, hz: Q.tz, id: c.id })
+              shifted = true
+              break
+            }
           }
         }
+        // 2) Single-lane or all-lanes-obstructed smooth lateral overtake around stalled PayMo or crater.
+        if (!shifted && (r.lanes === 1 || leadCar?.rtStuck || craterObstruction)) {
+          const obS = leadCar && leadCar.road === r ? (leadCar.s! + leadCar.model.long * 0.5) : (c.s! + Math.min(Math.max(gap, 25), 95) + 25)
+          const passDist = Math.max(68, (obS - c.s!) + c.model.long + 26)
+          const candShifts = !(r.flags & 1) ? [-33, 26] : [-28, 28]
+          for (const shiftCand of candShifts) {
+            const opposing = !(r.flags & 1) && shiftCand < 0
+            if (isLaneClear({
+              id: c.id, x: c.x, z: c.z, hx, hz,
+              halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v,
+              lateralShift: shiftCand, forwardClear: passDist, opposingLane: opposing, margin: 4,
+            }, aiObstacles)) {
+              c.overtake = { shiftTarget: shiftCand, clearS: obS + c.model.long * 0.5 + 24, roadKey: r.key, aroundId: leadCar?.id }
+              c.blockedAheadTime = 0
+              c.stuck = 0
+              c.resolvingBlock = true
+              c.laneChangeCoolAt = simTime + 1.4
+              aiStats.laneChanges++
+              lanePoint(r, c.lane!, c.s!, Q)
+              aiObstacles.push({ x: Q.x - Q.tz * shiftCand, z: Q.z + Q.tx * shiftCand, halfL: c.model.long / 2 + 6, halfW: c.model.wide / 2 + 1, v: c.v, hx: Q.tx, hz: Q.tz, id: c.id })
+              shifted = true
+              break
+            }
+          }
+        }
+      }
+
+      // Smoothly interpolate lateral offsets (`laneShift`, `overtakeShift`, `sirenYieldShift`).
+      const lsStep = stepLateralShift(c.laneShift ?? 0, 0, dt, Math.max(18, c.v * 0.45))
+      c.laneShift = lsStep.value
+      if (c.overtake) {
+        const pastOb = c.overtake.roadKey !== r.key || c.s! >= c.overtake.clearS
+        if (pastOb) {
+          const retShift = -(c.overtakeShift ?? 0)
+          if (Math.abs(retShift) < 1 || isLaneClear({ id: c.id, x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, lateralShift: retShift, forwardClear: 28, rearClear: 18, margin: 3.5 }, aiObstacles)) {
+            c.overtake = undefined
+          }
+        }
+      }
+      const otStep = stepLateralShift(c.overtakeShift ?? 0, c.overtake ? c.overtake.shiftTarget : 0, dt, Math.max(18, c.v * 0.45))
+      c.overtakeShift = otStep.value
+      const syStep = stepLateralShift(c.sirenYieldShift ?? 0, safeSirenTarget, dt, sy.yielding ? 18 : 12)
+      c.sirenYieldShift = syStep.value
+      c.latVel = lsStep.vel + otStep.vel + syStep.vel
+
+      // Credit deadlock resolution once a vehicle that was blocked smoothly clears and resumes cruising.
+      if (c.resolvingBlock && !c.blockedByObstruction && c.v > 16 && Math.abs(c.laneShift ?? 0) < 4 && !c.overtake) {
+        c.resolvingBlock = false
+        aiStats.deadlocksResolved++
+      }
+
+      // A hole ahead in its road that cannot be bypassed laterally: turn round onto the reverse way if the exit path ahead of us is clear of craters.
+      if (r.blocked && ((c.stuck ?? 0) > 2.0 || (c.blockedAheadTime ?? 0) > 2.0)) {
+        const back = roads.get(`${r.way}/${r.b}/${r.a}`)
+        if (back) {
+          const ns = Math.max(0, back.len - c.s!)
+          let backClearOfCraters = !back.blocked
+          if (!backClearOfCraters) {
+            backClearOfCraters = true
+            for (let ds = ns + 15; ds <= back.len; ds += 25) {
+              lanePoint(back, 0, ds, Q)
+              if (craters.some((h) => Math.hypot(Q.x - h.x, Q.z - h.z) < h.r + 14)) { backClearOfCraters = false; break }
+            }
+          }
+          if (backClearOfCraters) {
+            lanePoint(back, 0, ns, Q)
+            if (!taken(Q.x, Q.z, Q.tx, Q.tz, c.model.long / 2 + 8, c.model.wide / 2 + 2, 2)) {
+              c.prev = null; c.road = back; c.s = ns; c.lane = 0; c.laneShift = 0; c.overtakeShift = 0; c.overtake = undefined
+              c.route = undefined; c.next = choose(back, c.model.kind); c.stuck = 0; c.blockedAheadTime = 0
+              aiStats.detours++; aiStats.deadlocksResolved++; letGo(c)
+            }
+          } else if (unseen(c.x, c.z, view)) { letGo(c); hide(c); traffic.splice(i, 1); continue }
+        } else if (unseen(c.x, c.z, view)) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       }
       // At the end of a road that goes nowhere it may (mapping ends there, or the way on is closed): it turns round,
       // or clears cleanly on one-way stubs where no reverse road exists so it cannot stall the lane forever (#129).
       if (!c.next && c.stuck! > 4 && c.road!.len - c.s! < 40) {
         const back = roads.get(`${c.road!.way}/${c.road!.b}/${c.road!.a}`)
-        if (back && open(back)) { c.prev = null; c.road = back; c.s = 0; c.lane = Math.min(c.lane!, back.lanes - 1); c.route = undefined; c.next = choose(back, c.model.kind); c.stuck = 0; letGo(c) }
+        if (back && open(back)) { c.prev = null; c.road = back; c.s = 0; c.lane = Math.min(c.lane!, back.lanes - 1); c.laneShift = 0; c.overtake = undefined; c.overtakeShift = 0; c.route = undefined; c.next = choose(back, c.model.kind); c.stuck = 0; letGo(c) }
         else if (c.stuck! > 6) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       }
       while (c.s! >= c.road!.len) {
         if (!c.next) break
         c.s! -= c.road!.len
         c.prev = c.road!; c.road = c.next; c.lane = Math.min(c.lane!, c.road.lanes - 1)
+        if (c.overtake && c.overtake.roadKey !== c.road.key) c.overtake = undefined
         if (c.route) { c.route.i++; c.route.served = -Infinity; c.route.dwell = undefined; c.lane = c.road.lanes - 1 }
         c.next = nextOf(c, c.road)
       }
@@ -2701,9 +2909,9 @@ export function street(o: {
       // Someone held a junction a long time without moving (a person stands in front of them): let it go.
       if (c.stuck! > 6) letGo(c)
       pose(c)
-      // Corner-sweep OBB guard (#155): if advancing onto a bend (e.g. a long bus turning from lane 2) sweeps into
-      // an adjacent traffic vehicle's OBB, revert the step and yield instead of penetrating it.
-      if (c.v > 0.1) {
+      // Corner-sweep & lateral-shift OBB guard (#155, #164): if advancing or shifting laterally deepens an OBB overlap
+      // with an adjacent traffic vehicle, revert the step and yield instead of penetrating it.
+      if (c.v > 0.1 || Math.abs(c.latVel ?? 0) > 0.1) {
         const pBox = { x: prevPose.x, z: prevPose.z, heading: prevPose.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
         const nBox = { x: c.x, z: c.z, heading: c.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
         let sweptHit: Car | null = null
@@ -2718,6 +2926,7 @@ export function street(o: {
           c.x = prevPose.x; c.z = prevPose.z; c.y = prevPose.y
           c.heading = prevPose.heading; c.pitch = prevPose.pitch; c.roll = prevPose.roll
           c.s = prevPose.s; c.road = prevPose.road; c.prev = prevPose.prev; c.next = prevPose.next; c.lane = prevPose.lane
+          c.laneShift = prevPose.laneShift; c.overtakeShift = prevPose.overtakeShift; c.sirenYieldShift = prevPose.sirenYieldShift; c.latVel = 0
           if (prevPose.route) c.route = prevPose.route
           c.v = 0; c.wait = 'car'; c.stuck = (c.stuck ?? 0) + dt
         }
@@ -2997,7 +3206,7 @@ export function street(o: {
         if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined }
         pending.set(c, { inside: false, push: [(dx / d) * 160 * k, 60 + 80 * k, (dz / d) * 160 * k] })
       }
-      for (const c of traffic) if (Math.hypot(c.x - s.at[0], c.z - s.at[2]) < 800) c.shaken = now
+      for (const c of traffic) if (Math.hypot(c.x - s.at[0], c.z - s.at[2]) < 800) c.shaken = simTime
       looks.push({ at: s.at, radius: s.radius, when: now + 1.5 })
       // Where it broke the road is known once the world has been changed: looked at in a moment.
     }
@@ -3368,7 +3577,7 @@ export function street(o: {
         // Scatter nearby pedestrians & briefly alert nearby traffic.
         crashShocks.push({ at: hitAt, radius: 14 + force * 24, t: o.clock() })
         if (crashShocks.length > 16) crashShocks.shift()
-        for (const tCar of traffic) if (Math.hypot(tCar.x - hitAt[0], tCar.z - hitAt[2]) < 260) tCar.shaken = now - 2.5
+        for (const tCar of traffic) if (Math.hypot(tCar.x - hitAt[0], tCar.z - hitAt[2]) < 260) tCar.shaken = simTime - 2.5
         if (m.ridden || closing > 30) o.onCrash?.({ at: hitAt, speed: relSpeed, force, car: carName(c.model, c.paint), woke: true })
       } else if (m.thing && closing > 0 && now - (c.hitAt ?? -99) > 0.45) {
         // What has no motor does not wake (cable cars, trams, buses): solid. The mover is thrown back off it; whoever
@@ -3478,6 +3687,9 @@ export function street(o: {
       prevRideId = 0; prevRideAt = null; rideDt = 0; rideVel[0] = 0; rideVel[1] = 0; rideVel[2] = 0
       hornWas = false; lastHornPulse = -99; lastTrafficHorn = -99
       lastCrowdShout = -99; crowdShoutsStat = 0; rtFilmersStat = 0; rtYellersStat = 0; stuckHonksStat = 0; lastStuckHorn = -99
+      simTime = 0
+      aiStats.laneChanges = 0; aiStats.detours = 0; aiStats.sirenYields = 0; aiStats.activeEmergency = 0; aiStats.deadlocksResolved = 0
+      detourCache.map.clear(); nearMissCues.length = 0; pedNearMissCool.clear(); activeCongested.clear(); activeBlockedSig = ''
       watching.clear()
       for (const depot of depots) { depot.inGateLift = 0; depot.outGateLift = 0; depot.lastSpawn = -99; depot.arrivals = 0; depot.departures = 0 }
       crashCountStat = 0; nearMissCountStat = 0; hornResponsesStat = 0; sentAwayStat = 0; brokeStat = 0
@@ -3639,6 +3851,10 @@ export function street(o: {
           road: c.road?.key ?? '', lane: c.lane ?? 0, s: Math.round((c.s ?? 0) * 10) / 10,
           wait: c.wait ?? '', stuck: Math.round((c.stuck ?? 0) * 10) / 10,
           blocked: !!c.road?.blocked, living: !!c.thing,
+          emergency: c.emergency,
+          archetype: c.profile?.archetype,
+          laneShift: c.laneShift ? Math.round(c.laneShift * 10) / 10 : undefined,
+          sirenYieldShift: c.sirenYieldShift ? Math.round(c.sirenYieldShift * 10) / 10 : undefined,
         })
       }
       for (const c of parked.values()) push(c)
@@ -3648,6 +3864,59 @@ export function street(o: {
       for (const c of trams) push(c)
       return out
     },
+    trafficAiStats() {
+      return {
+        laneChanges: aiStats.laneChanges,
+        detours: aiStats.detours,
+        sirenYields: aiStats.sirenYields,
+        activeEmergency: traffic.filter((c) => !!(c.emergency && c.sirenActive)).length,
+        deadlocksResolved: aiStats.deadlocksResolved,
+      }
+    },
+    spawnEmergency(opts = {}) {
+      const kind: EmergencyKind = opts.kind ?? 'police'
+      const sirenActive = opts.siren ?? true
+      const cars = carModels()
+      const m = (kind === 'ambulance' ? ready.get('van') : ready.get('suv') ?? ready.get('saloon')) ?? cars[0] ?? robotaxiModels.values().next().value
+      if (!m) return null
+      let r: Road | undefined = opts.roadKey ? roads.get(opts.roadKey) : undefined
+      if (!r) {
+        const refX = opts.at ? opts.at[0] : (lastEye ? lastEye[0] : 0)
+        const refZ = opts.at ? opts.at[1] : (lastEye ? lastEye[2] : 0)
+        let bestD = Infinity
+        for (const cand of roads.values()) {
+          probes = Math.max(probes, 2)
+          if (!open(cand) || cand.len < 60) continue
+          const d = Math.hypot(cand.mx - refX, cand.mz - refZ)
+          if (d < bestD) { bestD = d; r = cand }
+        }
+      }
+      if (!r) return null
+      const lane = Math.max(0, Math.min(opts.lane ?? 0, r.lanes - 1))
+      let s = opts.s !== undefined ? Math.max(5, Math.min(r.len - 10, opts.s)) : Math.min(r.len * 0.25, 60)
+      lanePoint(r, lane, s, P)
+      if (taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 10, m.wide / 2 + 1, 2)) {
+        for (const tryS of [Math.max(10, s - 75), Math.min(r.len - 20, s + 75), r.len * 0.5]) {
+          lanePoint(r, lane, tryS, P)
+          if (!taken(P.x, P.z, P.tx, P.tz, m.long / 2 + 10, m.wide / 2 + 1, 2)) { s = tryS; break }
+        }
+      }
+      const seedId = ids + 1
+      const prof = driverProfile(seedId, m.kind, kind)
+      const c: Car = {
+        id: ids++, model: m, paint: -1, kind: 'traffic', seed: seedId,
+        x: P.x, y: 0, z: P.z, heading: 0, pitch: 0,
+        v: limit(r) * prof.speedBias * 0.75,
+        piece: null, shown: '', road: r, prev: null, next: null, lane, s,
+        hold: null, stuck: 0, profile: prof, emergency: kind, sirenActive,
+      }
+      c.next = choose(r, m.kind)
+      pose(c)
+      traffic.push(c)
+      aiStats.activeEmergency = traffic.filter((t2) => !!(t2.emergency && t2.sirenActive)).length
+      return { id: c.id, kind, x: c.x, y: c.y, z: c.z, heading: c.heading, road: r.key, sirenActive }
+    },
+    get nearMissCues() { return nearMissCues },
     get rng() { return rng },
     set rng(v: number) { if (Number.isInteger(v) && v !== 0) rng = v | 0 },
     cable(x, z) {
@@ -3686,9 +3955,9 @@ export function street(o: {
       }
       return showcase.map((c) => c.model.name)
     },
+    get lod() { return lastLod },
     trace(seed: number, times: number[]) {
-      for (let wi = 0; wi < walks.length; wi++) for (let h = 0; h < walks[wi].homes; h++) if (mix(walks[wi].seed, h) === seed) return times.map((t) => { placeOf(wi, seed, t); return { t, x: Math.round(W.x), z: Math.round(W.z), s: Math.round(W.s), still: W.still, far: W.far, waiting: W.waiting, crossing: W.crossing, kind: W.kind, walking: Math.round(W.walking * 100) / 100 } })
-      return null
+      return walkGraph.trace(seed, times, o.hour(), o.rain())
     },
     audit(seconds) {
       const t = o.clock()
@@ -3737,6 +4006,12 @@ export function street(o: {
         for (let i = 0; i < list.length; i++) {
           const c = list[i]
           if (c.thing && !c.landing) continue
+          if (c.emergency && c.sirenActive) {
+            emitEmergencyFlashers(sink, {
+              x: c.x, y: c.y, z: c.z, heading: c.heading, height: c.model.size[1],
+              emergency: c.emergency, sirenActive: c.sirenActive, seed: c.seed,
+            }, simTime)
+          }
           const ls = carLampState(c, nowSec)
           if (ls.head <= 0.01 && ls.brake <= 0.04 && ls.hazard <= 0.05) continue
           const ch = Math.cos(c.heading), sh = Math.sin(c.heading)

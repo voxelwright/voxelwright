@@ -43,7 +43,7 @@ const GUEST = `(() => {
     const m = JSON.parse(json), out = []
     const flat = (a, b) => Math.hypot(a.at[0] - b[0], a.at[2] - b[b.length - 1])
     const world = {
-      now: m.now, people: m.people, residents: m.residents || [], things: m.things || [], others: m.others || [], voiced: m.voiced === true, realm: m.realm || { name: '', about: '' }, keep: m.keep,
+      now: m.now, people: m.people, residents: m.residents || [], things: m.things || [], city: m.city || { heat: 0, districts: {}, witnesses: [], mood: { dominant: 'calm', counts: {}, panicRatio: 0, totalNpcs: 0 }, smartObjects: [], recentEvents: [], directorBrief: '' }, others: m.others || [], voiced: m.voiced === true, realm: m.realm || { name: '', about: '' }, keep: m.keep,
       near: (at, within) => m.people.filter((p) => flat(p, at) <= within),
       // Anyone by their id; and whoever this is about (who spoke, who did something, who came near): theirs, or null.
       who: (id) => m.people.find((p) => p.id === id) || null,
@@ -54,6 +54,17 @@ const GUEST = `(() => {
     // What may be asked for here, by name (the world says which): world.actor('guide', {...}), world.gone('guide').
     // With one argument that is an object, there is no id: world.something({...}).
     for (const name of m.does) world[name] = (id, fields) => { out.push(id !== null && typeof id === 'object' ? Object.assign({}, id, { do: name }) : Object.assign({}, fields, { do: name, id: String(id) })) }
+    // Living-city wants support concise positional arguments as well as single-object calls (#164).
+    if (world.stimulus) world.stimulus = (kind, at, opts) => {
+      if (kind !== null && typeof kind === 'object') out.push(Object.assign({}, kind, { do: 'stimulus' }))
+      else if (Array.isArray(at)) out.push(Object.assign({}, opts && typeof opts === 'object' ? opts : {}, { do: 'stimulus', kind: String(kind), at }))
+      else out.push(Object.assign({}, at && typeof at === 'object' ? at : {}, { do: 'stimulus', kind: String(kind) }))
+    }
+    if (world.social) world.social = (actorId, action, opts) => {
+      if (actorId !== null && typeof actorId === 'object') out.push(Object.assign({}, actorId, { do: 'social' }))
+      else if (typeof action === 'string') out.push(Object.assign({}, opts && typeof opts === 'object' ? opts : {}, { do: 'social', id: String(actorId), action }))
+      else out.push(Object.assign({}, action && typeof action === 'object' ? action : {}, { do: 'social', id: String(actorId) }))
+    }
     // An actor asked for is there at once, to the rule that asked: world.who(id) and world.near find it in this
     // same call, where it was asked to stand or where the resident it takes stands, marked fresh. (A rule that took
     // people and, in the same call, forgot everyone world.who did not know forgot them all, for good: a realm of

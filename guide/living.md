@@ -15,7 +15,7 @@ For the keys a player uses to drive, walk and look, see [gameplay](/gameplay). F
 | A person's own body | Someone at a page on their feet: a box 1.4 m tall on a springy leg that reaches 0.6 m down | That person's page, in a core of its own that is told every edit the world tells of | `engine/page/person.ts` |
 | Actor | A body the world moves for a rule. Everyone sees it. | The world process, for the rule that owns it | `actor` in `engine/world.mjs`, `engine/about.mjs` for finding a way round |
 | Seat | A body for an agent or any program that joins with `POST /world/join` | The world process, a step at a time over the world's cells | `engine/world.mjs` |
-| Resident | One of the town's people, worked out from place and time. Nothing is kept or sent: every page and the world process name the same people in the same places. | Nobody: a rule of place and time | `engine/page/residents.ts`. In San Francisco, street life takes their place (`engine/page/street.ts`). |
+| Resident | One of the town's or San Francisco's people, worked out from place and time. Nothing is kept or sent: every page and the world process name the same people in the same places. | Nobody: a rule of place and time (until a rule takes one as an actor) | `engine/page/residents.ts` for the town; `engine/sf-walks.mjs` shared by `engine/world.mjs` and `engine/page/street.ts` for San Francisco. |
 
 Every person is drawn as the same figure (`figure` in `engine/page/people.ts`): boxes of 5 cm cells jointed at hip, knee, shoulder, elbow and neck. A figure is never cells of the world, so the march does not see it. All the figures in sight are drawn in one call over the marched picture.
 
@@ -118,9 +118,26 @@ A helper started on someone's machine (`node helper.mjs --world URL` in `engine/
 
 With no helper running, a thought fails within a second, so a rule can do something else.
 
+### San Francisco street residents
+
+San Francisco's pedestrians are evaluated from the same shared module (`engine/sf-walks.mjs`) on both the world process (`engine/world.mjs`) and every browser page (`engine/page/street.ts`), using the square walk graphs (`life/*.json`) and signal timing (`cycleAt`, `phaseOf`).
+
+- **District-clocked daily routines.** Each resident gets a deterministic archetype (`commuter`, `shopkeeper`, `tourist`, `runner`, `night_owl`, `resident`) from their seed and street busyness, and follows origin-to-destination walks across five schedule phases (`morning_commute`, `work_day`, `evening_commute`, `nightlife`, `late_quiet`). When `rain > 0.3`, pedestrians hurry toward busy commercial storefronts (`seeking_shelter` / `sheltering`) and raise umbrellas.
+- **Three-ring AI LOD.** Pedestrians are classified by distance (`classifyLod`): **Ring 1** (`<= 35 m`) runs full gaze, avoidance, horn and stuck-robotaxi micro-reactions; **Ring 2** (`35–110 m`) uses simplified kinematics with posture and umbrellas; **Ring 3** (`110–300 m`) tracks lightweight macro route progression with zero animation or collision work and materialises cleanly into Ring 2 when approached.
+- **Zero-teleport promotion.** On released San Francisco worlds, `world.residents` lists nearby SF pedestrians with their `seed`, `home`, `archetype`, `activity`, and `lod`. Taking one (`world.actor(id, { take })`) promotes them from their live `sf-walks.mjs` whereabouts with zero jump, broadcasts their `was` seed so connected pages suppress the analytic duplicate (`taken`), and lets `release()` walk them back to their live route before handing them back to the street crowd.
+
+### San Francisco traffic AI
+
+San Francisco's ambient street vehicles (`engine/page/street.ts`) use the modular traffic AI in `engine/page/traffic-ai.ts` so queues keep flowing around craters and stalled robotaxis without overlapping or snapping.
+
+- **Per-driver profiles and wet roads.** Every vehicle gets a deterministic `driverProfile(seed, kind, emergency)` across six archetypes (`cautious`, `commuter`, `assertive`, `hurried`, `delivery`, `emergency`) setting its speed bias, caution, aggression, following gap, lane-change willingness, horn patience, and rain braking scale. When `rain > 0.2`, `rainDrivingFactors` elongates braking and following distances and trims cornering speed.
+- **Dynamic lane-changing and local junction detours.** When a lane ahead is obstructed by a blast crater (`r.blocked`), a stalled robotaxi (`rtStuck`), or a stopped car, trailing vehicles verify clearance with `isLaneClear` and smoothly interpolate lateral shifts (`laneShift` on multi-lane roads, `overtakeShift` on narrow streets) with zero snapping and OBB overlap guards. Approaching a junction whose outgoing road is blocked or congested triggers `planLocalDetour` (budgeted to 16–24 graph expansions and cached per road and blocked set) to choose a clear alternate road.
+- **Emergency vehicles and acoustic sirens.** Police cruisers and ambulances spawn at a low ambient share (~4%) or on demand via `street.spawnEmergency(...)`. While their siren is active, they pulse alternating red/blue roof flashers through `LocalLightSink`, clear red lights after a brief caution slowdown, and project an acoustic siren cone (45 m / 50° forward plus 18 m omnidirectional). Regular traffic inside the cone (`evaluateSirenYield`) slows and pulls smoothly toward the right kerb (`sirenYieldShift`), then merges back once passed.
+- **Pedestrian-vehicle coupling and telemetry.** Crosswalk yielding scales with driver caution and rain (`crosswalkYieldBuffer`), hurried drivers honk sooner when blocked, and close fast passes emit structured `PedestrianNearMissCue` records (`street.nearMissCues`) that make nearby Ring-1 pedestrians flinch and step back. `street.trafficAiStats()` reports `{ laneChanges, detours, sirenYields, activeEmergency, deadlocksResolved }`.
+
 ### People answer by default
 
-Once someone's model answers for a world, the world is given one rule by the engine: `engine/mind/talk.rule.js`, under the id `talk`. When someone speaks, the nearest resident within 9 m stops, turns and answers as an ordinary person of the street. Left alone for 25 seconds they walk on. It is text run in a box like any rule. It does nothing while nobody's model answers, and stands back where another rule listens for `thought`. Put a rule of your own under `talk` to replace it, or take `talk` out. `GET /world/rules?given=1` lists it.
+Once someone's model answers for a world, the world is given one rule by the engine: `engine/mind/talk.rule.js`, under the id `talk`. When someone speaks, the nearest resident (in the town or on San Francisco's streets) within 9 m stops, turns and answers as an ordinary person of the street. Left alone for 25 seconds they walk on. It is text run in a box like any rule. It does nothing while nobody's model answers, and stands back where another rule listens for `thought`. Put a rule of your own under `talk` to replace it, or take `talk` out. `GET /world/rules?given=1` lists it.
 
 ### They remember and know where they live
 
@@ -145,6 +162,8 @@ The voice is Sonnet by default (`--voice`). `--no-voice` turns voicing off for t
 ```sh
 cd engine
 node test/mind.mjs            # thinking with replies kept in test/mind-kept.json, no model
+node test/sf-residents.mjs    # shared SF walk graph, daily routines, 3-ring LOD, take/release & talk.rule.js
+node test/traffic-ai.mjs      # per-driver profiles, rain braking, lane-changing, detours, sirens & ped coupling
 node test/living.mjs          # a living car driven in Chrome
 node test/person.mjs          # a person's own body, alone and in a shared world
 node test/moves.mjs           # moves and looks sent by a rule

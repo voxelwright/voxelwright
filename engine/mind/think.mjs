@@ -7,7 +7,7 @@
 //
 // Nothing here knows what a note means, or what any world is about.
 import { text } from '../text.mjs'
-import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, LISTENING_MOST, REALM_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, lines, noted, wanted } from './form.mjs'
+import { BEFORE_MOST, HEARD_MOST, LATELY_MOST, LISTENING_MOST, REALM_MOST, SAY_MOST, WHERE_MOST, WHO_MOST, lines, noted, sanitizeContext, wanted } from './form.mjs'
 
 /** How long a thought may take before its rule is told it failed (ms). */
 const THOUGHT_MOST = 20_000
@@ -71,7 +71,7 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null, s
     }
   }
   return {
-    /** `world.think(id, {who, where, lately, heard, from, notes, quiet})`: the `does` entry. */
+    /** `world.think(id, {who, where, lately, context, heard, from, notes, quiet})`: the `does` entry. */
     ask(rule, w, now, wrong) {
       const p = typeof w.id === 'string' ? actor(rule.id, w.id) : undefined
       if (!p) return wrong(`"${String(w.id).slice(0, 24)}" is not an actor of this rule: only an actor can be asked to think`)
@@ -90,7 +90,9 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null, s
       const before = Array.isArray(w.before) ? w.before.slice(-BEFORE_MOST).map((b) => ({ who: b?.who === 'self' ? 'self' : text(b?.who, 24), text: text(b?.text, SAY_MOST) })).filter((b) => b.who && b.text) : recalled(`${rule.id}/${w.id}`, now)
       // Where they live: what the realm is called and is about, unless the rule says they are not to be told (realm: false).
       const r = w.realm === false ? null : realm(), here = r && (r.name || r.about) ? { name: text(r.name, 40), about: text(r.about, REALM_MOST) } : undefined
-      hand({ n: ask.n, ask: { realm: here, name: p.name, who, where: text(w.where, WHERE_MOST), lately: text(w.lately, LATELY_MOST), before, from: ask.from, heard: ask.heard, notes: want } })
+      // Optional compact classical Blackboard context: strictly sanitized on both sides (form.mjs).
+      const context = sanitizeContext(w.context)
+      hand({ n: ask.n, ask: { realm: here, name: p.name, who, where: text(w.where, WHERE_MOST), lately: text(w.lately, LATELY_MOST), ...(context ? { context } : {}), before, from: ask.from, heard: ask.heard, notes: want } })
     },
     /**
      * `world.read(id, {said, from, listening, notes})`: the `does` entry. The model reads what a person said for
