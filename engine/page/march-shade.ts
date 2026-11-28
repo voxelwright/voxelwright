@@ -9,7 +9,9 @@
 // Enables WGSL shader-f16 when gpu.canF16 is supported to cut VGPR footprint on Apple Silicon Metal.
 import type { World } from './world.ts'
 import { MARKS } from './marks.ts'
-import { LOCAL_LIGHTS_STRUCT, localLightsEval } from './lights.ts'
+import { CLUSTER_LIGHTS_WGSL, LOCAL_LIGHTS_STRUCT, clusterLightsBindings, localLightsEval } from './lights.ts'
+import { DYNAMIC_SHADOW_WGSL, dynamicShadowBindings } from './dynamic-shadows.ts'
+import { SKY_LUT_WGSL, skyLutBindings } from './sky-lut.ts'
 import { GTAO_WGSL } from './gtao.ts'
 import { fineCellWgsl, treeCommonWgsl, VIS_PACK_WGSL } from './march-trace.ts'
 
@@ -56,6 +58,14 @@ struct ShadeExtra {
   jitter: vec4f,
   // xy: active GTAO texture size (aoW, aoH), z: 1.0 if halfRes else 0.0, w: pad
   gtaoInfo: vec4f,
+  // x: skyLutBlend (0..1), y: volCloudsActive (0/1), z: dynShadowActive (0/1), w: clusterActive (0/1)
+  atmoInfo: vec4f,
+  // xyz: physical unclamped unit sun direction, w: skyExposure
+  skySunDir: vec4f,
+  // x: overcast (0..1), y: aerialStrength (0..1), z: camAltKm, w: dayFade (0..1)
+  skyOvercast: vec4f,
+  // xyz: world anchor in cells (floor(eye / SIDE) * SIDE), w: pad
+  anchorInfo: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> g: Globals;
@@ -71,6 +81,12 @@ ${LOCAL_LIGHTS_STRUCT}
 @group(1) @binding(1) var vis1Tex: texture_2d<f32>;
 @group(1) @binding(2) var<uniform> shadeExtra: ShadeExtra;
 @group(1) @binding(3) var gtaoTex: texture_2d<f32>;
+${CLUSTER_LIGHTS_WGSL}
+${clusterLightsBindings(2, 0)}
+${DYNAMIC_SHADOW_WGSL}
+${dynamicShadowBindings(3, 0)}
+${SKY_LUT_WGSL}
+${skyLutBindings(3, 3)}
 
 override MIRRORS: bool = true;
 override FOGGY: bool = false;
@@ -78,6 +94,7 @@ override NIGHT: bool = false;
 override UNDERWATER: bool = false;
 override LOCAL_OCCLUDE: bool = false;
 override USE_GTAO: bool = false;
+override USE_CLUSTER_LIGHTS: bool = false;
 
 const INDOORS = 0.45;
 const NEAR = 1.0;
@@ -389,11 +406,40 @@ fn cloud(p: vec2f) -> f32 {
   }
   return sum;
 }
-fn sky(rd: vec3f) -> vec3f {
-  ${useF16 ? 'var col = vec3<f16>(min(max(skyBase(rd), vec3f(0.0)), vec3f(60000.0)));' : 'var col = skyBase(rd);'}
+fn skyBasePhys(rd: vec3f) -> vec3f {
+  let analytic = skyBase(rd);
+  let lutBlend = shadeExtra.atmoInfo.x;
+  if (lutBlend <= 0.001) { return analytic; }
+  let physSun = shadeExtra.skySunDir.xyz;
+  let expo = shadeExtra.skySunDir.w;
+  var phys = sampleSkyView(rd, physSun) * expo;
+  if (rd.y < 0.0) {
+    let horiz = sampleSkyView(normalize(vec3f(rd.x, 0.015, rd.z)), physSun) * expo;
+    phys = mix(phys, horiz * 0.72, clamp(-rd.y * 6.0, 0.0, 1.0));
+  }
+  // Soft-rolloff only extreme >2.2 linear sun-core Mie spikes so golden-hour sky stays rich without clipping.
+  phys = phys / (vec3f(1.0) + max(phys - vec3f(2.2), vec3f(0.0)) * 0.38);
+  let dayFade = shadeExtra.skyOvercast.w;
+  let ov = shadeExtra.skyOvercast.x;
+  if (ov > 0.001) {
+    let lum = dot(phys, vec3f(0.2126, 0.7152, 0.0722));
+    // Cool coastal slate-blue mist sky so overcast/foggy glass reflections never read flat tan/beige.
+    let grey = mix(vec3f(0.022, 0.028, 0.044), vec3f(0.50, 0.57, 0.67), dayFade);
+    phys = mix(phys, mix(vec3f(lum), grey, 0.78), ov * 0.90);
+  }
+  let up = clamp(rd.y, 0.0, 1.0);
+  let nightFloor = mix(vec3f(0.020, 0.030, 0.054), vec3f(0.004, 0.007, 0.020), pow(up, 0.55));
+  phys = max(phys, nightFloor * (1.0 - dayFade * 0.92));
+  return mix(analytic, phys, lutBlend);
+}
+
+fn sky(rd: vec3f, cloudWeight: f32) -> vec3f {
+  ${useF16 ? 'var col = vec3<f16>(min(max(skyBasePhys(rd), vec3f(0.0)), vec3f(60000.0)));' : 'var col = skyBasePhys(rd);'}
   let toward = max(dot(rd, g.sun), 0.0);
   if (g.day > 0.0) {
-    let sunGlow = min(g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a + pow(toward, 60.0) * 0.35) * g.day, vec3f(60000.0));
+    let haloScale = mix(1.0, mix(0.26, 0.08, g.low), shadeExtra.atmoInfo.x);
+    let discScale = mix(1.0, mix(0.55, 0.18, g.low), shadeExtra.atmoInfo.x);
+    let sunGlow = min(g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a * discScale + pow(toward, 60.0) * 0.35 * haloScale) * g.day, vec3f(60000.0));
     ${useF16 ? 'col += vec3<f16>(sunGlow);' : 'col += sunGlow;'}
   }
   if (g.day < 1.0 && g.moon.w >= 0.0) {
@@ -417,16 +463,19 @@ fn sky(rd: vec3f) -> vec3f {
     let starAdd = vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9 * clamp(1.0 - (g.skyZenith.g - 0.012) * 40.0, 0.0, 1.0);
     ${useF16 ? 'col += vec3<f16>(starAdd);' : 'col += starAdd;'}
   }
-  if (rd.y > 0.015) {
+  if (cloudWeight > 0.001 && rd.y > 0.015) {
     let far = (15000.0 - g.eye.y) / rd.y;
     let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
     let thick = cloud(at);
-    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
+    // Soften reflected legacy clouds when volumetric clouds drive the primary sky so glass reflections
+    // harmonize naturally without harsh 2D cloud band cutouts.
+    let softReflect = shadeExtra.atmoInfo.y > 0.5;
+    let cover = smoothstep(select(0.45, 0.40, softReflect), select(0.64, 0.74, softReflect), thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
     if (cover > 0.0) {
       var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
       if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward); }
       let cloudCol = min(body * mix(1.25, 1.85, g.day), vec3f(60000.0));
-      ${useF16 ? 'col = mix(col, vec3<f16>(cloudCol), f16(cover * 0.92));' : 'col = mix(col, cloudCol, cover * 0.92);'}
+      ${useF16 ? 'col = mix(col, vec3<f16>(cloudCol), f16(cover * 0.92 * cloudWeight));' : 'col = mix(col, cloudCol, cover * 0.92 * cloudWeight);'}
     }
   }
   return vec3f(col);
@@ -447,6 +496,97 @@ fn worldClear(p: vec3f, n: vec3f, lPos: vec3f) -> f32 {
   return max(vis, 0.0);
 }
 ${localLightsEval({ withOcclusion: true, withWet: true })}
+
+// 512-light 3D frustum-clustered local-light evaluator calibrated identically to PR #192/#208 HDR GGX
+// (lights.ts scales cluster radiance by dHalf^2 and stores dHalf in extra.x, shadow in extra.y, focus in extra.w).
+fn evalClusteredLocalLights(
+  p: vec3f,
+  n: vec3f,
+  rd: vec3f,
+  albedo: vec3f,
+  rough: f32,
+  clearcoat: f32,
+  wetSurface: f32,
+  allowOcclude: bool,
+  viewDist: f32,
+  screenUv: vec2f,
+  linDepth: f32,
+) -> vec3f {
+  if (clusterParams.counts.x == 0u || linDepth >= clusterParams.upFar.w) { return vec3f(0.0); }
+  let cIdx = clusterIndexFor(screenUv, linDepth);
+  if (cIdx >= clusterParams.counts.w) { return vec3f(0.0); }
+  let cell = clusterGrid[cIdx];
+  if (cell.count == 0u) { return vec3f(0.0); }
+  let quality = localLights.info.y;
+  let occOn = LOCAL_OCCLUDE && allowOcclude && viewDist < 600.0 && (localLights.info.z & 1u) != 0u;
+  let wet = localLights.grid.w * wetSurface;
+  let back = reflect(rd, vec3f(0.0, 1.0, 0.0));
+  let side = normalize(vec2f(-rd.z, rd.x) + vec2f(0.00001, 0.0));
+  var sum = vec3f(0.0);
+  let lim = min(cell.count, clusterParams.counts.y);
+  let poolCap = clusterParams.counts.z;
+  for (var i = 0u; i < lim; i = i + 1u) {
+    let slot = cell.offset + i;
+    if (slot >= poolCap) { break; }
+    let li = clusterLightIndices[slot];
+    if (li >= clusterParams.counts.x) { continue; }
+    let l = clusterLights[li];
+    let toL = l.posRange.xyz - p;
+    let d2 = dot(toL, toL);
+    let range = max(l.posRange.w, 1e-4);
+    let r2 = range * range;
+    if (d2 >= r2 || d2 <= 1e-6) { continue; }
+    let invD = inverseSqrt(d2);
+    let L = toL * invD;
+    var spot = 1.0;
+    if (l.colorType.w > -1.5) {
+      let cosA = dot(-L, l.dirInner.xyz);
+      if (cosA <= l.colorType.w) { continue; }
+      let invSpan = 1.0 / max(l.dirInner.w - l.colorType.w, 0.001);
+      let u = clamp((cosA - l.colorType.w) * invSpan, 0.0, 1.0);
+      let cone = u * u * (3.0 - 2.0 * u);
+      spot = mix(cone, cone * (0.38 + 0.62 * cone * cone), l.extra.w);
+    }
+    let norm2 = d2 / r2;
+    let win = 1.0 - norm2 * norm2;
+    let srcR = max(l.extra.x, 1.0);
+    let att = (win * win) / (srcR * srcR + d2);
+    let ndl = dot(n, L);
+    if (ndl <= -0.04) { continue; }
+    let diff = pow(max(ndl, 0.0), 0.72);
+    var rad = l.colorType.rgb * (att * spot);
+    if (occOn && l.extra.y > 0.5 && (abs(n.y) < 0.5 || d2 > 10000.0) && d2 > 900.0 && (rad.r + rad.g + rad.b) * max(diff, 0.12) > 0.10) {
+      let vis = worldClear(p, n, l.posRange.xyz);
+      if (vis <= 0.01) { continue; }
+      rad *= vis;
+    }
+    sum += albedo * rad * diff;
+    if (quality >= 1u && ndl > 0.0) {
+      let hv = normalize(L - rd);
+      let ndh = max(dot(n, hv), 0.0);
+      let specBoost = select(1.0, 1.15, l.extra.w > 0.5);
+      if (clearcoat > 0.05) {
+        let fres = 0.06 + 0.94 * pow(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 4.0);
+        let sharp = pow(ndh, 64.0) * 0.28 + pow(ndh, 16.0) * 0.055;
+        sum += rad * sharp * (0.35 + 0.75 * fres) * clearcoat * specBoost;
+      } else {
+        let smoothness = max(1.0 - rough, 0.0);
+        let shininess = mix(8.0, 64.0, smoothness);
+        let spec = pow(ndh, shininess) * smoothness * smoothness * 0.38;
+        sum += rad * spec * specBoost;
+      }
+      if (wet > 0.02) {
+        let off = back - L;
+        let across = dot(off.xz, side);
+        let streak = exp(-across * across * 420.0 - max(dot(off, off) - across * across, 0.0) * 6.5);
+        let sheen = pow(ndh, 24.0) * 0.22 + streak * 0.52;
+        sum += rad * sheen * wet * specBoost * 0.65;
+      }
+    }
+  }
+  let peak = max(sum.r, max(sum.g, sum.b));
+  return sum / (1.0 + max(peak - 0.12, 0.0) * 1.55);
+}
 
 fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
   let lv = g.level[hit.level];
@@ -541,8 +681,8 @@ fn leavingShadow(ro: vec3f, rd: vec3f, hit: Hit) -> f32 {
 struct PrimaryLit { col: vec3f, n: vec3f, rough: f32 }
 
 // Single-site primary surface shading: evaluates paint, slope/diagonal normals, compute GTAO or legacy openness,
-// shadows, GGX Metallic/Roughness PBR, night windows/landmarks, and local lights (with LOCAL_OCCLUDE).
-fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> PrimaryLit {
+// shadows, GGX Metallic/Roughness PBR, night windows/landmarks, and local lights (with LOCAL_OCCLUDE / 3D clustering).
+fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv: vec2f) -> PrimaryLit {
   let stuff = hit.kind & 15u;
   let m = looks.material[stuff];
   let p = ro + rd * hit.t;
@@ -631,7 +771,12 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> Primar
         level = s.level;
       }
     }
-    direct *= max(sunny, 0.0);
+    var sunVis = max(sunny, 0.0);
+    if (sunVis > 0.001 && shadeExtra.atmoInfo.z > 0.5) {
+      let dynVis = sampleDynamicSunShadow(p + shadeExtra.anchorInfo.xyz, n);
+      sunVis = min(sunVis, dynVis);
+    }
+    direct *= sunVis;
   }
   var directOpen = 1.0;
   var ambientAo = vec3f(1.0);
@@ -733,16 +878,25 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> Primar
     nightAdd += landmarkLamp(p) * clamp(dark * 3.0, 0.0, 1.0);
     ${useF16 ? 'col += vec3<f16>(min(max(nightAdd, vec3f(0.0)), vec3f(60000.0)));' : 'col += nightAdd;'}
   }
-  if (NIGHT && localLights.info.x > 0u && stuff != 5u && hit.t < 1600.0) {
-    let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
-    let localAdd = evalLocalLights(p, n, rd, albedo, surfRough, 0.0, wetSurf, shadows == 1u, hit.t);
-    ${useF16 ? 'col += vec3<f16>(min(max(localAdd, vec3f(0.0)), vec3f(60000.0)));' : 'col += localAdd;'}
+  if (NIGHT && stuff != 5u) {
+    if (USE_CLUSTER_LIGHTS) {
+      if (clusterParams.counts.x > 0u && hit.t < 4000.0) {
+        let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
+        let linZ = max(hit.t * dot(rd, g.forward), NEAR);
+        let localAdd = evalClusteredLocalLights(p, n, rd, albedo, surfRough, 0.0, wetSurf, shadows == 1u, hit.t, screenUv, linZ);
+        ${useF16 ? 'col += vec3<f16>(min(max(localAdd, vec3f(0.0)), vec3f(60000.0)));' : 'col += localAdd;'}
+      }
+    } else if (localLights.info.x > 0u && hit.t < 1600.0) {
+      let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
+      let localAdd = evalLocalLights(p, n, rd, albedo, surfRough, 0.0, wetSurf, shadows == 1u, hit.t);
+      ${useF16 ? 'col += vec3<f16>(min(max(localAdd, vec3f(0.0)), vec3f(60000.0)));' : 'col += localAdd;'}
+    }
   }
   return PrimaryLit(vec3f(col), n, surfRough);
 }
 
 // Lightweight glass-pane own-light evaluator (avoids duplicating litPrimary for the front pane of transparent glass).
-fn litPane(rd: vec3f, p: vec3f, n: vec3f, kind: u32, level: u32, cell: vec3i, t: f32, shadows: u32) -> vec3f {
+fn litPane(rd: vec3f, p: vec3f, n: vec3f, kind: u32, level: u32, cell: vec3i, t: f32, shadows: u32, screenUv: vec2f) -> vec3f {
   let m = looks.material[11u];
   let ci = (kind >> 8u) & 255u;
   let lvh = g.level[level];
@@ -768,8 +922,15 @@ fn litPane(rd: vec3f, p: vec3f, n: vec3f, kind: u32, level: u32, cell: vec3i, t:
       col += warm * w * dark * mix(1.5, PANE_LIGHT, smoothstep(1.5, 5.0, wide)) * (1.0 - 0.33 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
     }
   }
-  if (NIGHT && localLights.info.x > 0u && t < 1600.0) {
-    col += evalLocalLights(p, n, rd, albedo, m.rough, 0.0, 0.0, shadows == 1u, t);
+  if (NIGHT) {
+    if (USE_CLUSTER_LIGHTS) {
+      if (clusterParams.counts.x > 0u && t < 4000.0) {
+        let linZ = max(t * dot(rd, g.forward), NEAR);
+        col += evalClusteredLocalLights(p, n, rd, albedo, m.rough, 0.0, 0.0, shadows == 1u, t, screenUv, linZ);
+      }
+    } else if (localLights.info.x > 0u && t < 1600.0) {
+      col += evalLocalLights(p, n, rd, albedo, m.rough, 0.0, 0.0, shadows == 1u, t);
+    }
   }
   return col;
 }
@@ -817,7 +978,7 @@ fn net(at: vec2f) -> f32 {
   let b = noise2(at * 0.047 - vec2f(g.time * 0.17, g.time * 0.24) + vec2f(7.3, 1.9));
   return pow(clamp(1.0 - abs(a - b) * 3.2, 0.0, 1.0), 5.0);
 }
-fn deep(rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> PrimaryLit {
+fn deep(rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv: vec2f) -> PrimaryLit {
   let M = 0.1;
   let down = (g.sea - g.eye.y) * M;
   var out = 1e9;
@@ -833,7 +994,7 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> PrimaryLit {
     far = hit.t;
     let p = g.eye + rd * hit.t;
     let under = max(g.sea - p.y, 0.0);
-    let lp = litPrimary(g.eye, rd, hit, shadows, px);
+    let lp = litPrimary(g.eye, rd, hit, shadows, px, screenUv);
     outN = lp.n;
     outR = lp.rough;
     col = lp.col * (1.05 + 1.1 * net(p.xz + sun.xz * (under / sun.y)) * (0.15 + 0.85 * max(hit.n.y, 0.0)));
@@ -850,7 +1011,7 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, px: vec2i) -> PrimaryLit {
     let waves = pow(clamp(1.0 - abs(wa - wb) * 2.6, 0.0, 1.0), 2.0) * (0.45 + 0.55 * noise2(at * 0.023 + vec2f(g.time * 0.05, 0.0)));
     let glint = sqrt(waves) * smoothstep(0.35, 0.7, noise2(at * 0.045 + vec2f(g.time * 0.11, g.time * 0.07)));
     let mirror = glow * 0.7 + vec3f(0.3, 0.85, 0.82) * strength * waves * 0.5 + vec3f(0.55, 0.95, 0.95) * strength * glint * 0.8;
-    col = mix(mirror, sky(bent) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * (net(at) * 0.4 + waves * 0.22), window);
+    col = mix(mirror, sky(bent, select(1.0, 0.38, shadeExtra.atmoInfo.y > 0.5)) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * (net(at) * 0.4 + waves * 0.22), window);
   }
   col = mix(col, glow, 1.0 - exp(-far * M * 0.021));
   col *= 0.8;
@@ -932,7 +1093,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
 
   if (UNDERWATER && (g.flags & 128u) != 0u) {
     let d = depthOf(hit.t, rd);
-    let dp = deep(rd, hit, shadows, px);
+    let dp = deep(rd, hit, shadows, px, jitUV);
     let vel = motionVector(rd, hit.t, jitUV);
     if ((g.flags & 4u) != 0u) {
       let h = f32(work) / 128.0;
@@ -944,7 +1105,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
 
   // Fast pure-sky early exit (zero material/lighting/reflection work).
   if (!hasPane && hit.t < 0.0) {
-    var col = sky(rd);
+    var col = sky(rd, select(1.0, 0.0, shadeExtra.atmoInfo.y > 0.5));
     if (FOGGY) { col = inFog(col, rd, 1e7); }
     let vel = motionVector(rd, -1.0, jitUV);
     if ((g.flags & 4u) != 0u) {
@@ -984,7 +1145,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
     let pane1Cell = vec3i(floor((g.eye + rd * (pane1T + 0.001 / lv1.scale) - lv1.boxMin) * lv1.scale)) + lv1.cells;
     var n1 = unpackFace(pFace);
     if (dot(n1, n1) < 0.5) { n1 = -rd; }
-    var own1 = litPane(rd, p1, n1, pane1Kind, pane1Level, pane1Cell, pane1T, shadows);
+    var own1 = litPane(rd, p1, n1, pane1Kind, pane1Level, pane1Cell, pane1T, shadows, jitUV);
     var lamp1 = 0.0;
     if (NIGHT && g.weather.z > 0.0) {
       let fine1 = pane1Cell * i32(1u << pane1Level);
@@ -1000,7 +1161,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
     if (mir1 > 0.0) {
       let back1 = reflect(rd, n1);
       let safe1 = select(back1, vec3f(0.00001), abs(back1) < vec3f(0.00001));
-      add1 += sky(safe1) * 0.8 * mir1;
+      add1 += sky(safe1, select(1.0, 0.38, shadeExtra.atmoInfo.y > 0.5)) * 0.8 * mir1;
     }
     var through1 = glassTint(pane1Kind, pThick + 0.5) * 0.94 * (1.0 - mir1) * (1.0 - lamp1);
     let across1 = 1.0 / (lv1.scale * max(pane1T, 1.0) * g.pixel);
@@ -1031,7 +1192,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
   // Primary opaque surface (or surface behind the first transparent glass pane).
   if (shadeBehind) {
     if (hit.t < 0.0) {
-      col += keep * sky(rd);
+      col += keep * sky(rd, select(1.0, 0.35, shadeExtra.atmoInfo.y > 0.5));
       visT = -1.0;
       outN = vec3f(0.0);
     } else {
@@ -1039,7 +1200,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
       let glass = stuff == 11u && MIRRORS;
       let scale = g.level[hit.level].scale;
       let m = looks.material[stuff];
-      let lp = litPrimary(g.eye, rd, hit, select(lights, lights * 2u, glass), px);
+      let lp = litPrimary(g.eye, rd, hit, select(lights, lights * 2u, glass), px, jitUV);
       var own = lp.col;
       var n = lp.n;
       outN = n;
@@ -1086,11 +1247,12 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
         if (stuff == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
         var safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
         if (stuff == 5u) { safe = vec3f(abs(safe.x) * select(-1.0, 1.0, rd.x > 0.0), safe.y, abs(safe.z) * select(-1.0, 1.0, rd.z > 0.0)); }
-        var seen = sky(safe) * 0.8;
+        let reflectCloud = select(1.0, 0.38, shadeExtra.atmoInfo.y > 0.5);
+        var seen = sky(safe, reflectCloud) * 0.8;
         if (ask) {
           let coarse = select(2.0, 6.0, stuff == 5u);
           let far = shadeTrace(p + n * (0.05 / scale), safe, 0.0, hit.level, 64u, hit.t * g.pixel * coarse, g.pixel * coarse, stuff == 5u, stuff == 5u);
-          seen = sky(safe);
+          seen = sky(safe, reflectCloud);
           if (far.t >= 0.0) { seen = air(litReflect(p, safe, far, shadows * 2u), safe, far.t); }
         }
         if (glass) { add += seen * mirror; } else { add = mix(own, seen, mirror); }
@@ -1105,7 +1267,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
       if (glass) {
         let through2 = glassTint(hit.kind, 1.5) * 0.94 * (1.0 - mirror) * (1.0 - lamp);
         let room2 = (g.lightFill.rgb * 0.3 + g.lightSun.rgb * g.lightSun.a * 0.12) * 0.35 * INDOORS;
-        add += through2 * select(room2, skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 0.7, hasPane);
+        add += through2 * select(room2, skyBasePhys(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 0.7, hasPane);
       }
       if (hasPane) {
         add = mix(add, airColour, 1.0 - (1.0 - haze(rd, hit.t)) / max(1.0 - haze(rd, first), 0.0001));
@@ -1115,7 +1277,21 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
     }
   }
 
-  if (first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
+  if (first >= 0.0) {
+    let hazed = mix(col, airColour, haze(rd, first));
+    let apBlend = shadeExtra.atmoInfo.x * shadeExtra.skyOvercast.y;
+    if (apBlend > 0.001) {
+      let ap = sampleAerialPerspective(jitUV, first * 0.0001);
+      var apScatter = ap.rgb * shadeExtra.skySunDir.w * shadeExtra.skyOvercast.w;
+      // Soft-compress extreme low-sun forward Mie glare in front of skyline silhouettes so distant
+      // towers keep warm golden rim light and lit-window contrast without washing out.
+      apScatter = apScatter / (vec3f(1.0) + apScatter * (0.40 + 1.15 * g.low));
+      let phys = col * clamp(ap.a, 0.0, 1.0) + apScatter;
+      col = mix(hazed, phys, apBlend);
+    } else {
+      col = hazed;
+    }
+  }
   if (FOGGY) { col = inFog(col, rd, select(1e7, first, first >= 0.0)); }
   let depth = depthOf(visT, rd);
   let vel = motionVector(rd, visT, jitUV);

@@ -17,6 +17,7 @@ import type { CrashOpening } from './crash-opening.ts'
 import { FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
 import { createIndirectCuller, writeFrustumPlanesFromCamera, type GpuCamera, type IndirectCuller } from './gpu-particles.ts'
+import type { DynamicShadows } from './dynamic-shadows.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, palette, type Marcher, type View } from './march.ts'
 import { LIGHT_EXTRA, LOCAL_LIGHTS_STRUCT, localLightsEval, type LocalLightSink } from './lights.ts'
 import type { Born } from './told.ts'
@@ -619,6 +620,10 @@ export interface Pieces {
   readonly culler: IndirectCuller | null
   /** Automatically emits local lights for every non-vehicle piece containing LAMP (material 15) voxels (robotaxi LiDAR domes, traffic signals, depot canopies, conjured lamps). */
   emitLights(sink: LocalLightSink): void
+  /** Queues active nearby non-ghost pieces as dynamic directional shadow casters (exact merged faces for closest hero pieces in Cascade 0, OBB boxes for mid-range pieces). Returns true when exact mesh draws are queued. */
+  castShadows(shadows: DynamicShadows, view: View): boolean
+  /** Records exact merged-face shadow draws prepared by `castShadows()` into a dynamic-shadow cascade render pass. */
+  recordShadowMeshes(pass: GPURenderPassEncoder, cascade: 0 | 1): void
   readonly count: number
   /** How many faces are drawn a frame. */
   readonly faces: number
@@ -928,6 +933,14 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   const visiblePieces: Held[] = []
   const visibleFaces: Faces[] = []
   let visibleCount = 0
+  // Pre-allocated parallel arrays for dynamic directional shadow hero meshes (zero per-frame allocations).
+  const MAX_SHADOW_HERO_PIECES = 16
+  const MAX_SHADOW_HERO_FACES = 120_000
+  const shadowHeroPieces: Held[] = []
+  const shadowHeroFaces: Faces[] = []
+  const shadowHeroDistSq = new Float64Array(MAX_SHADOW_HERO_PIECES)
+  let shadowHeroCount = 0
+  let shadowActiveTarget: DynamicShadows | null = null
   // Pre-allocated 6-plane frustum buffer + anchor-relative camera wrapper (shared math with `createIndirectCuller`).
   const frustumPlanes = new Float32Array(new ArrayBuffer(24 * 4))
   const cullEye: [number, number, number] = [0, 0, 0]
@@ -1331,6 +1344,94 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
             sink.addPoint(wx, wy, wz, cr, cg, cb, range, dHalf, 1.0, prio, LIGHT_EXTRA)
           }
         }
+      }
+    },
+    castShadows(shadows, view) {
+      shadowHeroCount = 0
+      shadowActiveTarget = shadows
+      const n = liveList.length
+      if (!n) return false
+      const c0R = shadows.cascadeRadii[0]
+      const c1R = shadows.cascadeRadii[1]
+      const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
+      let heroFaceTotal = 0
+
+      for (let idx = 0; idx < n; idx++) {
+        const piece = liveList[idx]
+        if (!piece.cell || !piece.count || piece.ghost) continue
+        const [x, y, z, w] = piece.rot, b = piece.born, cell = piece.cell
+        const midX = b.size[0] * 0.5, midY = b.size[1] * 0.5, midZ = b.size[2] * 0.5
+        const hx = midX * cell, hy = midY * cell, hz = midZ * cell
+        const rad = Math.hypot(hx, hy, hz)
+        if (rad < 0.8) continue
+        const m00 = 1 - 2 * (y * y + z * z), m10 = 2 * (x * y + z * w), m20 = 2 * (x * z - y * w)
+        const m01 = 2 * (x * y - z * w), m11 = 1 - 2 * (x * x + z * z), m21 = 2 * (y * z + x * w)
+        const m02 = 2 * (x * z + y * w), m12 = 2 * (y * z - x * w), m22 = 1 - 2 * (x * x + y * y)
+        const ox = (midX - b.com[0]) * cell, oy = (midY - b.com[1]) * cell, oz = (midZ - b.com[2]) * cell
+        const wx = piece.pos[0] + m00 * ox + m01 * oy + m02 * oz
+        const wy = piece.pos[1] + m10 * ox + m11 * oy + m12 * oz
+        const wz = piece.pos[2] + m20 * ox + m21 * oy + m22 * oz
+        const dx = wx - ex, dy = wy - ey, dz = wz - ez
+        const d2 = dx * dx + dy * dy + dz * dz
+        const r1 = c1R + rad
+        if (d2 > r1 * r1) continue
+        // Skip tiny first-person held blocks right in front of the camera lens, never cars.
+        if (d2 < 36 && rad < 6) continue
+
+        const r0 = c0R + rad
+        const faces = facesOf(piece)
+        const solidCount = faces.count - faces.glass
+        if (solidCount > 0 && d2 <= r0 * r0 && heroFaceTotal + solidCount <= MAX_SHADOW_HERO_FACES) {
+          if (shadowHeroCount < MAX_SHADOW_HERO_PIECES) {
+            shadowHeroPieces[shadowHeroCount] = piece
+            shadowHeroFaces[shadowHeroCount] = faces
+            shadowHeroDistSq[shadowHeroCount] = d2
+            shadowHeroCount++
+            heroFaceTotal += solidCount
+            continue
+          }
+          // Replace the farthest hero piece if this piece is closer, demoting the evicted piece to an OBB box.
+          let farIdx = 0
+          for (let k = 1; k < shadowHeroCount; k++) {
+            if (shadowHeroDistSq[k] > shadowHeroDistSq[farIdx]) farIdx = k
+          }
+          if (d2 < shadowHeroDistSq[farIdx]) {
+            const ev = shadowHeroPieces[farIdx]
+            const evFaces = shadowHeroFaces[farIdx]
+            heroFaceTotal -= (evFaces.count - evFaces.glass)
+            const [exq, eyq, ezq, ewq] = ev.rot, eb = ev.born, ecell = ev.cell
+            const emx = eb.size[0] * 0.5, emy = eb.size[1] * 0.5, emz = eb.size[2] * 0.5
+            const ehx = emx * ecell, ehy = emy * ecell, ehz = emz * ecell
+            const eox = (emx - eb.com[0]) * ecell, eoy = (emy - eb.com[1]) * ecell, eoz = (emz - eb.com[2]) * ecell
+            const em00 = 1 - 2 * (eyq * eyq + ezq * ezq), em10 = 2 * (exq * eyq + ezq * ewq), em20 = 2 * (exq * ezq - eyq * ewq)
+            const em01 = 2 * (exq * eyq - ezq * ewq), em11 = 1 - 2 * (exq * exq + ezq * ezq), em21 = 2 * (eyq * ezq + exq * ewq)
+            const em02 = 2 * (exq * ezq + eyq * ewq), em12 = 2 * (eyq * ezq - exq * ewq), em22 = 1 - 2 * (exq * exq + eyq * eyq)
+            shadows.addBoxCasterRaw(
+              ev.pos[0] + em00 * eox + em01 * eoy + em02 * eoz,
+              ev.pos[1] + em10 * eox + em11 * eoy + em12 * eoz,
+              ev.pos[2] + em20 * eox + em21 * eoy + em22 * eoz,
+              ehx * 0.92, ehy * 0.92, ehz * 0.92,
+              exq, eyq, ezq, ewq,
+            )
+            shadowHeroPieces[farIdx] = piece
+            shadowHeroFaces[farIdx] = faces
+            shadowHeroDistSq[farIdx] = d2
+            heroFaceTotal += solidCount
+            continue
+          }
+        }
+        shadows.addBoxCasterRaw(wx, wy, wz, hx * 0.92, hy * 0.92, hz * 0.92, x, y, z, w)
+      }
+      return shadowHeroCount > 0
+    },
+    recordShadowMeshes(pass, _cascade) {
+      if (!shadowHeroCount || !shadowActiveTarget) return
+      for (let i = 0; i < shadowHeroCount; i++) {
+        const piece = shadowHeroPieces[i]
+        const faces = shadowHeroFaces[i]
+        const solidCount = faces.count - faces.glass
+        if (solidCount <= 0) continue
+        shadowActiveTarget.drawPieceFaces(pass, faces.faces, solidCount, piece.pos, piece.rot, piece.born.com, piece.cell)
       }
     },
   }
