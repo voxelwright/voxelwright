@@ -43,7 +43,7 @@ import type { MapSystem, MapWaypoint } from './minimap.ts'
 import { NAMED } from './moves.ts'
 import type { PlacesPayload, RawShop } from './neighborhood.ts'
 import type { Person } from './people.ts'
-import type { PhoneOS } from './phone.ts'
+import type { PhoneNotification, PhoneOS } from './phone.ts'
 import type { Piece, Pieces } from './pieces.ts'
 import type { Sound } from './sound/sound.ts'
 import type { Street } from './street.ts'
@@ -61,6 +61,26 @@ const FOOD_CATEGORIES = new Set([
 export type CustomerPersonality = 'chill' | 'generous' | 'obnoxious' | 'picky' | 'hangry' | 'techbro'
 export type RestaurantPersonality = 'fast' | 'busy' | 'obnoxious'
 export type OrderStatus = 'offered' | 'accepted' | 'shopping' | 'waiting_delay' | 'in_transit' | 'delivered' | 'cancelled'
+export type ShiftFocus = 'citywide' | 'restaurants' | 'supermarkets'
+
+export interface ShiftState {
+  active: boolean
+  focus: ShiftFocus
+  startedAt: number
+  endedAt: number
+  completed: number
+  earnings: number
+  likes: number
+}
+
+export interface ShiftSummary {
+  focus: ShiftFocus
+  durationS: number
+  completed: number
+  earnings: number
+  likes: number
+  endedAt: number
+}
 
 export interface ChatMessage {
   id: string
@@ -72,6 +92,7 @@ export interface ChatMessage {
 export interface ShoppingItem {
   id: string
   name: string
+  price: number
   aisleNumber: number
   aisleName: string
   category: 'produce' | 'bakery' | 'dairy' | 'pantry' | 'snacks'
@@ -94,7 +115,15 @@ export interface DeliveryOrder {
   delayReason: string
   customerName: string
   customerTrait: CustomerPersonality
-  dropoff: { x: number; z: number; address: string; seed: number }
+  dropoff: {
+    x: number
+    z: number
+    address: string
+    seed: number
+    roadNx?: number
+    roadNz?: number
+    curbVerified?: boolean
+  }
   /** Template cargo items generated for this order. */
   itemSpecs: {
     name: string
@@ -209,6 +238,9 @@ export interface DeliveryEngineOptions {
 export interface DeliveryController {
   readonly profile: DriverProfile
   readonly rank: string
+  readonly onShift: boolean
+  readonly shift: Readonly<ShiftState>
+  readonly lastShiftSummary: ShiftSummary | null
   readonly offers: readonly DeliveryOrder[]
   readonly activeOrders: readonly DeliveryOrder[]
   readonly routeStops: readonly GpsStop[]
@@ -221,6 +253,10 @@ export interface DeliveryController {
   readonly nearbyStore: StorePlaceMeta | null
   readonly lastReceipt: DeliveryReceipt | null
   subscribe(listener: () => void): () => void
+  /** Signs up / clocks into a DoorSmash delivery shift so incoming offers & phone notifications turn on. */
+  startShift(opts?: { focus?: ShiftFocus }): boolean
+  /** Signs off the active shift, clearing pending offers and silencing DoorSmash notifications. */
+  endShift(): ShiftSummary | null
   /** Generates a fresh offer near the player (useful for surge boost & tests). */
   generateOffer(opts?: { supermarket?: boolean; obnoxious?: boolean; pizza?: boolean; soup?: boolean }): DeliveryOrder
   acceptOffer(orderId: string): boolean
@@ -422,22 +458,169 @@ function dropoffBeaconBorn(): Born {
   return cachedBeacon
 }
 
+// Materials that must NEVER be chosen as a customer drop-off spot: air/unloaded (0), water (5), asphalt road (6), steel rails/bridges (12), building roofs (14).
+const NON_SIDEWALK_MATS = new Set([0, 5, 6, 12, 14])
+
+/** True when (xM, zM) sits on walkable non-road ground (sidewalk/plaza/yard) with clear headroom and street-level grade. */
+export function isSidewalkGround(land: DeliveryLand, xM: number, zM: number, refY?: number): boolean {
+  const cx = Math.round(xM * M)
+  const cz = Math.round(zM * M)
+  const mat = land.top_at(cx, cz) & 15
+  if (NON_SIDEWALK_MATS.has(mat)) return false
+  const g = land.ground_at(cx, cz)
+  if (!Number.isFinite(g) || g <= -200 || g > 5000) return false
+  const f = land.feet_at(cx, cz)
+  if (f - g > 20) return false
+  if (refY !== undefined && Math.abs(g - refY) > 35) return false
+  for (const dy of [4, 10, 16]) {
+    const wk = land.world_kind(cx, g + dy, cz) & 15
+    if (wk !== 0 && wk !== 13) return false
+  }
+  return true
+}
+
+function hasCurbBuffer(land: DeliveryLand, xM: number, zM: number, bufM = 0.6): boolean {
+  for (const [dx, dz] of [[bufM, 0], [-bufM, 0], [0, bufM], [0, -bufM]]) {
+    const m = land.top_at(Math.round((xM + dx) * M), Math.round((zM + dz) * M)) & 15
+    if (m === 6 || m === 12 || m === 5) return false
+  }
+  return true
+}
+
+/**
+ * Resolves a customer drop-off point off the asphalt carriageway onto a verified walkable sidewalk/curb.
+ * Returns null if the underlying terrain tile is not loaded yet so the caller can retry once streamed.
+ */
+export function findSidewalkDropoff(
+  land: DeliveryLand,
+  xM: number,
+  zM: number,
+  perpX = 1,
+  perpZ = 0,
+): { x: number; z: number; snapped: boolean } | null {
+  const cx = Math.round(xM * M)
+  const cz = Math.round(zM * M)
+  const g0 = land.ground_at(cx, cz)
+  const m0 = land.top_at(cx, cz) & 15
+  if (!Number.isFinite(g0) || g0 <= -200 || (g0 === 0 && m0 === 0)) return null
+
+  const refY = g0
+  if (isSidewalkGround(land, xM, zM, refY) && hasCurbBuffer(land, xM, zM, 0.5)) {
+    return { x: Math.round(xM * 10) / 10, z: Math.round(zM * 10) / 10, snapped: false }
+  }
+
+  const pLen = Math.hypot(perpX, perpZ)
+  const nx = pLen > 1e-4 ? perpX / pLen : 1
+  const nz = pLen > 1e-4 ? perpZ / pLen : 0
+  const tx = -nz, tz = nx
+
+  let fallbackX: number | null = null
+  let fallbackZ: number | null = null
+  const tryPoint = (px: number, pz: number, stepDirX = 0, stepDirZ = 0): { x: number; z: number; snapped: boolean } | null => {
+    if (!isSidewalkGround(land, px, pz, refY)) return null
+    if (fallbackX === null) { fallbackX = px; fallbackZ = pz }
+    if (hasCurbBuffer(land, px, pz, 0.6)) {
+      // Step slightly deeper onto the sidewalk if still clear so customer stands comfortably off the curb lip
+      const deeperX = px + stepDirX * 0.6
+      const deeperZ = pz + stepDirZ * 0.6
+      if ((stepDirX || stepDirZ) && isSidewalkGround(land, deeperX, deeperZ, refY) && hasCurbBuffer(land, deeperX, deeperZ, 0.6)) {
+        return { x: Math.round(deeperX * 10) / 10, z: Math.round(deeperZ * 10) / 10, snapped: true }
+      }
+      return { x: Math.round(px * 10) / 10, z: Math.round(pz * 10) / 10, snapped: true }
+    }
+    return null
+  }
+
+  // 1. Step laterally away from the road centerline along perpendicular (with small along-street offsets if a driveway/pole blocks)
+  for (const along of [0, 3.0, -3.0, 6.0, -6.0]) {
+    for (let dist = 0.8; dist <= 16.0; dist += 0.6) {
+      for (const side of [1, -1]) {
+        const hit = tryPoint(xM + tx * along + nx * side * dist, zM + tz * along + nz * side * dist, nx * side, nz * side)
+        if (hit) return hit
+      }
+    }
+  }
+
+  // 2. Radial fallback search up to 22 m for wide avenues / plazas / intersections
+  for (let rad = 1.2; rad <= 22.0; rad += 1.0) {
+    for (let a = 0; a < 16; a++) {
+      const ang = (a * Math.PI * 2) / 16
+      const dx = Math.cos(ang), dz = Math.sin(ang)
+      const hit = tryPoint(xM + dx * rad, zM + dz * rad, dx, dz)
+      if (hit) return hit
+    }
+  }
+
+  if (fallbackX !== null && fallbackZ !== null) {
+    return { x: Math.round(fallbackX * 10) / 10, z: Math.round(fallbackZ * 10) / 10, snapped: true }
+  }
+  return { x: Math.round(xM * 10) / 10, z: Math.round(zM * 10) / 10, snapped: false }
+}
+
+const MARKET_CATALOG: Record<ShoppingItem['category'], readonly { name: string; price: number; aisleNumber: number; aisleName: string; heavy?: boolean; fragile?: boolean }[]> = {
+  produce: [
+    { name: 'Organic Avocados', price: 5, aisleNumber: 1, aisleName: 'PRODUCE' },
+    { name: 'Honeycrisp Apples', price: 4, aisleNumber: 1, aisleName: 'PRODUCE' },
+    { name: 'Heirloom Tomatoes', price: 5, aisleNumber: 1, aisleName: 'PRODUCE' },
+    { name: 'Baby Spinach Box', price: 4, aisleNumber: 1, aisleName: 'PRODUCE' },
+  ],
+  bakery: [
+    { name: 'SF Sourdough Loaf', price: 7, aisleNumber: 2, aisleName: 'BAKERY', fragile: true },
+    { name: 'Almond Croissants', price: 6, aisleNumber: 2, aisleName: 'BAKERY', fragile: true },
+    { name: 'Everything Bagels', price: 5, aisleNumber: 2, aisleName: 'BAKERY' },
+    { name: 'Blueberry Muffins', price: 6, aisleNumber: 2, aisleName: 'BAKERY', fragile: true },
+  ],
+  pantry: [
+    { name: 'Colonel Crunch Cereal', price: 6, aisleNumber: 3, aisleName: 'CEREAL & PANTRY' },
+    { name: 'Spicy Ramen 4-Pack', price: 8, aisleNumber: 3, aisleName: 'CEREAL & PANTRY' },
+    { name: 'Olive Oil Bottle', price: 11, aisleNumber: 3, aisleName: 'CEREAL & PANTRY', fragile: true },
+    { name: 'Espresso Roast Beans', price: 12, aisleNumber: 3, aisleName: 'CEREAL & PANTRY' },
+  ],
+  snacks: [
+    { name: 'Kettle Chips Bag', price: 4, aisleNumber: 4, aisleName: 'SNACKS & DRINKS' },
+    { name: 'Sparkling Water 12-Pack', price: 9, aisleNumber: 4, aisleName: 'SNACKS & DRINKS', heavy: true },
+    { name: 'Dark Chocolate Bar', price: 5, aisleNumber: 4, aisleName: 'SNACKS & DRINKS' },
+    { name: 'Crispy Tortilla Chips', price: 5, aisleNumber: 4, aisleName: 'SNACKS & DRINKS' },
+  ],
+  dairy: [
+    { name: 'Pasture Eggs (Fragile)', price: 7, aisleNumber: 5, aisleName: 'DAIRY & COLD', fragile: true },
+    { name: 'Oat Milk Half-Gal', price: 5, aisleNumber: 5, aisleName: 'DAIRY & COLD' },
+    { name: 'Greek Yogurt Cup', price: 6, aisleNumber: 5, aisleName: 'DAIRY & COLD' },
+    { name: 'Aged Cheddar Block', price: 8, aisleNumber: 5, aisleName: 'DAIRY & COLD' },
+  ],
+}
+
 function buildMenuSpecs(category: string, rng: () => number, forceOpts?: { pizza?: boolean; soup?: boolean; supermarket?: boolean }): {
   items: DeliveryOrder['itemSpecs']
   shoppingList: ShoppingItem[]
 } {
   if (forceOpts?.supermarket || isSupermarketCategory(category)) {
-    const shoppingList: ShoppingItem[] = [
-      { id: 'sh-1', name: 'Organic Avocados', aisleNumber: 1, aisleName: 'PRODUCE', category: 'produce', collected: false },
-      { id: 'sh-2', name: 'SF Sourdough Loaf', aisleNumber: 2, aisleName: 'BAKERY', category: 'bakery', collected: false, fragile: true },
-      { id: 'sh-3', name: 'Pasture Eggs (Fragile)', aisleNumber: 3, aisleName: 'DAIRY & COLD', category: 'dairy', collected: false, fragile: true },
-      { id: 'sh-4', name: 'Sparkling Water 12-Pack', aisleNumber: 4, aisleName: 'PANTRY & DRINKS', category: 'pantry', collected: false, heavy: true },
+    const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(rng() * arr.length)]
+    const chosen: { cat: ShoppingItem['category']; spec: (typeof MARKET_CATALOG)['produce'][number] }[] = [
+      { cat: 'produce', spec: pick(MARKET_CATALOG.produce) },
+      { cat: 'bakery', spec: pick(MARKET_CATALOG.bakery) },
+      { cat: 'pantry', spec: pick(MARKET_CATALOG.pantry) },
+      { cat: 'dairy', spec: pick(MARKET_CATALOG.dairy) },
     ]
+    if (rng() > 0.45) {
+      chosen[2] = { cat: 'snacks', spec: pick(MARKET_CATALOG.snacks) }
+    }
+    const shoppingList: ShoppingItem[] = chosen.map((c, idx) => ({
+      id: `sh-${idx + 1}`,
+      name: c.spec.name,
+      price: c.spec.price,
+      aisleNumber: c.spec.aisleNumber,
+      aisleName: c.spec.aisleName,
+      category: c.cat,
+      collected: false,
+      heavy: c.spec.heavy,
+      fragile: c.spec.fragile,
+    }))
     return {
       shoppingList,
       items: [
-        { name: 'Sparkling Water & Pantry Bag', emoji: '🛒', kind: 'groceries_heavy', baseW: 2, baseH: 1, weight: 5, fragile: false, isLiquid: false, hot: false, cold: false },
-        { name: 'Eggs, Sourdough & Produce', emoji: '🥚', kind: 'groceries_fragile', baseW: 1, baseH: 1, weight: 1, fragile: true, isLiquid: false, hot: false, cold: true },
+        { name: `${shoppingList[2].name} & Pantry Bag`, emoji: '🛒', kind: 'groceries_heavy', baseW: 2, baseH: 1, weight: 5, fragile: false, isLiquid: false, hot: false, cold: false },
+        { name: `${shoppingList[3].name}, ${shoppingList[1].name}`, emoji: '🥚', kind: 'groceries_fragile', baseW: 1, baseH: 1, weight: 1, fragile: true, isLiquid: false, hot: false, cold: true },
       ],
     }
   }
@@ -518,9 +701,18 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
   let profile = loadProfile()
   const cargo = new CargoBay(profile.activeVehicle, profile.upgrades[profile.activeVehicle])
   const listeners = new Set<() => void>()
+  let shift: ShiftState = { active: false, focus: 'citywide', startedAt: 0, endedAt: 0, completed: 0, earnings: 0, likes: 0 }
+  let lastShiftSummary: ShiftSummary | null = null
+
   const emit = () => {
-    opts.phone.setStatusChip(`$${profile.cash.toFixed(0)}`)
+    opts.phone.setStatusChip(shift.active ? `● $${profile.cash.toFixed(0)}` : `$${profile.cash.toFixed(0)}`)
     for (const fn of listeners) fn()
+  }
+
+  /** DoorSmash notifications ONLY fire while the driver is signed into an active shift. */
+  const notifyDriver = (n: PhoneNotification) => {
+    if (!shift.active || !opts.engaged()) return
+    opts.phone.notify(n)
   }
 
   let offers: DeliveryOrder[] = []
@@ -625,22 +817,85 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     return fb[Math.floor(rand() * fb.length)]
   }
 
-  const pickDropoffFrom = (sx: number, sz: number): { x: number; z: number; address: string; seed: number } => {
+  const pickDropoffFrom = (sx: number, sz: number): DeliveryOrder['dropoff'] => {
+    // 1. Prefer real building storefronts / entrances from SF places.json (stepped 1.4 m onto their front sidewalk!)
+    const payload = opts.places()
+    if (payload?.shops.length && rand() < 0.62) {
+      const candidates: RawShop[] = []
+      for (const s of payload.shops) {
+        const d = Math.hypot(s.x - sx, s.z - sz)
+        if (d >= 190 && d <= 760) candidates.push(s)
+      }
+      if (candidates.length) {
+        const picked = candidates[Math.floor(rand() * candidates.length)]
+        const nx = picked.nx || 1
+        const nz = picked.nz || 0
+        let tx = picked.x + nx * 1.45
+        let tz = picked.z + nz * 1.45
+        let curbVerified = false
+        const verified = findSidewalkDropoff(opts.land, tx, tz, nx, nz)
+        if (verified) {
+          tx = verified.x
+          tz = verified.z
+          curbVerified = true
+        }
+        const streetName = picked.a || (opts.map()?.data ? snapToRoad(opts.map()!.data!, tx, tz, 80)?.street : '') || 'Columbus Ave'
+        const address = /^\d/.test(streetName) ? streetName : `${100 + Math.floor(rand() * 2600)} ${streetName}`
+        return {
+          x: Math.round(tx * 10) / 10,
+          z: Math.round(tz * 10) / 10,
+          address,
+          seed: Math.floor(rand() * 100_000),
+          roadNx: nx,
+          roadNz: nz,
+          curbVerified,
+        }
+      }
+    }
+
+    // 2. Road-graph dropoff: snap to nearest street, then step OFF the road centerline onto the sidewalk!
     const angle = rand() * Math.PI * 2
     const dist = 210 + rand() * 580
     let tx = sx + Math.cos(angle) * dist
     let tz = sz + Math.sin(angle) * dist
     let address = `${100 + Math.floor(rand() * 2400)} Bay St`
+    let roadNx = Math.cos(angle + Math.PI * 0.5)
+    let roadNz = Math.sin(angle + Math.PI * 0.5)
     const mapData = opts.map()?.data
     if (mapData) {
       const snap = snapToRoad(mapData, tx, tz, 420)
       if (snap) {
-        tx = snap.x
-        tz = snap.z
+        const ea = mapData.edgeA[snap.edge], eb = mapData.edgeB[snap.edge]
+        const dx = mapData.nodes[eb * 2] - mapData.nodes[ea * 2]
+        const dz = mapData.nodes[eb * 2 + 1] - mapData.nodes[ea * 2 + 1]
+        const elen = Math.hypot(dx, dz) || 1
+        const sign = rand() > 0.5 ? 1 : -1
+        roadNx = (-dz / elen) * sign
+        roadNz = (dx / elen) * sign
+        const cls = (mapData.edgeFlags[snap.edge] >> 2) & 3
+        // Offset laterally past the asphalt lanes onto the sidewalk (residential ~6 m, collector ~7.2 m, arterial ~8.8 m)
+        const curbOffset = cls === 0 ? 6.0 : cls === 1 ? 7.2 : 8.8
+        tx = snap.x + roadNx * curbOffset
+        tz = snap.z + roadNz * curbOffset
         address = `${100 + Math.floor(rand() * 2800)} ${snap.street || 'Columbus Ave'}`
       }
     }
-    return { x: Math.round(tx * 10) / 10, z: Math.round(tz * 10) / 10, address, seed: Math.floor(rand() * 100_000) }
+    let curbVerified = false
+    const verified = findSidewalkDropoff(opts.land, tx, tz, roadNx, roadNz)
+    if (verified) {
+      tx = verified.x
+      tz = verified.z
+      curbVerified = true
+    }
+    return {
+      x: Math.round(tx * 10) / 10,
+      z: Math.round(tz * 10) / 10,
+      address,
+      seed: Math.floor(rand() * 100_000),
+      roadNx,
+      roadNz,
+      curbVerified,
+    }
   }
 
   const syncGpsFromStops = () => {
@@ -770,17 +1025,62 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
       styleNotes: [],
     }
     offers = [order, ...offers].slice(0, MAX_OFFERS)
-    if (opts.engaged()) {
-      opts.phone.notify({
-        appId: 'doorsmash',
-        title: `New ${order.isSupermarket ? 'Shop & Deliver' : 'Order'} · $${(order.basePay + order.upfrontTip).toFixed(2)}`,
-        body: `${order.store.name} → ${order.dropoff.address}${order.upfrontTip > 0 ? ` (+$${order.upfrontTip.toFixed(0)} tip)` : ' (tip after)'}`,
-        accent: order.isSupermarket ? '#38bdf8' : '#ff4d3d',
-        sound: 'order',
-      })
-    }
+    notifyDriver({
+      appId: 'doorsmash',
+      title: `New ${order.isSupermarket ? 'Shop & Deliver' : 'Order'} · $${(order.basePay + order.upfrontTip).toFixed(2)}`,
+      body: `${order.store.name} → ${order.dropoff.address}${order.upfrontTip > 0 ? ` (+$${order.upfrontTip.toFixed(0)} tip)` : ' (tip after)'}`,
+      accent: order.isSupermarket ? '#38bdf8' : '#ff4d3d',
+      sound: 'order',
+    })
     emit()
     return order
+  }
+
+  const startShift = (sOpts?: { focus?: ShiftFocus }): boolean => {
+    const focus = sOpts?.focus ?? shift.focus ?? 'citywide'
+    if (shift.active) {
+      if (shift.focus !== focus) { shift = { ...shift, focus }; emit() }
+      return true
+    }
+    shift = {
+      active: true,
+      focus,
+      startedAt: performance.now(),
+      endedAt: 0,
+      completed: 0,
+      earnings: 0,
+      likes: 0,
+    }
+    lastShiftSummary = null
+    offerSpawnTimer = 6.0
+    sfx('tap')
+    opts.hud.notice('DoorSmash shift started — now receiving offers!', 3000)
+    // Queue an initial offer right away so the driver has immediate work on clock-in
+    const initOpts = focus === 'supermarkets' ? { supermarket: true } : focus === 'restaurants' ? { supermarket: false } : undefined
+    generateOffer(initOpts)
+    emit()
+    return true
+  }
+
+  const endShift = (): ShiftSummary | null => {
+    if (!shift.active) return null
+    const now = performance.now()
+    const summary: ShiftSummary = {
+      focus: shift.focus,
+      durationS: Math.max(1, Math.round((now - shift.startedAt) / 1000)),
+      completed: shift.completed,
+      earnings: Math.round(shift.earnings * 100) / 100,
+      likes: shift.likes,
+      endedAt: now,
+    }
+    shift = { ...shift, active: false, endedAt: now }
+    lastShiftSummary = summary
+    offers = []
+    opts.phone.dismissNotification?.()
+    sfx('tap')
+    opts.hud.notice('Signed off DoorSmash shift — notifications silenced', 2800)
+    emit()
+    return summary
   }
 
   const acceptOffer = (orderId: string): boolean => {
@@ -886,7 +1186,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     const done = order.shoppingList.filter((i) => i.collected).length
     const total = order.shoppingList.length
     if (done === total) {
-      opts.phone.notify({
+      notifyDriver({
         appId: 'doorsmash',
         title: `Cart Complete (${done}/${total})`,
         body: 'Head to Checkout (E) or exit to load your vehicle!',
@@ -895,7 +1195,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
       })
       sfx('cash')
     } else {
-      opts.phone.notify({
+      notifyDriver({
         appId: 'doorsmash',
         title: `Auto-Bought (${done}/${total})`,
         body: `${item.name} added to cart`,
@@ -957,7 +1257,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     const hasUnsealed = cargo.itemsForOrder(order.id).some((i) => i.isLiquid && !i.sealed)
     const hasLoose = cargo.itemsForOrder(order.id).some((i) => i.x === null)
     const warn = hasUnsealed ? 'Seal soup/drink lids in Cargo!' : hasLoose ? 'Cargo full — pack loose items!' : 'Follow GPS to drop-off'
-    opts.phone.notify({
+    notifyDriver({
       appId: 'doorsmash',
       title: `Picked Up · ${order.store.name} (${order.code})`,
       body: warn,
@@ -1134,13 +1434,21 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     profile.ratingCount++
     profile.likes += likesEarned
     profile.completed++
+    if (shift.active) {
+      shift = {
+        ...shift,
+        completed: shift.completed + 1,
+        earnings: Math.round((shift.earnings + totalPay) * 100) / 100,
+        likes: shift.likes + likesEarned,
+      }
+    }
     profile.recentReceipts = [receipt, ...profile.recentReceipts].slice(0, 12)
     lastReceipt = receipt
     saveProfile(profile)
 
     sfx(likesEarned > 0 ? 'likes' : 'finger')
     if (totalPay > 0) sfx('cash')
-    opts.phone.notify({
+    notifyDriver({
       appId: 'doorsmash',
       title: `Delivered! +$${totalPay.toFixed(2)} · ${starsEarned.toFixed(1)}★`,
       body: likesEarned > 0 ? `+${likesEarned} 👍 Likes from ${order.customerName}! ${review}` : review,
@@ -1213,7 +1521,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
         atMs: now,
       })
       order.unreadChat++
-      opts.phone.notify({
+      notifyDriver({
         appId: 'doorsmash',
         title: `${order.customerName} is furious!`,
         body: `You ate their ${item.name}! Send 🖕 or deliver the crumbs?`,
@@ -1350,7 +1658,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     const tip = HANGOUT_TIPS[Math.floor(rand() * HANGOUT_TIPS.length)]
     sfx('likes')
     opts.hud.notice(`👍 +${bonusLikes} Likes with fellow couriers! "${tip}"`, 4800)
-    if (offers.length < MAX_OFFERS) generateOffer()
+    if (shift.active && offers.length < MAX_OFFERS) generateOffer()
     emit()
     return { likes: bonusLikes, tip }
   }
@@ -1402,17 +1710,47 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     const now = performance.now()
     const p = opts.player()
 
-    // 1. Auto-dispatch new offers periodically when slots are open
-    offers = offers.filter((o) => o.offerExpiresAt > now)
-    offerSpawnTimer -= dt
-    if (offerSpawnTimer <= 0 && offers.length < 3) {
-      generateOffer()
-      offerSpawnTimer = 14 + rand() * 12
+    // 1. Auto-dispatch new offers periodically ONLY while signed into an active shift!
+    if (shift.active) {
+      offers = offers.filter((o) => o.offerExpiresAt > now)
+      offerSpawnTimer -= dt
+      if (offerSpawnTimer <= 0 && offers.length < 3) {
+        const focusOpts = shift.focus === 'supermarkets' ? { supermarket: true } : shift.focus === 'restaurants' ? { supermarket: false } : undefined
+        generateOffer(focusOpts)
+        offerSpawnTimer = 14 + rand() * 12
+      }
+    } else if (offers.length) {
+      offers = []
     }
 
-    // 2. Step active orders: restaurant delay countdowns + timed customer follow-up texts!
+    // 2. Step active orders: live sidewalk curb-verification once terrain tiles stream in, delay countdowns & follow-up texts!
     let changed = false
+    let stopsMoved = false
     for (const ord of activeOrders) {
+      // Once near the dropoff (tiles loaded), verify the customer stands on a real sidewalk — NEVER in the middle of the road!
+      if (!ord.dropoff.curbVerified && Math.hypot(ord.dropoff.x - p.x, ord.dropoff.z - p.z) < 165) {
+        const verified = findSidewalkDropoff(opts.land, ord.dropoff.x, ord.dropoff.z, ord.dropoff.roadNx ?? 1, ord.dropoff.roadNz ?? 0)
+        if (verified) {
+          const movedM = Math.hypot(verified.x - ord.dropoff.x, verified.z - ord.dropoff.z)
+          ord.dropoff.x = verified.x
+          ord.dropoff.z = verified.z
+          ord.dropoff.curbVerified = true
+          const existingBeacon = beaconPieces.get(ord.id)
+          if (existingBeacon) {
+            const gy = opts.land.ground_at(Math.round(verified.x * M), Math.round(verified.z * M))
+            existingBeacon.pos = [verified.x * M, gy, verified.z * M]
+          }
+          if (movedM > 1.5) {
+            for (const st of routeStops) {
+              if (st.orderId === ord.id && st.kind === 'dropoff') {
+                st.x = verified.x
+                st.z = verified.z
+                stopsMoved = true
+              }
+            }
+          }
+        }
+      }
       if ((ord.status === 'accepted' || ord.status === 'waiting_delay') && ord.delayRemaining > 0) {
         const nearStore = opts.interiors.active
           ? opts.interiors.currentPlace?.id === ord.store.id
@@ -1433,7 +1771,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
         ord.followUpAskedAt = now
         ord.chat.push({ id: `fu-${now}`, from: 'customer', text: ord.followUpText, atMs: now })
         ord.unreadChat++
-        opts.phone.notify({
+        notifyDriver({
           appId: 'doorsmash',
           title: `Message from ${ord.customerName}`,
           body: ord.followUpText,
@@ -1451,6 +1789,7 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
         }
       }
     }
+    if (stopsMoved) syncGpsFromStops()
 
     // 3. Detect vehicle dismount -> check double-parking style bonus!
     const ridingNow = !!opts.alive.riding
@@ -1724,7 +2063,10 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
         }
       }
       if (ord.status === 'in_transit' && Math.hypot(ord.dropoff.x - eyeXM, ord.dropoff.z - eyeZM) < 110) {
-        const gy = opts.land.ground_at(Math.round(ord.dropoff.x * M), Math.round(ord.dropoff.z * M))
+        const cx = Math.round(ord.dropoff.x * M), cz = Math.round(ord.dropoff.z * M)
+        const g = opts.land.ground_at(cx, cz)
+        const f = opts.land.feet_at(cx, cz)
+        const gy = f - g > 20 ? g : Math.max(g, f)
         folkBuf.push({
           at: [ord.dropoff.x * M, gy, ord.dropoff.z * M],
           yaw: Math.atan2(eyeXM - ord.dropoff.x, -(eyeZM - ord.dropoff.z)),
@@ -1744,6 +2086,9 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
   return {
     get profile() { return profile },
     get rank() { return driverRankFor(profile.likes, profile.completed) },
+    get onShift() { return shift.active },
+    get shift() { return shift },
+    get lastShiftSummary() { return lastShiftSummary },
     get offers() { return offers },
     get activeOrders() { return activeOrders },
     get routeStops() { return routeStops },
@@ -1756,6 +2101,8 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     get nearbyStore() { return nearbyStore },
     get lastReceipt() { return lastReceipt },
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn) },
+    startShift,
+    endShift,
     generateOffer,
     acceptOffer,
     declineOffer,
@@ -1796,12 +2143,15 @@ export function createDeliveryEngine(opts: DeliveryEngineOptions): DeliveryContr
     resetProgress() {
       profile = defaultProfile()
       saveProfile(profile)
+      shift = { active: false, focus: 'citywide', startedAt: 0, endedAt: 0, completed: 0, earnings: 0, likes: 0 }
+      lastShiftSummary = null
       offers = []
       activeOrders = []
       routeStops = []
       cargo.items = []
       cargo.configure(profile.activeVehicle, profile.upgrades[profile.activeVehicle])
       syncGpsFromStops()
+      opts.phone.dismissNotification?.()
       emit()
     },
   }

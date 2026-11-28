@@ -66,12 +66,12 @@ export async function ground(where, { cache = CACHE, arrive = null } = {}) {
   // The manifest too, from an address: a host that does not give it fails the start here, plainly and in bounded time,
   // not a world's process later. It is then on its way to that process already (`once` holds it a minute).
   const manifest = remote ? new URL(said.manifest ?? '', pointer).href : null
-  const [heroesKept, squares, marks, kerbs, mapBin, listed] = await Promise.all([beside('heroes.json'), beside('marks-squares.bin'), beside('marks.bin'), beside('kerbs.bin'), beside('map.bin'), manifest && (existsSync(keptAt(cache, manifest) ?? '') ? { status: 200 } : fetchOnce(manifest))])
+  const [heroesKept, squares, marks, kerbs, bridges, mapBin, listed] = await Promise.all([beside('heroes.json'), beside('marks-squares.bin'), beside('marks.bin'), beside('kerbs.bin'), beside('bridges.bin'), beside('map.bin'), manifest && (existsSync(keptAt(cache, manifest) ?? '') ? { status: 200 } : fetchOnce(manifest))])
   if (listed && listed.status !== 200) throw new Error(`no release at ${pointer}: its manifest did not come (${listed.status === 503 ? `nothing came in ${FETCH_MOST / 1000} s, or the host could not be reached` : listed.status})`)
   const heroes = heroesKept ?? readFileSync(join(here, 'sf', 'heroes.json'))
   const realm = JSON.parse(readFileSync(join(here, 'sf', 'realm.json'), 'utf8'))
   return {
-    release, pointer, bytes, read, passed, heroes, squares, marks, kerbs, map: mapBin, remote, cache, fetchOnce,
+    release, pointer, bytes, read, passed, heroes, squares, marks, kerbs, bridges, map: mapBin, remote, cache, fetchOnce,
     /** An object the release lists, by its path in the manifest, checked (page/bay.ts `listed`), where this process reads an address's release itself: null till then. */
     listed: null,
     /** Where one arrives: `--arrive x,y,z,yaw`, else the SF realm's own record (sf/realm.json). */

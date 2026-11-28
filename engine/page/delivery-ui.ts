@@ -6,7 +6,7 @@
 //   4. Chat    — Live customer messages with quick replies, custom text, ignore, and send 🖕!
 //   5. Garage  — Buy/equip E-Scooter, Moped, Prius Hybrid, Turbo Hatch + Paints, Lighting & Practical Upgrades + Driver Stars & 👍 Likes!
 import { itemDims, type CargoItem } from './delivery-cargo.ts'
-import type { DeliveryController } from './delivery.ts'
+import type { DeliveryController, ShiftFocus } from './delivery.ts'
 import {
   DELIVERY_LIGHTING,
   DELIVERY_PAINTS,
@@ -241,6 +241,76 @@ const STYLE = /* css */ `
   border-radius: 50%;
   background: #ff3b30;
 }
+
+/* Shift Status Bar & Sign-Up Card */
+.ds-shift-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 11px;
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(52, 211, 153, 0.45);
+}
+.ds-shift-live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font: 700 11px/1.15 -apple-system, system-ui, sans-serif;
+  color: #a7f3d0;
+}
+.ds-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 8px #34d399;
+  flex: none;
+}
+.ds-shift-card {
+  padding: 12px;
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(230, 57, 70, 0.16), rgba(16, 22, 34, 0.72));
+  border: 1px solid rgba(255, 77, 61, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.ds-focus-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.ds-focus-btn {
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(226, 234, 248, 0.84);
+  font: 700 10px/1.15 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  text-align: center;
+}
+.ds-focus-btn.on {
+  background: rgba(255, 77, 61, 0.24);
+  border-color: #ff6b6b;
+  color: #fff;
+}
+
+/* Compact dashboard car-mount scaling when open on mobile while driving */
+[data-panel="phone"].mobile-drive-dock .ds-hdr { padding: 4px 8px 3px; }
+[data-panel="phone"].mobile-drive-dock .ds-title { font-size: 11.5px; }
+[data-panel="phone"].mobile-drive-dock .ds-sub { display: none; }
+[data-panel="phone"].mobile-drive-dock .ds-scroll { padding: 5px 6px; gap: 5px; }
+[data-panel="phone"].mobile-drive-dock .ds-shift-bar { padding: 4px 7px; border-radius: 9px; }
+[data-panel="phone"].mobile-drive-dock .ds-card,
+[data-panel="phone"].mobile-drive-dock .ds-shift-card { padding: 6px 7px; border-radius: 10px; gap: 4px; }
+[data-panel="phone"].mobile-drive-dock .ds-btn { padding: 4px 6px; font-size: 10px; }
+[data-panel="phone"].mobile-drive-dock .ds-tabs { padding: 2px 3px 2px; }
+[data-panel="phone"].mobile-drive-dock .ds-tab { padding: 2.5px 1px; font-size: 8.5px; gap: 1px; }
+[data-panel="phone"].mobile-drive-dock .ds-tab-ic { font-size: 11px; }
 `
 
 const DOORSMASH_ICON = `<svg viewBox="0 0 28 28" width="28" height="28" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15.5c2.2-6 7-8.5 13-8.5 3.6 0 6.5 1.9 7 5.2H4v3.3z" fill="rgba(255,255,255,0.2)"/><path d="M3 18.5h22"/><circle cx="9" cy="21" r="2.1" fill="#fff"/><circle cx="19" cy="21" r="2.1" fill="#fff"/><path d="M12.5 5.5l1.5-2.5"/></svg>`
@@ -255,7 +325,8 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
     order: 1,
     badge: () => {
       const unread = ctrl.activeOrders.reduce((n, o) => n + o.unreadChat, 0)
-      const count = unread + ctrl.offers.length
+      const offerCount = ctrl.onShift ? ctrl.offers.length : 0
+      const count = unread + offerCount
       return count > 0 ? count : null
     },
     mount(container, ctx) {
@@ -269,6 +340,7 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
       let tab: TabId = 'orders'
       let selectedItemId: string | null = null
       let selectedChatOrderId: string | null = null
+      let selectedFocus: ShiftFocus = ctrl.shift.focus ?? 'citywide'
       let shopNotice = ''
 
       const root = document.createElement('div')
@@ -309,7 +381,72 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
         })
       }
 
+      const formatDur = (secs: number) => {
+        const m = Math.floor(secs / 60)
+        const s = Math.floor(secs % 60)
+        return `${m}:${String(s).padStart(2, '0')}`
+      }
+
       const renderOrdersTab = () => {
+        // 0. Shift status bar (when ON shift) OR Sign-Up card (when OFF shift)
+        if (ctrl.onShift) {
+          const sh = ctrl.shift
+          const elapsedS = Math.max(0, Math.round((performance.now() - sh.startedAt) / 1000))
+          const bar = document.createElement('div')
+          bar.className = 'ds-shift-bar'
+          bar.innerHTML = `
+            <div class="ds-shift-live">
+              <span class="ds-live-dot"></span>
+              <span class="ds-shift-meta"></span>
+            </div>
+            <button type="button" class="ds-btn sm danger ds-signoff">Sign Off</button>
+          `
+          bar.querySelector('.ds-shift-meta')!.textContent = `ON SHIFT · ${formatDur(elapsedS)} · $${sh.earnings.toFixed(2)} (${sh.completed})`
+          bar.querySelector('.ds-signoff')!.addEventListener('click', () => {
+            ctrl.endShift()
+            render()
+          })
+          scrollEl.append(bar)
+        } else {
+          if (ctrl.lastShiftSummary && performance.now() - ctrl.lastShiftSummary.endedAt < 120_000) {
+            const sum = ctrl.lastShiftSummary
+            const sc = document.createElement('div')
+            sc.className = 'ds-card receipt'
+            sc.innerHTML = `
+              <div class="ds-row"><span class="ds-name">Shift Signed Off</span><span class="ds-pay">$${sum.earnings.toFixed(2)}</span></div>
+              <div class="ds-meta">${sum.completed} deliver${sum.completed === 1 ? 'y' : 'ies'} · +${sum.likes} 👍 Likes · ${formatDur(sum.durationS)} on shift</div>
+            `
+            scrollEl.append(sc)
+          }
+          const card = document.createElement('div')
+          card.className = 'ds-shift-card'
+          card.innerHTML = `
+            <div class="ds-row">
+              <span class="ds-name">Ready to Deliver?</span>
+              <span class="ds-tag">OFF SHIFT</span>
+            </div>
+            <div class="ds-meta">Sign up for a San Francisco shift to receive live delivery offers and notifications.</div>
+            <div class="ds-focus-row">
+              <button type="button" class="ds-focus-btn ${selectedFocus === 'citywide' ? 'on' : ''}" data-focus="citywide">Citywide</button>
+              <button type="button" class="ds-focus-btn ${selectedFocus === 'restaurants' ? 'on' : ''}" data-focus="restaurants">Food</button>
+              <button type="button" class="ds-focus-btn ${selectedFocus === 'supermarkets' ? 'on' : ''}" data-focus="supermarkets">Markets</button>
+            </div>
+            <button type="button" class="ds-btn primary ds-start-shift">Sign Up &amp; Start Shift</button>
+          `
+          for (const fb of card.querySelectorAll<HTMLButtonElement>('.ds-focus-btn')) {
+            fb.addEventListener('click', () => {
+              selectedFocus = (fb.dataset.focus as ShiftFocus) ?? 'citywide'
+              ctx.sfx('tap')
+              render()
+            })
+          }
+          card.querySelector('.ds-start-shift')!.addEventListener('click', () => {
+            ctrl.startShift({ focus: selectedFocus })
+            render()
+          })
+          scrollEl.append(card)
+        }
+
         // Show latest delivery receipt summary if just finished
         if (ctrl.lastReceipt && performance.now() - ctrl.lastReceipt.atMs < 45_000) {
           const r = ctrl.lastReceipt
@@ -390,7 +527,9 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
           }
         }
 
-        // Incoming offers
+        // Incoming offers (only active & shown while signed into a shift!)
+        if (!ctrl.onShift) return
+
         const oh = document.createElement('div')
         oh.className = 'ds-row'
         oh.innerHTML = `<span class="ds-meta">INCOMING OFFERS (${ctrl.offers.length})</span>`
@@ -398,7 +537,10 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
         findBtn.type = 'button'
         findBtn.className = 'ds-btn sm'
         findBtn.textContent = '+ Ping Orders'
-        findBtn.addEventListener('click', () => ctrl.generateOffer())
+        findBtn.addEventListener('click', () => {
+          const f = ctrl.shift.focus
+          ctrl.generateOffer(f === 'supermarkets' ? { supermarket: true } : f === 'restaurants' ? { supermarket: false } : undefined)
+        })
         oh.append(findBtn)
         scrollEl.append(oh)
 
@@ -487,7 +629,7 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
           for (const it of ord.shoppingList) {
             const r = document.createElement('div')
             r.className = 'ds-row'
-            r.innerHTML = `<span class="ds-meta" style="${it.collected ? 'text-decoration:line-through;opacity:0.55;' : 'color:#f8fafc;'}">Aisle ${it.aisleNumber} (${it.aisleName}): ${it.name}</span><span class="ds-tag ${it.collected ? 'good' : ''}">${it.collected ? '✓ Bought' : 'Need'}</span>`
+            r.innerHTML = `<span class="ds-meta" style="${it.collected ? 'text-decoration:line-through;opacity:0.55;' : 'color:#f8fafc;'}">A${it.aisleNumber} (${it.aisleName}): ${it.name}${it.price ? ` ($${it.price})` : ''}</span><span class="ds-tag ${it.collected ? 'good' : ''}">${it.collected ? '✓ Bought' : 'Need'}</span>`
             sc.append(r)
           }
           scrollEl.append(sc)
@@ -508,7 +650,8 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
           goBtn.textContent = 'GPS'
           goBtn.addEventListener('click', () => {
             ctrl.reorderStop(0, 0)
-            ctx.notify({ appId: 'doorsmash', title: h.name, body: h.hotTip, accent: '#f59e0b', sound: 'tap' })
+            if (ctrl.onShift) ctx.notify({ appId: 'doorsmash', title: h.name, body: h.hotTip, accent: '#f59e0b', sound: 'tap' })
+            else ctx.sfx('tap')
           })
           r.append(goBtn)
           hc.append(r)
@@ -827,23 +970,24 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
 
       const render = () => {
         const p = ctrl.profile
-        subEl.textContent = `${ctrl.rank} · 👍 ${p.likes}`
+        subEl.textContent = `${ctrl.onShift ? '● ON SHIFT' : '○ OFF SHIFT'} · ${ctrl.rank}`
         starEl.textContent = `★ ${p.stars.toFixed(2)}`
         cashEl.textContent = `$${p.cash.toFixed(0)}`
 
         const unread = ctrl.activeOrders.reduce((n, o) => n + o.unreadChat, 0)
+        const offerCount = ctrl.onShift ? ctrl.offers.length : 0
         const warnings = ctrl.cargo.snapshot().warnings.length
         for (const b of tabBtns) {
           const t = b.dataset.tab as TabId
           b.classList.toggle('on', t === tab)
           b.querySelector('.ds-tab-dot')?.remove()
-          if ((t === 'chat' && unread > 0) || (t === 'cargo' && warnings > 0) || (t === 'orders' && ctrl.offers.length > 0)) {
+          if ((t === 'chat' && unread > 0) || (t === 'cargo' && warnings > 0) || (t === 'orders' && offerCount > 0)) {
             const dot = document.createElement('span')
             dot.className = 'ds-tab-dot'
             b.append(dot)
           }
         }
-        ctx.setBadge(unread + ctrl.offers.length || null)
+        ctx.setBadge(unread + offerCount || null)
 
         scrollEl.replaceChildren()
         if (tab === 'orders') renderOrdersTab()
@@ -856,12 +1000,21 @@ export function createDoorSmashApp(ctrl: DeliveryController): PhoneApp {
       const unsub = ctrl.subscribe(render)
       render()
 
+      let tickAcc = 0
       return {
         onShow() { render() },
-        onTick() {
-          // Keep timers fresh in orders tab
-          if (tab === 'orders' && ctrl.activeOrders.length) {
-            // lightweight refresh handled on state changes
+        onTick(dt) {
+          if (tab === 'orders' && ctrl.onShift) {
+            tickAcc += dt
+            if (tickAcc >= 1) {
+              tickAcc = 0
+              const el = scrollEl.querySelector<HTMLElement>('.ds-shift-meta')
+              if (el) {
+                const sh = ctrl.shift
+                const elapsedS = Math.max(0, Math.round((performance.now() - sh.startedAt) / 1000))
+                el.textContent = `ON SHIFT · ${formatDur(elapsedS)} · $${sh.earnings.toFixed(2)} (${sh.completed})`
+              }
+            }
           }
         },
         destroy() {

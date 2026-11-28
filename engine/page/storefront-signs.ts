@@ -493,13 +493,80 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
   const pen = paper.getContext('2d')!
 
   // LRU-like slot allocation: maps sign id -> slot index [0..MAX_SIGNS-1].
+  const MAX_PAINTS_PER_FRAME = 6
   const slotOf = new Map<string, number>()
   const slotOwner: (string | null)[] = Array(MAX_SIGNS).fill(null)
+  const slotPainted: boolean[] = Array(MAX_SIGNS).fill(false)
+  let currentSpecs: readonly SignSpec[] = []
+  let hasPendingPaints = false
   const instData = new Float32Array(MAX_SIGNS * FLOATS_PER_INST)
   const uData = new Float32Array(20)
   let activeCount = 0
   let preparedBind: GPUBindGroup | null = null
   let preparedCount = 0
+
+  const uploadActiveInstances = (paintBudget: number) => {
+    let paintedNow = 0
+    let pending = false
+    let outIdx = 0
+    for (let i = 0; i < currentSpecs.length; i++) {
+      const spec = currentSpecs[i]
+      const slot = slotOf.get(spec.id)
+      if (slot === undefined) continue
+      if (!slotPainted[slot]) {
+        if (paintedNow < paintBudget) {
+          paintSign(pen, spec)
+          const col = slot % COLS
+          const row = Math.floor(slot / COLS)
+          device.queue.copyExternalImageToTexture(
+            { source: paper },
+            { texture: atlas, origin: [col * SLOT_W, row * SLOT_H, 0] },
+            [SLOT_W, SLOT_H],
+          )
+          slotPainted[slot] = true
+          paintedNow++
+        } else {
+          pending = true
+          continue
+        }
+      }
+      const col = slot % COLS
+      const row = Math.floor(slot / COLS)
+      // Inset UV by half a texel so linear filtering never bleeds from neighboring atlas slots.
+      const u0 = (col * SLOT_W + 0.5) / ATLAS_W
+      const v0 = (row * SLOT_H + 0.5) / ATLAS_H
+      const u1 = ((col + 1) * SLOT_W - 0.5) / ATLAS_W
+      const v1 = ((row + 1) * SLOT_H - 0.5) / ATLAS_H
+
+      const o = outIdx * FLOATS_PER_INST
+      instData[o + 0] = spec.at[0]
+      instData[o + 1] = spec.at[1]
+      instData[o + 2] = spec.at[2]
+      instData[o + 3] = spec.style.glow ? 1 : 0
+      instData[o + 4] = spec.hu[0]
+      instData[o + 5] = spec.hu[1]
+      instData[o + 6] = spec.hu[2]
+      instData[o + 7] = spec.both ? 1 : 0
+      instData[o + 8] = spec.hv[0]
+      instData[o + 9] = spec.hv[1]
+      instData[o + 10] = spec.hv[2]
+      instData[o + 11] = 0
+      instData[o + 12] = spec.normal[0]
+      instData[o + 13] = spec.normal[1]
+      instData[o + 14] = spec.normal[2]
+      instData[o + 15] = 0
+      instData[o + 16] = u0
+      instData[o + 17] = v0
+      instData[o + 18] = u1
+      instData[o + 19] = v1
+      outIdx++
+    }
+    hasPendingPaints = pending
+    activeCount = outIdx
+    if (activeCount > 0) {
+      device.queue.writeBuffer(instances, 0, instData.subarray(0, activeCount * FLOATS_PER_INST))
+    }
+  }
 
   const self: StorefrontSigns = {
     get count() {
@@ -508,6 +575,9 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
     clear() {
       slotOf.clear()
       slotOwner.fill(null)
+      slotPainted.fill(false)
+      currentSpecs = []
+      hasPendingPaints = false
       activeCount = 0
       preparedCount = 0
     },
@@ -520,62 +590,26 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
         if (owner && !wanted.has(owner)) {
           slotOf.delete(owner)
           slotOwner[i] = null
+          slotPainted[i] = false
         }
       }
-      let outIdx = 0
-      for (const spec of capped) {
-        let slot = slotOf.get(spec.id)
-        if (slot === undefined) {
-          slot = slotOwner.indexOf(null)
-          if (slot < 0) continue
-          slotOwner[slot] = spec.id
-          slotOf.set(spec.id, slot)
-          paintSign(pen, spec)
-          const col = slot % COLS
-          const row = Math.floor(slot / COLS)
-          device.queue.copyExternalImageToTexture(
-            { source: paper },
-            { texture: atlas, origin: [col * SLOT_W, row * SLOT_H, 0] },
-            [SLOT_W, SLOT_H],
-          )
-        }
-        const col = slot % COLS
-        const row = Math.floor(slot / COLS)
-        // Inset UV by half a texel so linear filtering never bleeds from neighboring atlas slots.
-        const u0 = (col * SLOT_W + 0.5) / ATLAS_W
-        const v0 = (row * SLOT_H + 0.5) / ATLAS_H
-        const u1 = ((col + 1) * SLOT_W - 0.5) / ATLAS_W
-        const v1 = ((row + 1) * SLOT_H - 0.5) / ATLAS_H
-
-        const o = outIdx * FLOATS_PER_INST
-        instData[o + 0] = spec.at[0]
-        instData[o + 1] = spec.at[1]
-        instData[o + 2] = spec.at[2]
-        instData[o + 3] = spec.style.glow ? 1 : 0
-        instData[o + 4] = spec.hu[0]
-        instData[o + 5] = spec.hu[1]
-        instData[o + 6] = spec.hu[2]
-        instData[o + 7] = spec.both ? 1 : 0
-        instData[o + 8] = spec.hv[0]
-        instData[o + 9] = spec.hv[1]
-        instData[o + 10] = spec.hv[2]
-        instData[o + 11] = 0
-        instData[o + 12] = spec.normal[0]
-        instData[o + 13] = spec.normal[1]
-        instData[o + 14] = spec.normal[2]
-        instData[o + 15] = 0
-        instData[o + 16] = u0
-        instData[o + 17] = v0
-        instData[o + 18] = u1
-        instData[o + 19] = v1
-        outIdx++
+      for (let i = 0; i < capped.length; i++) {
+        const spec = capped[i]
+        if (slotOf.has(spec.id)) continue
+        const slot = slotOwner.indexOf(null)
+        if (slot < 0) continue
+        slotOwner[slot] = spec.id
+        slotOf.set(spec.id, slot)
+        slotPainted[slot] = false
       }
-      activeCount = outIdx
-      if (activeCount > 0) {
-        device.queue.writeBuffer(instances, 0, instData.subarray(0, activeCount * FLOATS_PER_INST))
-      }
+      currentSpecs = capped
+      // Paint up to MAX_PAINTS_PER_FRAME signs per frame so entering a dense retail street never stalls the main thread.
+      uploadActiveInstances(MAX_PAINTS_PER_FRAME)
     },
     prepare(to, view, sun, day, dull, faced = null) {
+      if (hasPendingPaints) {
+        uploadActiveInstances(MAX_PAINTS_PER_FRAME)
+      }
       if (activeCount <= 0) {
         preparedCount = 0
         return false

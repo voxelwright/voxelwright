@@ -82,6 +82,7 @@ const fakeCore = {
   bay_load: () => 1,
   bay_marks: () => 0,
   bay_kerbs: () => 0,
+  bay_bridges: () => 0,
   bay_begin: () => {},
   bay_drop: () => 0,
   bay_hero: () => 1,
@@ -159,6 +160,29 @@ const oppGap = trafficObstacleGap(
   { x: 80, z: 33, hx: -1, hz: 0, long: 22, wide: 10, v: 40, id: 2 },
 )
 check(oppGap === Infinity, `parallel head-on traffic (dot=-1) stays clear (${oppGap})`)
+
+// Regression for feedback anomaly a-3-1ju5: traffic#2022 (heading=0.706, v=142) approaching stationary
+// opposite-facing living#-5 (heading=-2.722, v=0, dot=-0.958) blocking its lane must detect the obstacle and brake.
+{
+  const th = 0.706, lh = -2.722
+  const thx = Math.cos(th), thz = Math.sin(th)
+  const lhx = Math.cos(lh), lhz = Math.sin(lh)
+  const dot = thx * lhx + thz * lhz
+  assert(dot < -0.9, `expected opposite heading dot < -0.9 (got ${dot.toFixed(3)})`)
+  const lx = 520100, lz = 662400
+  const trafficCar = { x: lx - thx * 75, z: lz - thz * 75, hx: thx, hz: thz, halfL: 22, halfW: 10, v: 142, id: 2022 }
+  const crashedLiving = { x: lx, z: lz, hx: lhx, hz: lhz, long: 22, wide: 10, v: 0, alive: true }
+  const gLiving = trafficObstacleGap(trafficCar, crashedLiving)
+  check(Number.isFinite(gLiving) && gLiving > 0 && gLiving < 50, `a-3-1ju5: traffic brakes for opposite-facing stationary living car (gap=${(gLiving / 10).toFixed(2)} m, dot=${dot.toFixed(3)})`)
+  // Moving wrong-way living/player car in the same lane must also be seen.
+  const oncomingLiving = { ...crashedLiving, v: 80 }
+  const gMovingLiving = trafficObstacleGap(trafficCar, oncomingLiving)
+  check(Number.isFinite(gMovingLiving) && gMovingLiving > 0 && gMovingLiving < 50, `a-3-1ju5: traffic brakes for wrong-way moving living car in its lane (gap=${(gMovingLiving / 10).toFixed(2)} m)`)
+  // Opposite-facing stationary living car clear in the adjacent lane (3.5 m lateral) stays Infinity.
+  const adjacentLiving = { x: lx - thz * 35, z: lz + thx * 35, hx: lhx, hz: lhz, long: 22, wide: 10, v: 0, alive: true }
+  const gAdj = trafficObstacleGap(trafficCar, adjacentLiving)
+  check(gAdj === Infinity, `opposite-facing living car clear in adjacent lane stays clear (${gAdj})`)
+}
 
 // Two crossing cars both stopped facing each other obliquely must tie-break cleanly (lower id proceeds, higher id yields).
 const angle = 2.1 // cos(2.1) ≈ -0.50 (oblique crossing)

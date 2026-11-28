@@ -86,6 +86,8 @@ const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
 const RIGHTS = [[0, 0, 1], [0, 0, -1], [-1, 0, 0], [1, 0, 0]] as const
 /** Exponential time constant for smooth mode switches (~0.25s to 95%). */
 const MODE_TAU = 0.082
+/** The widest screen (width over height) the chase cameras are framed for; wider ones bring the chase in. */
+const WIDE_ASPECT = 16 / 9
 /** Horizontal shoulder half-width (cells) for multi-ray anti-clipping. */
 const SHOULDER = 4.5
 /** Cinema shot kinds cycled dynamically. */
@@ -524,8 +526,11 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       const halfLenM = Math.max(visLen, len) * 0.5 / M
       const visTallM = Math.max(visTall, size[1]) / M
       const roofAboveComM = Math.max(size[1] * 0.5, visualBox[4] - size[1] * 0.5) / M
-      const closeBack = (halfLenM + 3.63 + visTallM * 0.55) * (tallScreen ? 1.28 : 1)
-      const farBack = (halfLenM + 4.35 + visTallM * 0.72) * (tallScreen ? 1.28 : 1)
+      // The lens is vertical, so a screen wider than 16:9 (a phone on its side, ~2.17:1) shows more road at each
+      // side and the car shrinks across it: bring the chase in so the car keeps a 16:9 desktop's share of the width.
+      const screenBack = tallScreen ? 1.28 : clamp(WIDE_ASPECT * innerHeight / innerWidth, 0.8, 1)
+      const closeBack = (halfLenM + 3.63 + visTallM * 0.55) * screenBack
+      const farBack = (halfLenM + 4.35 + visTallM * 0.72) * screenBack
       const closeHigh = roofAboveComM + (tallScreen ? 1.12 : 0.90)
       const farHigh = roofAboveComM + (tallScreen ? 1.28 : 1.08)
 

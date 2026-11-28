@@ -213,7 +213,7 @@ async function main() {
     // had the page ask that master and join that server with no click. It asks first now, and says whose it is;
     // until the visitor agrees nothing is sent to either, and the door's code is not fetched.)
     : query.has('lobby') && MASTER && RULES.lobbies === 'preview' && agreed('join') ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
-  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; world_memory_budget?(keeps: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; bay_bridge_y?(x: number, z: number, layer: number): number; world_edit(after: number): void; world_forget(): void; world_memory_budget?(keeps: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; world_under?(x: number, y: number, z: number, depth: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // Open GPU and the page's WASM core in parallel so core compilation overlaps adapter/device creation (#83).
   const [gpu, innerInit] = await Promise.all([openGpu(), open<Core>(new URL('./core.wasm', import.meta.url).href)])
   useFineCore(innerInit)
@@ -949,25 +949,31 @@ async function main() {
   // metre towards the street is open (swept over the start street at 1.5 to 2.5 m: none of the open air counted).
   // Eased over a quarter of a second or so, as eyes take to a room; 0 or 1 once settled.
   let roomed = 0
+  let roomX = NaN, roomY = NaN, roomZ = NaN, roomAt = -1e9, roomCached = false
   const stands = (x: number, y: number, z: number) => { const k = core.world_kind(x, y, z) & 15; return k !== 0 && k !== 5 && k !== 13 }
   const covered = (x: number, y: number, z: number) => { for (let k = 1; k <= 80; k++) if (stands(x, y + k, z)) return true; return false }
   const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]]
   const inRoom = (): boolean => {
     // Asked at one's own head when afoot: the eye behind it is often still in the doorway.
     const f = me.feet, x = Math.floor(f ? f.at[0] : pose.x * M), y = Math.floor(f ? f.at[1] + 16.5 : pose.y * M), z = Math.floor(f ? f.at[2] : pose.z * M)
-    if (!covered(x, y, z)) return false
+    const now = performance.now()
+    if (x === roomX && y === roomY && z === roomZ && now - roomAt < 500) return roomCached
+    // Moving slowly still throttles to ~12 Hz (roomed eases over ~250 ms anyway).
+    if (Math.abs(x - roomX) <= 2 && Math.abs(y - roomY) <= 2 && Math.abs(z - roomZ) <= 2 && now - roomAt < 80) return roomCached
+    roomX = x; roomY = y; roomZ = z; roomAt = now
+    if (!covered(x, y, z)) return (roomCached = false)
     // A side stands if a wall is met along it, straight out or a metre to either hand: so a doorway and a window
     // across from it in line with one do not open the room.
     const side = (dx: number, dz: number) => { for (const o of [0, 10, -10]) for (let k = 1; k <= 80; k++) if (stands(x + dx * k - dz * o, y, z + dz * k + dx * o)) return true; return false }
     let sides = 0
     for (const [dx, dz] of SIDES) if (side(dx, dz)) sides++
-    if (sides < 3) return false
+    if (sides < 3) return (roomCached = false)
     for (const [dx, dz] of SIDES) {
       let k = 1
       while (k <= 10 && !stands(x + dx * k, y, z + dz * k)) k++
-      if (k > 10 && !covered(x + dx * 10, y, z + dz * 10)) return false
+      if (k > 10 && !covered(x + dx * 10, y, z + dz * 10)) return (roomCached = false)
     }
-    return true
+    return (roomCached = true)
   }
   // Not asked of an eye going faster than anyone runs (#73): each cell asked about is asked of the page's own core,
   // which makes the whole sector round it the first time, on this thread. With the eye alone at 180 km/h down Geary
@@ -1636,6 +1642,7 @@ async function main() {
     telemetry?.onPresented(canvas)
     lap('draw')
     over.frame(project, playedHud?.parts())
+    interiorSys?.projectOverlay(project)
     social?.frame()
     if (timed) {
       clock.busy = true
@@ -1970,6 +1977,7 @@ async function main() {
   const smoothKeys = new Map<number, Born>()
   const alive = living({
     body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null },
+    person: (id) => id !== 0 && id === me.id,
     kind: (x, y, z) => core.world_kind(x, y, z),
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },
@@ -2306,6 +2314,7 @@ async function main() {
       if (entryCtrl) await entryCtrl.visit(x, z, name, cam)
       else await classicVisit(x, z, name)
     },
+    interior: () => interiorSys?.indoorMapState() ?? null,
   })
   watchers.add((gap) => {
     mapSys?.frame(gap / 1000)

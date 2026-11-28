@@ -1773,7 +1773,12 @@ impl Bodies {
                 continue;
             }
             let body = &self.list[a];
-            let flags = body.live.is_some() as u32 | if b != NONE && self.list[b].live.is_some() { 2 } else { 0 };
+            let fig_a = body.live.as_ref().is_some_and(|l| l.figure);
+            let fig_b = b != NONE && self.list[b].live.as_ref().is_some_and(|l| l.figure);
+            let flags = body.live.is_some() as u32
+                | if b != NONE && self.list[b].live.is_some() { 2 } else { 0 }
+                | if fig_a { 8 } else { 0 }
+                | if fig_b { 16 } else { 0 };
             found.push((Struck { a: body.id, b: if b == NONE { 0 } else { self.list[b].id }, at: add(body.pos, touch.ra), speed: -touch.closing, push, kinds: [0, 0], flags }, hardest));
         }
         // Only the hardest few of a call are told, so only those of this step that could be among them are finished:
@@ -2535,13 +2540,18 @@ pub mod tests {
         let at = the(&bodies, id).pos;
         bodies.throw_ball([at[0], at[1], at[2] + 40.0], [0.0, 0.0, -300.0], 2, kind(STEEL, OWN));
         let out = run(&mut bodies, 1.0, id, [0.0; 3]);
-        assert!(records(&out, STRUCK).iter().any(|s| s[1] == id || s[0] == id), "a ball that hits a person is told as a blow");
+        assert!(records(&out, STRUCK).iter().any(|s| (s[1] == id || s[0] == id) && (s[9] & 24) != 0), "a ball that hits a person is told as a blow with a figure flag");
         assert!(sub(the(&bodies, id).pos, at)[2] < -1.0, "and moves them: {:?}", sub(the(&bodies, id).pos, at));
         // A car driven into them.
         let other = person(&mut bodies, [X + 120, ground + 5, Z + 7], 45.0);
         let c = car(&mut bodies, [X, ground + 6, Z]);
         let out = run(&mut bodies, 3.0, c, [1.0, 0.0, 0.0]);
-        assert!(records(&out, STRUCK).iter().any(|s| (s[0] == c && s[1] == other) || (s[0] == other && s[1] == c)), "a car that hits a person is told too");
+        assert!(records(&out, STRUCK).iter().any(|s| (s[0] == c && s[1] == other && (s[9] & 16) != 0) || (s[0] == other && s[1] == c && (s[9] & 8) != 0)), "a car that hits a person is told with the figure flag bit");
+        assert!(records(&out, STRUCK).iter().all(|s| {
+            let a_fig = s[0] == id || s[0] == other;
+            let b_fig = s[1] == id || s[1] == other;
+            ((s[9] & 8) != 0) == a_fig && ((s[9] & 16) != 0) == b_fig
+        }), "figure flag bits (8/16) match exactly which side is a person");
         assert!(bodies.list.iter().any(|b| b.id == other && b.live.is_some()), "and the person is still one body");
     }
 

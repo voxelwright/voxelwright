@@ -519,13 +519,13 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   /** Lets a band's buffers go: destroys its face buffer and recycles its sections' uniform slots. */
   const drop = (h: Held) => { h.buffer.destroy(); for (const s of h.sections) blockFree.push(s.slot) }
   // A tile's slots: its bands, then (last) the landing's cut of it.
-  interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; recs: (Rec | null)[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[]; full: boolean }
+  interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; recs: (Rec | null)[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[]; full: boolean; lastD: number; lastSeen: number; anyHeld: boolean }
   const C = bands.length
   const tiles: Tile[] = Object.entries(listing.tiles).map(([key, listed]) => {
     const [x, z] = key.split('_').map(Number)
     const cut = landing?.tiles[key]
     const recs = [...listed, cut ? { ...cut, path: new URL(cut.path, new URL(landing!.base, location.href)).href } : null]
-    return { key, x, z, lo: [x * size, -2000, z * size], hi: [(x + 1) * size, 6000, (z + 1) * size], bounded: false, listed: recs.map(Boolean), recs, held: recs.map(() => null), retry: recs.map(() => 0), fails: recs.map(() => 0), full: false }
+    return { key, x, z, lo: [x * size, -2000, z * size], hi: [(x + 1) * size, 6000, (z + 1) * size], bounded: false, listed: recs.map(Boolean), recs, held: recs.map(() => null), retry: recs.map(() => 0), fails: recs.map(() => 0), full: false, lastD: 0, lastSeen: 0, anyHeld: false }
   })
   const keys = tiles.map((t) => [t.x, t.z])
   const corner: [number, number] = [Math.min(...keys.map((k) => k[0])), Math.min(...keys.map((k) => k[1]))]
@@ -663,15 +663,32 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     stats.coming--
   }
 
-  /** How far a box is from a point, cells. */
-  const away = (eye: readonly number[], lo: readonly number[], hi: readonly number[]) => Math.hypot(...[0, 1, 2].map((a) => Math.max(lo[a] - eye[a], 0, eye[a] - hi[a])))
-  /** Whether a box is anywhere in the view. */
-  const inView = (view: View, aspect: number, lo: readonly number[], hi: readonly number[]) => {
-    const tx = view.tanHalf * aspect * 1.05, ty = view.tanHalf * 1.05, f = view.forward, r = view.right, u = view.up
-    for (const n of [[0, 1, 2].map((i) => f[i] * tx - r[i]), [0, 1, 2].map((i) => f[i] * tx + r[i]), [0, 1, 2].map((i) => f[i] * ty - u[i]), [0, 1, 2].map((i) => f[i] * ty + u[i])]) {
-      let most = 0
-      for (let i = 0; i < 3; i++) most += n[i] * ((n[i] > 0 ? hi[i] : lo[i]) - view.eye[i])
-      if (most < 0) return false
+  /** Zero-allocation scalar AABB distance to eye (cells). */
+  const away = (ex: number, ey: number, ez: number, lo: readonly number[], hi: readonly number[]) => {
+    const dx = ex < lo[0] ? lo[0] - ex : ex > hi[0] ? ex - hi[0] : 0
+    const dy = ey < lo[1] ? lo[1] - ey : ey > hi[1] ? ey - hi[1] : 0
+    const dz = ez < lo[2] ? lo[2] - ez : ez > hi[2] ? ez - hi[2] : 0
+    return Math.hypot(dx, dy, dz)
+  }
+  /** Precomputed 4 side frustum plane normals for the current frame (zero per-tile allocations). */
+  const planes = new Float64Array(12)
+  const setPlanes = (view: View, aspect: number) => {
+    const tx = view.tanHalf * aspect * 1.05, ty = view.tanHalf * 1.05
+    const f0 = view.forward[0], f1 = view.forward[1], f2 = view.forward[2]
+    const r0 = view.right[0], r1 = view.right[1], r2 = view.right[2]
+    const u0 = view.up[0], u1 = view.up[1], u2 = view.up[2]
+    planes[0] = f0 * tx - r0; planes[1] = f1 * tx - r1; planes[2] = f2 * tx - r2
+    planes[3] = f0 * tx + r0; planes[4] = f1 * tx + r1; planes[5] = f2 * tx + r2
+    planes[6] = f0 * ty - u0; planes[7] = f1 * ty - u1; planes[8] = f2 * ty - u2
+    planes[9] = f0 * ty + u0; planes[10] = f1 * ty + u1; planes[11] = f2 * ty + u2
+  }
+  /** Whether an AABB is anywhere in the precomputed view frustum (zero allocations). */
+  const inView = (ex: number, ey: number, ez: number, lo: readonly number[], hi: readonly number[]) => {
+    const l0 = lo[0] - ex, l1 = lo[1] - ey, l2 = lo[2] - ez
+    const h0 = hi[0] - ex, h1 = hi[1] - ey, h2 = hi[2] - ez
+    for (let k = 0; k < 12; k += 3) {
+      const nx = planes[k], ny = planes[k + 1], nz = planes[k + 2]
+      if (nx * (nx > 0 ? h0 : l0) + ny * (ny > 0 ? h1 : l1) + nz * (nz > 0 ? h2 : l2) < 0) return false
     }
     return true
   }
@@ -680,27 +697,46 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
    * screen. A box the eye is in or beside counts as the whole screen.
    */
   const coverage = (view: View, aspect: number, lo: readonly number[], hi: readonly number[]) => {
+    const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
+    const f0 = view.forward[0], f1 = view.forward[1], f2 = view.forward[2]
+    const r0 = view.right[0], r1 = view.right[1], r2 = view.right[2]
+    const u0 = view.up[0], u1 = view.up[1], u2 = view.up[2]
+    const invTx = 1 / (view.tanHalf * aspect), invTy = 1 / view.tanHalf
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
-    for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) {
-      const d = [x - view.eye[0], y - view.eye[1], z - view.eye[2]]
-      const along = d[0] * view.forward[0] + d[1] * view.forward[1] + d[2] * view.forward[2]
-      if (along < 10) return 1
-      const sx = (d[0] * view.right[0] + d[1] * view.right[1] + d[2] * view.right[2]) / (along * view.tanHalf * aspect)
-      const sy = (d[0] * view.up[0] + d[1] * view.up[1] + d[2] * view.up[2]) / (along * view.tanHalf)
-      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
+    for (let ix = 0; ix < 2; ix++) {
+      const dx = (ix ? hi[0] : lo[0]) - ex
+      for (let iy = 0; iy < 2; iy++) {
+        const dy = (iy ? hi[1] : lo[1]) - ey
+        for (let iz = 0; iz < 2; iz++) {
+          const dz = (iz ? hi[2] : lo[2]) - ez
+          const along = dx * f0 + dy * f1 + dz * f2
+          if (along < 10) return 1
+          const inv = 1 / along
+          const sx = (dx * r0 + dy * r1 + dz * r2) * inv * invTx
+          const sy = (dx * u0 + dy * u1 + dz * u2) * inv * invTy
+          if (sx < x0) x0 = sx; if (sx > x1) x1 = sx
+          if (sy < y0) y0 = sy; if (sy > y1) y1 = sy
+        }
+      }
     }
     return (Math.max(0, Math.min(1, x1) - Math.max(-1, x0)) * Math.max(0, Math.min(1, y1) - Math.max(-1, y0))) / 4
   }
-  /** Whether any face of a run that looks `way` (1 up, 2 to 5 the walls) could face the eye: its plane is in front of the eye at some corner of the section's box. */
-  const facing = (way: number, s: Section, eye: readonly number[]) => {
-    if (way === 1) return eye[1] > s.lo[1]
-    const axis = way < 4 ? s.c0 : s.c2, sign = way % 2 ? 1 : -1
-    let most = -Infinity
-    for (const x of [s.lo[0], s.hi[0]]) for (const y of [s.lo[1], s.hi[1]]) for (const z of [s.lo[2], s.hi[2]]) most = Math.max(most, sign * (axis[0] * (eye[0] - x) + axis[1] * (eye[1] - y) + axis[2] * (eye[2] - z)))
-    return most > 0
+  /** Closed-form O(1) visibility check for a face run (maximizes `sign * dot(axis, eye - corner)` over the AABB). */
+  const facing = (way: number, s: Section, ex: number, ey: number, ez: number) => {
+    if (way === 1) return ey > s.lo[1]
+    const axis = way < 4 ? s.c0 : s.c2
+    const sign = way & 1 ? 1 : -1
+    const sx = sign * axis[0], sy = sign * axis[1], sz = sign * axis[2]
+    return sx * (ex - (sx > 0 ? s.lo[0] : s.hi[0]))
+      + sy * (ey - (sy > 0 ? s.lo[1] : s.hi[1]))
+      + sz * (ez - (sz > 0 ? s.lo[2] : s.hi[2])) > 0
   }
-  /** The bands a tile `d` cells off needs: band k holds faces from bands[k] metres, which are `detail` pixels across out to bands[k] * focal / detail. */
-  const needs = (d: number, focal: number, detail: number) => bands.map((least, k) => k === 0 || (d / 10) * detail < bands[k - 1] * focal)
+  const needBuf: boolean[] = new Array(C).fill(false)
+  const fetchBuf: boolean[] = new Array(C + 1).fill(false)
+  const uBuf = new Float32Array(40)
+  const boxBuf = new Float32Array(EDITS * 8)
+  const prevCover = new Uint32Array(128)
+  let coverInit = false, prevReach = -1, prevNear = -1, prevMapX = 0, prevMapZ = 0, prevKept: readonly number[] | null = null, prevEditsSig = ''
   /** Faces held at most, by device class (bay.ts `BUDGETS`: 20 bytes each, 60 MiB on a phone): past this the furthest tiles' finer bands are let go. */
   const BUDGET = bounded(query.get('farfaces'), HELD.faces, 100_000, 20_000_000, true)
   /** The lens (half its height's tangent) the wedge's faces begin nearer through: under 50 degrees, where at 720 pixels tall a cell of the march is over 3 pixels across (the realm's is 25). Not by the picture's own pixels: the page's scale moves with its load, and the foreground would flip between cells and faces. */
@@ -805,20 +841,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const pass = (encoder: GPUCommandEncoder, colours: GPUTextureView[], depth: GPUTextureView, sz: readonly [number, number], allocSz: readonly [number, number], view: View, pipeline: GPURenderPipeline, clear: boolean) => {
     frame++
     const reach = self.reach * 10, aspect = sz[0] / sz[1], focal = sz[1] / (2 * view.tanHalf), eye = view.eye
+    const ex = eye[0], ey = eye[1], ez = eye[2]
+    setPlanes(view, aspect)
     // The march's map of held tiles is 64 a side round the eye's tile (the city is wider than that: 32 km).
-    const map: [number, number] = [Math.floor(eye[0] / size) - 32, Math.floor(eye[2] / size) - 32]
+    const mapX = Math.floor(ex / size) - 32, mapZ = Math.floor(ez / size) - 32
+    const map: [number, number] = [mapX, mapZ]
     const shaded = sunBaked && march.sun.s ? sunBaked[0] * march.sun.s[0] + sunBaked[1] * march.sun.s[1] + sunBaked[2] * march.sun.s[2] > 0.999 : false
-    // What is fetched: for each tile in the view, the landing's cut of it while the eye is there, then every band it
-    // needs, the tiles that cover most of the screen first; then what the tiles out of the view need, nearest first.
-    // Which tiles are whole, for the march. Until the place is first shown, only the landing's cut of the view (or,
-    // away from it or where the listing has none, the first band of the view): on an ordinary link the finer bands
-    // near the eye had taken the wire for seconds while the skyline was still the cells' boxes.
-    const there = !!landing && Math.hypot(eye[0] - landing.eye[0], eye[1] - landing.eye[1], eye[2] - landing.eye[2]) < LANDED
-    // The very view the cut was made for (its eye, its look, its lens or a narrower one, a picture no taller): there it
-    // is the whole picture (#523), and a tile draws it whatever bands it holds, a twentieth of their faces; a tile it has
-    // nothing of shows nothing, and is neither fetched nor left to the cells. Any other view (a wider screen sees past
-    // the faces it kept, a turned eye others, a taller picture finer ones) has every band it needs fetched as well.
-    const exact = there && !!cutLook && sz[1] <= cutTall && view.tanHalf <= cutTan.y && view.tanHalf * aspect <= cutTan.x && Math.hypot(eye[0] - landing!.eye[0], eye[1] - landing!.eye[1], eye[2] - landing!.eye[2]) < 10 && view.forward[0] * cutLook[0] + view.forward[1] * cutLook[1] + view.forward[2] * cutLook[2] > 0.99999
+    const there = !!landing && Math.hypot(ex - landing.eye[0], ey - landing.eye[1], ez - landing.eye[2]) < LANDED
+    const exact = there && !!cutLook && sz[1] <= cutTall && view.tanHalf <= cutTan.y && view.tanHalf * aspect <= cutTan.x && Math.hypot(ex - landing!.eye[0], ey - landing!.eye[1], ez - landing!.eye[2]) < 10 && view.forward[0] * cutLook[0] + view.forward[1] * cutLook[1] + view.forward[2] * cutLook[2] > 0.99999
     const want: { t: Tile; band: number; d: number; seen: number }[] = []
     cover.fill(0)
     whole = true
@@ -826,48 +856,61 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     let held = 0, heldBytes = 0
     /** Whether a tile draws the landing's cut, which holds no face nearer than the reach it was cut for. */
     let onCut = false
-    for (const t of tiles) {
-      const d = away(eye, t.lo, t.hi)
-      const seen = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? coverage(view, aspect, t.lo, t.hi) : 0
-      // Out of sight: past 3 km fetch nothing until the eye turns toward the tile (the march's cells stand in
-      // meanwhile); between 1 km and 3 km keep only band 0 ready so nearby turns stay instant.
-      const need = d >= FURTHEST * 10 || (!seen && d > 30_000) ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
-      let all = true, bandHeld = false
-      for (const [k, h] of t.held.entries()) {
-        if (k === C || !t.listed[k]) continue
-        if (need[k] && (h === null || h === 'coming')) all = false
+    const furthCells = FURTHEST * 10
+    const detailOver10 = self.detail / 10
+    const nowPerf = performance.now()
+    for (let ti = 0; ti < tiles.length; ti++) {
+      const t = tiles[ti]
+      const d = away(ex, ey, ez, t.lo, t.hi)
+      const seen = d < furthCells && inView(ex, ey, ez, t.lo, t.hi) ? coverage(view, aspect, t.lo, t.hi) : 0
+      t.lastD = d
+      t.lastSeen = seen
+      if (d >= furthCells || (!seen && d > 30_000)) {
+        for (let k = 0; k < C; k++) needBuf[k] = false
+      } else if (d > 10_000 && !seen) {
+        for (let k = 0; k < C; k++) needBuf[k] = k === 0
+      } else {
+        const dDetail = d * detailOver10
+        for (let k = 0; k < C; k++) needBuf[k] = k === 0 || dDetail < bands[k - 1] * focal
+      }
+      let all = true, bandHeld = false, anyHeld = false
+      for (let k = 0; k < C; k++) {
+        const h = t.held[k]
+        if (h && h !== 'coming') anyHeld = true
+        if (!t.listed[k]) continue
+        if (needBuf[k] && (h === null || h === 'coming')) all = false
         if (h && h !== 'coming') {
           held += h.bytes / 20; heldBytes += h.bytes
-          if (need[k]) { h.used = frame; bandHeld = true }
+          if (needBuf[k]) { h.used = frame; bandHeld = true }
         }
       }
       t.full = all
       // The landing's cut is let go once every band the tile needs is here and the view is not the cut's own, or the eye has left the landing.
       const cut = t.held[C]
       if (((all && !exact) || !there) && cut && cut !== 'coming') { drop(cut); t.held[C] = null }
-      const cutHeld = (!all || exact) && there && !!cut && cut !== 'coming'
-      if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes; onCut = true }
+      const cutNow = t.held[C]
+      if (cutNow && cutNow !== 'coming') anyHeld = true
+      t.anyHeld = anyHeld
+      const cutHeld = (!all || exact) && there && !!cutNow && cutNow !== 'coming'
+      if (cutHeld) { held += (cutNow as Held).bytes / 20; heldBytes += (cutNow as Held).bytes; onCut = true }
       const cutting = there && t.listed[C]
-      // What it is fetched for now: until `shown`, the cut if the tile is in the view, or else its first band (none of
-      // a tile the cut has nothing of, through its own view); until `left`, every band a tile in the view needs where
-      // the cut is not its whole picture (any view but the cut's own, or a cut that did not come); after, every band it
-      // needs. And the cut while the tile is in the view and not whole.
       const enough = exact && !t.fails[C]
-      const fetch = [...(first ? bands.map((_, k) => k === 0 && !!seen && !cutting && !exact) : landed ? need.map((n) => n && !!seen && (cutting ? !enough : !exact)) : need), !all && !!seen && cutting]
-      for (const [k, h] of t.held.entries()) {
-        if (!fetch[k] || !t.listed[k] || (h !== null && h !== 'coming')) continue
-        if (h === null && performance.now() >= t.retry[k]) want.push({ t, band: k === C ? -1 : k, d, seen })
-        // What the first picture waits on: the cut of the view, each held or asked once and failed.
+      const seenBool = seen > 0
+      for (let k = 0; k < C; k++) {
+        fetchBuf[k] = first ? (k === 0 && seenBool && !cutting && !exact) : landed ? (needBuf[k] && seenBool && (cutting ? !enough : !exact)) : needBuf[k]
+      }
+      fetchBuf[C] = !all && seenBool && cutting
+      for (let k = 0; k <= C; k++) {
+        const h = t.held[k]
+        if (!fetchBuf[k] || !t.listed[k] || (h !== null && h !== 'coming')) continue
+        if (h === null && nowPerf >= t.retry[k]) want.push({ t, band: k === C ? -1 : k, d, seen })
         if (k === C && first && (h === 'coming' || !t.fails[k])) short = true
       }
-      // (Through the cut's own view, the cut is a tile's whole, and a tile it has nothing of shows nothing.)
       const hidden = exact && !t.listed[C]
-      if (!all && !(exact && cutHeld) && !hidden && seen) whole = false
-      // A cut taken from another angle, a missing band, an unfetched out-of-view tile past 3 km (`bandHeld === false`),
-      // or a tile touched only by the edge of the survey can add visible faces without replacing the coarse terrain behind them.
+      if (!all && !(exact && cutHeld) && !hidden && seenBool) whole = false
       const replaces = (all && bandHeld) || (exact && (cutHeld || hidden))
-      if (replaces && d < FURTHEST * 10 && !changed.has(t.key) && owned.has(t.key)) {
-        const bx = t.x - map[0], bz = t.z - map[1]
+      if (replaces && d < furthCells && !changed.has(t.key) && owned.has(t.key)) {
+        const bx = t.x - mapX, bz = t.z - mapZ
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
       }
     }
@@ -888,7 +931,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       for (const e of loose) { if (held <= BUDGET * 0.9) break; drop(e.h); e.t.held[e.k] = null; held -= e.h.bytes / 20; heldBytes -= e.h.bytes }
       if (held > BUDGET * 1.05) {
         const finer = tiles.flatMap((t) => {
-          const d = away(eye, t.lo, t.hi), vis = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? 1 : 0
+          const d = t.lastD, vis = t.lastSeen > 0 ? 1 : 0
           return t.held.map((h, k) => ({ t, h, k, d, vis }))
         }).filter((e) => e.k > 0 && e.k < C && e.h && e.h !== 'coming') as { t: Tile; h: Held; k: number; d: number; vis: number }[]
         finer.sort((a, b) => a.vis - b.vis || b.k - a.k || b.d - a.d)
@@ -898,21 +941,52 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     stats.held = held; stats.heldBytes = heldBytes
     // The faces' light was read off a clear afternoon: it is theirs as far as the day is clear (the march's own overcast).
     const fair = Math.max(0, Math.min(1, march.day)) * (1 - Math.max(march.rain, march.cloud, 0.2 * march.fog))
-    // The wedge (HANDOVER): for the march from the frame's corner, here from the eye (where a face is measured from).
-    // While a tile draws the landing's cut, no nearer than the reach the cut was made for: nearer it has no faces.
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut || exact ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
-    // Fade the fitted colour as the eye or lens leaves the calibrated panorama.
-    const photoFit = w && cutTan.y < NARROW ? fair * Math.max(0, 1 - Math.hypot(eye[0] - w.at[0], eye[2] - w.at[1]) / LANDED)
+    const photoFit = w && cutTan.y < NARROW ? fair * Math.max(0, 1 - Math.hypot(ex - w.at[0], ez - w.at[1]) / LANDED)
       * Math.min(1, Math.max(0, (NARROW - view.tanHalf) / (NARROW - cutTan.y))) : 0
     if (!clear) handed = { reach, wedge }
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, photoFit, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
-    const boxes = new Float32Array(EDITS * 8)
-    for (const [i, e] of edits.entries()) boxes.set([e[0] - eye[0], e[1] - eye[1], e[2] - eye[2], 0, e[3] - eye[0], e[4] - eye[1], e[5] - eye[2], 1], i * 8)
-    device.queue.writeBuffer(uniforms, 160, boxes)
-    const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}:${kept}:${edits.join(';')}`
-    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge, kept, edits.map((e) => [...e])); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
+    uBuf[0] = ex - anchor[0]; uBuf[1] = ey - anchor[1]; uBuf[2] = ez - anchor[2]; uBuf[3] = view.tanHalf
+    uBuf[4] = view.right[0]; uBuf[5] = view.right[1]; uBuf[6] = view.right[2]; uBuf[7] = aspect
+    uBuf[8] = view.up[0]; uBuf[9] = view.up[1]; uBuf[10] = view.up[2]; uBuf[11] = reach
+    uBuf[12] = view.forward[0]; uBuf[13] = view.forward[1]; uBuf[14] = view.forward[2]; uBuf[15] = shaded ? 1 : 0
+    uBuf[16] = march.sun.s[0]; uBuf[17] = march.sun.s[1]; uBuf[18] = march.sun.s[2]; uBuf[19] = (2 * view.tanHalf) / sz[1]
+    if (wedge) {
+      uBuf[20] = wedge[0] - ex; uBuf[21] = wedge[1] - ez; uBuf[22] = wedge[2]; uBuf[23] = wedge[3]
+      uBuf[24] = wedge[4]; uBuf[25] = wedge[5]; uBuf[26] = 0; uBuf[27] = 0
+    } else {
+      uBuf[20] = 0; uBuf[21] = 0; uBuf[22] = 0; uBuf[23] = 0; uBuf[24] = 0; uBuf[25] = 0; uBuf[26] = 0; uBuf[27] = 0
+    }
+    uBuf[28] = 1 + (light.fill - 1) * fair; uBuf[29] = 1 + (light.gain - 1) * fair; uBuf[30] = photoFit; uBuf[31] = 0
+    if (kept && wedge) {
+      uBuf[32] = kept[0] - ex; uBuf[33] = kept[1] - ey; uBuf[34] = kept[2] - ez; uBuf[35] = 0
+      uBuf[36] = kept[3] - ex; uBuf[37] = kept[4] - ey; uBuf[38] = kept[5] - ez; uBuf[39] = 1
+    } else {
+      uBuf[32] = 0; uBuf[33] = 0; uBuf[34] = 0; uBuf[35] = 0; uBuf[36] = 0; uBuf[37] = 0; uBuf[38] = 0; uBuf[39] = 0
+    }
+    device.queue.writeBuffer(uniforms, 0, uBuf)
+    boxBuf.fill(0)
+    for (let i = 0; i < edits.length; i++) {
+      const e = edits[i], o = i * 8
+      boxBuf[o] = e[0] - ex; boxBuf[o + 1] = e[1] - ey; boxBuf[o + 2] = e[2] - ez; boxBuf[o + 3] = 0
+      boxBuf[o + 4] = e[3] - ex; boxBuf[o + 5] = e[4] - ey; boxBuf[o + 6] = e[5] - ez; boxBuf[o + 7] = 1
+    }
+    device.queue.writeBuffer(uniforms, 160, boxBuf)
+    const wedgeNear = wedge ? near : 0
+    const editsSig = edits.length ? edits.join(';') : ''
+    let coverDirty = !coverInit || reach !== prevReach || wedgeNear !== prevNear || mapX !== prevMapX || mapZ !== prevMapZ || kept !== prevKept || editsSig !== prevEditsSig
+    if (!coverDirty) {
+      for (let i = 0; i < 128; i++) if (cover[i] !== prevCover[i]) { coverDirty = true; break }
+    }
+    if (coverDirty) {
+      coverInit = true; prevReach = reach; prevNear = wedgeNear; prevMapX = mapX; prevMapZ = mapZ; prevKept = kept; prevEditsSig = editsSig
+      prevCover.set(cover)
+      march.farCover(map, size, reach, cover, wedge, kept, edits.map((e) => [...e]))
+      let cnt = 0
+      for (let i = 0; i < 128; i++) { for (let v = cover[i]; v; v &= v - 1) cnt++ }
+      stats.covered = cnt
+    }
 
     let bind = viewBinds.get(depth)
     if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }, { binding: 4, resource: march.screen.view }, { binding: 5, resource: { buffer: lockerTable } }] }); viewBinds.set(depth, bind) }
@@ -926,33 +1000,44 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     out.setPipeline(pipeline)
     out.setBindGroup(0, bind)
     let faces = 0, sections = 0, drawn = 0
-    for (const t of tiles) {
-      if (!t.held.some((h) => h && h !== 'coming') || changed.has(t.key)) continue
-      const d = away(eye, t.lo, t.hi)
-      if (d > FURTHEST * 10 || !inView(view, aspect, t.lo, t.hi)) continue
-      // A tile wholly within the reach (the wedge's, where there is one) is the cells'.
-      const furthest = Math.hypot(...[0, 1, 2].map((a) => Math.max(Math.abs(t.lo[a] - eye[a]), Math.abs(t.hi[a] - eye[a]))))
-      if (furthest < (wedge ? near : reach)) continue
-      // A tile not yet whole, or seen through the cut's own view, draws the landing's cut where it has it, else what
-      // bands it has; seen through the cut's own view, a tile the cut has nothing of draws nothing.
+    const cutReach = wedge ? near : reach
+    const inv10Focal = self.detail / (10 * focal)
+    for (let ti = 0; ti < tiles.length; ti++) {
+      const t = tiles[ti]
+      if (!t.anyHeld || t.lastSeen <= 0 || t.lastD > furthCells || changed.has(t.key)) continue
+      const fdx = Math.max(Math.abs(t.lo[0] - ex), Math.abs(t.hi[0] - ex))
+      const fdy = Math.max(Math.abs(t.lo[1] - ey), Math.abs(t.hi[1] - ey))
+      const fdz = Math.max(Math.abs(t.lo[2] - ez), Math.abs(t.hi[2] - ez))
+      if (Math.hypot(fdx, fdy, fdz) < cutReach) continue
       const cut = t.held[C]
       if (exact && !t.listed[C]) continue
       drawn++
-      for (const h of (!t.full || exact) && cut && cut !== 'coming' ? [cut] : t.held.slice(0, C)) {
+      const useCut = (!t.full || exact) && cut && cut !== 'coming'
+      const kFrom = useCut ? C : 0
+      const kTo = useCut ? C + 1 : C
+      for (let bk = kFrom; bk < kTo; bk++) {
+        const h = t.held[bk]
         if (!h || h === 'coming') continue
         out.setVertexBuffer(0, h.buffer)
-        for (const { s, slot } of h.sections) {
-          const sf = Math.hypot(Math.max(Math.abs(s.lo[0] - eye[0]), Math.abs(s.hi[0] - eye[0])), Math.max(Math.abs(s.lo[1] - eye[1]), Math.abs(s.hi[1] - eye[1])), Math.max(Math.abs(s.lo[2] - eye[2]), Math.abs(s.hi[2] - eye[2])))
-          if (sf < (wedge ? near : reach)) continue
-          const ds = away(eye, s.lo, s.hi)
-          if (!inView(view, aspect, s.lo, s.hi)) continue
-          const least = (self.detail * ds) / 10 / focal
-          // lods run from big to small: every face at least the first of them under `least` metres.
-          const k = s.layer === 'hero' ? -1 : lods.findIndex((l) => l <= least)
+        const secs = h.sections
+        for (let si = 0; si < secs.length; si++) {
+          const { s, slot } = secs[si]
+          const sfx = Math.max(Math.abs(s.lo[0] - ex), Math.abs(s.hi[0] - ex))
+          const sfy = Math.max(Math.abs(s.lo[1] - ey), Math.abs(s.hi[1] - ey))
+          const sfz = Math.max(Math.abs(s.lo[2] - ez), Math.abs(s.hi[2] - ez))
+          if (Math.hypot(sfx, sfy, sfz) < cutReach) continue
+          if (!inView(ex, ey, ez, s.lo, s.hi)) continue
+          const ds = away(ex, ey, ez, s.lo, s.hi)
+          const least = ds * inv10Focal
+          let k = -1
+          if (s.layer !== 'hero') {
+            for (let li = 0; li < lods.length; li++) if (lods[li] <= least) { k = li; break }
+          }
           let bound = false
-          for (const run of s.runs) {
-            // A run of faces all looking away from the eye (it is behind their plane at every corner of the section) is not drawn.
-            if (!facing(run.way, s, eye)) continue
+          const runs = s.runs
+          for (let ri = 0; ri < runs.length; ri++) {
+            const run = runs[ri]
+            if (!facing(run.way, s, ex, ey, ez)) continue
             const count = k < 0 ? run.count : run.lods[k]
             if (!count) continue
             if (!bound) { out.setBindGroup(1, blockBind, [slot * blockStride]); bound = true }
