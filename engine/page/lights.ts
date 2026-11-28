@@ -19,6 +19,7 @@
 //                 diffuse + clearcoat specular + wet asphalt streaks + 2-tap level-1 world occlusion in march.ts
 //                 (compiled only on High via LOCAL_OCCLUDE, skipped on mirror/through-pane rays and past 60 m).
 import type { View } from './march.ts'
+import type { FroxelFogPass } from './froxel-fog.ts'
 import {
   CLUSTER_COUNT,
   CLUSTER_LIGHTS_WGSL,
@@ -154,6 +155,8 @@ export interface LocalLights extends LocalLightSink {
   ): void
   /** Prioritizes collected lights into the preset budget, builds the 8x8 XZ tile bitmask, and uploads to the GPU. */
   finishFrame(): void
+  /** Feeds up to `maxLights` (default 64) nearest prioritized local lights into a 3D froxel fog volume with zero GC. */
+  feedFroxel(froxel: FroxelFogPass, maxLights?: number): void
   /** Clears all active lights (e.g. daytime with nothing active, space view, or `off.has('lights')`). */
   clear(): void
 }
@@ -908,6 +911,31 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       stats.total = n; stats.car = carN; stats.street = streetN; stats.extra = extraN
       // Upload header + 8x8 tile masks + active lights only (never copies unused tail slots).
       device.queue.writeBuffer(buffer, 0, raw, 0, (itemsBase + n * LIGHT_FLOATS) * 4)
+    },
+    feedFroxel(froxel, maxLights = 64) {
+      froxel.beginLights()
+      if (activeCount <= 0) return
+      const limit = Math.min(activeCount, Math.max(0, maxLights))
+      for (let i = 0; i < limit; i++) {
+        const ci = mergedIdx[i]
+        const o = ci * CAND_STRIDE
+        const kind = candKind[ci]
+        const px = candF32[o], py = candF32[o + 1], pz = candF32[o + 2]
+        const dx = candF32[o + 3], dy = candF32[o + 4], dz = candF32[o + 5]
+        const cr = candF32[o + 6], cg = candF32[o + 7], cb = candF32[o + 8]
+        const range = candF32[o + 9]
+        const dHalf = candF32[o + 10]
+        const cosOuter = candF32[o + 11]
+        const cosInner = candF32[o + 12]
+        const isHeadlight = kind === LIGHT_CAR && cosOuter > 0.3
+        const aniso = isHeadlight ? 0.72 : kind === LIGHT_CAR ? 0.56 : kind === LIGHT_STREET ? 0.50 : 0.45
+        const volScale = isHeadlight ? 1.45 : kind === LIGHT_CAR ? 0.72 : kind === LIGHT_STREET ? 0.85 : 0.95
+        if (cosOuter < -1.5) {
+          froxel.addPoint(px, py, pz, cr, cg, cb, range, dHalf, aniso, volScale)
+        } else {
+          froxel.addSpot(px, py, pz, dx, dy, dz, cr, cg, cb, range, cosOuter, cosInner, dHalf, aniso, volScale)
+        }
+      }
     },
   }
   return self

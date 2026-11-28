@@ -124,7 +124,7 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
   let room = 1, wasHead: [number, number, number] | null = null
   // Smooth mode-switch blended parameters (metres & radians).
   let blendReady = false
-  let curFwdOff = -5.4, curUpOff = 1.25, curPitch = -0.072, curFovBias = 0, curMountMix = 0
+  let curFwdOff = -6.45, curUpOff = 1.70, curPitch = -0.105, curFovBias = 0, curMountMix = 0
   // Instant look-back (X) state: 1 while held, decays smoothly to 0 on release.
   let lookBackBlend = 0
   // SF hill stunt air-cam state.
@@ -524,9 +524,9 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
       const halfLenM = Math.max(visLen, len) * 0.5 / M
       const visTallM = Math.max(visTall, size[1]) / M
       const roofAboveComM = Math.max(size[1] * 0.5, visualBox[4] - size[1] * 0.5) / M
-      const closeBack = (halfLenM + 2.55 + visTallM * 0.55) * (tallScreen ? 1.28 : 1)
+      const closeBack = (halfLenM + 3.63 + visTallM * 0.55) * (tallScreen ? 1.28 : 1)
       const farBack = (halfLenM + 4.35 + visTallM * 0.72) * (tallScreen ? 1.28 : 1)
-      const closeHigh = roofAboveComM + (tallScreen ? 0.72 : 0.50)
+      const closeHigh = roofAboveComM + (tallScreen ? 1.12 : 0.90)
       const farHigh = roofAboveComM + (tallScreen ? 1.28 : 1.08)
 
       // Air-cam framing adjustments for chase cameras: widen back, tilt slightly lower/wider over SF skyline.
@@ -560,7 +560,7 @@ export function createDriveCam(deps: DriveCamDeps): DriveCam {
         // 'close' (and cinema look-back fallback, and a seat that cannot be placed)
         targetFwdOff = -(closeBack + camPull + airBack)
         targetUpOff = closeHigh - airDrop
-        targetBasePitch = (tallScreen ? -0.115 : -0.072) + camHill + airPitch
+        targetBasePitch = (tallScreen ? -0.145 : -0.105) + camHill + airPitch
         targetFovBias = airFov
         targetMountMix = 0
       }
