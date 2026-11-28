@@ -20,6 +20,7 @@ pub mod joints;
 pub mod kinds;
 pub mod land;
 pub mod melee;
+mod melee_ffi;
 pub mod nav;
 pub mod perception;
 pub mod ragdoll;
