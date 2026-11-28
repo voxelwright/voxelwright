@@ -29,6 +29,7 @@ pub mod sports;
 pub mod support;
 pub mod tree;
 pub mod water;
+mod water_ffi;
 
 use scratch::Scratch;
 use std::cell::RefCell;
