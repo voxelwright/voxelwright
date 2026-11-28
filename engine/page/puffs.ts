@@ -10,8 +10,10 @@ import { crashOpening } from './crash-opening.ts'
 import type { Piece } from './pieces.ts'
 import { deformPointCpu, type DeformState } from './deform.ts'
 import { SmokeGrid, SMOKE_CELL_SIZE, type SmokeBounds, type SolidSampler } from './smoke-grid.ts'
+import { createBillows, type Billows } from './billows.ts'
 
 export { SmokeGrid, SMOKE_CELL_SIZE, type SmokeBounds, type SolidSampler }
+export type { Billows }
 
 type Point = [number, number, number]
 function rotate(point: Point, rotation: Piece['rot'], inverse = false): Point {
@@ -351,6 +353,14 @@ export interface Puffs {
   refreshSmokeSolids(bounds?: SmokeBounds): void
   /** Direct access to the internal 32^3 `SmokeGrid` when a solid sampler is attached (null otherwise). */
   readonly smokeGrid: SmokeGrid | null
+  /** Solid toroidal-roll explosion billows & close-range 3D flame tongues renderer (#226). */
+  readonly billows: Billows
+  /** Enables or disables solid explosion billows & 3D flame tongues (defaults to true unless `?billows=0`). */
+  billowsEnabled: boolean
+  /** Sets absolute simulation clock in seconds for Time Rewind (`age = clock - born`). */
+  setClock(t: number): void
+  /** Current simulation clock in seconds. */
+  readonly clock: number
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -361,7 +371,11 @@ export interface Puffs {
 }
 
 export async function puffs(device: GPUDevice, format: GPUTextureFormat, march?: Marcher): Promise<Puffs> {
-  const module = await shader(device, 'puffs', CODE)
+  const [module, billowsInst] = await Promise.all([
+    shader(device, 'puffs', CODE),
+    createBillows(device, format),
+  ])
+  let billowsEnabled = new URLSearchParams(globalThis.location?.search ?? '').get('billows') !== '0'
   const both = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT
   const ownLayout = device.createBindGroupLayout({
     entries: [
@@ -483,6 +497,11 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat, march?:
   return {
     get live() { return live + (grid ? grid.activeCount : 0) },
     get smokeGrid() { return grid },
+    get billows() { return billowsInst },
+    get billowsEnabled() { return billowsEnabled },
+    set billowsEnabled(on: boolean) { billowsEnabled = on },
+    get clock() { return billowsInst.clock },
+    setClock(t) { billowsInst.setClock(t) },
     setSolidSampler(isSolid) {
       solidSampler = isSolid
       if (isSolid) {
@@ -571,6 +590,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat, march?:
         puff(at, r * 1.2, rnd(4, 14), rnd(4, 10), { size: r * rnd(3, 4.4), grow: r * 0.12, life: rnd(70, 110), heat: 0, cool: 0, rise: 4, drag: 6, colour: [pale, pale * 0.97, pale * 0.92], cover: 0.3 })
       }
       feedGrid(at, Math.min(2.4, 0.75 + r * 0.08), 2.2, 18)
+      billowsInst.spawnBlast(at, r)
     },
     dust(at, radius, count, colour) {
       // Thrown out along the ground more than up, and slow to clear: it hangs over where a thing came down for
@@ -602,6 +622,7 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat, march?:
       // And its light on what is near: a dull glow round it, added to the picture.
       if (Math.random() < dt * 0.1) puff(at, 1, 0, 0, { size: rnd(14, 22), grow: 0, life: rnd(0.6, 1.0), heat: 0.11, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
       feedGrid(at, dt * 1.6, 1.5, 10)
+      billowsInst.addFlame(at)
     },
     spray(at, dt) {
       if (Math.random() < dt * 0.9) puff(at, 3, rnd(8, 22), rnd(6, 16), { size: rnd(6, 11), grow: rnd(6, 10), life: rnd(0.9, 1.8), heat: 0, cool: 0, rise: 3, drag: 1.6, colour: [0.86, 0.9, 0.94], cover: 0.3 })
@@ -763,8 +784,13 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat, march?:
         heat[i] = Math.max(0, heat[i] - cool[i] * dt)
       }
       if (grid && solidSampler) grid.step(dt, 6, 0)
+      billowsInst.step(dt)
     },
     draw(encoder, to, view) {
+      // Solid depth-tested explosion billows & close-range 3D flame tongues render before transparent puffs.
+      if (billowsEnabled && billowsInst.hasWork(view.eye)) {
+        billowsInst.draw(encoder, to, view, sun, day)
+      }
       if (grid && solidSampler) grid.recenter(view.eye[0], view.eye[1], view.eye[2], solidSampler)
       const gridActive = !!grid && grid.activeCount > 0
       if (!live && !gridActive) return
