@@ -119,7 +119,7 @@ The shapes are `bar`, `plate`, `bell`, `skin`, `string`, `tube`, `pipe`, `hollow
    - delay: metres / 343 s, so a far blast is heard after it is seen (`travels: false` turns this off);
    - room: more of a far sound goes to the reverb.
 3. **The note is twelve numbers** (`NOTE` in `dsp.ts`): when (in frames of the audio clock), patch id, pitch, size, force, hold time, left gain, right gain, low-pass, room send, bus, and a last slot that marks a piece of something breaking or names a held note.
-4. **Notes go once a frame.** `listen(eye, yaw)` moves the ears and sends everything asked for since. Notes on the play bus (an instrument under your fingers) are sent at once.
+4. **Notes go once a frame.** `listen(eye, yaw)` moves the ears and sends everything asked for since. Notes on the play bus (an instrument under your fingers) and on the head bus (a spell's own sounds) are sent at once.
 
 A held note (`hold()`) has a name, and `release()` lets it go: a tone dies away by its patch, a string or a struck thing is damped. While a held tone sounds, `glide()` bends its pitch and loudness and `place()` moves it. The worklet reports which named notes still sound once a second (`told.named`).
 
@@ -135,7 +135,11 @@ A note starts on one of four fixed pools, chosen by its compiled patch. A fifth 
 | air | 24 | a patch's `air` | noise through a band that sweeps from `from` to `to` |
 | grains | 40 | drops of rain, cracks of fire, bubbles | short chirps the beds start by themselves |
 
-When a pool is full the quietest voice gives way. A voice on the play bus is never taken for the world or the music.
+When a pool is full the quietest voice gives way. A voice on the play bus is never taken for the world or the music, and neither is one on the head bus.
+
+There are four buses (`BUS`): `world`, `music`, `play` and `head`. The head bus is for what is heard inside the head: the Cleave's and Time's own sounds. Three `SET` values act on the world bus alone and never reach the head bus: `worldHush` (0 none to 1 silent), `earMuffle` (a two-pole low-pass in Hz, 20,000 for none) and `hillGain` (how much of the world bus is sent to the hills). All three default to no effect, and with them at their defaults the synthesiser renders the same samples as before they existed.
+
+**The hills** are one delay line a side, fed from the world bus: what is sent comes back 0.71 s later through a 1,250 Hz low-pass, and 0.34 of that goes round again. Their answer returns into the world bus, so it is hushed and dulled with the rest. The line is not run while nothing is sent and it has been silent for two trips.
 
 **Beds** are not patches. Rain, wind, fire, surf, the sea overhead, rubble grinding, and the driven vehicle's engine (with its turbo and boost whine), tyres and road roll are code in `dsp.ts` that runs all the time at a level the page sets through `SET`. Every level is clamped to its own range where it is set (`LEAST` and `MOST`).
 
@@ -146,19 +150,23 @@ flowchart LR
   LP --> MB[music bus]
   LP --> PB[play bus]
   LP --> RS[room send]
+  LP --> HB[head bus]
   B[beds and the driven vehicle] --> WB
   RS --> RM[room: 12 ms pre-delay, four feedback delay lines] --> WB
-  WB --> SUM[sum x master]
+  WB --> HL[hills: 0.71 s, 1,250 Hz low-pass, 0.34 fed back] --> WB
+  WB --> WH[worldHush, then earMuffle low-pass] --> SUM[sum x master]
   MB --> DK[ducked under a loud world, then compressed] --> SUM
   PB --> SUM
   SUM --> MU[muffle low-pass: under the sea, in a car]
-  MU --> DC[DC blocker, 20 Hz]
+  MU --> HS[head bus joins]
+  HB --> HS
+  HS --> DC[DC blocker, 20 Hz]
   DC --> LIM[limiter, 3 ms look-ahead]
   LIM --> CL[hard stop at CEILING]
   CL --> OUT[left and right out]
 ```
 
-The limiter's look-ahead is why a key on an instrument leaves the synthesiser 3 ms after it is pressed.
+The limiter's look-ahead is why a key on an instrument leaves the synthesiser 3 ms after it is pressed. The head bus joins after the hush and both low-passes but before the limiter, so nothing on it can pass `CEILING` either.
 
 ## Where the world's sounds come from
 
@@ -166,8 +174,11 @@ The limiter's look-ahead is why a key on an instrument leaves the synthesiser 3 
 
 | What happens | What is heard | Where |
 | --- | --- | --- |
-| A tool is used | the hammer plays the struck material's `HIT` and `BREAK` patches, a charge its `BREAK` alone; the torch, cutter, brick and cannon have their own | `used()` |
-| A blast | a crack for those near and a boom that carries, late by distance. A blast under 8 cells (the hammer) plays nothing here: the hammer is heard through `used()` | `blast()` |
+| A tool is used | the hammer plays the struck material's `HIT` and `BREAK` patches, a charge its `BREAK` alone; the torch, brick and cannon have their own; `Cleave` (and the older `Cutter`) plays `WORLD.cut` on what it met | `used()` |
+| The Cleave, beat by beat | on the head bus: `cleaveAim` as the point is taken out; `cleaveDraw`, one held tone bent up as the stroke lengthens; on release `cleaveStrike` drawn and struck again 127 ms on, with the world bus hushed by 0.92 for 0.42 s; as the cut lands a boom in the head, concrete breaking out in the world, and the hills opened | `cleave(phase, intensity)` |
+| Time stopped or wound back | the world bus hushed by 0.7 and dulled to 380 Hz for as long as it lasts; on the head bus the `rewind` patch as a deep stroke when time stops, a clock once a second while it stands and up to twelve times a second while it is wound back | `rewind(state, speed)` |
+| A blast landing close | the world bus silent for 50 to 300 ms, the ears dull after (down to 700 Hz) and clearing over a few seconds, and the hills opened | `blastHush(strength)` |
+| A blast | a crack for those near and a boom that carries, late by distance; a charge (10 cells and up) also opens the hills, more the nearer and bigger it is, so its boom comes back off them. A blast under 8 cells (the hammer) plays nothing here: the hammer is heard through `used()` | `blast()` |
 | The solver's report | a living thing striking something (`told.struck`, with its speed and material): a person bumping a car or wall is silent at walking speed and plays a muted `bodyBump` when running, while vehicle impacts play damped `carBump`, `carCrunch` at speed and `BREAK.glass` on severe crashes (never ringing `HIT.steel`); loose bodies whose speed changed sharply play their five heaviest blows and fold the rest into the rubble's grinding bed | `told()` |
 | Glass turning to dust | the glass `BREAK` patch | `told()` |
 | Each frame | rain, wind (stronger with height and speed), fire (louder and closer with more flames nearby), surf (the sea looked for in eight directions), the sea overhead | `frame()` |
@@ -178,7 +189,7 @@ The limiter's look-ahead is why a key on an instrument leaves the synthesiser 3 
 | A rule's sound | a kept word or the rule's own patch, placed where the rule says, or following someone | `sounded()`, `follows()` |
 | Someone speaks | a voice, if the page asked for one | `spoke()` |
 
-The world's own patches are in [kinds.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/kinds.ts): `HIT` and `BREAK` for each of the core's materials, and `WORLD` for sounds that are no material's (steps, the blast's crack and boom, tools, vehicle foley). A rule picks from a small kept set of words in [likes.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/likes.ts) (`bell`, `drum`, `horn`, `engine` and others), or sends a patch of its own. How a rule makes a sound, and its limits, is on [Engine plugins](/engine-plugins).
+The world's own patches are in [kinds.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/kinds.ts): `HIT` and `BREAK` for each of the core's materials, and `WORLD` for sounds that are no material's (steps, the blast's crack and boom, tools, vehicle foley, and the Cleave's and Time's `cleaveAim`, `cleaveDraw`, `cleaveStrike` and `rewind`). A rule picks from a small kept set of words in [likes.ts](https://github.com/voxelwright/voxelwright/blob/main/engine/page/sound/likes.ts) (`bell`, `drum`, `horn`, `engine` and others), or sends a patch of its own. How a rule makes a sound, and its limits, is on [Engine plugins](/engine-plugins).
 
 ## Combat, lightsabers, ballistics and tennis
 
