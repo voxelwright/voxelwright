@@ -31,7 +31,8 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Switch between walking and flying | B | Fly / Walk key | D-pad down |
 | Camera behind you or in your head | V | - | R3 or D-pad up |
 | Get in a car, use an egg's thing | E, beside it | Tap its cue | Y / Triangle |
-| Summon a sports coupe | G (not in a shared world) | - | - |
+| Summon a sports coupe | G (not in a shared world, when not facing an NPC) | - | - |
+| Greet, antagonize, defuse or intercept an NPC (within 6 m ahead) | G (Greet), H (Antagonize), F (Defuse after antagonism, or Intercept an active witness) | Tap the contextual prompt buttons | - |
 | **Flying** | | | |
 | Move along the view | W A S D | Left half | Left stick |
 | Up and down | Space, and C or Left Ctrl | Up and Down keys | A / Cross, and B / Circle or LT |
@@ -233,6 +234,8 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
 
+**Social interaction & living-city alerts (`engine/page/social.ts`).** On foot, facing any pedestrian, town resident or shared-world actor within 6 m (`60` cells) inside a 70° forward view cone reveals a compact contextual prompt pill: **G** Greet and **H** Antagonize, plus **F** Defuse after antagonizing someone or **F** Intercept when that actor is an active reporting witness. The prompt stays completely hidden at rest, while driving, typing, in the first view, or with the map or tool wheel open, shifts clear of your character's box if needed, and offers touch-friendly 44 px buttons on phones. In solo San Francisco, barks and 3-step Greet/Antagonize/Defuse exchanges resolve deterministically in 0 ms and appear directly over the pedestrian's head. In a [shared world](/multiplayer), actions sync with `POST /world/social`, reaching a 3rd greeting or high-tension confrontation surfaces a **Talk** (`Enter`) nudge to hand off to free-text conversation, and a subtle top-center status pill polls `GET /world/city` every 2.5 s to show Heat or an active Witness Alert only when `heat > 0` or a witness is reporting (staying invisible while the city is calm).
+
 **Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for the touch driving scheme (below): the steering under one thumb and the pedals under the other. Quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
 
 ### Touch driving
@@ -341,6 +344,34 @@ Q, or the Wand on the tool wheel, takes the wand (`engine/page/wand.ts`). It aim
 
 A click casts the spell in hand, Fireball at first. Typing a spell's words on the ask bar with the wand in hand casts it at once, with no model (`engine/page/spells.ts`): Fireball and Great fireball, a colour ("make it pink"), a material ("turn it to steel"), shiny, and twice, three times or half the size. A change of more than 3,276 rows of cells (`ROWS_MOST`) is sent as several edits. `engine.spell(words)` casts from the console.
 
+## Tennis
+
+The tennis mini-game pairs Voxelwright's 480 Hz sports physics core (`engine/core/src/sports.rs`, built into the core WebAssembly module) with a TypeScript court controller and multiplayer rollback bridge (`engine/page/sports-court.ts`) and modal tennis foley (`engine/page/sound/combat.ts`). A regulation tennis ball is 6.7 cm across (`0.335` cells radius, 57 g, hollow-sphere inertia `α = 2/3`), smaller than one 10 cm world cell, so every `1/120 s` outer physics tick runs four `480 Hz` micro-substeps with exact continuous Time-of-Impact (TOI) swept-sphere collision, coplanar voxel seam welding, Cross/Stepanek aerodynamic drag and Magnus spin, and Cross/Brody slip-to-roll bounce impulses.
+
+### Court presets and ITF dimensions
+
+`TennisCourtController` lays out an ITF-proportioned court in 10 cm cells (`237.7 × 82.3` cells singles, `109.7` cells doubles, service lines `64.0` cells from the net, net height `9.14` cells at the centre strap and `10.7` cells at the posts) and switches between three surface presets:
+
+| Surface | Normal restitution (`e_n`) | Sliding friction (`mu`) | Bounce feel & audio |
+| --- | --- | --- | --- |
+| `hard` | `0.75` | `0.65` | Balanced pace and medium bounce; crisp 268 Hz court thump (`tennisBounce`) |
+| `clay` | `0.80` | `0.85` | High kick, slower forward skid, strong backspin check; warm 226 Hz thump |
+| `grass` | `0.68` | `0.45` | Low skid that preserves forward pace on topspin; damped 192 Hz thump |
+
+### Rackets, rallies and scoring
+
+- **Swept-ellipse rackets**: `swingRacket(side, prevPose, currPose)` submits a moving, rotating elliptic disk prism (`16 cm × 12.5 cm × 1.6 cm`, `1.6 × 1.25 × 0.08` cells) solved via Conservative Advancement so 200+ km/h serves never tunnel. Brushing upward imparts heavy topspin (>200 rad/s) that pulls the ball down via Magnus lift.
+- **Sweet-spot profile & foley**: Apparent restitution peaks at `0.45` in the stringbed centre and drops smoothly to `0.15` at the rim. `TennisCourtController` computes each strike's normalized elliptical offset and drives `combatSound.tennisPop` (clean string pop near centre blending into `tennisFrame` graphite clank off-centre), `combatSound.tennisBounce`, and `combatSound.tennisNet`.
+- **Serves & scoring**: `serve()` launches across the net into the opponent's service box (configurable speed in km/h, topspin RPM, and placement). The controller tracks bounces, net tape/mesh hits, line calls, first/double faults, double-bounces, and standard ITF game scoring (`0`, `15`, `30`, `40`, `Deuce`, `Ad Near` / `Ad Far`, and `Game`, alternating server each game).
+
+### Deterministic multiplayer rollback
+
+`DeterministicRollbackClient` runs local client prediction at `120 Hz` on its own `SportsWasm` WebAssembly instance:
+
+- **Stamped inputs**: `predictTick(localSwing)` stamps outgoing racket swings with the exact prediction `tick` and buffers them locally.
+- **32-byte wire snapshots**: `encodeBallSnapshot` / `decodeBallSnapshot` match `sports.rs`'s little-endian wire layout byte-for-byte: `tick` (`u32`, 4 B), lossless `pos` (`3 × f32`, 12 B), and `vel` + `spin` packed as `3 × 21-bit` deterministic floats each (16 B).
+- **Late server reconciliation (`4–16` frames / `33–133 ms` RTT)**: `reconcile(snapshotBytes)` writes incoming 32-byte authoritative snapshots into `sports_snapshot_room` and invokes `sports_rollback` inside the core WebAssembly 16-slot rollback ring (`0–15` ticks native WASM rewind, with seamless deterministic input-history replay for `16+` tick RTT spikes), converging client trajectory to the server within `< 1e-2` cells (1 mm).
+
 ## Query parameters
 
 Add these to the page's address. "Realm" means the San Francisco realm, as `./world` serves it. "Server" means `/city` from the engine's page server, `engine/serve.mjs`. A number outside its range is kept to the nearest end of it, and one that is not a number is ignored ([what the page refuses](/engine-page#what-the-page-refuses)).
@@ -410,6 +441,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Wand, spells | `engine/page/wand.ts`, `engine/page/spells.ts` | `engine/test/wand.mjs`, `engine/test/spells.mjs` |
 | Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
 | Native T3 Studio & Game-Use MCP | `engine/studio/*`, `engine/page/studio/*` | `engine/test/studio.mjs` |
+| Tennis & rollback physics | `engine/page/sports-court.ts`, `engine/core/src/sports.rs`, `engine/page/sound/combat.ts` | `engine/test/sports-rollback.mjs` |
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 
