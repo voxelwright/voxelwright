@@ -34,13 +34,14 @@ const ERRORS_KEPT = 8
  * @param people  who is there, as a rule is to be told it: asked when a call is sent, so it is as fresh as the call
  * @param residents  the town's residents near people, as a rule is to be told them (#218)
  * @param things  the living things near people, as a rule is to be told them (#245)
+ * @param city    bounded read-only living-city telemetry snapshot for rules (#164)
  * @param does    the names of what a rule may ask for here: told to it with every call
  * @param voiced  whether a model answers for this world's people now (mind/door.mjs)
  * @param realm   what this world is called and is about, as its record says: {name, about}, or null
  * @param still   whether the rule under an id is at rest now (the world says which and when): it is told nothing, and what a call of its that was under way asks for is left
  * @param obey    what a rule wants done (the `out` of its answer), for the world to check and do
  */
-export function rules({ people, residents = () => [], things = () => [], does, obey, voiced = () => false, realm = () => null, still = () => false }) {
+export function rules({ people, residents = () => [], things = () => [], city = () => null, does, obey, voiced = () => false, realm = () => null, still = () => false }) {
   /** By id: the thread, what it listens for, what waits for it, what it keeps, and how it has been doing. */
   const all = new Map()
   const stop = (rule, why) => {
@@ -66,7 +67,7 @@ export function rules({ people, residents = () => [], things = () => [], does, o
     const { event, e } = rule.waiting.shift(), now = Date.now()
     rule.at = { n: ++rule.sent, event }
     rule.owed = { left: CALL_MOST, why: `stopped: a call (${event}) took over ${CALL_MOST} ms` }
-    rule.thread.postMessage({ n: rule.at.n, json: JSON.stringify({ event, e, now: now / 1000, people: people(rule.id), residents: residents(), things: things(rule.id), keep: rule.keep, does: does(), others: others(rule), voiced: voiced(), realm: realm() }) })
+    rule.thread.postMessage({ n: rule.at.n, json: JSON.stringify({ event, e, now: now / 1000, people: people(rule.id), residents: residents(), things: things(rule.id), city: city(rule.id), keep: rule.keep, does: does(), others: others(rule), voiced: voiced(), realm: realm() }) })
   }
   const answered = (rule, m) => {
     if (m.failed !== undefined) return stop(rule, String(m.failed).slice(0, 300))
