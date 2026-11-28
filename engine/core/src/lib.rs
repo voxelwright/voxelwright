@@ -18,6 +18,7 @@ pub mod hash;
 pub mod joints;
 pub mod kinds;
 pub mod land;
+pub mod ragdoll;
 pub mod scratch;
 pub mod sports;
 pub mod support;
