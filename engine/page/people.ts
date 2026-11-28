@@ -6,6 +6,7 @@
 // with its shadow laid on the ground under it. `figure` is the one place that says what a person
 // looks like and how one moves.
 import { shader, type Target } from '../probe/gpu.ts'
+import { BONE, type RagdollRenderPose } from './ragdoll-bridge.ts'
 import type { DynamicShadows } from './dynamic-shadows.ts'
 import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
 import { LOCAL_LIGHTS_STRUCT, localLightsEval } from './lights.ts'
@@ -15,6 +16,7 @@ import { chance, residents, type Land, type Resident, type Shock } from './resid
 
 /** One person, as whoever draws them is told. Lengths are the world's finest cells (10 cm). */
 export interface Person {
+  ragdollPose?: RagdollRenderPose
   /** Where the feet are. */
   at: readonly [number, number, number]
   /** Which way they face: 0 is north (-z), a quarter turn is east. */
@@ -435,7 +437,8 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   if (hairstyle === 0 && extras.some((b) => b.on === 'head' && b.at[1] > 2.4)) hairstyle = 1
   const walking = p.walking ?? 0, running = walking * (p.running ?? 0), flinch = p.flinch ?? 0, down = p.down ?? 0, reading = p.reading ?? 0, filming = p.filming ?? 0, time = p.time ?? 0
   const stride = (p.stride ?? 0) * Math.PI * 2
-  const feet = p.at[1]
+  const rag = p.ragdollPose
+  const feet = rag?.feetPos[1] ?? p.at[1]
   let n = at
   /**
    * A shape in a part's frame: a box of cells, its cross-section rounded by `e` (2 an ellipse, 4 a soft square; 0 a
@@ -443,7 +446,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
    * its length at each end. A limb is two of these that end round on the joint between them.
    */
   const shape = (f: Frame, x: number, y: number, z: number, w: number, h: number, d: number, colour: V3, made: number, e = 0, top = 1, low = 1, capT = 0, capB = 0) => {
-    if (n + EACH > out.length) return
+    if (n + EACH > out.length || (rag && f === HEAD && !rag.visibility.segments.head)) return
     for (let a = 0; a < 3; a++) out[n + a] = f[9 + a] + f[a] * x + f[3 + a] * y + f[6 + a] * z - anchor[a]
     out[n + 3] = (s % 9973) / 9973
     out[n + 4] = w / 2; out[n + 5] = h / 2; out[n + 6] = d / 2; out[n + 7] = CELL
@@ -601,6 +604,11 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   const sway = walking * Math.sin(stride) * 0.035 + (1 - walking) * (Math.sin(time * 0.6 + s) * 0.008 - shift * 0.035)
   child(HIP, ROOT, 0, hipHigh, 0)
   roll(HIP, sway)
+  if (rag) {
+    for (const cap of rag.stumpCaps) shape(cap.frame, 0, 0, 0, 2 * cap.radius, 0.5, 2 * cap.radius, skin, SKIN, 4)
+    if (!rag.visibility.segments.pelvis) return n
+    HIP.set(rag.limbs[BONE.Pelvis].frame)
+  }
   // How much of it is drawn: all of it near, less across a street, the least from far off.
   const close = level === 0, near = level <= 1, fine = level <= 2
   const shade = (c: V3, by: number): V3 => [c[0] * by, c[1] * by, c[2] * by]
@@ -614,15 +622,30 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     const leg = side < 0 ? left : right
     child(LEG, HIP, side * 1.02 * broad * hips, 0, 0)
     pitch(LEG, leg.swing)
+    if (rag) {
+      const thigh = rag.limbs[side < 0 ? BONE.ThighL : BONE.ThighR]
+      if (!thigh.visible) continue
+      LEG.set(thigh.frame)
+    }
     // A thigh ends round at the hip and at the knee, and a shin begins round there: bent, the knee is whole.
     shape(LEG, 0, -THIGH * tall / 2 + 0.05, 0, 1.65, THIGH * tall + 1.1, 1.9, legs, CLOTH, 2.6, 1, 0.82, 0.2, 0.2)
     child(SHIN, LEG, 0, -THIGH * tall, 0)
     pitch(SHIN, -leg.knee)
+    if (rag) {
+      const shin = rag.limbs[side < 0 ? BONE.ShinL : BONE.ShinR]
+      if (!shin.visible) continue
+      SHIN.set(shin.frame)
+    }
     shape(SHIN, 0, -CALF * tall / 2 + 0.3, 0.08, 1.45, CALF * tall + 0.6, 1.55, legs, CLOTH, 2.6, 1, 0.8, 0.3, 0)
     child(FOOT, SHIN, 0, -CALF * tall, 0)
     // The foot lies level on the ground but as the walk has it: toes up as it lands, down as it leaves.
     pitch(FOOT, leg.knee - leg.swing - TOES[side < 0 ? 0 : 1])
     // A shoe is long the way the foot points: its shape is told along that (right, ahead, up).
+    if (rag) {
+      const foot = rag.limbs[side < 0 ? BONE.FootL : BONE.FootR]
+      if (!foot.visible) continue
+      FOOT.set(foot.frame)
+    }
     AX.set(FOOT)
     for (let a = 0; a < 3; a++) { AX[3 + a] = -FOOT[6 + a]; AX[6 + a] = FOOT[3 + a] }
     shape(AX, 0, 0.62, -0.08, 1.3, 2.8, 0.85, shoe, LEATHER, 3, 0.8, 0.95, 0.3, 0.12)
@@ -635,6 +658,10 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   pitch(CHEST, -P[J.lean])
   roll(CHEST, -sway * 1.6 + P[J.tilt])
   turn(CHEST, P[J.twist])
+  if (rag) {
+    if (!rag.visibility.segments.chest) return n
+    CHEST.set(rag.limbs[BONE.Chest].frame)
+  }
   const across = 3.8 * broad * shoulders
   shape(CHEST, 0, 2.4, 0, across, 5, 2.25, coat, CLOTH, 4, 1, waist, 0.16, 0)
   if (long) {
@@ -697,6 +724,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   child(HEAD, CHEST, 0, 4.9, 0)
   turn(HEAD, P[J.turn])
   pitch(HEAD, -P[J.nod])
+  if (rag) HEAD.set(rag.limbs[BONE.Head].frame)
   if (fine) shape(HEAD, 0, 0.3, 0.05, 1.15, 1.1, 1.2, skin, SKIN, 2)
   shape(HEAD, 0, 1.75, -0.05, 1.75, 2.25, 2, skin, SKIN, 4, 1, 0.86, 0.3, 0)
   if (fine) {
@@ -754,10 +782,20 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     turn(ARM, round)
     roll(ARM, side * (0.06 + out))
     pitch(ARM, lift)
+    if (rag) {
+      const arm = rag.limbs[side < 0 ? BONE.UpperArmL : BONE.UpperArmR]
+      if (!arm.visible) continue
+      ARM.set(arm.frame)
+    }
     // An upper arm is round at the shoulder and the elbow, a forearm narrows to the wrist.
     shape(ARM, 0, -1.75, 0, 1.32, 3.8, 1.5, coat, CLOTH, 2.6, 1, 0.88, 0.36, 0.18)
     child(FORE, ARM, 0, -3.4, 0)
     pitch(FORE, bend)
+    if (rag) {
+      const forearm = rag.limbs[side < 0 ? BONE.ForearmL : BONE.ForearmR]
+      if (!forearm.visible) continue
+      FORE.set(forearm.frame)
+    }
     shape(FORE, 0, -1.3, 0, 1.24, 3.7, 1.34, coat, CLOTH, 2.6, 1, 0.8, 0.28, 0)
     if (fine) {
       // A hand: a palm that narrows to the fingers, and a thumb.
@@ -927,7 +965,8 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
       let n = 0, count = 0, lies = 0, named = 0
       frames++
       for (const source of self.from) for (const p of source(view, seconds)) {
-        const dx = p.at[0] - view.eye[0], dy = p.at[1] + 9 - view.eye[1], dz = p.at[2] - view.eye[2]
+        const at = p.ragdollPose?.feetPos ?? p.at
+        const dx = at[0] - view.eye[0], dy = at[1] + 9 - view.eye[1], dz = at[2] - view.eye[2]
         const ahead = dx * view.forward[0] + dy * view.forward[1] + dz * view.forward[2], off = Math.hypot(dx, dy, dz)
         // Out of sight behind the eye, or too far to be a pixel.
         if (ahead < -30 || off > 4000) continue
@@ -938,7 +977,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
           const w = write(p.name ?? '', p.says ?? ''), o = named++ * 12
           const high = to.size[1] / (2 * view.tanHalf * Math.max(ahead, 1)), tall = Math.max(to.size[1] * 0.034, Math.min(to.size[1] * 0.05, 2.4 * high)) * (w.tall / 44) / high
           const lift = (p.umbrella ? 29 : 19.5) * (1 - (p.down ?? 0) * 0.8), q = p.frame, ux = q ? 2 * (q[0] * q[1] - q[3] * q[2]) : 0, uy = q ? 1 - 2 * (q[0] * q[0] + q[2] * q[2]) : 1, uz = q ? 2 * (q[1] * q[2] + q[3] * q[0]) : 0
-          board[o] = p.at[0] + ux * lift - anchor[0]; board[o + 1] = p.at[1] + uy * lift - anchor[1]; board[o + 2] = p.at[2] + uz * lift - anchor[2]
+          board[o] = at[0] + ux * lift - anchor[0]; board[o + 1] = at[1] + uy * lift - anchor[1]; board[o + 2] = at[2] + uz * lift - anchor[2]
           board[o + 3] = Math.min(1, (900 - off) / 200)
           board[o + 4] = tall * w.wide / w.tall; board[o + 5] = tall
           const sx = (w.slot % SLOTS[0]) * SLOT[0], sy = Math.floor(w.slot / SLOTS[0]) * SLOT[1], W = SLOT[0] * SLOTS[0], H = SLOT[1] * SLOTS[1]
@@ -946,15 +985,15 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         }
         if (!skipGroundDecal && lies < 1024 && off < 1500) {
           const o = lies++ * 8, lying = p.down ?? 0
-          shade[o] = p.at[0] - anchor[0]; shade[o + 1] = p.at[1] - anchor[1]; shade[o + 2] = p.at[2] - anchor[2]; shade[o + 3] = (p.umbrella ? 5 : 2.6) + lying * 2
+          shade[o] = at[0] - anchor[0]; shade[o + 1] = at[1] - anchor[1]; shade[o + 2] = at[2] - anchor[2]; shade[o + 3] = (p.umbrella ? 5 : 2.6) + lying * 2
           shade[o + 4] = -sun[0] / flat; shade[o + 5] = -sun[2] / flat; shade[o + 6] = reach * (1 - lying * 0.8); shade[o + 7] = 0
         }
         if (shadowPeopleCount < MAX_SHADOW_PEOPLE && off < 1400) {
           const so = shadowPeopleCount++ * 6
-          shadowPeople[so] = p.at[0]
-          shadowPeople[so + 1] = p.at[1]
-          shadowPeople[so + 2] = p.at[2]
-          shadowPeople[so + 3] = p.yaw
+          shadowPeople[so] = at[0]
+          shadowPeople[so + 1] = at[1]
+          shadowPeople[so + 2] = at[2]
+          shadowPeople[so + 3] = p.ragdollPose?.yaw ?? p.yaw
           shadowPeople[so + 4] = p.down ?? 0
           shadowPeople[so + 5] = p.umbrella ? 1 : 0
         }

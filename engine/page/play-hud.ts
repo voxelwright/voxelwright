@@ -686,7 +686,7 @@ export function playHud(o: {
   style.textContent = STYLE
   document.head.append(style)
   const coarse = matchMedia('(pointer: coarse)')
-  const short = (name: string) => name
+  const short = (name: string) => name === 'Lightsaber' ? 'Saber' : name
 
   // ── The safe area, as the page has it (env() read through a probe) ──
   const probe = document.createElement('div')
@@ -765,6 +765,7 @@ export function playHud(o: {
 
   // ── The tool's key: on a desk (wheel) the held tool and its key; by touch, among the thumb's keys ──
   const held = Object.assign(document.createElement('button'), { className: 'vx-button held', type: 'button', innerHTML: '<kbd class="vx-kbd">E</kbd><span class="ic"></span><span class="name"></span>' })
+  held.title = 'E · Choose tool   T · Rewind time'
   held.setAttribute('aria-haspopup', 'dialog')
   root.append(held)
   const toolkey = Object.assign(document.createElement('button'), { className: 'vx-button toolkey', type: 'button', innerHTML: '<span class="ic"></span><span class="name"></span>' })
