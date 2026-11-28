@@ -343,7 +343,7 @@ A click casts the spell in hand, Fireball at first. Typing a spell's words on th
 
 ## Tennis
 
-The tennis mini-game pairs Voxelwright's 480 Hz sports physics core (`engine/core/src/sports.rs`, compiled into `core.wasm`) with a TypeScript court controller and multiplayer rollback bridge (`engine/page/sports-court.ts`) and modal tennis foley (`engine/page/sound/combat.ts`). A regulation tennis ball is 6.7 cm across (`0.335` cells radius, 57 g, hollow-sphere inertia `α = 2/3`), smaller than one 10 cm world cell, so every `1/120 s` outer physics tick runs four `480 Hz` micro-substeps with exact continuous Time-of-Impact (TOI) swept-sphere collision, coplanar voxel seam welding, Cross/Stepanek aerodynamic drag and Magnus spin, and Cross/Brody slip-to-roll bounce impulses.
+The tennis mini-game pairs Voxelwright's 480 Hz sports physics core (`engine/core/src/sports.rs`, built into the core WebAssembly module) with a TypeScript court controller and multiplayer rollback bridge (`engine/page/sports-court.ts`) and modal tennis foley (`engine/page/sound/combat.ts`). A regulation tennis ball is 6.7 cm across (`0.335` cells radius, 57 g, hollow-sphere inertia `α = 2/3`), smaller than one 10 cm world cell, so every `1/120 s` outer physics tick runs four `480 Hz` micro-substeps with exact continuous Time-of-Impact (TOI) swept-sphere collision, coplanar voxel seam welding, Cross/Stepanek aerodynamic drag and Magnus spin, and Cross/Brody slip-to-roll bounce impulses.
 
 ### Court presets and ITF dimensions
 
@@ -363,11 +363,11 @@ The tennis mini-game pairs Voxelwright's 480 Hz sports physics core (`engine/cor
 
 ### Deterministic multiplayer rollback
 
-`DeterministicRollbackClient` runs local client prediction at `120 Hz` on its own `SportsWasm` (`core.wasm`) instance:
+`DeterministicRollbackClient` runs local client prediction at `120 Hz` on its own `SportsWasm` WebAssembly instance:
 
 - **Stamped inputs**: `predictTick(localSwing)` stamps outgoing racket swings with the exact prediction `tick` and buffers them locally.
 - **32-byte wire snapshots**: `encodeBallSnapshot` / `decodeBallSnapshot` match `sports.rs`'s little-endian wire layout byte-for-byte: `tick` (`u32`, 4 B), lossless `pos` (`3 × f32`, 12 B), and `vel` + `spin` packed as `3 × 21-bit` deterministic floats each (16 B).
-- **Late server reconciliation (`4–16` frames / `33–133 ms` RTT)**: `reconcile(snapshotBytes)` writes incoming 32-byte authoritative snapshots into `sports_snapshot_room` and invokes `sports_rollback` inside `core.wasm`'s 16-slot rollback ring (`0–15` ticks native WASM rewind, with seamless deterministic input-history replay for `16+` tick RTT spikes), converging client trajectory to the server within `< 1e-2` cells (1 mm).
+- **Late server reconciliation (`4–16` frames / `33–133 ms` RTT)**: `reconcile(snapshotBytes)` writes incoming 32-byte authoritative snapshots into `sports_snapshot_room` and invokes `sports_rollback` inside the core WebAssembly 16-slot rollback ring (`0–15` ticks native WASM rewind, with seamless deterministic input-history replay for `16+` tick RTT spikes), converging client trajectory to the server within `< 1e-2` cells (1 mm).
 
 ## Query parameters
 
