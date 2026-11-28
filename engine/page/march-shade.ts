@@ -862,7 +862,7 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv:
       let giIrr = max(giRaw.rgb, vec3f(0.0)) * shadeExtra.moonshotInfo.z;
       giOverride = vec4f(min(giIrr, vec3f(60000.0)), giMix);
       // Soften GTAO slightly when combined with 80 cm voxel GI so fine contact creases stay crisp without double-darkening corners.
-      ambientAo = mix(ambientAo, mix(vec3f(1.0), ambientAo, 0.72), giMix);
+      ambientAo = mix(ambientAo, mix(vec3f(1.0), ambientAo, 0.76), giMix);
     }
   }
   ${useF16 ? 'var col = vec3<f16>(min(max(shadePbrAo(albedo, n, rd, g.sun, direct, directOpen, ambientAo, specAo, surfRough, select(m.glow, 0.0, sign), surfMet), vec3f(0.0)), vec3f(60000.0)));' : 'var col = shadePbrAo(albedo, n, rd, g.sun, direct, directOpen, ambientAo, specAo, surfRough, select(m.glow, 0.0, sign), surfMet);'}

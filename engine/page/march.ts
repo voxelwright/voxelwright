@@ -2031,7 +2031,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       // Moonshot half-res G-Buffer dims, GI gain, and ReSTIR-DI active flag (floats 44..47).
       shadeExtraBuf[44] = halfW
       shadeExtraBuf[45] = halfH
-      shadeExtraBuf[46] = useGi ? (extra?.giGain ?? 0.88) : 0
+      shadeExtraBuf[46] = useGi ? (extra?.giGain ?? 0.87) : 0
       shadeExtraBuf[47] = useRestir ? 1 : 0
       device.queue.writeBuffer(shadeExtra, 0, shadeExtraBuf)
 
@@ -2161,21 +2161,24 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
           if (runGi && extGi && voxelizer) {
             const lb = 36 + MAX_LEVELS * 32
             // Physically balanced sun-to-sky cache ratio so sunlit streets, brick, and blasted rubble
-            // flood warm multi-bounce GI indoors & into shaded facades while sealed rooms stay dark (0 * 7.4 = 0).
-            giSunIrrBuf[0] = f[lb] * 7.4
-            giSunIrrBuf[1] = f[lb + 1] * 7.4
-            giSunIrrBuf[2] = f[lb + 2] * 7.4
-            giSkyZenithBuf[0] = f[lb + 4] * 1.10
-            giSkyZenithBuf[1] = f[lb + 5] * 1.10
-            giSkyZenithBuf[2] = f[lb + 6] * 1.10
+            // flood warm multi-bounce GI indoors & into shaded facades while sealed rooms stay dark (0 * 7.2 = 0).
+            giSunIrrBuf[0] = f[lb] * 7.2
+            giSunIrrBuf[1] = f[lb + 1] * 7.2
+            giSunIrrBuf[2] = f[lb + 2] * 7.2
             const hDay = day
-            giSkyHorizonBuf[0] = ((f[lb + 4] * 0.65 + f[lb + 12] * 0.35 * 1.08) * hDay + f[lb + 4] * (1 - hDay)) * 1.04
-            giSkyHorizonBuf[1] = ((f[lb + 5] * 0.65 + f[lb + 13] * 0.35 * 0.98) * hDay + f[lb + 5] * (1 - hDay)) * 1.04
-            giSkyHorizonBuf[2] = ((f[lb + 6] * 0.65 + f[lb + 14] * 0.35 * 0.84) * hDay + f[lb + 6] * (1 - hDay)) * 1.04
-            giSkyGroundBuf[0] = 0.28 * 1.08 * f[lb + 7]
-            giSkyGroundBuf[1] = 0.28 * 0.98 * f[lb + 7]
-            giSkyGroundBuf[2] = 0.28 * 0.86 * f[lb + 7]
-            giSkyObj.sunGlow = 0.14 * hDay * (1 - Math.max(rain, cloud))
+            const skyZenDay = 1.08 + 0.18 * hDay
+            giSkyZenithBuf[0] = f[lb + 4] * skyZenDay
+            giSkyZenithBuf[1] = f[lb + 5] * skyZenDay
+            giSkyZenithBuf[2] = f[lb + 6] * skyZenDay
+            const skyHorDay = 1.04 + 0.20 * hDay
+            giSkyHorizonBuf[0] = ((f[lb + 4] * 0.62 + f[lb + 12] * 0.38 * 1.16) * hDay + f[lb + 4] * (1 - hDay)) * skyHorDay
+            giSkyHorizonBuf[1] = ((f[lb + 5] * 0.62 + f[lb + 13] * 0.38 * 1.01) * hDay + f[lb + 5] * (1 - hDay)) * skyHorDay
+            giSkyHorizonBuf[2] = ((f[lb + 6] * 0.62 + f[lb + 14] * 0.38 * 0.84) * hDay + f[lb + 6] * (1 - hDay)) * skyHorDay
+            const gndDay = 0.28 + 0.10 * hDay
+            giSkyGroundBuf[0] = gndDay * 1.14 * f[lb + 7]
+            giSkyGroundBuf[1] = gndDay * 1.00 * f[lb + 7]
+            giSkyGroundBuf[2] = gndDay * 0.84 * f[lb + 7]
+            giSkyObj.sunGlow = 0.15 * hDay * (1 - Math.max(rain, cloud))
 
             const giForceFull = Boolean(extra?.giForceFull || extra?.giReset)
             const giStride = giForceFull ? 1 : (extra?.giAmortizeStride ?? 8)
