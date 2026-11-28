@@ -85,6 +85,10 @@ import { steerScale, type SteerState } from './steer.ts'
 import { feedbackUi, type FeedbackUi } from './feedback.ts'
 import { initPwa } from './pwa.ts'
 import { createSocial, type SocialCandidate, type SocialController } from './social.ts'
+import { createPhone, type PhoneOS } from './phone.ts'
+import { createInteriorSystem, type InteriorSystem } from './interiors.ts'
+import { createDeliveryEngine, type DeliveryController } from './delivery.ts'
+import { createDoorSmashApp } from './delivery-ui.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -581,6 +585,10 @@ async function main() {
   let streetLife: Street | null = null
   let neighborhood: Neighborhood | null = null
   let social: SocialController | null = null
+  let phoneOs: PhoneOS | null = null
+  let interiorSys: InteriorSystem | null = null
+  let deliveryCtrl: DeliveryController | null = null
+  let cachedPlaces: PlacesPayload | null = null
   const observeNpcFolk = (src: (v: View, s: number) => readonly Person[]) => (v: View, s: number) => {
     const list = src(v, s)
     social?.observeLocal(list)
@@ -988,6 +996,7 @@ async function main() {
     falling.emitLights(march.localLights)
     smoke.lights(march.localLights)
     portalLights?.(march.localLights)
+    deliveryCtrl?.lights(march.localLights, (performance.now() - started) / 1000)
     emitPlacedLamps(march.localLights)
     if (BAY_ON && march.lights > 0.02) {
       const useClust = clusterLightsEnabled && march.localLights.clustered !== null && !off.has('clusterLights')
@@ -1030,8 +1039,10 @@ async function main() {
     controls.poll?.(dt)
     shot?.before?.()
     drawAhead(now)
-    if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
+    if (!interiorSys?.frame(dt) && !alive.frame(dt) && !me.frame(dt)) walk(dt)
     stuntHud.frame(dt)
+    phoneOs?.frame(dt)
+    deliveryCtrl?.frame(dt, (now - started) / 1000)
     shot?.after(dt)
     const budget = rate ? Math.max(1000 / rate, screenMs) : fastestMs
     steer(budget, gap, resting)
@@ -1051,7 +1062,7 @@ async function main() {
     streetLife?.frame(dt, v)
     neighborhood?.frame(v)
     lap('street')
-    world.update(ahead ?? v.eye)
+    world.update(interiorSys?.streetAnchor ?? ahead ?? v.eye)
     lap('update')
     if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
     lap('spoil')
@@ -1313,15 +1324,16 @@ async function main() {
       const drawWheels = !off.has('wheels') && carWheels.prepare(to, v)
       const drawPieces = !off.has('pieces') && falling.prepare(to, v, march.sun.s, (flags & MIRRORS) !== 0)
       const drawSigns = !off.has('signs') && (neighborhood?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog), farModel.depth) ?? false)
+      const drawInteriorSigns = !off.has('signs') && (interiorSys?.prepareSigns(to, v, march.sun.s, march.day, Math.max(march.rain, march.cloud, 0.2 * march.fog)) ?? false)
       let drawCrumbs = false
       if (!off.has('crumbs')) {
         debris.defer()
         debris.draw(encoder, to, v)
         drawCrumbs = debris.ready
       }
-      const overlayMask = (drawShade ? 1 : 0) | (drawTracks ? 2 : 0) | (drawWheels ? 4 : 0) | (drawPieces ? 8 : 0) | (drawSigns ? 16 : 0) | (drawPeople ? 32 : 0) | (drawCrumbs ? 64 : 0)
+      const overlayMask = (drawShade ? 1 : 0) | (drawTracks ? 2 : 0) | (drawWheels ? 4 : 0) | (drawPieces ? 8 : 0) | ((drawSigns || drawInteriorSigns) ? 16 : 0) | (drawPeople ? 32 : 0) | (drawCrumbs ? 64 : 0)
       overlayPasses.mask = overlayMask
-      overlayPasses.merged = (drawShade ? 1 : 0) + (drawTracks ? 1 : 0) + (drawWheels ? 1 : 0) + (drawPieces ? 1 : 0) + (drawSigns ? 1 : 0) + (drawPeople ? 1 : 0) + (drawCrumbs ? 1 : 0)
+      overlayPasses.merged = (drawShade ? 1 : 0) + (drawTracks ? 1 : 0) + (drawWheels ? 1 : 0) + (drawPieces ? 1 : 0) + ((drawSigns || drawInteriorSigns) ? 1 : 0) + (drawPeople ? 1 : 0) + (drawCrumbs ? 1 : 0)
       overlayPasses.passes = overlayMask ? 1 : 0
       if (overlayMask) {
         const pass = encoder.beginRenderPass({
@@ -1336,6 +1348,7 @@ async function main() {
         if (drawWheels) carWheels.record(pass)
         if (drawPieces) falling.record(pass)
         if (drawSigns) neighborhood!.recordSigns(pass)
+        if (drawInteriorSigns) interiorSys!.recordSigns(pass)
         if (drawPeople) folk.record(pass)
         if (drawCrumbs) debris.record(pass)
         pass.end()
@@ -2042,6 +2055,7 @@ async function main() {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(buf)) as PlacesPayload
         if (!parsed || !Array.isArray(parsed.shops) || !Array.isArray(parsed.plazas)) { sfPlacesPromise = null; return null }
+        cachedPlaces = parsed
         mapSys?.setPlacesData(parsed)
         return parsed
       } catch {
@@ -3073,7 +3087,89 @@ async function main() {
     canTalk: () => Boolean(far && over.line.onsubmit),
     openTalk: () => { if (far && over.line.onsubmit) over.line.show() },
   })
-  resetting.add(() => { carSummon.clear(); telemetry?.edit({ op: 'reset' }) })
+  // Extensible GTA 6–style Smartphone OS, Modular Store Interiors & DoorSmash Food Delivery Game.
+  let phoneWasInsideBeforeOpen = false
+  let wasAfootBeforeInterior = false
+  phoneOs = createPhone({
+    hud: over,
+    input: controls,
+    hour: () => hour ?? 12,
+    engaged: () => first?.engaged ?? true,
+    driving: () => Boolean(alive.riding && (alive.riding.controls ?? 'drive') === 'drive'),
+    blocked: () => Boolean(mapSys?.open || playedHud?.choosing || over.line.open || document.documentElement.classList.contains('drawer')),
+    sound: () => ears?.voice ?? null,
+    telemetry: () => alive.telemetry ? { kmh: alive.telemetry.kmh, slip: alive.telemetry.slip, drifting: alive.telemetry.drifting } : null,
+    onOpenChange: (isOpen, driving) => {
+      if (isOpen) {
+        me.phoneReading = me.on && !driving
+        if (driving) {
+          phoneWasInsideBeforeOpen = alive.inside
+          if (!alive.inside) alive.view(true)
+        }
+      } else {
+        me.phoneReading = false
+        if (driving && !phoneWasInsideBeforeOpen && alive.inside) {
+          alive.view(false)
+        }
+      }
+    },
+  })
+  interiorSys = createInteriorSystem({
+    device,
+    format: gpu.sceneFormat,
+    pieces: falling,
+    hud: over,
+    input: controls,
+    pose,
+    onSfx: (k) => { void import('./delivery-sound.ts').then((m) => m.playDeliverySfx(ears?.voice, k)) },
+    onEnterChanged: (inside) => {
+      if (inside) {
+        wasAfootBeforeInterior = me.on
+        if (me.on) me.walk(false)
+      } else if (wasAfootBeforeInterior) {
+        wasAfootBeforeInterior = false
+        me.walk(true)
+      }
+    },
+  })
+  deliveryCtrl = createDeliveryEngine({
+    land: core,
+    alive,
+    hud: over,
+    pieces: falling,
+    phone: phoneOs,
+    interiors: interiorSys,
+    map: () => mapSys,
+    street: () => streetLife,
+    places: () => cachedPlaces,
+    player: () => {
+      const r = alive.rider, f = me.feet
+      return {
+        x: r ? r.at[0] / M : f ? f.at[0] / M : pose.x,
+        y: r ? r.at[1] / M : f ? f.at[1] / M : pose.y,
+        z: r ? r.at[2] / M : f ? f.at[2] / M : pose.z,
+        yaw: r ? r.yaw : f ? f.yaw : pose.yaw,
+        driving: !!alive.riding,
+        onFoot: me.on && !alive.riding,
+      }
+    },
+    engaged: () => first?.engaged ?? true,
+    sound: () => ears?.voice ?? null,
+    hour: () => hour ?? 12,
+    onVehiclePrebake: (kinds, size) => { void prebakeLook(kinds, size, true) },
+  })
+  phoneOs.registerApp(createDoorSmashApp(deliveryCtrl))
+  if (query.get('people') !== '0') folk.from.push(observeNpcFolk(deliveryCtrl.folk))
+  Object.assign((globalThis as unknown as { engine: object }).engine, { phone: phoneOs, delivery: deliveryCtrl, interiors: interiorSys })
+  if (!far) {
+    controls.always('KeyP', (e) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return false
+      if (first && !first.engaged) return false
+      phoneOs?.toggle()
+      return true
+    })
+  }
+  resetting.add(() => { carSummon.clear(); if (interiorSys?.active) interiorSys.exit(); telemetry?.edit({ op: 'reset' }) })
   // Black-box gameplay flight recorder & passive anomaly watchers + F8 / /bug feedback UI (#64).
   telemetry = createRecorder({
     build: 'city-4',
