@@ -367,6 +367,17 @@ export function createWalkGraph() {
     return j
   }
 
+  const updateRouteBox = (r) => {
+    const p = r.p
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
+    for (let i = 0; i < p.length; i += 2) {
+      const x = p[i], z = p[i + 1]
+      if (x < x0) x0 = x; if (x > x1) x1 = x
+      if (z < z0) z0 = z; if (z > z1) z1 = z
+    }
+    r.x0 = x0; r.z0 = z0; r.x1 = x1; r.z1 = z1
+  }
+
   const cutAt = (r, cut) => {
     const P2 = { x: 0, z: 0, tx: 0, tz: 0 }
     const at = r.cum.findIndex((c) => c >= cut)
@@ -386,6 +397,7 @@ export function createWalkGraph() {
     r.C = Float64Array.from(r.cum)
     r.destX = P2.x
     r.destZ = P2.z
+    updateRouteBox(r)
   }
 
   /** Edge preference weight modulated by district-clocked destination bias. */
@@ -418,15 +430,16 @@ export function createWalkGraph() {
     const key = `${seed}:${k}:${bias}`
     let r = routes.get(key)
     if (r) { r.used = k; return r }
-    if (routes.size > 6000) {
+    if (routes.size > 12000) {
       let n = 0
-      for (const rk of routes.keys()) { routes.delete(rk); if (++n > 2000) break }
+      for (const rk of routes.keys()) { routes.delete(rk); if (++n > 3000) break }
     }
     r = {
       p: [], cum: [0], kinds: [], sigs: [], len: 0, used: k,
       P: new Float64Array(0), C: new Float64Array(0),
       crossings: [], plans: new Map(),
       originX: 0, originZ: 0, destX: 0, destZ: 0, destBusy: w.busy,
+      x0: 0, z0: 0, x1: 0, z1: 0,
     }
     const P = { x: 0, z: 0, tx: 0, tz: 0 }
     along(w.p, w.cum, u, P)
@@ -517,6 +530,7 @@ export function createWalkGraph() {
     r.destX = r.p[r.p.length - 2] ?? r.originX
     r.destZ = r.p[r.p.length - 1] ?? r.originZ
     r.destBusy = lastBusy
+    updateRouteBox(r)
     routes.set(key, r)
     return r
   }
@@ -583,9 +597,10 @@ export function createWalkGraph() {
   /**
    * Evaluates one pedestrian's exact deterministic state at `(wi, seed, t, hour, rain)` into `out`.
    * Produces bit-for-bit identical `(x, z, yaw, speed, stride, phase, home, seed, activity, archetype)`
-   * across Node and browser.
+   * across Node and browser. Optional `clip = [eyeX, eyeZ, reach]` returns `null` early when the
+   * cached route AABB cannot intersect `[eyeX ± reach, eyeZ ± reach]` (skips `planOf`/`along`).
    */
-  function placeOf(wi, seed, t, hour = 11, rain = 0, out = {}) {
+  function placeOf(wi, seed, t, hour = 11, rain = 0, out = {}, clip = null) {
     const w = walks[wi]
     const routine = routineOf(seed, w.busy, hour, rain)
     const T = 180 + 180 * chance(seed, 1)
@@ -600,6 +615,10 @@ export function createWalkGraph() {
     const wantScale = routine.shelter ? 0.78 : routine.archetype === 'runner' ? 1.15 : 1
     const want = Math.max(180, Math.min(WALK_MOST, ((v * (T - rest - 15 - 90)) / 2) * wantScale))
     const r = routeOf(wi, homePos, seed, k, want, routine.destinationBias)
+    if (clip) {
+      const pad = clip[2] + 20
+      if (r.x1 < clip[0] - pad || r.x0 > clip[0] + pad || r.z1 < clip[1] - pad || r.z0 > clip[1] + pad) return null
+    }
     const planKey = `${routine.phase}:${routine.shelter ? 1 : 0}`
     let plan = r.plans.get(planKey)
     while (!plan) {
@@ -708,31 +727,39 @@ export function createWalkGraph() {
     return out
   }
 
+  const SHOCK_SCRATCH = {}
+  const SHOCK_CLIP = [0, 0, 0]
+
   /** Evaluates startle (blast or crash shock) on one pedestrian at `(wi, seed, t)`. */
   function startleOf(wi, seed, t, hour, rain, shocks, crashShocks, feetAt, out = {}) {
     out.when = t; out.down = 0; out.flinch = 0; out.towards = 0; out.turned = 0; out.frozen = false
-    const scratch = {}
+    const w = walks[wi]
+    const maxWalkReach = w.len * 0.5 + WALK_MOST + 25
     const checkList = (list, crash) => {
       for (let k = list.length - 1; k >= 0; k--) {
         const shock = list[k], age = t - shock.t
         if (age < 0 || age > (crash ? 18 : 45)) continue
-        placeOf(wi, seed, shock.t, hour, rain, scratch)
-        const sy = feetAt ? feetAt(scratch.x, scratch.z) + 9 : (shock.at[1] ?? 0)
-        const far = Math.hypot(scratch.x - shock.at[0], scratch.z - shock.at[2], sy - shock.at[1])
-        const close = crash ? far < 28 : far < shock.radius * 2.5 + 10
         const reach = crash ? shock.radius * 4 + 50 : shock.radius * 6 + 60
-        if (!close && far >= reach) continue
-        const held = close ? (crash ? 2.4 : 4.4) + 1.4 * chance(seed, 31) : (crash ? 0.9 : 1.2) + 0.8 * chance(seed, 31)
+        const close = crash ? 28 : shock.radius * 2.5 + 10
+        const maxR = Math.max(reach, close)
+        if (Math.abs(w.mx - shock.at[0]) > maxWalkReach + maxR || Math.abs(w.mz - shock.at[2]) > maxWalkReach + maxR) continue
+        SHOCK_CLIP[0] = shock.at[0]; SHOCK_CLIP[1] = shock.at[2]; SHOCK_CLIP[2] = maxR
+        if (!placeOf(wi, seed, shock.t, hour, rain, SHOCK_SCRATCH, SHOCK_CLIP)) continue
+        const sy = feetAt ? feetAt(SHOCK_SCRATCH.x, SHOCK_SCRATCH.z) + 9 : (shock.at[1] ?? 0)
+        const far = Math.hypot(SHOCK_SCRATCH.x - shock.at[0], SHOCK_SCRATCH.z - shock.at[2], sy - shock.at[1])
+        const isClose = far < close
+        if (!isClose && far >= reach) continue
+        const held = isClose ? (crash ? 2.4 : 4.4) + 1.4 * chance(seed, 31) : (crash ? 0.9 : 1.2) + 0.8 * chance(seed, 31)
         if (age < held) {
           out.when = shock.t; out.frozen = true
-          if (close) {
+          if (isClose) {
             out.down = ease(age / 0.3) * (1 - ease((age - held + 1.2) / 1.2))
             out.turned = ease(age / 0.3)
           } else {
             out.flinch = ease(age / 0.12) * (1 - ease((age - held + 0.6) / 0.6))
             if (crash) out.turned = ease(age / 0.2) * (1 - ease((age - held + 0.6) / 0.6)) * 0.85
           }
-          out.towards = Math.atan2(shock.at[0] - scratch.x, -(shock.at[2] - scratch.z))
+          out.towards = Math.atan2(shock.at[0] - SHOCK_SCRATCH.x, -(shock.at[2] - SHOCK_SCRATCH.z))
         } else {
           out.when = Math.min(t, shock.t + (age - held) * 1.7)
         }
@@ -837,7 +864,12 @@ export function createWalkGraph() {
     const candidates = []
     let suppressedTaken = 0
     const shockState = { when: 0, down: 0, flinch: 0, towards: 0, turned: 0, frozen: false }
-    const hasShocks = !!(shocks?.length || crashShocks?.length)
+    // Pre-filter shocks once per query so expired or far-away shocks never invoke per-resident startle work.
+    const activeShocks = shocks?.length ? shocks.filter((s) => { const a = t - s.t; return a >= 0 && a <= 45 }) : null
+    const activeCrash = crashShocks?.length ? crashShocks.filter((s) => { const a = t - s.t; return a >= 0 && a <= 18 }) : null
+    const hasShocks = !!((activeShocks && activeShocks.length) || (activeCrash && activeCrash.length))
+    const queryClip = [eye[0], eye[1], reach]
+    const evScratch = {}
 
     for (let sIdx = 0; sIdx < seenWalks.length; sIdx++) {
       const wi = seenWalks[sIdx]
@@ -849,17 +881,18 @@ export function createWalkGraph() {
         const routine = routineOf(seed, w.busy, hour, rain)
         if (chance(seed, 20) >= routine.presence) continue
         if (taken?.has(seed)) { suppressedTaken++; continue }
-        if (hasShocks) startleOf(wi, seed, t, hour, rain, shocks, crashShocks, feetAt, shockState)
+        if (hasShocks) startleOf(wi, seed, t, hour, rain, activeShocks, activeCrash, feetAt, shockState)
         else { shockState.when = t; shockState.down = 0; shockState.flinch = 0; shockState.towards = 0; shockState.turned = 0; shockState.frozen = false }
         const routeTime = timeOf ? timeOf(seed, shockState.when, shockState) : shockState.when
-        const ev = placeOf(wi, seed, routeTime, hour, rain, {})
-        const dx = ev.x - eye[0], dz = ev.z - eye[1]
+        if (!placeOf(wi, seed, routeTime, hour, rain, evScratch, queryClip)) continue
+        const dx = evScratch.x - eye[0], dz = evScratch.z - eye[1]
         if (Math.abs(dx) > reach || Math.abs(dz) > reach) continue
         const dist = Math.hypot(dx, dz)
         if (dist > reach) continue
         const lod = classifyLod(dist)
         if (lod === 0) continue
 
+        const ev = { ...evScratch }
         let yaw = ev.yaw
         if (shockState.turned) {
           let by = shockState.towards - yaw
@@ -936,6 +969,47 @@ export function createWalkGraph() {
     })
   }
 
+  /**
+   * Fast Ring-3 macro telemetry counter (110–300 m) that avoids building or evicting multi-segment
+   * routes for distant residents just to report `lod.ring3` (#164).
+   */
+  function countRing3(eye, opts = {}) {
+    const reach = opts.reach ?? RING3_RADIUS
+    const hour = opts.hour ?? 11
+    const rain = opts.rain ?? 0
+    const taken = opts.taken
+    const cap3 = opts.caps?.[3] ?? DEFAULT_RING_CAPS[3]
+    scanStamp++
+    seenWalks.length = 0
+    const gx0 = Math.floor((eye[0] - reach) / GRID), gx1 = Math.floor((eye[0] + reach) / GRID)
+    const gz0 = Math.floor((eye[1] - reach) / GRID), gz1 = Math.floor((eye[1] + reach) / GRID)
+    for (let gx = gx0; gx <= gx1; gx++) {
+      for (let gz = gz0; gz <= gz1; gz++) {
+        const list = walkGrid.get(cellKey(gx, gz))
+        if (!list) continue
+        for (let idx = 0; idx < list.length; idx++) {
+          const wi = list[idx]
+          if (walkStamp.get(wi) !== scanStamp) { walkStamp.set(wi, scanStamp); seenWalks.push(wi) }
+        }
+      }
+    }
+    let count = 0
+    for (let sIdx = 0; sIdx < seenWalks.length; sIdx++) {
+      const w = walks[seenWalks[sIdx]]
+      if (!w.homes) continue
+      const d = Math.hypot(w.mx - eye[0], w.mz - eye[1])
+      if (d <= RING2_RADIUS || d > reach) continue
+      for (let h = 0; h < w.homes; h++) {
+        const seed = mix(w.seed, h)
+        const routine = routineOf(seed, w.busy, hour, rain)
+        if (chance(seed, 20) >= routine.presence) continue
+        if (taken?.has(seed)) continue
+        if (++count >= cap3) return cap3
+      }
+    }
+    return count
+  }
+
   return {
     addSquare,
     hasSquare: (name) => squares.has(name),
@@ -948,6 +1022,7 @@ export function createWalkGraph() {
     whereabouts,
     findResident,
     query,
+    countRing3,
     trace,
   }
 }

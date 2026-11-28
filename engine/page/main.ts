@@ -949,25 +949,31 @@ async function main() {
   // metre towards the street is open (swept over the start street at 1.5 to 2.5 m: none of the open air counted).
   // Eased over a quarter of a second or so, as eyes take to a room; 0 or 1 once settled.
   let roomed = 0
+  let roomX = NaN, roomY = NaN, roomZ = NaN, roomAt = -1e9, roomCached = false
   const stands = (x: number, y: number, z: number) => { const k = core.world_kind(x, y, z) & 15; return k !== 0 && k !== 5 && k !== 13 }
   const covered = (x: number, y: number, z: number) => { for (let k = 1; k <= 80; k++) if (stands(x, y + k, z)) return true; return false }
   const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]]
   const inRoom = (): boolean => {
     // Asked at one's own head when afoot: the eye behind it is often still in the doorway.
     const f = me.feet, x = Math.floor(f ? f.at[0] : pose.x * M), y = Math.floor(f ? f.at[1] + 16.5 : pose.y * M), z = Math.floor(f ? f.at[2] : pose.z * M)
-    if (!covered(x, y, z)) return false
+    const now = performance.now()
+    if (x === roomX && y === roomY && z === roomZ && now - roomAt < 500) return roomCached
+    // Moving slowly still throttles to ~12 Hz (roomed eases over ~250 ms anyway).
+    if (Math.abs(x - roomX) <= 2 && Math.abs(y - roomY) <= 2 && Math.abs(z - roomZ) <= 2 && now - roomAt < 80) return roomCached
+    roomX = x; roomY = y; roomZ = z; roomAt = now
+    if (!covered(x, y, z)) return (roomCached = false)
     // A side stands if a wall is met along it, straight out or a metre to either hand: so a doorway and a window
     // across from it in line with one do not open the room.
     const side = (dx: number, dz: number) => { for (const o of [0, 10, -10]) for (let k = 1; k <= 80; k++) if (stands(x + dx * k - dz * o, y, z + dz * k + dx * o)) return true; return false }
     let sides = 0
     for (const [dx, dz] of SIDES) if (side(dx, dz)) sides++
-    if (sides < 3) return false
+    if (sides < 3) return (roomCached = false)
     for (const [dx, dz] of SIDES) {
       let k = 1
       while (k <= 10 && !stands(x + dx * k, y, z + dz * k)) k++
-      if (k > 10 && !covered(x + dx * 10, y, z + dz * 10)) return false
+      if (k > 10 && !covered(x + dx * 10, y, z + dz * 10)) return (roomCached = false)
     }
-    return true
+    return (roomCached = true)
   }
   // Not asked of an eye going faster than anyone runs (#73): each cell asked about is asked of the page's own core,
   // which makes the whole sector round it the first time, on this thread. With the eye alone at 180 km/h down Geary

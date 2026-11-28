@@ -8,6 +8,7 @@ import { steerScale } from '../page/steer.ts'
 import { clearWay } from '../page/eye.ts'
 import { street, trafficObstacleGap, stepDeepensOverlap } from '../page/street.ts'
 import { createRecorder } from '../page/recorder.ts'
+import { createWalkGraph } from '../sf-walks.mjs'
 
 // ── 1. steerScale: CPU-bound guard, unclocked deadband, GPU-bound backoff, desktop fast-drop ──
 {
@@ -232,4 +233,29 @@ import { createRecorder } from '../page/recorder.ts'
   }
 }
 
-console.log('iphone-perf-fixes: PASS (steerScale, clearWay, deadlock tie-breaker, short-stub & lane-width building clearance, corner-sweep overlap, async JPEG capture)')
+// ── 6. walkGraph: route AABB clip, spatial shock culling, and fast countRing3 ──
+{
+  const wg = createWalkGraph()
+  const walk = []
+  let id = 1
+  for (let gx = -2400; gx <= 2400; gx += 400) {
+    for (let gz = -2400; gz <= 2400; gz += 400) {
+      const a = id++, b = id++
+      walk.push([a, b, 0, 80, gx, gz, gx + 320, gz])
+    }
+  }
+  wg.addSquare('sq', { walk, roads: [] })
+  const farCrash = [{ at: [2200, 0, 2200], radius: 15, t: 99.6 }]
+  const r0 = wg.query([0, 0], { reach: 1400, t: 100, hour: 17.25, rain: 0 })
+  assert.ok(r0.people.length > 0, 'walkGraph returns residents near origin')
+  const p0 = r0.people[0]
+  const nearCrash = [{ at: [p0.x, 0, p0.z], radius: 15, t: 99.6 }]
+  const rFar = wg.query([0, 0], { reach: 1400, t: 100, hour: 17.25, rain: 0, crashShocks: farCrash })
+  const rNear = wg.query([0, 0], { reach: 1400, t: 100, hour: 17.25, rain: 0, crashShocks: nearCrash })
+  assert.equal(rFar.people.length, r0.people.length, 'distant crash shock must not drop or alter nearby residents')
+  assert.ok(rNear.people.some((p) => p.flinch > 0 || p.down > 0 || p.frozen), 'nearby crash shock still triggers pedestrian startle')
+  const ring3 = wg.countRing3([0, 0], { reach: 3000, hour: 17.25, rain: 0 })
+  assert.ok(ring3 > 0 && ring3 <= 240, `countRing3 reports macro Ring-3 count cleanly (got ${ring3})`)
+}
+
+console.log('iphone-perf-fixes: PASS (steerScale, clearWay, deadlock tie-breaker, short-stub & lane-width building clearance, corner-sweep overlap, async JPEG capture, walkGraph culling)')

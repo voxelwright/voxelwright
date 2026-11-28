@@ -147,6 +147,18 @@ pub trait VoxelSource {
     fn tile_region(&mut self, _tx: i32, _tz: i32, _y_lo: i32, _y_hi: i32) -> Option<Region> {
         None
     }
+    /// Optional direct 256-column extractor for unedited Bay tiles (avoids building 3–4 full 64³ sectors
+    /// and evicting `Ground::kept` just to sample 16×16 nav columns).
+    fn fast_bay_spans(
+        &mut self,
+        _tx: i32,
+        _tz: i32,
+        _y_lo: i32,
+        _y_hi: i32,
+        _min_foot: i32,
+    ) -> Option<(Vec<NavSpan>, [u8; TILE_COL_COUNT])> {
+        None
+    }
     /// Returns inclusive-low, exclusive-high vertical scan range `(y_lo, y_hi)` for tile `(tx, tz)`,
     /// expanding for any recorded edit vertical range `edit_y`.
     fn tile_y_bounds(&mut self, tx: i32, tz: i32, edit_y: Option<(i32, i32)>) -> (i32, i32);
@@ -168,6 +180,25 @@ impl VoxelSource for Ground {
             [tx * TILE_CELLS, y_lo, tz * TILE_CELLS],
             [TILE_CELLS as usize, h, TILE_CELLS as usize],
         ))
+    }
+
+    fn fast_bay_spans(
+        &mut self,
+        tx: i32,
+        tz: i32,
+        y_lo: i32,
+        y_hi: i32,
+        min_foot: i32,
+    ) -> Option<(Vec<NavSpan>, [u8; TILE_COL_COUNT])> {
+        if !crate::bay::on() {
+            return None;
+        }
+        let lo = [tx * TILE_CELLS, (y_lo - 64).min(min_foot - 1), tz * TILE_CELLS];
+        let hi = [(tx + 1) * TILE_CELLS, y_hi + AGENT_TALL + 2, (tz + 1) * TILE_CELLS];
+        if self.has_edit_in_box(lo, hi) {
+            return None;
+        }
+        Some(crate::bay::extract_nav_spans(tx, tz, y_lo, y_hi, min_foot))
     }
 
     fn tile_y_bounds(&mut self, tx: i32, tz: i32, edit_y: Option<(i32, i32)>) -> (i32, i32) {
@@ -273,6 +304,40 @@ fn classify_transition_with(
     wz_b: i32,
     span_b: &NavSpan,
 ) -> (u8, u8) {
+    classify_transition_barrier(
+        |mx, mz, y_hi| {
+            if is_solid(mx, y_hi + 11, mz)
+                || is_solid(mx, y_hi + 15, mz)
+                || is_solid(mx, y_hi + AGENT_TALL - 1, mz)
+            {
+                3
+            } else if is_solid(mx, y_hi + 7, mz) {
+                2
+            } else if is_solid(mx, y_hi + 3, mz) {
+                1
+            } else {
+                0
+            }
+        },
+        wx_a,
+        wz_a,
+        span_a,
+        wx_b,
+        wz_b,
+        span_b,
+    )
+}
+
+#[inline]
+fn classify_transition_barrier(
+    mut barrier_at: impl FnMut(i32, i32, i32) -> u8,
+    wx_a: i32,
+    wz_a: i32,
+    span_a: &NavSpan,
+    wx_b: i32,
+    wz_b: i32,
+    span_b: &NavSpan,
+) -> (u8, u8) {
     let dy = span_b.y - span_a.y;
     let mut ab = classify_dy(dy);
     let mut ba = classify_dy(-dy);
@@ -321,23 +386,20 @@ fn classify_transition_with(
     for s in 1..NAV_STEP {
         let mx = wx_a + step_x * s;
         let mz = wz_a + step_z * s;
-        // Upper body & head band (above vault height 10): solid here is a wall/lintel.
-        if is_solid(mx, y_hi + 11, mz)
-            || is_solid(mx, y_hi + 15, mz)
-            || is_solid(mx, y_hi + AGENT_TALL - 1, mz)
-        {
-            high_blocked = true;
-            break;
-        }
-        // Knee / waist band (above 2-cell step): solid here is a low barrier / railing / fence.
-        if is_solid(mx, y_hi + 3, mz) || is_solid(mx, y_hi + 7, mz) {
-            low_blocked = true;
-            // Estimate barrier top to check whether vaulting clears the ceiling.
-            if is_solid(mx, y_hi + 7, mz) {
+        match barrier_at(mx, mz, y_hi) {
+            3 => {
+                high_blocked = true;
+                break;
+            }
+            2 => {
+                low_blocked = true;
                 mid_y_top = mid_y_top.max(y_hi + 10);
-            } else {
+            }
+            1 => {
+                low_blocked = true;
                 mid_y_top = mid_y_top.max(y_hi + 6);
             }
+            _ => {}
         }
     }
     if high_blocked {
@@ -384,183 +446,190 @@ pub fn extract_tile<S: VoxelSource>(
 ) -> RawHeightfield {
     let (y_lo, y_hi) = src.tile_y_bounds(tx, tz, edit_y);
     let min_foot = src.min_foot_y();
-    let region = src.tile_region(tx, tz, y_lo, y_hi);
     let x0 = tx * TILE_CELLS;
     let z0 = tz * TILE_CELLS;
     let h = (y_hi - y_lo).max(1) as usize;
 
-    let mut col_state = [ColScan::EMPTY; TILE_COL_COUNT];
-    let mut raw_spans: Vec<NavSpan> = Vec::with_capacity(TILE_COL_COUNT * 2);
-    let mut col_counts = [0u8; TILE_COL_COUNT];
-
-    // If any column starts in air at `y_lo` (e.g. a deep crater or steep drop), probe down up to
-    // 64 cells once to locate the solid floor directly underneath `y_lo`.
-    for cz in 0..TILE_COLS {
-        let wz = col_center(tz, cz);
-        let lz = cz * (NAV_STEP as usize) + (NAV_STEP as usize / 2);
-        for cx in 0..TILE_COLS {
-            let wx = col_center(tx, cx);
-            let lx = cx * (NAV_STEP as usize) + (NAV_STEP as usize / 2);
-            let cidx = col_index(cx, cz);
-            let k0 = match &region {
-                Some(r) => r.cells[lx + 64 * lz],
-                None => src.kind(wx, y_lo, wz),
-            };
-            if k0 == 0 {
-                let mut py = y_lo - 1;
-                let stop = (y_lo - 64).max(min_foot - 1);
-                while py >= stop {
-                    let kp = src.kind(wx, py, wz);
-                    if kp != 0 {
-                        let mat = material(kp);
-                        if mat != WATER && py + 1 >= min_foot {
-                            let st = &mut col_state[cidx];
-                            st.has_floor = true;
-                            st.floor_y = py + 1;
-                            st.floor_mat = mat;
-                            st.floor_flags = if rubble(kp) { SPAN_RUBBLE } else { 0 };
-                            st.air_run = (y_lo - (py + 1)).min(u16::MAX as i32) as u16;
-                            if st.air_run >= AGENT_TALL as u16 {
-                                let idx = raw_spans.len() as u16;
-                                raw_spans.push(NavSpan {
-                                    y: st.floor_y,
-                                    clearance: st.air_run,
-                                    material: st.floor_mat,
-                                    flags: st.floor_flags,
-                                    region: u16::MAX,
-                                    edge_start: 0,
-                                    edge_count: 0,
-                                    col: cidx as u8,
-                                });
-                                col_counts[cidx] = col_counts[cidx].saturating_add(1);
-                                st.emitted = true;
-                                st.last_span = idx;
-                            }
-                        }
-                        break;
-                    }
-                    py -= 1;
-                }
-            }
-        }
-    }
-
-    // Layer-major vertical scan: when `region` is present, reads directly from the flat `Region`
-    // slice with zero HashMap lookups or `Sector::Bits` rebuilds.
-    if let Some(ref reg) = region {
-        let cells = &reg.cells;
-        for ly in 0..h {
-            let y = y_lo + ly as i32;
-            let y_base = ly * 4096;
-            for cz in 0..TILE_COLS {
-                let z_base = y_base + (cz * 4 + 2) * 64 + 2;
-                let row_base = cz * TILE_COLS;
-                for cx in 0..TILE_COLS {
-                    let cidx = row_base + cx;
-                    let k = cells[z_base + cx * 4];
-                    let st = &mut col_state[cidx];
-                    if k == 0 {
-                        if st.has_floor {
-                            st.air_run = st.air_run.saturating_add(1);
-                            if !st.emitted {
-                                if st.air_run >= AGENT_TALL as u16 {
-                                    if raw_spans.len() < (u16::MAX as usize) - 1 && col_counts[cidx] < u8::MAX {
-                                        let idx = raw_spans.len() as u16;
-                                        raw_spans.push(NavSpan {
-                                            y: st.floor_y,
-                                            clearance: st.air_run,
-                                            material: st.floor_mat,
-                                            flags: st.floor_flags,
-                                            region: u16::MAX,
-                                            edge_start: 0,
-                                            edge_count: 0,
-                                            col: cidx as u8,
-                                        });
-                                        col_counts[cidx] += 1;
-                                        st.emitted = true;
-                                        st.last_span = idx;
-                                    }
-                                }
-                            } else {
-                                raw_spans[st.last_span as usize].clearance = st.air_run;
-                            }
-                        }
-                    } else {
-                        st.air_run = 0;
-                        st.emitted = false;
-                        let mat = material(k);
-                        if mat != WATER && y + 1 >= min_foot {
-                            st.has_floor = true;
-                            st.floor_y = y + 1;
-                            st.floor_mat = mat;
-                            st.floor_flags = if rubble(k) { SPAN_RUBBLE } else { 0 };
-                        } else {
-                            st.has_floor = false;
-                        }
-                    }
-                }
-            }
-        }
+    let mut used_fast_bay = false;
+    let (region, raw_spans, col_counts) = if let Some((spans, counts)) = src.fast_bay_spans(tx, tz, y_lo, y_hi, min_foot) {
+        used_fast_bay = true;
+        (None, spans, counts)
     } else {
-        for y in y_lo..y_hi {
-            for cz in 0..TILE_COLS {
-                let wz = col_center(tz, cz);
-                let row_base = cz * TILE_COLS;
-                for cx in 0..TILE_COLS {
-                    let wx = col_center(tx, cx);
-                    let cidx = row_base + cx;
-                    let k = src.kind(wx, y, wz);
-                    let st = &mut col_state[cidx];
-                    if k == 0 {
-                        if st.has_floor {
-                            st.air_run = st.air_run.saturating_add(1);
-                            if !st.emitted {
+        let region = src.tile_region(tx, tz, y_lo, y_hi);
+        let mut col_state = [ColScan::EMPTY; TILE_COL_COUNT];
+        let mut raw_spans: Vec<NavSpan> = Vec::with_capacity(TILE_COL_COUNT * 2);
+        let mut col_counts = [0u8; TILE_COL_COUNT];
+
+        // If any column starts in air at `y_lo` (e.g. a deep crater or steep drop), probe down up to
+        // 64 cells once to locate the solid floor directly underneath `y_lo`.
+        for cz in 0..TILE_COLS {
+            let wz = col_center(tz, cz);
+            let lz = cz * (NAV_STEP as usize) + (NAV_STEP as usize / 2);
+            for cx in 0..TILE_COLS {
+                let wx = col_center(tx, cx);
+                let lx = cx * (NAV_STEP as usize) + (NAV_STEP as usize / 2);
+                let cidx = col_index(cx, cz);
+                let k0 = match &region {
+                    Some(r) => r.cells[lx + 64 * lz],
+                    None => src.kind(wx, y_lo, wz),
+                };
+                if k0 == 0 {
+                    let mut py = y_lo - 1;
+                    let stop = (y_lo - 64).max(min_foot - 1);
+                    while py >= stop {
+                        let kp = src.kind(wx, py, wz);
+                        if kp != 0 {
+                            let mat = material(kp);
+                            if mat != WATER && py + 1 >= min_foot {
+                                let st = &mut col_state[cidx];
+                                st.has_floor = true;
+                                st.floor_y = py + 1;
+                                st.floor_mat = mat;
+                                st.floor_flags = if rubble(kp) { SPAN_RUBBLE } else { 0 };
+                                st.air_run = (y_lo - (py + 1)).min(u16::MAX as i32) as u16;
                                 if st.air_run >= AGENT_TALL as u16 {
-                                    if raw_spans.len() < (u16::MAX as usize) - 1 && col_counts[cidx] < u8::MAX {
-                                        let idx = raw_spans.len() as u16;
-                                        raw_spans.push(NavSpan {
-                                            y: st.floor_y,
-                                            clearance: st.air_run,
-                                            material: st.floor_mat,
-                                            flags: st.floor_flags,
-                                            region: u16::MAX,
-                                            edge_start: 0,
-                                            edge_count: 0,
-                                            col: cidx as u8,
-                                        });
-                                        col_counts[cidx] += 1;
-                                        st.emitted = true;
-                                        st.last_span = idx;
-                                    }
+                                    let idx = raw_spans.len() as u16;
+                                    raw_spans.push(NavSpan {
+                                        y: st.floor_y,
+                                        clearance: st.air_run,
+                                        material: st.floor_mat,
+                                        flags: st.floor_flags,
+                                        region: u16::MAX,
+                                        edge_start: 0,
+                                        edge_count: 0,
+                                        col: cidx as u8,
+                                    });
+                                    col_counts[cidx] = col_counts[cidx].saturating_add(1);
+                                    st.emitted = true;
+                                    st.last_span = idx;
                                 }
+                            }
+                            break;
+                        }
+                        py -= 1;
+                    }
+                }
+            }
+        }
+
+        // Layer-major vertical scan: when `region` is present, reads directly from the flat `Region`
+        // slice with zero HashMap lookups or `Sector::Bits` rebuilds.
+        if let Some(ref reg) = region {
+            let cells = &reg.cells;
+            for ly in 0..h {
+                let y = y_lo + ly as i32;
+                let y_base = ly * 4096;
+                for cz in 0..TILE_COLS {
+                    let z_base = y_base + (cz * 4 + 2) * 64 + 2;
+                    let row_base = cz * TILE_COLS;
+                    for cx in 0..TILE_COLS {
+                        let cidx = row_base + cx;
+                        let k = cells[z_base + cx * 4];
+                        let st = &mut col_state[cidx];
+                        if k == 0 {
+                            if st.has_floor {
+                                st.air_run = st.air_run.saturating_add(1);
+                                if !st.emitted {
+                                    if st.air_run >= AGENT_TALL as u16 {
+                                        if raw_spans.len() < (u16::MAX as usize) - 1 && col_counts[cidx] < u8::MAX {
+                                            let idx = raw_spans.len() as u16;
+                                            raw_spans.push(NavSpan {
+                                                y: st.floor_y,
+                                                clearance: st.air_run,
+                                                material: st.floor_mat,
+                                                flags: st.floor_flags,
+                                                region: u16::MAX,
+                                                edge_start: 0,
+                                                edge_count: 0,
+                                                col: cidx as u8,
+                                            });
+                                            col_counts[cidx] += 1;
+                                            st.emitted = true;
+                                            st.last_span = idx;
+                                        }
+                                    }
+                                } else {
+                                    raw_spans[st.last_span as usize].clearance = st.air_run;
+                                }
+                            }
+                        } else {
+                            st.air_run = 0;
+                            st.emitted = false;
+                            let mat = material(k);
+                            if mat != WATER && y + 1 >= min_foot {
+                                st.has_floor = true;
+                                st.floor_y = y + 1;
+                                st.floor_mat = mat;
+                                st.floor_flags = if rubble(k) { SPAN_RUBBLE } else { 0 };
                             } else {
-                                raw_spans[st.last_span as usize].clearance = st.air_run;
+                                st.has_floor = false;
                             }
                         }
-                    } else {
-                        st.air_run = 0;
-                        st.emitted = false;
-                        let mat = material(k);
-                        if mat != WATER && y + 1 >= min_foot {
-                            st.has_floor = true;
-                            st.floor_y = y + 1;
-                            st.floor_mat = mat;
-                            st.floor_flags = if rubble(k) { SPAN_RUBBLE } else { 0 };
+                    }
+                }
+            }
+        } else {
+            for y in y_lo..y_hi {
+                for cz in 0..TILE_COLS {
+                    let wz = col_center(tz, cz);
+                    let row_base = cz * TILE_COLS;
+                    for cx in 0..TILE_COLS {
+                        let wx = col_center(tx, cx);
+                        let cidx = row_base + cx;
+                        let k = src.kind(wx, y, wz);
+                        let st = &mut col_state[cidx];
+                        if k == 0 {
+                            if st.has_floor {
+                                st.air_run = st.air_run.saturating_add(1);
+                                if !st.emitted {
+                                    if st.air_run >= AGENT_TALL as u16 {
+                                        if raw_spans.len() < (u16::MAX as usize) - 1 && col_counts[cidx] < u8::MAX {
+                                            let idx = raw_spans.len() as u16;
+                                            raw_spans.push(NavSpan {
+                                                y: st.floor_y,
+                                                clearance: st.air_run,
+                                                material: st.floor_mat,
+                                                flags: st.floor_flags,
+                                                region: u16::MAX,
+                                                edge_start: 0,
+                                                edge_count: 0,
+                                                col: cidx as u8,
+                                            });
+                                            col_counts[cidx] += 1;
+                                            st.emitted = true;
+                                            st.last_span = idx;
+                                        }
+                                    }
+                                } else {
+                                    raw_spans[st.last_span as usize].clearance = st.air_run;
+                                }
+                            }
                         } else {
-                            st.has_floor = false;
+                            st.air_run = 0;
+                            st.emitted = false;
+                            let mat = material(k);
+                            if mat != WATER && y + 1 >= min_foot {
+                                st.has_floor = true;
+                                st.floor_y = y + 1;
+                                st.floor_mat = mat;
+                                st.floor_flags = if rubble(k) { SPAN_RUBBLE } else { 0 };
+                            } else {
+                                st.has_floor = false;
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    // Any span still open to air at the top of the scan window reaches open sky.
-    for st in &col_state {
-        if st.emitted && st.last_span != u16::MAX {
-            raw_spans[st.last_span as usize].clearance = u16::MAX;
+        // Any span still open to air at the top of the scan window reaches open sky.
+        for st in &col_state {
+            if st.emitted && st.last_span != u16::MAX {
+                raw_spans[st.last_span as usize].clearance = u16::MAX;
+            }
         }
-    }
+        (region, raw_spans, col_counts)
+    };
 
     // Pack spans contiguously by column so `col_spans[c]` gives an O(1) slice per column.
     let mut col_spans = [(0u16, 0u8); TILE_COL_COUNT];
@@ -594,18 +663,32 @@ pub fn extract_tile<S: VoxelSource>(
     }
 
     // Build intra-tile directed neighbor edges along +X/-X and +Z/-Z, probing each wall gap once
-    // directly from `region` when available.
+    // directly from `region` (or single-column `bay::nav_barrier_column` on unedited Bay tiles).
     let mut temp_edges: Vec<(u16, SpanEdge)> = Vec::with_capacity(spans.len() * 4);
-    let mut probe_solid = |wx: i32, wy: i32, wz: i32| -> bool {
-        if let Some(ref reg) = region {
-            let lx = wx - x0;
-            let ly = wy - y_lo;
-            let lz = wz - z0;
-            if (0..TILE_CELLS).contains(&lx) && ly >= 0 && (ly as usize) < h && (0..TILE_CELLS).contains(&lz) {
-                return reg.cells[lx as usize + 64 * (lz as usize + 64 * ly as usize)] != 0;
-            }
+    let mut probe_barrier = |wx: i32, wz: i32, y_hi: i32| -> u8 {
+        if used_fast_bay {
+            return crate::bay::nav_barrier_column(wx, wz, y_hi);
         }
-        src.kind(wx, wy, wz) != 0
+        let mut solid = |wy: i32| -> bool {
+            if let Some(ref reg) = region {
+                let lx = wx - x0;
+                let ly = wy - y_lo;
+                let lz = wz - z0;
+                if (0..TILE_CELLS).contains(&lx) && ly >= 0 && (ly as usize) < h && (0..TILE_CELLS).contains(&lz) {
+                    return reg.cells[lx as usize + 64 * (lz as usize + 64 * ly as usize)] != 0;
+                }
+            }
+            src.kind(wx, wy, wz) != 0
+        };
+        if solid(y_hi + 11) || solid(y_hi + 15) || solid(y_hi + AGENT_TALL - 1) {
+            3
+        } else if solid(y_hi + 7) {
+            2
+        } else if solid(y_hi + 3) {
+            1
+        } else {
+            0
+        }
     };
 
     for cz in 0..TILE_COLS {
@@ -628,7 +711,7 @@ pub fn extract_tile<S: VoxelSource>(
                     for ib in 0..nb as u16 {
                         let b_idx = sb0 + ib;
                         let span_b = spans[b_idx as usize];
-                        let (ab, ba) = classify_transition_with(&mut probe_solid, wx_a, wz_a, &span_a, wx_b, wz_a, &span_b);
+                        let (ab, ba) = classify_transition_barrier(&mut probe_barrier, wx_a, wz_a, &span_a, wx_b, wz_a, &span_b);
                         if ab != MOVE_NONE {
                             temp_edges.push((a_idx, SpanEdge { to_span: b_idx, dir: DIR_POS_X, move_kind: ab }));
                         }
@@ -649,7 +732,7 @@ pub fn extract_tile<S: VoxelSource>(
                     for ib in 0..nb as u16 {
                         let b_idx = sb0 + ib;
                         let span_b = spans[b_idx as usize];
-                        let (ab, ba) = classify_transition_with(&mut probe_solid, wx_a, wz_a, &span_a, wx_a, wz_b, &span_b);
+                        let (ab, ba) = classify_transition_barrier(&mut probe_barrier, wx_a, wz_a, &span_a, wx_a, wz_b, &span_b);
                         if ab != MOVE_NONE {
                             temp_edges.push((a_idx, SpanEdge { to_span: b_idx, dir: DIR_POS_Z, move_kind: ab }));
                         }

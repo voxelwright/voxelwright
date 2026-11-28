@@ -671,6 +671,23 @@ function take(core: Core, body: ArrayBuffer | null): boolean {
   return true
 }
 
+/** Main-thread tile-ingest pacing queue: prevents multiple L0 bay_load() calls from stacking in one animation frame while driving. */
+let mainTakeChain: Promise<void> = Promise.resolve()
+let lastMainTakeAt = -1e9
+function scheduleMainTake(core: Core, body: ArrayBuffer | null, pace: boolean): Promise<boolean> {
+  if (!pace || !body || !body.byteLength) return Promise.resolve(take(core, body))
+  let out = false
+  const next = mainTakeChain.then(async () => {
+    if (performance.now() - lastMainTakeAt < 10) {
+      await new Promise<void>((r) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 0)))
+    }
+    out = take(core, body)
+    lastMainTakeAt = performance.now()
+  })
+  mainTakeChain = next.catch(() => {})
+  return next.then(() => out)
+}
+
 /** What each core holds: a tile by level and place, when it was last wanted, and its coming. */
 interface Held { level: number; x0: number; z0: number; used: number; /** When it was last wanted, ms since 1970. */ seen: number; came: Promise<boolean>; failed?: boolean; /** Whether it has come (as a pack or as water). */ ready?: boolean; /** How many asks wait on it now: such a tile is never let go. */ waiters?: number }
 const held = new WeakMap<object, Map<string, Held>>()
@@ -720,8 +737,9 @@ export async function ground(core: object, x0: number, z0: number, x1: number, z
       const entry: Held = { level, x0: tx * size, z0: tz * size, used: stamp, seen: 0, came: Promise.resolve(false), waiters: 0 }
       // Failed, it is let go of (the next ask tries again), and every ask that waited on it hears so: each column made
       // meanwhile is made again (world.ts `lacking`), not only the one that first asked.
-      entry.came = body.then((b) => {
-        const took = take(core as Core, b)
+      entry.came = body.then(async (b) => {
+        const pace = owns && level === 0 && mine!.size > 4
+        const took = await scheduleMainTake(core as Core, b, pace)
         entry.ready = true; resting.delete(key); restFor.delete(key)
         if (took) taken(core, entry.x0, entry.z0, size)
         return took
