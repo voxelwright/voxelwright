@@ -36,8 +36,12 @@ const FAR = 100000.0;
 export interface Shade { at: readonly [number, number, number]; yaw: number; half: readonly [number, number]; high: number; lift: number }
 
 export interface Under {
+  /** Prepares vertex and uniform buffers before a render pass begins; returns true when at least one shadow quad will draw. */
+  prepare(to: Target, view: View, shades: readonly Shade[], ground: (x: number, y: number, z: number) => number, light: number, sun: readonly [number, number, number]): boolean
+  /** Records the prepared shadow quads into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
   /** Darkens the ground under each thing; `ground(x, y, z)` is the height of what is under a place (cells), looked for down from `y`; `light` how much of the sky's light there is to keep out (0 to 1). */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, shades: readonly Shade[], ground: (x: number, y: number, z: number) => number, light: number, sun: readonly [number, number, number]): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, shades: readonly Shade[], ground: (x: number, y: number, z: number) => number, light: number, sun: readonly [number, number, number], sharedPass?: GPURenderPassEncoder): void
 }
 
 const MOST = 16, FLOATS = 6
@@ -56,8 +60,9 @@ export async function under(device: GPUDevice, format: GPUTextureFormat): Promis
   const corners = device.createBuffer({ size: MOST * 6 * FLOATS * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
   const data = new Float32Array(MOST * 6 * FLOATS)
-  return {
-    draw(encoder, to, view, shades, ground, light, sun) {
+  let prepared = 0
+  const self: Under = {
+    prepare(to, view, shades, ground, light, sun) {
       let n = 0
       for (const s of shades) {
         if (n === MOST) break
@@ -76,17 +81,28 @@ export async function under(device: GPUDevice, format: GPUTextureFormat): Promis
         data.set([...a, ...b, ...cc, ...a, ...cc, ...d], n * 6 * FLOATS)
         n++
       }
-      if (!n) return
+      prepared = n
+      if (!n) return false
       device.queue.writeBuffer(uniforms, 0, Float32Array.from([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, 0]))
       device.queue.writeBuffer(corners, 0, data, 0, n * 6 * FLOATS)
-      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
-      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
-      pass.setScissorRect(0, 0, to.size[0], to.size[1])
+      return true
+    },
+    record(pass) {
+      if (!prepared) return
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
       pass.setVertexBuffer(0, corners)
-      pass.draw(n * 6)
+      pass.draw(prepared * 6)
+    },
+    draw(encoder, to, view, shades, ground, light, sun, sharedPass) {
+      if (!self.prepare(to, view, shades, ground, light, sun)) return
+      if (sharedPass) { self.record(sharedPass); return }
+      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
+      self.record(pass)
       pass.end()
     },
   }
+  return self
 }

@@ -330,6 +330,14 @@ export interface Crumbs {
   ): void
   /** Moves them `dt` seconds on. `ground` says how high the land is at a column. */
   step(dt: number, ground: (x: number, z: number) => number): void
+  /** Uploads spawns/uniforms and dispatches the GPU compute integration pass BEFORE a render pass begins; returns true when crumbs/sparks/carried cubes will draw. */
+  prepare(encoder: GPUCommandEncoder, to: Target, view: View): boolean
+  /** Tells the next `draw()` call to run `prepare()` (including any wrappers on `draw`) and skip opening its own render pass so the caller can invoke `record(sharedPass)` inside a merged TBDR pass. */
+  defer(): void
+  /** True when the most recent `prepare()` / deferred `draw()` has geometry ready for `record(pass)`. */
+  readonly ready: boolean
+  /** Records the prepared crumbs, sparks and carried cubes into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is. */
   light(sun: readonly number[], day: number): void
@@ -602,8 +610,11 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
     pendingCount = 0
   }
 
-  return {
+  let preparedGpu = false, preparedCpu = 0, preparedCarried = 0, deferred = false
+  const self: Crumbs = {
     carried,
+    get ready() { return preparedGpu || preparedCpu > 0 || preparedCarried > 0 },
+    defer() { deferred = true },
     get gpuCompute() { return useGpu },
     light(from, isDay) { sun = from; sunLength = Math.hypot(sun[0], sun[1], sun[2]); day = isDay },
     get live() {
@@ -748,7 +759,7 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         }
       }
     },
-    draw(encoder, to, view) {
+    prepare(encoder, to, view) {
       const anchor: [number, number, number] = [
         Math.floor(view.eye[0] / 64) * 64,
         Math.floor(view.eye[1] / 64) * 64,
@@ -769,7 +780,10 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
 
       const gpuActive = useGpu && (pendingCount > 0 || (simTime < maxExpire && gpuAliveHint > 0))
       const cpuActive = !useGpu && cpuLive > 0
-      if (!gpuActive && !cpuActive && carriedCount === 0) return
+      if (!gpuActive && !cpuActive && carriedCount === 0) {
+        preparedGpu = false; preparedCpu = 0; preparedCarried = 0
+        return false
+      }
 
       const aspect = to.size[0] / to.size[1]
       if (useGpu && gpuActive && computePipeline && computeUniforms) {
@@ -843,6 +857,11 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         cpuLive = n
       }
 
+      preparedGpu = gpuActive
+      preparedCpu = cpuActive ? cpuLive : 0
+      preparedCarried = carriedCount
+      if (!preparedGpu && preparedCpu === 0 && preparedCarried === 0) return false
+
       if (carriedCount > 0) {
         device.queue.writeBuffer(carriedInstances, 0, carriedF32, 0, carriedCount * STRIDE_FLOATS)
       }
@@ -851,26 +870,37 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf,
         ...view.right, aspect, ...view.up, 0, ...view.forward, 0, ...sun.map((s) => s / sunLength), day,
       ]))
+      return true
+    },
+    record(pass) {
+      if (!preparedGpu && preparedCpu === 0 && preparedCarried === 0) return
+      pass.setPipeline(pipeline)
+      pass.setBindGroup(0, bind)
+      if (preparedGpu) {
+        pass.setVertexBuffer(0, instances)
+        pass.draw(36, MOST)
+      } else if (preparedCpu > 0) {
+        pass.setVertexBuffer(0, instances)
+        pass.draw(36, preparedCpu)
+      }
+      if (preparedCarried > 0) {
+        pass.setVertexBuffer(0, carriedInstances)
+        pass.draw(36, preparedCarried)
+      }
+    },
+    draw(encoder, to, view) {
+      const skipPass = deferred
+      deferred = false
+      if (!self.prepare(encoder, to, view) || skipPass) return
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
       pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      pass.setPipeline(pipeline)
-      pass.setBindGroup(0, bind)
-      if (gpuActive) {
-        pass.setVertexBuffer(0, instances)
-        pass.draw(36, MOST)
-      } else if (cpuActive && cpuLive > 0) {
-        pass.setVertexBuffer(0, instances)
-        pass.draw(36, cpuLive)
-      }
-      if (carriedCount > 0) {
-        pass.setVertexBuffer(0, carriedInstances)
-        pass.draw(36, carriedCount)
-      }
+      self.record(pass)
       pass.end()
     },
   }
+  return self
 }

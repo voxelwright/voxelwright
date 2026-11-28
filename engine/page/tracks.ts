@@ -75,8 +75,12 @@ export interface Tracks {
   step(dt: number): void
   /** Clears all marks and pools (e.g. on world reset). */
   clear(): void
+  /** Uploads active skidmark and light-pool buffers before a render pass begins; returns true when geometry is ready to draw. */
+  prepare(to: Target, view: View, ground: (x: number, y: number, z: number) => number): boolean
+  /** Records the prepared skidmarks and light pools into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
   /** Draws active skidmarks and ground light pools. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, ground: (x: number, y: number, z: number) => number): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, ground: (x: number, y: number, z: number) => number, sharedPass?: GPURenderPassEncoder): void
   readonly count: number
 }
 
@@ -128,8 +132,10 @@ export async function tracks(device: GPUDevice, format: GPUTextureFormat): Promi
   const spills: Spill[] = []
   const skidData = new Float32Array(MAX_SEGS * 6 * FLOATS)
   const spillData = new Float32Array(MAX_SPILLS * 6 * FLOATS)
+  let preparedSkid = 0
+  let preparedSpill = 0
 
-  return {
+  const self: Tracks = {
     get count() { return segs.length },
     mark(wheel, at, strength, colour = [0.04, 0.04, 0.045], width = 3.0) {
       const a = Math.max(0, Math.min(0.75, strength * 0.72))
@@ -173,8 +179,10 @@ export async function tracks(device: GPUDevice, format: GPUTextureFormat): Promi
       writeAt = 0
       tails.clear()
       spills.length = 0
+      preparedSkid = 0
+      preparedSpill = 0
     },
-    draw(encoder, to, view, ground) {
+    prepare(to, view, ground) {
       let nSkid = 0
       const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
       for (let i = 0; i < segs.length; i++) {
@@ -214,27 +222,37 @@ export async function tracks(device: GPUDevice, format: GPUTextureFormat): Promi
       }
       spills.length = 0
 
-      if (!nSkid && !nSpill) return
+      preparedSkid = nSkid
+      preparedSpill = nSpill
+      if (!nSkid && !nSpill) return false
       device.queue.writeBuffer(uniforms, 0, Float32Array.from([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, 0]))
       if (nSkid) device.queue.writeBuffer(skidBuf, 0, skidData, 0, nSkid * 6 * FLOATS)
       if (nSpill) device.queue.writeBuffer(spillBuf, 0, spillData, 0, nSpill * 6 * FLOATS)
-
-      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
-      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
-      pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      if (nSkid) {
+      return true
+    },
+    record(pass) {
+      if (preparedSkid) {
         pass.setPipeline(skidPipe)
         pass.setBindGroup(0, skidBind)
         pass.setVertexBuffer(0, skidBuf)
-        pass.draw(nSkid * 6)
+        pass.draw(preparedSkid * 6)
       }
-      if (nSpill) {
+      if (preparedSpill) {
         pass.setPipeline(spillPipe)
         pass.setBindGroup(0, spillBind)
         pass.setVertexBuffer(0, spillBuf)
-        pass.draw(nSpill * 6)
+        pass.draw(preparedSpill * 6)
       }
+    },
+    draw(encoder, to, view, ground, sharedPass) {
+      if (!self.prepare(to, view, ground)) return
+      if (sharedPass) { self.record(sharedPass); return }
+      const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
+      self.record(pass)
       pass.end()
     },
   }
+  return self
 }
