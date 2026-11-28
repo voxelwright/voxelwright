@@ -13,6 +13,7 @@ pub mod city;
 pub mod fine;
 pub mod fire;
 pub mod hash;
+pub mod joints;
 pub mod kinds;
 pub mod land;
 pub mod scratch;
