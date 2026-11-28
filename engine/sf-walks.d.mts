@@ -185,6 +185,7 @@ export interface WalkGraph {
   whereabouts(seed: number, home: readonly [number, number, number] | undefined, t: number, hour?: number, rain?: number, opts?: { shocks?: readonly Shock[]; crashShocks?: readonly Shock[]; feetAt?: (x: number, z: number) => number }): WhereaboutsResult | null
   findResident(seed: number, home?: readonly [number, number, number]): { wi: number; h: number } | null
   query(eye: readonly [number, number], opts?: QueryOptions): { people: EvaluatedPedestrian[]; stats: LodStats }
+  countRing3(eye: readonly [number, number], opts?: Pick<QueryOptions, 'reach' | 'hour' | 'rain' | 'taken' | 'caps'>): number
   trace(seed: number, times: readonly number[], hour?: number, rain?: number): Array<{ t: number; x: number; z: number; s: number; still: boolean; far: boolean; waiting: boolean; crossing: boolean; kind: number; walking: number; archetype: Archetype; phase: SchedulePhase; activity: string }> | null
 }
 

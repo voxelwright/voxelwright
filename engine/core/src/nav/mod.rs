@@ -927,4 +927,68 @@ mod tests {
             assert!(warm_rebake_ms < 2.5, "warm rebake after 10 in-place blasts took {warm_rebake_ms:.2} ms (gate < 2.5 ms)");
         }
     }
+
+    /// 8. Unedited Bay nav extraction skips Ground::keep() sector builds and matches Ground::region bit-for-bit.
+    #[test]
+    fn fast_bay_nav_extract_matches_region_and_skips_sector_keep() {
+        use crate::bay;
+        use crate::kinds::{PLASTER, grey};
+        // Minimal Bay pack: 640x640 cells with sloping road, pavement, a house at 200..400, and a trunk.
+        let (gw, tw) = (65i32, 128i32);
+        let mut b = Vec::new();
+        for v in [0x3159_4142i32, 0, 0, 640, 10, gw, 0, 0, 5, tw, 0, 0, 1, 4, 1, 0] {
+            b.extend(v.to_le_bytes());
+        }
+        for _ in 0..gw {
+            for i in 0..gw { b.extend(((100 + i * 2) as i16).to_le_bytes()); }
+        }
+        for j in 0..tw {
+            for i in 0..tw {
+                let inside = (40..80).contains(&i) && (40..80).contains(&j);
+                b.extend((if inside { 260i16 } else { i16::MIN }).to_le_bytes());
+            }
+        }
+        for j in 0..tw {
+            b.extend(std::iter::repeat_n(if j < 20 { 0u8 } else if j < 30 { 1u8 } else { 4u8 }, tw as usize));
+        }
+        b.extend(std::iter::repeat_n(3u8, (tw * tw) as usize));
+        for v in [0i32, 4, kind(PLASTER, grey(1)) as i32, kind(PLASTER, grey(3)) as i32, 32 | (30 << 8) | (1 << 16) | (7 << 24), 140] {
+            b.extend(v.to_le_bytes());
+        }
+        for v in [[200i32, 200, 3], [400, 200, 1], [400, 400, 1], [200, 400, 5]] {
+            for n in v { b.extend(n.to_le_bytes()); }
+        }
+        for n in [500i32, 500, 300, 1] { b.extend(n.to_le_bytes()); }
+
+        bay::clear();
+        let at = bay::room(b.len());
+        unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), at, b.len()) };
+        assert_eq!(bay::load(), 1);
+
+        // Wrapper that disables fast_bay_spans so we can compare against the reference Ground::region path.
+        struct RegionOnly<'a>(&'a mut Ground);
+        impl<'a> VoxelSource for RegionOnly<'a> {
+            fn kind(&mut self, x: i32, y: i32, z: i32) -> Kind { self.0.kind(x, y, z) }
+            fn tile_region(&mut self, tx: i32, tz: i32, y_lo: i32, y_hi: i32) -> Option<crate::support::Region> {
+                self.0.tile_region(tx, tz, y_lo, y_hi)
+            }
+            fn tile_y_bounds(&mut self, tx: i32, tz: i32, edit_y: Option<(i32, i32)>) -> (i32, i32) {
+                self.0.tile_y_bounds(tx, tz, edit_y)
+            }
+        }
+
+        let mut fast_bodies = Bodies::new();
+        let mut ref_bodies = Bodies::new();
+        // Check open street tile (1, 1), building edge tile (3, 3), and building interior tile (4, 4).
+        for (tx, tz) in [(1, 1), (3, 3), (4, 4)] {
+            let fast_hf = extract_tile(&mut fast_bodies.ground, tx, tz, None);
+            let ref_hf = extract_tile(&mut RegionOnly(&mut ref_bodies.ground), tx, tz, None);
+            assert_eq!(fast_hf.col_spans, ref_hf.col_spans, "col_spans mismatch on tile ({tx},{tz})");
+            assert_eq!(fast_hf.spans, ref_hf.spans, "spans mismatch on tile ({tx},{tz})");
+            assert_eq!(fast_hf.edges, ref_hf.edges, "edges mismatch on tile ({tx},{tz})");
+        }
+        // Fast path must never build or evict 64^3 sectors into Ground::kept.
+        assert_eq!(fast_bodies.ground.kept_count(), 0, "fast Bay nav extract must not allocate Ground::kept sectors");
+        bay::clear();
+    }
 }

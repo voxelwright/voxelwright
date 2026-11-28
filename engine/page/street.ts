@@ -268,7 +268,7 @@ export function stepDeepensOverlap(
  */
 export function trafficObstacleGap(
   c: { x: number; z: number; hx: number; hz: number; halfL: number; halfW: number; v: number; id: number },
-  ob: { x: number; z: number; hx: number; hz: number; long: number; wide: number; v: number; id?: number },
+  ob: { x: number; z: number; hx: number; hz: number; long: number; wide: number; v: number; id?: number; alive?: boolean },
 ): number {
   const dx = ob.x - c.x, dz = ob.z - c.z
   if (Math.abs(dx) > 450 || Math.abs(dz) > 450) return Infinity
@@ -277,7 +277,9 @@ export function trafficObstacleGap(
     return near > 0 && near <= 400 ? near - c.halfL : Infinity
   }
   const dot = ob.hx * c.hx + ob.hz * c.hz
-  if (ob.long > 3 && dot < -0.82) return Infinity
+  // Ignore moving oncoming AI traffic in the opposite lane, but ALWAYS swept-path check stationary or living/player
+  // vehicles even when facing opposite (dot < -0.82), so traffic stops for crashed/wrong-way cars blocking its lane.
+  if (ob.long > 3 && dot < -0.82 && !ob.alive && ob.v >= 2) return Infinity
   if (ob.long > 3 && dot < -0.25) {
     const near = sweptPathNear(c.x, c.z, c.hx, c.hz, c.halfW + 1, ob)
     if (near <= 0 || near > 300) return Infinity
@@ -1022,11 +1024,10 @@ export function street(o: {
       timeOf,
     })
 
-    // Refresh Ring-3 macro city count (110–300 m) at throttled cadence so telemetry stays live at near-zero CPU cost.
+    // Refresh Ring-3 macro city count (110–300 m) at throttled cadence without building/evicting distant routes.
     if (seconds - macroAt >= 0.5 || seconds < macroAt) {
       macroAt = seconds
-      const macro = walkGraph.query([eye[0], eye[2]], { reach: RING3_RADIUS, t, hour, rain, taken: o.taken })
-      macroRing3 = macro.stats.ring3
+      macroRing3 = walkGraph.countRing3([eye[0], eye[2]], { reach: RING3_RADIUS, hour, rain, taken: o.taken })
     }
     lastLod = { ...queried.stats, ring3: Math.max(queried.stats.ring3, macroRing3), total: queried.stats.ring1 + queried.stats.ring2 + Math.max(queried.stats.ring3, macroRing3) }
 
@@ -3098,7 +3099,9 @@ export function street(o: {
   }
 
   /** The things in the way of cars: other cars, people on crossings and anyone standing in a lane, living things, cable cars. */
-  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; car?: Car; alive?: boolean; isCrater?: boolean; isPedestrian?: boolean; stalled?: boolean }[] = []
+  const obstacles: { x: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; id?: number; car?: Car; alive?: boolean; isCrater?: boolean; isPedestrian?: boolean; stalled?: boolean }[] = []
+  const aliveBoxes: { x: number; y: number; z: number; heading: number; halfL: number; halfW: number }[] = []
+  const meCarScratch = { x: 0, z: 0, hx: 0, hz: 0, halfL: 0, halfW: 0, v: 0, id: 0 }
   /**
    * Whether any of an obstacle's outline lies in the path straight ahead of a vehicle at a place heading a way, a
    * path `half` wide each side of its middle line; and if so how far ahead of the vehicle's middle that part of it
@@ -3125,10 +3128,12 @@ export function street(o: {
     activeCongested = new Set<string>()
     for (const r of roads.values()) if (r.blocked) activeCongested.add(r.key)
 
+    let rtStuckCount = 0
     for (const c of traffic) {
       const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      if (c.rtStuck) rtStuckCount++
       const stalled = !!c.rtStuck || (c.v < 2 && !c.queued && (c.stuck ?? 0) > 1.2)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c, stalled })
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c, stalled })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, stalled })
       // Reserve destination lane slot for cars mid-lane-change or mid-overtake so queued cars never merge into the same spot.
       if (c.road && (Math.abs(c.laneShift ?? 0) > 2 || c.overtake)) {
@@ -3160,7 +3165,7 @@ export function street(o: {
 
     for (const c of depotCars) {
       const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c })
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
     }
     // Parked cars, which no place puts in a lane (inLane); and the holes blasts made in the road.
@@ -3173,11 +3178,17 @@ export function street(o: {
       obstacles.push({ x: h.x, z: h.z, long: h.r, wide: h.r, v: 0, hx: 1, hz: 0, isCrater: true })
       aiObstacles.push({ x: h.x, z: h.z, halfL: h.r, halfW: h.r, v: 0, hx: 1, hz: 0, isCrater: true })
     }
-    for (const c of [...cables, ...trams]) {
-      const ch = Math.cos(c.heading), sh = Math.sin(c.heading)
-      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, car: c })
+    for (let j = 0; j < cables.length; j++) {
+      const c = cables[j], ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c })
       aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
     }
+    for (let j = 0; j < trams.length; j++) {
+      const c = trams[j], ch = Math.cos(c.heading), sh = Math.sin(c.heading)
+      obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id, car: c })
+      aiObstacles.push({ x: c.x, z: c.z, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, hx: ch, hz: sh, id: c.id })
+    }
+    aliveBoxes.length = 0
     for (const th of o.alive.things) {
       const w = o.alive.where(th)
       if (w) {
@@ -3185,6 +3196,7 @@ export function street(o: {
         const v = th.state ? Math.abs(th.state.speed ?? 0) : 0
         obstacles.push({ x: w.at[0], z: w.at[2], long: hl, wide: hw, v, hx: w.front[0], hz: w.front[2], alive: true })
         aiObstacles.push({ x: w.at[0], z: w.at[2], halfL: hl, halfW: hw, v, hx: w.front[0], hz: w.front[2] })
+        aliveBoxes.push({ x: w.at[0], y: w.at[1], z: w.at[2], heading: Math.atan2(w.front[2], w.front[0]), halfL: hl, halfW: hw })
       }
     }
     for (const [x, z] of crossing) {
@@ -3203,10 +3215,13 @@ export function street(o: {
       const rf = rainDrivingFactors(profile, rainNow)
       const pedYieldBuf = crosswalkYieldBuffer(profile, c.v, rainNow)
       let gap = Infinity, lead = 0, why = '', leadCar: Car | undefined, hitCrater = false
-      const meCar = { x: c.x, z: c.z, hx, hz, halfL: c.model.long / 2, halfW: c.model.wide / 2, v: c.v, id: c.id }
-      for (const ob of obstacles) {
+      meCarScratch.x = c.x; meCarScratch.z = c.z; meCarScratch.hx = hx; meCarScratch.hz = hz
+      meCarScratch.halfL = c.model.long / 2; meCarScratch.halfW = c.model.wide / 2; meCarScratch.v = c.v; meCarScratch.id = c.id
+      for (let oi = 0; oi < obstacles.length; oi++) {
+        const ob = obstacles[oi]
         if (ob.car === c) continue
-        let g = trafficObstacleGap(meCar, ob.car ? { ...ob, id: ob.car.id } : ob)
+        if (Math.abs(ob.x - c.x) > 450 || Math.abs(ob.z - c.z) > 450) continue
+        let g = trafficObstacleGap(meCarScratch, ob)
         if (g === Infinity) continue
         if (ob.isPedestrian && g > 4) g = Math.max(0.5, g - pedYieldBuf)
         if (g < gap) {
@@ -3353,12 +3368,13 @@ export function street(o: {
               why = 'robotaxi-stuck'
             }
           }
-        } else if (dEye < 1300 && nowDrive > (c.rtCool ?? 0) && traffic.filter((t2) => t2.rtStuck).length < 2) {
+        } else if (dEye < 1300 && nowDrive > (c.rtCool ?? 0) && rtStuckCount < 2) {
           if (left > 14 && left < 78 && busyJunction(r.b) && c.rtNode !== r.b) {
             c.rtNode = r.b
             const nearOtherRT = traffic.some((o2) => o2 !== c && o2.model.kind === 'robotaxi' && Math.hypot(o2.x - c.x, o2.z - c.z) < 180)
             if (random() < (nearOtherRT ? 0.42 : 0.15)) {
               c.rtStuck = { at: nowDrive, until: nowDrive + 24 + random() * 14, kind: 'intersection', stutter: nowDrive + 3.2 + random() * 2.4, microEnd: 0 }
+              rtStuckCount++
               v0 = 0.01; gap = 0; why = 'robotaxi-stuck'
             }
           } else if ((r.lanes === 1 || (r.flags & 4) !== 0) && c.s! > 55 && left > 55 && c.rtRoadKey !== r.key) {
@@ -3366,6 +3382,7 @@ export function street(o: {
             const tight = traffic.some((o2) => o2 !== c && Math.hypot(o2.x - c.x, o2.z - c.z) < 180)
             if (random() < (tight ? 0.24 : 0.14)) {
               c.rtStuck = { at: nowDrive, until: nowDrive + 22 + random() * 14, kind: 'narrow', stutter: nowDrive + 3.6 + random() * 2.6, microEnd: 0 }
+              rtStuckCount++
               v0 = 0.01; gap = 0; why = 'robotaxi-stuck'
             }
           }
@@ -3606,47 +3623,73 @@ export function street(o: {
       if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 10 && unseen(c.x, c.z, view)) || mutualDeadlock || vehicleStall) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       // Someone held a junction a long time without moving (a person stands in front of them): let it go.
       if (c.stuck! > 6) letGo(c)
-      pose(c)
+      const movedPose = c.s !== prevPose.s || c.road !== prevPose.road || c.lane !== prevPose.lane
+        || (c.laneShift ?? 0) !== prevPose.laneShift || (c.overtakeShift ?? 0) !== prevPose.overtakeShift
+        || (c.sirenYieldShift ?? 0) !== prevPose.sirenYieldShift || Math.abs(c.latVel ?? 0) >= 1e-4
+        || c.y === 0 || changedNear(c.x, c.z)
+      if (movedPose) pose(c)
       // Corner-sweep & lateral-shift OBB guard (#155, #164): if advancing or shifting laterally deepens an OBB overlap
-      // with an adjacent traffic vehicle, streetcar, or cable car, revert the step and yield instead of penetrating it.
-      if (c.v > 0.1 || Math.abs(c.latVel ?? 0) > 0.1) {
+      // with an adjacent traffic vehicle, streetcar, cable car, or living/player vehicle, revert the step and yield.
+      if (movedPose && (c.v > 0.1 || Math.abs(c.latVel ?? 0) > 0.1)) {
         const pBox = { x: prevPose.x, z: prevPose.z, heading: prevPose.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
         const nBox = { x: c.x, z: c.z, heading: c.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
-        let sweptHit: Car | null = null
+        let sweptWait: string | null = null
         for (const list of [traffic, trams, cables]) {
           for (let j = 0; j < list.length; j++) {
             const oCar = list[j]
             if (oCar === c || Math.abs(oCar.y - c.y) > 25) continue
             if (stepDeepensOverlap(pBox, nBox, { x: oCar.x, z: oCar.z, heading: oCar.heading, halfL: oCar.model.long / 2, halfW: oCar.model.wide / 2 })) {
-              sweptHit = oCar; break
+              sweptWait = oCar.kind === 'tram' || oCar.kind === 'cable' ? 'tram' : 'car'
+              break
             }
           }
-          if (sweptHit) break
+          if (sweptWait) break
         }
-        if (sweptHit) {
+        if (!sweptWait) {
+          for (let j = 0; j < aliveBoxes.length; j++) {
+            const ab = aliveBoxes[j]
+            if (Math.abs(ab.y - c.y) > 25) continue
+            if (stepDeepensOverlap(pBox, nBox, ab)) {
+              sweptWait = 'vehicle'
+              break
+            }
+          }
+        }
+        if (sweptWait) {
           c.x = prevPose.x; c.z = prevPose.z; c.y = prevPose.y
           c.heading = prevPose.heading; c.pitch = prevPose.pitch; c.roll = prevPose.roll
           c.s = prevPose.s; c.road = prevPose.road; c.prev = prevPose.prev; c.next = prevPose.next; c.lane = prevPose.lane
           c.laneShift = prevPose.laneShift; c.overtakeShift = prevPose.overtakeShift; c.sirenYieldShift = prevPose.sirenYieldShift; c.latVel = 0
           if (prevPose.route) c.route = prevPose.route
-          c.v = 0; c.wait = sweptHit.kind === 'tram' || sweptHit.kind === 'cable' ? 'tram' : 'car'; c.stuck = (c.stuck ?? 0) + dt
+          c.v = 0; c.wait = sweptWait; c.stuck = (c.stuck ?? 0) + dt
         }
       }
       // Persistent overlap recovery (runs even while `queued` at a stop sign/light, so two stopped vehicles overlapping
-      // across a junction seam never remain fused together for tens of seconds).
+      // across a junction seam or against a crashed living car never remain fused together for tens of seconds).
       if (c.v < 2) {
         const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
+        const hl = c.model.long / 2, hw = c.model.wide / 2
         let overlapping = false
-        for (const oRail of [...trams, ...cables]) {
+        for (let j = 0; j < trams.length && !overlapping; j++) {
+          const oRail = trams[j]
           if (Math.abs(oRail.x - c.x) > 180 || Math.abs(oRail.z - c.z) > 180 || Math.abs(oRail.y - c.y) > 25) continue
-          const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oRail.x, oRail.z, Math.cos(oRail.heading), Math.sin(oRail.heading), oRail.model.long / 2, oRail.model.wide / 2)
-          if (g < -2) { overlapping = true; break }
+          if (boxGap(c.x, c.z, cfx, cfz, hl, hw, oRail.x, oRail.z, Math.cos(oRail.heading), Math.sin(oRail.heading), oRail.model.long / 2, oRail.model.wide / 2) < -2) overlapping = true
+        }
+        for (let j = 0; j < cables.length && !overlapping; j++) {
+          const oRail = cables[j]
+          if (Math.abs(oRail.x - c.x) > 180 || Math.abs(oRail.z - c.z) > 180 || Math.abs(oRail.y - c.y) > 25) continue
+          if (boxGap(c.x, c.z, cfx, cfz, hl, hw, oRail.x, oRail.z, Math.cos(oRail.heading), Math.sin(oRail.heading), oRail.model.long / 2, oRail.model.wide / 2) < -2) overlapping = true
+        }
+        for (let j = 0; j < aliveBoxes.length && !overlapping; j++) {
+          const ab = aliveBoxes[j]
+          if (Math.abs(ab.x - c.x) > 180 || Math.abs(ab.z - c.z) > 180 || Math.abs(ab.y - c.y) > 25) continue
+          if (boxGap(c.x, c.z, cfx, cfz, hl, hw, ab.x, ab.z, Math.cos(ab.heading), Math.sin(ab.heading), ab.halfL, ab.halfW) < -2) overlapping = true
         }
         if (!overlapping) {
           for (let j = 0; j < traffic.length; j++) {
             const oCar = traffic[j]
             if (oCar === c || oCar.v >= 2 || c.id <= oCar.id || Math.abs(oCar.x - c.x) > 150 || Math.abs(oCar.z - c.z) > 150 || Math.abs(oCar.y - c.y) > 25) continue
-            const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
+            const g = boxGap(c.x, c.z, cfx, cfz, hl, hw, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
             if (g < -2) { overlapping = true; break }
           }
         }

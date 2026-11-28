@@ -1097,6 +1097,9 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
     }
 
     // 1. Stream nearby Plazas & automatically re-seat if L0 tiles refine ground elevation!
+    // Budget plaza/shop builds per frame after initial hydration so driving into dense retail districts never stalls.
+    let buildBudget = activeShops.size > 0 || activePlazas.size > 0 ? 6 : 16
+    let morePending = false
     const wantedPlazas = new Set<string>()
     const pgx0 = Math.floor((eyeXM - PLAZA_RADIUS) / GRID_CELL), pgx1 = Math.floor((eyeXM + PLAZA_RADIUS) / GRID_CELL)
     const pgz0 = Math.floor((eyeZM - PLAZA_RADIUS) / GRID_CELL), pgz1 = Math.floor((eyeZM + PLAZA_RADIUS) / GRID_CELL)
@@ -1110,8 +1113,10 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
           const curSig = plazaSig(p)
           if (curSig === null) continue
           if (!existing || existing.sig !== curSig) {
+            if (buildBudget <= 0) { morePending = true; continue }
             if (existing) destroyPlaza(existing)
             const built = buildPlaza(p, marketOpen)
+            buildBudget -= 2
             if (built) {
               activePlazas.set(p.id, built)
               dirty = true
@@ -1149,14 +1154,17 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
       const curSig = shopSig(s)
       if (curSig === null) continue
       if (!existing || existing.sig !== curSig) {
+        if (buildBudget <= 0) { morePending = true; continue }
         if (existing) destroyShop(existing)
         const built = buildShop(s)
+        buildBudget--
         if (built) {
           activeShops.set(k, built)
           dirty = true
         }
       }
     }
+    if (morePending) lastRefreshMs = 0
     for (const [k, b] of activeShops) {
       if (!wantedShops.has(k)) {
         destroyShop(b)
