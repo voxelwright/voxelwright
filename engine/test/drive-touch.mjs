@@ -80,7 +80,9 @@ for (const [name, s] of Object.entries(screens)) {
     const apart = !L.length || !R.length ? Infinity : Math.min(...R.map((k) => k.left)) - Math.max(...L.map((k) => k.right))
     const acts = new Set(rs.map((k) => k.act)), drive = hand, steerSide = hand === 'right' ? 'left' : 'right'
     const need = ['brake', 'drift', 'boost', ...(gas === 'pedals' ? ['gas'] : []), ...(steer === 'arrows' ? ['left', 'right'] : []), ...(steer === 'wheel' ? ['wheel'] : [])]
-    const sides = rs.every((k) => ['left', 'right', 'wheel', 'tilt-on'].includes(k.act) || (k.act === 'brake' && steer === 'tilt' && gas === 'pedals') ? k.side === steerSide : k.side === drive)
+    // (Boost is held with Gas: with pedals it is the steering thumb's, or one thumb would need both keys.)
+    const steering = (k) => ['left', 'right', 'wheel', 'tilt-on'].includes(k.act) || (k.act === 'boost' && gas === 'pedals') || (k.act === 'brake' && steer === 'tilt' && gas === 'pedals')
+    const sides = rs.every((k) => k.side === (steering(k) ? steerSide : drive))
     const high = rs.filter((k) => k.side === drive).filter((k) => k.top <= s.h * (size > 1 ? 0.42 : 0.5))
     const ok = !high.length && !small.length && !out.length && !meet.length && apart >= 24 && need.every((a) => acts.has(a)) && sides && (gas === 'auto') === !acts.has('gas')
     if (!ok) bad++
@@ -90,8 +92,18 @@ for (const [name, s] of Object.entries(screens)) {
 }
 check(bad === 0, `${laid} layouts (4 steerings, 2 gases, 2 hands, 3 sizes, 4 screens, and tilt waiting): keys 44 px or more, in the safe area, none on another, the two thumbs 24 px or more apart, the driving thumb's in the lower half`)
 
+// Boost works only while the car is told to go, so no one thumb has both Gas and Boost (nor, with auto gas, both the
+// steering and Boost): every scheme, hand and size, with and without the player over a corner.
+const shared = []
+for (const steer of STEERS) for (const gas of GASES) for (const hand of ['right', 'left']) for (const size of [0.85, 1, 1.2]) for (const below of [0, 244]) {
+  const keys = layout({ ...DEFAULTS, steer, gas, hand, size }, steer, { width: 844, height: 390, portrait: false, below })
+  const side = (act) => keys.find((k) => k.act === act)?.side, other = hand === 'right' ? 'left' : 'right'
+  if (side('boost') !== (gas === 'pedals' ? other : hand) || side('boost') === side('gas')) shared.push(`${steer}+${gas} ${hand}-handed ${size}${below ? ' under the player' : ''}`)
+}
+check(shared.length === 0, `Boost is under the other thumb from Gas, and with auto gas under the driving thumb${shared.length ? `; not: ${shared.length}, such as ${shared.slice(0, 3).join(', ')}` : ''}`)
+
 // Under the YouTube player (top left, its foot 244 px down a phone on its side): that corner's keys, steering or driving, stay below it.
-for (const steer of ['arrows', 'wheel', 'tilt']) for (const gas of ['pedals', 'auto']) for (const hand of ['right', 'left']) for (const ask of [false, true]) {
+for (const steer of STEERS) for (const gas of ['pedals', 'auto']) for (const hand of ['right', 'left']) for (const ask of [false, true]) {
   if (ask && steer !== 'arrows') continue
   const all = layout({ ...DEFAULTS, steer, hand, gas }, steer, { width: 844, height: 390, portrait: false, below: 244 }, ask)
   const ks = all.filter((k) => k.side === 'left')

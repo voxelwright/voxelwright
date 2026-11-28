@@ -128,6 +128,8 @@ export interface Me {
   down(seconds: number): void
   /** How fast time goes for this body: 1, or the world's clock when a rule has slowed it and has not spared this person. */
   clock: number
+  /** True while holding and looking at the in-game smartphone on foot (people.ts `reading`). */
+  phoneReading: boolean
 }
 
 export function person(o: {
@@ -186,7 +188,7 @@ export function person(o: {
   // move takes over from the one before, and none brings it to rest from whatever it was in. A move begins when this
   // page hears of it: by the world's clock a strike of half a second told a little late began part way through.
   type Under = { n: number; move: Move; since: number; aim?: [number, number, number] }
-  let limbs: Limbs = {}, doing: Under | null = null, before: Under | null = null, carry: Extra[] | undefined
+  let limbs: Limbs = {}, doing: Under | null = null, before: Under | null = null, carry: Extra[] | undefined, phoneReading = false
   const moved = () => {
     const m = limbs.move, now = performance.now() / 1000
     if (!m) { if (doing && doing.move !== REST) { before = doing; doing = { n: -1, move: REST, since: now } } return }
@@ -204,7 +206,7 @@ export function person(o: {
     // In the air its limbs are the air's: hung from a canopy, or out to a fall of more than a jump's.
     // (Only one who does not fly, and whom no rule has given a move: theirs are theirs.)
     const air: Under | null = canopy ? { n: -2, move: HUNG, since: airborne } : off && sinking > 60 && can.fly === 0 && (!doing || doing.move === REST) ? { n: -3, move: FALLING, since: airborne } : null
-    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking: air ? 0 : walking, running: runningAt(speed), pace: speed, down: lying, time: seconds, look: dressed(), move: air ? part(air, now) : doing ? part(doing, now) : undefined, was: air ? undefined : before && doing ? part(before, now) : undefined })
+    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking: air ? 0 : walking, running: runningAt(speed), pace: speed, down: lying, reading: phoneReading && !air ? 0.92 : 0, time: seconds, look: dressed(), move: air ? part(air, now) : doing ? part(doing, now) : undefined, was: air ? undefined : before && doing ? part(before, now) : undefined })
     return [shown]
   })
   // What it has on: a rule's look, what its hand carries, and its canopy while one is open. Made again only when one of them is another.
@@ -267,6 +269,8 @@ export function person(o: {
     down(seconds) { downUntil = seconds > 0 ? performance.now() + seconds * 1000 : 0 },
     get clock() { return clock },
     set clock(rate) { clock = rate },
+    get phoneReading() { return phoneReading },
+    set phoneReading(on) { phoneReading = on },
     edit(words) { if (o.own) o.send({ edit: words }) },
     heard(answer, told) {
       waiting = false
