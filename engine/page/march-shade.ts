@@ -102,6 +102,7 @@ override USE_GTAO: bool = false;
 override USE_CLUSTER_LIGHTS: bool = false;
 override USE_GI: bool = false;
 override USE_RESTIR: bool = false;
+override AUTOTILE: bool = true;
 
 const INDOORS = 0.45;
 const NEAR = 1.0;
@@ -805,6 +806,7 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv:
     }
   }` : ''}
   var albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), face, select(0.0, 1.0, hit.level == 0u && faced), qc, select(0.0, 1.0 / (max(hit.t, 1.0) * g.pixel), hit.level == 0u && faced));
+  if (AUTOTILE && !slope && faced && hit.level == 0u) { albedo = autotile(albedo, hit.kind, hit.cell, hit.level, n, qc, 1.0 / (max(hit.t, 1.0) * g.pixel)); }
   ${world.options.surveyedWalls ? 'if (stuff == 6u) { albedo = marked(albedo, ro, rd, hit.t); }' : ''}
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0) {

@@ -595,6 +595,151 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
 }
 `
 
+/** `?autotile=0` (#226): faces drawn as their cell alone, without the trims their neighbours give them (for A/B at one camera). */
+export const AUTOTILE_ON = new URLSearchParams(globalThis.location?.search ?? '').get('autotile') !== '0'
+
+/**
+ * Architectural auto-tiling (#226): a face of a fine cell takes trim from the cells round it, as building blocks do,
+ * at no geometry cost. Only the march's shading has `kindAt`, so this lives beside PAINT and not in it (pieces.ts
+ * shares PAINT). Each pixel asks only of the neighbours whose edges it is nearest: the cell over it or under it, the
+ * one beside it on its nearer side, and the one at its foot in front. A wall's face (brick, plaster, concrete, wood):
+ *   - coping: open air or glass over it, or another material, gives a lit cap and a hairline shadow under it;
+ *   - drip: open air or glass under it (a lintel, a sill's underside) gives a shadow line along its foot;
+ *   - plinth: ground in front of its foot gives a darker stone course with a lit chamfer and a joint on top;
+ *   - arris: an outside corner (open beside and behind that) or a window's glass beside gives a chamfered edge, so a
+ *     post one cell wide is fluted on both sides and a band one cell high is moulded top and bottom;
+ *   - seam: earth, grass or sand at its foot or beside it creeps onto it, feathered by noise. A paved top face
+ *     (asphalt, concrete, brick, plaster) takes the same seam from terrain beside it.
+ * Bands are drawn with a pixel's width of smoothing, hairlines only where a cell is many pixels across, and the whole
+ * fades out by two and a half pixels a cell, where no lookup is made at all.
+ */
+export const AUTOTILE = /* wgsl */ `
+fn tileOpen(k: u32) -> bool { return k == 0u || (k & 15u) == 11u; }
+fn tileSolid(k: u32) -> bool { return k != 0u && (k & 15u) != 5u && (k & 15u) != 11u; }
+fn tileTerrain(k: u32) -> bool { let s = k & 15u; return k != 0u && (s == 1u || s == 3u || s == 4u); }
+fn tileBand(x: f32, lo: f32, hi: f32, w: f32) -> f32 { return smoothstep(lo - w, lo + w, x) * (1.0 - smoothstep(hi - w, hi + w, x)); }
+// What terrain leaves on a wall's foot: a stain of its hue (moss from grass, dirt from earth and sand), as a factor on the wall's own colour.
+fn tileStain(k: u32) -> vec3f {
+  let s = k & 15u;
+  let ci = (k >> 8u) & 255u;
+  var own = looks.material[s].colour;
+  if (ci != 0u) { own = looks.palette[ci].rgb; }
+  if (s == 3u) { own = mix(own, looks.material[1u].colour, 0.35); }
+  let hue = own / max(dot(own, vec3f(0.3, 0.55, 0.15)), 0.02);
+  return mix(vec3f(1.0), hue, 0.45) * 0.84;
+}
+// A dressing of stone (coping, sill, lintel, plinth): a pale stone of about the wall material's own lightness, its
+// blocks a little different from each other, laid over the wall's pattern so no brick joint shows through it.
+fn tileStone(kind: u32, block: f32) -> vec3f {
+  let ci = (kind >> 8u) & 255u;
+  var own = looks.material[kind & 15u].colour;
+  if (ci != 0u) { own = looks.palette[ci].rgb; }
+  let lum = dot(own, vec3f(0.3, 0.55, 0.15));
+  return vec3f(mix(lum, 0.3, 0.55)) * vec3f(0.97, 0.94, 0.88) * (0.93 + 0.14 * hash3i(vec3i(i32(floor(block)), 0, 0), 70u));
+}
+fn autotile(albedo: vec3f, kind: u32, cell: vec3i, level: u32, n: vec3f, q: vec3f, sharp: f32) -> vec3f {
+  let fade = clamp((sharp - 2.5) / 4.0, 0.0, 1.0);
+  if (fade <= 0.0 || (kind & 80u) != 0u) { return albedo; }
+  let stuff = kind & 15u;
+  let structural = stuff == 7u || stuff == 8u || stuff == 9u || stuff == 10u;
+  let paved = stuff == 6u || stuff == 7u || stuff == 8u || stuff == 9u;
+  if (!structural && !paved) { return albedo; }
+  let c = cell - g.level[level].cells;
+  let px = 1.0 / max(sharp, 1.0);
+  let w = max(px * 0.7, 0.015);
+  let crisp = clamp((sharp - 6.0) / 6.0, 0.0, 1.0) * fade;
+  let masonry = stuff != 10u;
+  let up = vec3i(0, 1, 0);
+  var v = 1.0;
+  var stone = 0.0;
+  var block = 0.0;
+  var stain = vec3f(1.0);
+  var creep = 0.0;
+  if (abs(n.y) < 0.5) {
+    let out = vec3i(round(n));
+    var t = vec3i(1, 0, 0);
+    var fa = q.x;
+    if (abs(n.x) > 0.5) { t = vec3i(0, 0, 1); fa = q.z; }
+    let fu = q.y;
+    let along = f32(dot(cell, t)) + fa;
+    block = floor(along / 6.0) + f32(cell.y) * 31.0;
+    let low = kindAt(c - up + out, level);
+    let grounded = tileSolid(low);
+    if (structural) {
+      if (fu >= 0.5) {
+        let above = kindAt(c + up, level);
+        if (tileOpen(above) || ((above & 15u) != stuff && !tileTerrain(above))) {
+          // Coping or sill: a stone cap, its top arris lit, a shadow line under its lip.
+          stone = select(0.0, 0.8, masonry);
+          v *= 1.06 + 0.07 * smoothstep(0.8 - w, 0.8 + w, fu);
+          v *= 1.0 - 0.28 * crisp * (1.0 - smoothstep(0.08 - w, 0.08 + w, fu));
+        }
+      } else if (!grounded && tileOpen(kindAt(c - up, level))) {
+        // Lintel or soffit edge: a stone course with a drip line along its foot.
+        stone = select(0.0, 0.7, masonry);
+        v *= 1.0 - 0.3 * crisp * (1.0 - smoothstep(0.1 - w, 0.1 + w, fu));
+      }
+      if (grounded && !(stuff == 7u && (low & 15u) == 6u)) {
+        // Plinth: a darker stone course on the ground, a lit chamfer and a joint along its top.
+        stone = select(0.0, 0.85, masonry);
+        v *= 0.84;
+        v *= 1.0 + 0.16 * fade * tileBand(fu, 0.8, 0.92, w);
+        v *= 1.0 - 0.25 * crisp * smoothstep(0.94 - w, 0.94 + w, fu);
+      }
+    }
+    var side = t;
+    var fs = 1.0 - fa;
+    if (fa < 0.5) { side = -t; fs = fa; }
+    let beside = kindAt(c + side, level);
+    if (structural && tileOpen(beside)) {
+      var corner = beside != 0u;
+      if (!corner) { corner = !tileSolid(kindAt(c + side - out, level)); }
+      if (corner) {
+        // Arris: a lit chamfer on an outside corner or a window's jamb, a groove just inside it.
+        v *= 1.0 + 0.1 * (1.0 - smoothstep(0.15 - w, 0.15 + w, fs));
+        v *= 1.0 - 0.22 * crisp * tileBand(fs, 0.15, 0.23, w);
+      }
+    }
+    let rough = (soft(vec2f(along / 2.5, f32(dot(cell, vec3i(n))) * 0.37), 61u) - 0.5) + (soft(vec2f(along * 1.7, fu * 1.7), 62u) - 0.5) * 0.35;
+    let mottle = 0.55 + 0.45 * soft(vec2f(along * 4.0, fu * 4.0), 65u);
+    if (tileTerrain(low)) {
+      let reach = 0.35 + 0.7 * rough;
+      creep = (1.0 - smoothstep(reach - max(w, 0.12), reach + max(w, 0.12), fu)) * mottle;
+      stain = tileStain(low);
+    }
+    if (tileTerrain(beside)) {
+      let reach = 0.25 + 0.6 * rough;
+      let edge = (1.0 - smoothstep(reach - max(w, 0.12), reach + max(w, 0.12), fs)) * mottle;
+      if (edge > creep) { creep = edge; stain = tileStain(beside); }
+    }
+  } else if (n.y > 0.5 && paved) {
+    // A paved top beside terrain: the terrain's stain creeps over its edge.
+    var sx = vec3i(1, 0, 0);
+    var dx = 1.0 - q.x;
+    if (q.x < 0.5) { sx = vec3i(-1, 0, 0); dx = q.x; }
+    var sz = vec3i(0, 0, 1);
+    var dz = 1.0 - q.z;
+    if (q.z < 0.5) { sz = vec3i(0, 0, -1); dz = q.z; }
+    let kx = kindAt(c + sx, level);
+    let kz = kindAt(c + sz, level);
+    let at = vec2f(f32(cell.x), f32(cell.z)) + q.xz;
+    let rough = (soft(at / 2.5, 63u) - 0.5) + (soft(at * 1.7, 64u) - 0.5) * 0.35;
+    let mottle = 0.55 + 0.45 * soft(at * 4.0, 66u);
+    let reach = 0.3 + 0.6 * rough;
+    let fw = max(w, 0.12);
+    if (tileTerrain(kx)) { creep = (1.0 - smoothstep(reach - fw, reach + fw, dx)) * mottle; stain = tileStain(kx); }
+    if (tileTerrain(kz)) {
+      let edge = (1.0 - smoothstep(reach - fw, reach + fw, dz)) * mottle;
+      if (edge > creep) { creep = edge; stain = tileStain(kz); }
+    }
+  }
+  var col = albedo;
+  if (stone > 0.0) { col = mix(albedo, tileStone(kind, block), stone * fade); }
+  col *= mix(1.0, v, fade);
+  return col * mix(vec3f(1.0), stain, creep * 0.85 * fade);
+}
+`
+
 const TRIES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('tries'), 16, 1, 64, true)
 const THROUGH = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('through'), 2, 0.1, 64).toFixed(2)
 const PANES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('panes'), 2, 1, 8, true)
@@ -803,7 +948,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
 
   const traceDeps: TraceCodeDeps = { GLOBALS, HANDOVER, EDITED, GLASS, LIT_LETTERS, EDITS, TRIES, THROUGH, PANES, INLOOP }
   const shadeDepsFor = (useF16: boolean): ShadeCodeDeps => ({
-    GLOBALS, SCREEN, LIGHT: lightWgsl(useF16), GLASS, PAINT, AIR, NOISE,
+    GLOBALS, SCREEN, LIGHT: lightWgsl(useF16), GLASS, PAINT: PAINT + AUTOTILE, AIR, NOISE,
     NIGHT_WALL, LANDMARK_LIGHT, LEAF_NIGHT, FOG, sunlitText,
     PANE_LIGHT, LIT_LETTERS, EDITS, TRIES, THROUGH, INLOOP,
   })
@@ -1075,6 +1220,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         USE_CLUSTER_LIGHTS: useCluster && night && !isUnder && !readback ? 1 : 0,
         USE_GI: useGi && !isUnder && !readback ? 1 : 0,
         USE_RESTIR: useRestir && night && !isUnder && !readback ? 1 : 0,
+        AUTOTILE: AUTOTILE_ON ? 1 : 0,
       },
       targets: shadeTargets(mirrors, targetFormat, readback),
     },
