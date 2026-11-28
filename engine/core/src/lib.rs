@@ -5,7 +5,9 @@
 //! What the outside calls is at the bottom: plain functions over the instance's own memory,
 //! no generated glue. An instance does one thing at a time; a page runs one in each worker.
 
+pub mod ballistics;
 pub mod bay;
+pub mod beams;
 pub mod heroes;
 pub mod bodies;
 pub mod city;

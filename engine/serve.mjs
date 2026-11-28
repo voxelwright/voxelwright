@@ -52,7 +52,7 @@ const inboxDir = arg('inbox', DEFAULT_INBOX)
 const handleInbox = createInboxRoutes(inboxDir, { send: (res, code, body, type) => send(res, code, body, type), foreign })
 /** What the page may ask for: the folders of pages, never the server or its tests. */
 const OPEN = ['probe', 'page']
-const TYPES = { '.html': 'text/html; charset=utf-8', '.ts': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.json': 'application/json' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.ts': 'text/javascript; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm', '.json': 'application/json' }
 /** A page that is its own origin's only reader may share memory with its workers and read a fine clock. */
 const HEADERS = { 'Cache-Control': 'no-store', 'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp' }
 const BODY_MOST = 2 << 20
@@ -62,7 +62,7 @@ const send = (res, code, body, type = 'text/plain; charset=utf-8') => { res.writ
 async function file(res, path, host = '') {
   const rel = normalize(path).replace(/^[/\\]+/, '')
   // Of a plugin (plugins.mjs) a page may have its page side, and no more.
-  if (rel.startsWith('..') || !(OPEN.includes(rel.split(sep)[0]) || /^plugins[/\\][a-z0-9-]+[/\\]page\.ts$/.test(rel)) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
+  if (rel.startsWith('..') || !(OPEN.includes(rel.split(sep)[0]) || rel === 'sf-walks.mjs' || /^plugins[/\\][a-z0-9-]+[/\\]page\.ts$/.test(rel)) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
   let body
   try { body = await readFile(rel.startsWith('plugins') ? join(pluginsDir, rel.slice(8)) : join(root, rel)) } catch { return send(res, 404, 'not here') }
   if (extname(rel) === '.ts') {
