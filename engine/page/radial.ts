@@ -18,6 +18,14 @@ export const TOOL_ICONS: Record<string, string> = {
   // The cutter the Cleave replaces: the same picture, for whoever still names tool 6 so.
   Cutter: CLEAVE,
   Brick: '<rect x="4" y="5" width="26" height="10" rx="1.5"/><rect x="33" y="5" width="27" height="10" rx="1.5"/><rect x="4" y="18" width="12" height="10" rx="1.5"/><rect x="19" y="18" width="26" height="10" rx="1.5"/><rect x="48" y="18" width="12" height="10" rx="1.5"/>',
+  // The weapons (#166, combat-tools.ts): a hilt and its blade of light; a rifle; a tube on the shoulder; a beam
+  // that bounces; a hook on its line; a racket and its ball.
+  Lightsaber: '<rect x="2" y="13" width="16" height="6" rx="2"/><rect x="17" y="12" width="3" height="8" rx="1"/><rect x="21" y="14.5" width="40" height="3" rx="1.5"/><rect x="19" y="13.5" width="43" height="5" rx="2.5" fill-opacity=".35"/>',
+  Rifle: '<path d="M2 16l8-4h30v-2h14v2h8v4H40l-4 3h-8l-3 6h-6l2-6H10l-8 3z"/><rect x="28" y="7" width="8" height="3" rx="1"/>',
+  Rocket: '<rect x="6" y="11" width="44" height="9" rx="2"/><path d="M50 9h6l4 6.5-4 6.5h-6z"/><rect x="18" y="20" width="5" height="8" rx="1"/><path d="M6 12L1 9v13l5-3z" fill-opacity=".55"/>',
+  Laser: '<rect x="2" y="12" width="18" height="8" rx="2"/><path d="M20 15h18l10-10 2 2-10 10 2 2H20z"/><path d="M48 5l12 22" stroke="#fff" stroke-width="2" stroke-linecap="round" fill="none" stroke-opacity=".6"/>',
+  Grapple: '<path d="M4 28C14 20 26 14 40 12" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><path d="M44 4v18M44 22c-5 0-8-3-8-7M44 22c5 0 8-3 8-7M44 4l-4 4M44 4l4 4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>',
+  Tennis: '<ellipse cx="22" cy="13" rx="12" ry="10" fill="none" stroke="#fff" stroke-width="3"/><path d="M14 9h16M12 13h20M14 17h16M18 5v16M22 3v20M26 5v16" stroke="#fff" stroke-width="1" stroke-opacity=".6"/><rect x="31" y="20" width="16" height="4" rx="2" transform="rotate(30 31 20)"/><circle cx="54" cy="10" r="5"/>',
   Wand: '<path d="M8 28L40 10" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><path d="M47 1l2.2 5.8L55 9l-5.8 2.2L47 17l-2.2-5.8L39 9l5.8-2.2z"/><path d="M58 17l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z"/><path d="M34 2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
 }
 const ICONS = TOOL_ICONS

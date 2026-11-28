@@ -39,8 +39,10 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Faster | Hold Shift (5 times); the wheel sets the speed | - | Hold LB or L3 |
 | **Tools** | | | |
 | Open the tool wheel | E: tap to keep it open, or hold, point and let go to pick | Tool key | - |
-| Pick a tool | 1 to 7, or a wedge of the wheel | A wedge of the wheel | - |
+| Pick a tool | 1 to 9, or a wedge of the wheel | A wedge of the wheel | - |
 | Use the tool | Click | Use key | RT, X / Square or RB |
+| Draw a Cleave (tool 6) | Click to take the point out, then press, drag and let go; right click or Esc puts it away | Use key three times: point, begin, let go | - |
+| Stop time, wind it back | T (when nothing is held): tap to stop, hold to wind back, tap again to let go | - | - |
 | Set what is ahead alight | F | - | - |
 | Take the wand | Q | Wand on the wheel | - |
 | **Driving** | | | |
@@ -335,6 +337,15 @@ A video egg (and the Matrix's music) brings up a player made of the HUD's slim v
 
 The public build has the procedural eggs only, including a silent code rain. The Rickroll, Bad Apple!!, the memes and the things that play them (jukebox, fruit cart, TV) appear only in a build with the private media. See [Private egg media](https://github.com/voxelwright/voxelwright/blob/main/deploy/README.md#private-egg-media).
 
+## The tools
+
+The bar holds thirteen tools (`engine/page/main.ts`). The first seven keep their keys: Hammer, Charge, Big charge, Cannon, Torch, Cleave and Brick. The six weapons follow on keys 8 and 9 and the wheel: Lightsaber, Rifle, Rocket, Laser, Grapple and Tennis (`engine/page/combat-tools.ts`).
+
+- **Cleave** (`engine/page/cleave.ts`). The first click takes out a golden point and slows the world to a twentieth, holds the view and widens it by 14°. The mouse or stick steers the point. Press again and drag to draw the seam; let go and the flat sheet through the eye and both ends of the seam cuts everything within 45 m. What lies above the cut hangs, then slides off along it. Right click or Esc puts the point away. `engine.cut()` draws a level stroke across what is ahead, for the checks and the Studio.
+- **Time** (`engine/page/rewind.ts`). With nothing in the hands, T stops the world: pieces in the air, fire and smoke stand still and the colour drains to silver. Hold T to wind loose pieces and smoke back; let go and they stand again; tap T once more and they go on as they were going. Cells broken or built since are not put back.
+- **Weapons.** The lightsaber swings through the melee arena in the page's own core, cuts the cells it passes and the loose pieces it crosses. The rifle fires a ballistic round, the rocket a blast with its shockwave, the laser a beam that bounces off glass and melts what it holds on, the grapple a rope between two things it hooks (the wheel reels it), and Tennis sets a court underfoot. People a blast, shot, beam, blade or Cleave reaches go limp as ragdolls and get up again when they can.
+- Blasts flatten and burn grass (`engine/page/grass.ts`), throw rubble on the GPU (`engine/page/avbd-rubble.ts`) and roll billows of fire and smoke (`engine/page/billows.ts`). `?grass=0`, `?avbd=0`, `?billows=0` and `?ragdolls=0` leave each out.
+
 ## The wand
 
 Q, or the Wand on the tool wheel, takes the wand (`engine/page/wand.ts`). It aims at the middle of the picture in one of three ways, picked with 1, 2 or 3:
@@ -440,6 +451,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Sky and weather | `engine/page/modes.ts`, `engine/page/almanac.ts`, `engine/page/weather.ts` | `engine/test/almanac.mjs`, `engine/test/sf-modes.mjs` |
 | Signs | `engine/page/boards.ts`, `engine/page/signs.ts` | `engine/test/sf-boards.mjs`, `engine/test/sf-leaving.mjs`, `engine/test/sf-type.mjs` |
 | Eggs, lockers | `engine/page/eggs.ts`, `engine/page/lockers.ts` | `engine/test/sf-eggs.mjs`, `engine/test/sf-lockers.mjs` |
+| Tools, Cleave, time, weapons | `engine/page/main.ts`, `engine/page/cleave.ts`, `engine/page/rewind.ts`, `engine/page/combat-tools.ts`, `engine/page/ragdoll-live.ts` | `engine/test/tools.mjs`, `engine/test/combat-tools.mjs`, `engine/test/ragdoll-live.mjs` |
 | Wand, spells | `engine/page/wand.ts`, `engine/page/spells.ts` | `engine/test/wand.mjs`, `engine/test/spells.mjs` |
 | Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
 | Native T3 Studio & Game-Use MCP | `engine/studio/*`, `engine/page/studio/*` | `engine/test/studio.mjs` |

@@ -1,7 +1,8 @@
 // The tools, for real (#155): the city page in the installed Chrome with WebGPU. Each tool on
 // the bar is picked and used on a house front, and what it did is asked of the page: the
-// hammer makes a small hole, the cannon's ball breaks a wall, the cutter lets what stood on
-// its cut come loose, the brick is there, the torch sets a tree alight.
+// hammer makes a small hole, the cannon's ball breaks a wall, the Cleave (#226) parts what it is
+// drawn across and lets what stood above the cut come loose, the brick is there, the torch sets a
+// tree alight. The weapons (#166) follow the first seven on the bar.
 //
 //   node test/tools.mjs
 import { start, still } from './kit.mjs'
@@ -11,7 +12,10 @@ try {
   const page = await city('scale=0.5&fire=0')
   await still(page)
   const names = await page.evaluate(() => [...document.querySelectorAll('#tools button')].map((b) => b.textContent))
-  check(names.length === 7, `the bar has seven tools (${names.join(', ')})`)
+  const first = ['Hammer', 'Charge', 'Big charge', 'Cannon', 'Torch', 'Cleave', 'Brick'], weapons = ['Lightsaber', 'Rifle', 'Rocket', 'Laser', 'Grapple', 'Tennis']
+  check(names.length === 13 && first.every((n, i) => names[i] === n) && weapons.every((n, i) => names[7 + i] === n), `the bar has the seven tools, then the six weapons (${names.join(', ')})`)
+  await page.evaluate(() => globalThis.engine.spells)
+  check(await page.evaluate(() => !!globalThis.engine.cleave && !!globalThis.engine.rewind && !!globalThis.engine.combat), 'the Cleave, time and the weapons are made')
   // In the street, facing the houses on one side, a little up their fronts.
   await page.evaluate(() => { const p = globalThis.engine.pose; p.y -= 9; p.yaw = 0; p.pitch = 0.2 })
   await page.waitForTimeout(300)
@@ -35,11 +39,17 @@ try {
   check(after.pieces > before.pieces + 3, `the cannon's ball broke things (${after.pieces - before.pieces} bodies came of it)`)
   check(struck.now && struck.was && struck.now.t > struck.was.t + 0.5, `where it struck there is a hole (${struck.was?.t.toFixed(1)} cells off before, ${struck.now?.t.toFixed(1)} after)`)
 
-  // Cutter: what stood on the cut comes loose.
+  // Cleave (tool 6, key 6): in hand, its gesture is the picture's; a stroke drawn across the houses parts them.
+  const inHand = await page.evaluate(() => { globalThis.engine.pickTool(5); const e = globalThis.engine; return { tool: e.tool, live: e.input.live('cleaving') } })
+  check(inHand.tool === 'Cleave' && inHand.live, `tool 6 is the Cleave, and its gesture is the picture's (${JSON.stringify(inHand)})`)
   before = await fell()
-  await turned(-0.5, async () => { await page.evaluate(() => globalThis.engine.cut()); await page.waitForTimeout(400); await still(page) })
+  const cleft = await turned(-0.5, async () => { const made = await page.evaluate(() => globalThis.engine.cut()); await page.waitForTimeout(1500); await still(page); return made })
   after = await fell()
-  check(after.cells > before.cells + 50, `the cutter let ${after.cells - before.cells} cells come loose`)
+  const cuts = await page.evaluate(() => globalThis.engine.cleave.stats.cuts)
+  check(!!cleft && cuts >= 1, `the Cleave struck (${cuts} cut${cuts === 1 ? '' : 's'}, at ${cleft?.at})`)
+  check(after.cells > before.cells + 50, `the Cleave let ${after.cells - before.cells} cells come loose`)
+  // Put down again: another tool in hand, its gesture is gone.
+  check(await page.evaluate(() => { globalThis.engine.pickTool(1); return !globalThis.engine.input.live('cleaving') }), 'another tool taken, the Cleave lets the picture go')
 
   // Brick: it is there, nearer than what it was put against (or lies under where it was put).
   const bare = await turned(-0.9, () => ahead())

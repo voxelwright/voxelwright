@@ -980,7 +980,18 @@ pub extern "C" fn beams_fire(
     power: f32,
     dt: f32,
 ) -> u32 {
-    INSTANCE.with_borrow_mut(|i| moving(i).beams_fire([ox, oy, oz], [dx, dy, dz], power, dt))
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.beams_fire([ox, oy, oz], [dx, dy, dz], power, dt)
+    })
+}
+
+/// How many words the last call left at `bodies_words` (#226/#166): what `beams_fire` melted or set alight, whose
+/// own answer is its segment count.
+#[unsafe(no_mangle)]
+pub extern "C" fn bodies_said() -> usize {
+    INSTANCE.with_borrow(|i| i.bodies.as_ref().map_or(0, |b| b.out.len()))
 }
 
 /// Which way is down for a living thing (a way; all zero for the world's own), and whether it clings: walked at a

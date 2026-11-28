@@ -51,8 +51,12 @@ output, not by the source.
    reaches; duller with distance (one pole at `400 + 19600 exp(-d / 90)` Hz: our curve, tuned by the far blast
    check, not from a table); later by `d / 343` s; more of it to the room. Close by, a thing is not panned
    hard: side goes with `min(1, d / 1.5 m)`.
-5. **The mix.** Three buses (world, music, play). The world ducks the music by up to about 11 dB inside the
-   synthesiser. Beds full up measure -30 to -18 LUFS; a charge on a house front peaks at -4 dB.
+5. **The mix.** Four buses (`BUS.world`, `BUS.music`, `BUS.play`, `BUS.head`). The world ducks the music by up
+   to about 11 dB inside the synthesiser. Beds full up measure -30 to -18 LUFS; a charge on a house front peaks at
+   -4 dB. `BUS.head` is for what is heard inside the head, a spell's own sounds (the Cleave, time stopping): the
+   world's hush (`SET.worldHush`) and the ears' dullness after a blast (`SET.earMuffle`) do not reach it, only the
+   ceiling does, and no world or music note takes its voices. The hills answer the world's bus 0.71 s later
+   (`HILL_LATE`), darkened above 1250 Hz and answered again at 0.34, as loud as `SET.hillGain` says.
 6. **A budget of voices.** 64 struck, 16 strings, 16 tones, 24 airs, 40 grains. When a pool is full the
    quietest gives way. Of the blows in one telling of the solver, five are played and the rest feed the
    rubble's bed.

@@ -82,6 +82,8 @@ export interface CleaveOptions {
   onCue?(what: 'aim' | 'draw' | 'cancel' | 'strike' | 'hit', intensity: number): void
   /** How far off the first thing along a way from the eye is (cells), or null for nothing within reach: the rings go out round the middle of the cut, as far off as what it struck there. */
   probe?(eye: Readonly<V3>, dir: Readonly<V3>, reach: number): number | null
+  /** How far the cut reaches from the eye (cells): 95 m unless told. The seam on the cut faces goes as far. */
+  reach?: number
 }
 export interface Cleave {
   readonly phase: CleavePhase
@@ -229,6 +231,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 export async function createCleave(gpu: Gpu, format: GPUTextureFormat = gpu.sceneFormat, options: CleaveOptions = {}): Promise<Cleave> {
   const { device } = gpu
+  const reach = options.reach ?? REACH
   const module = await shader(device, 'cleave', CODE)
   const layout = device.createBindGroupLayout({
     entries: [
@@ -340,7 +343,7 @@ export async function createCleave(gpu: Gpu, format: GPUTextureFormat = gpu.scen
     const up = n[1] < 0 ? -1 : 1, nu: V3 = [n[0] * up, n[1] * up, n[2] * up]
     seam = SEAM; since = 0; haze = 1
     // (the rings: round the middle of the cut, as far off as the first thing it crossed there)
-    const mid = along(0.5, [0, 0, 0]), far = options.probe?.(eye, mid, REACH) ?? null
+    const mid = along(0.5, [0, 0, 0]), far = options.probe?.(eye, mid, reach) ?? null
     const D = clamp(far ?? 30 * M, 9 * M, 55 * M)
     set(ring.at, eye[0] + mid[0] * D, eye[1] + mid[1] * D, eye[2] + mid[2] * D); copy(ring.normal, nu); copy(ring.mid, mid); ring.size = D
     // which way the halves go: down the sheet if it slopes; along the stroke if it lies flat
@@ -348,7 +351,7 @@ export async function createCleave(gpu: Gpu, format: GPUTextureFormat = gpu.scen
     if (Math.hypot(slide[0], slide[1], slide[2]) > 0.3) unit(slide)
     else { along(1, tmp); along(0, tmp2); unit(set(slide, tmp[0] - tmp2[0], tmp[1] - tmp2[1], tmp[2] - tmp2[2])) }
     copy(seamAt.eye, eye); copy(seamAt.normal, nu); copy(seamAt.e1, e1); copy(seamAt.e2, e2); seamAt.theta = theta
-    const made: CleaveCut = { eye: [eye[0], eye[1], eye[2]], normal: nu, e1: [e1[0], e1[1], e1[2]], e2: [e2[0], e2[1], e2[2]], theta, reach: REACH, slide }
+    const made: CleaveCut = { eye: [eye[0], eye[1], eye[2]], normal: nu, e1: [e1[0], e1[1], e1[2]], e2: [e2[0], e2[1], e2[2]], theta, reach, slide }
     stats.cuts++; stats.last = made; landed = true
     return made
   }
@@ -524,7 +527,7 @@ export async function createCleave(gpu: Gpu, format: GPUTextureFormat = gpu.scen
       const r = out.rings
       r.age = ring.age >= 0 ? Math.max(ring.age, 1e-4) : 0; copy(r.at, ring.at); copy(r.normal, ring.normal); copy(r.mid, ring.mid); r.size = ring.size
       const s = out.seam
-      s.glow = seamAt.glow; s.width = seamAt.width; copy(s.eye, seamAt.eye); copy(s.normal, seamAt.normal); copy(s.e1, seamAt.e1); copy(s.e2, seamAt.e2); s.theta = seamAt.theta; s.reach = REACH
+      s.glow = seamAt.glow; s.width = seamAt.width; copy(s.eye, seamAt.eye); copy(s.normal, seamAt.normal); copy(s.e1, seamAt.e1); copy(s.e2, seamAt.e2); s.theta = seamAt.theta; s.reach = reach
       // the line on the picture: its two ends, laid before the eye (while it is drawn, struck, and its rings go out)
       if (!cam || (phase === 'idle' && ring.age < 0) || phase === 'aim') return
       const seenAt = (d: Readonly<V3>, at: [number, number]) => { const z = Math.max(dot(d, cam!.forward as V3), 1e-4); at[0] = dot(d, cam!.right as V3) / (z * cam!.tanHalf * aspect); at[1] = dot(d, cam!.up as V3) / (z * cam!.tanHalf); return at }
