@@ -13,6 +13,8 @@
 
 use crate::bodies::{Bodies, FLOW, Ground};
 use crate::city;
+use crate::kinds::{material, weighs};
+use crate::tree::Kind;
 
 /// Cells a column is wide.
 pub const COL: i32 = 2;
@@ -21,6 +23,83 @@ pub const N: usize = 384;
 /// One step of the flow, seconds.
 const TICK: f32 = 1.0 / 60.0;
 const G: f32 = 98.0;
+/// Seawater density relative to fresh water (`kinds::weighs` uses fresh water = 1.0):
+/// wood (0.6), leaves (0.15) and grass (1.0) float; earth/masonry/steel (1.6..7.8) sink unless supported by enclosed hull air.
+pub const RHO_WATER: f32 = 1.025;
+/// Minimum shallow-water depth (in cells) that extinguishes fire.
+pub const EXTINGUISH_DEPTH: f32 = 0.05;
+/// Hydrodynamic drag constants in cell units (10 cm cells, `G = 98`).
+const DRAG_QUAD: f32 = 1.1;
+const DRAG_LIN: f32 = 3.5;
+const MAX_LIN_DAMP_RATE: f32 = 40.0;
+const ANG_DAMP_LIN: f32 = 4.5;
+const ANG_DAMP_QUAD: f32 = 0.35;
+const MAX_ANG_DAMP_RATE: f32 = 30.0;
+const MAX_FLOW_SPEED: f32 = 200.0;
+/// Maximum sampled cells per body for buoyancy so large bodies stay well under 0.05 ms.
+const BUOYANCY_MAX_SAMPLES: usize = 512;
+
+/// Hydrodynamic buoyancy, righting torque and drag computed for one rigid body against sea and shallow water.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuoyancyResult {
+    pub force: [f32; 3],
+    pub torque: [f32; 3],
+    pub submerged_cells: usize,
+    pub submerged_ratio: f32,
+    pub water_contact_pos: [f32; 3],
+}
+
+#[inline]
+fn v_add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] + b[0], a[1] + b[1], a[2] + b[2]] }
+#[inline]
+fn v_sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
+#[inline]
+fn v_scale(a: [f32; 3], k: f32) -> [f32; 3] { [a[0] * k, a[1] * k, a[2] * k] }
+#[inline]
+fn v_dot(a: [f32; 3], b: [f32; 3]) -> f32 { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
+#[inline]
+fn v_cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+#[inline]
+fn q_turn(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+    let u = [q[0], q[1], q[2]];
+    let t = v_scale(v_cross(u, v), 2.0);
+    v_add(v_add(v, v_scale(t, q[3])), v_cross(u, t))
+}
+#[inline]
+fn rot_basis(rot: [f32; 4]) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let len2 = rot[0] * rot[0] + rot[1] * rot[1] + rot[2] * rot[2] + rot[3] * rot[3];
+    let q = if len2 > 1e-12 {
+        let inv = 1.0 / len2.sqrt();
+        [rot[0] * inv, rot[1] * inv, rot[2] * inv, rot[3] * inv]
+    } else {
+        [0.0, 0.0, 0.0, 1.0]
+    };
+    (q_turn(q, [1.0, 0.0, 0.0]), q_turn(q, [0.0, 1.0, 0.0]), q_turn(q, [0.0, 0.0, 1.0]))
+}
+
+/// Choose per-axis sample counts `(nx, ny, nz)` so total visited cells stay within `max_samples`.
+fn stride_counts(size: [usize; 3], max_samples: usize) -> [usize; 3] {
+    let total = size[0].saturating_mul(size[1]).saturating_mul(size[2]);
+    if total <= max_samples {
+        return size;
+    }
+    let scale = (max_samples as f32 / total as f32).cbrt();
+    let mut n = [
+        ((size[0] as f32 * scale).round() as usize).clamp(1, size[0]),
+        ((size[1] as f32 * scale).round() as usize).clamp(1, size[1]),
+        ((size[2] as f32 * scale).round() as usize).clamp(1, size[2]),
+    ];
+    while n[0] * n[1] * n[2] > max_samples {
+        let max_axis = (0..3).max_by_key(|&a| n[a]).unwrap();
+        if n[max_axis] <= 1 {
+            break;
+        }
+        n[max_axis] -= 1;
+    }
+    n
+}
 /// A tank's inside: how far from its middle to its wall, and how high.
 const TANK_R: i32 = 18;
 const TANK_HIGH: i32 = 42;
@@ -98,6 +177,320 @@ impl Water {
     /// Cells of water on the ground, and left in tanks.
     pub fn held(&self) -> (f32, f32) {
         (self.wet.iter().map(|&i| self.depth[i as usize]).sum::<f32>() * (COL * COL) as f32, self.tanks.iter().map(|t| t.left).sum())
+    }
+
+    #[inline]
+    fn column_at(&self, x: f32, z: f32) -> Option<usize> {
+        if self.floor.is_empty() {
+            return None;
+        }
+        let cx = (x.floor() as i32 - self.low[0]).div_euclid(COL);
+        let cz = (z.floor() as i32 - self.low[1]).div_euclid(COL);
+        if cx < 0 || cz < 0 || cx >= N as i32 || cz >= N as i32 {
+            None
+        } else {
+            Some(cx as usize + N * cz as usize)
+        }
+    }
+
+    #[inline]
+    fn column_flow(&self, idx: usize) -> [f32; 2] {
+        let d = self.depth[idx];
+        if d <= FILM {
+            return [0.0, 0.0];
+        }
+        let (cx, cz) = (idx % N, idx / N);
+        let f = self.flux[idx];
+        let in_xm = if cx > 0 { self.flux[idx - 1][0] } else { f[0] };
+        let in_xp = if cx + 1 < N { self.flux[idx + 1][1] } else { f[1] };
+        let in_zm = if cz > 0 { self.flux[idx - N][2] } else { f[2] };
+        let in_zp = if cz + 1 < N { self.flux[idx + N][3] } else { f[3] };
+        let qx = 0.5 * (in_xm + f[0] - f[1] - in_xp);
+        let qz = 0.5 * (in_zm + f[2] - f[3] - in_zp);
+        let denom = d.max(0.1) * COL as f32;
+        let (mut vx, mut vz) = (qx / denom, qz / denom);
+        let spd2 = vx * vx + vz * vz;
+        if spd2 > MAX_FLOW_SPEED * MAX_FLOW_SPEED {
+            let k = MAX_FLOW_SPEED / spd2.sqrt();
+            vx *= k;
+            vz *= k;
+        }
+        [vx, vz]
+    }
+
+    /// Shallow-water floor height, depth (cells), and horizontal flow velocity `(vx, vz)` at world `(x, z)`.
+    #[inline]
+    pub fn shallow_at(&self, x: f32, z: f32) -> Option<(f32, f32, [f32; 2])> {
+        let idx = self.column_at(x, z)?;
+        let d = self.depth[idx];
+        if d <= FILM {
+            return None;
+        }
+        Some((self.floor[idx], d, self.column_flow(idx)))
+    }
+
+    /// Shallow-water depth (in cells) at world `(x, z)`, or `0.0` when dry or outside the window.
+    #[inline]
+    pub fn depth_at(&self, x: f32, z: f32) -> f32 {
+        self.column_at(x, z).map_or(0.0, |i| self.depth[i])
+    }
+
+    /// Water surface height `water_surface_y` and horizontal flow velocity `[vx, vz]` (cells/s) at world `(x, z)`,
+    /// combining the 2.5D shallow-water window and an optional global sea plane.
+    pub fn surface_at(&self, x: f32, z: f32, sea_level: Option<f32>) -> Option<(f32, [f32; 2])> {
+        let shallow = self.shallow_at(x, z).map(|(floor, d, flow)| (floor + d, flow));
+        match (shallow, sea_level) {
+            (Some((top, flow)), Some(sea)) => {
+                if top >= sea { Some((top, flow)) } else { Some((sea, [0.0, 0.0])) }
+            }
+            (Some(s), None) => Some(s),
+            (None, Some(sea)) => Some((sea, [0.0, 0.0])),
+            (None, None) => None,
+        }
+    }
+
+    /// Whether a 1-cell voxel centered at `(x, y, z)` is submerged below `sea_level` or touched by
+    /// shallow water deeper than `EXTINGUISH_DEPTH` (0.05 cells) without false-matching roofs far above.
+    #[inline]
+    pub fn touches(&self, x: f32, y: f32, z: f32, sea_level: Option<f32>) -> bool {
+        if let Some(sea) = sea_level {
+            if y - 0.5 < sea {
+                return true;
+            }
+        }
+        if let Some((floor, depth, _)) = self.shallow_at(x, z) {
+            if depth > EXTINGUISH_DEPTH && y - 0.5 < floor + depth && y + 0.5 >= floor - 0.5 {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Test helper: opens the shallow-water window around `(x, z)` if needed and seeds one column with
+    /// explicit `floor`, `depth`, and horizontal `flow_vel` (cells/s).
+    #[cfg(test)]
+    pub(crate) fn seed_column(&mut self, x: i32, z: i32, floor: f32, depth: f32, flow_vel: [f32; 2]) {
+        if self.floor.is_empty() {
+            self.open([x, z]);
+        }
+        let Some(idx) = self.column_at(x as f32 + 0.5, z as f32 + 0.5) else { return };
+        self.floor[idx] = floor;
+        self.depth[idx] = depth.max(0.0);
+        self.known[idx] = true;
+        let scale = self.depth[idx].max(0.1) * COL as f32;
+        let qx = flow_vel[0] * scale;
+        let qz = flow_vel[1] * scale;
+        self.flux[idx] = [qx.max(0.0), (-qx).max(0.0), qz.max(0.0), (-qz).max(0.0)];
+        if self.depth[idx] > 0.0 && !self.listed[idx] {
+            self.listed[idx] = true;
+            self.wet.push(idx as u32);
+        }
+    }
+
+    /// Computes per-submerged-cell buoyancy force, center-of-buoyancy righting torque, flow-current push,
+    /// and quadratic linear/angular water drag for a rigid body against both `sea_level` and shallow water.
+    ///
+    /// Samples solid cells cleanly (striding large bodies to stay well under 0.05 ms/body).
+    /// `enclosed_hull_air_cells` adds trapped-air buoyancy when upright (flooding smoothly as the body capsizes).
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_buoyancy(
+        &self,
+        pos: [f32; 3],
+        rot: [f32; 4],
+        com: [f32; 3],
+        size: [usize; 3],
+        cells: &[Kind],
+        vel: [f32; 3],
+        spin: [f32; 3],
+        sea_level: Option<f32>,
+        enclosed_hull_air_cells: usize,
+    ) -> BuoyancyResult {
+        let total_grid = size[0].saturating_mul(size[1]).saturating_mul(size[2]);
+        if total_grid == 0 || cells.len() < total_grid || (sea_level.is_none() && self.floor.is_empty()) {
+            return BuoyancyResult::default();
+        }
+
+        // Fast dry-body early out when only the global sea plane is active.
+        if self.floor.is_empty() {
+            if let Some(sea) = sea_level {
+                let rx = com[0].max(size[0] as f32 - com[0]);
+                let ry = com[1].max(size[1] as f32 - com[1]);
+                let rz = com[2].max(size[2] as f32 - com[2]);
+                let r_bound = (rx * rx + ry * ry + rz * rz).sqrt();
+                if pos[1] - r_bound > sea + 1.0 {
+                    return BuoyancyResult::default();
+                }
+            }
+        }
+
+        let (ex, ey, ez) = rot_basis(rot);
+        let samples = stride_counts(size, BUOYANCY_MAX_SAMPLES);
+        let step = [
+            size[0] as f32 / samples[0] as f32,
+            size[1] as f32 / samples[1] as f32,
+            size[2] as f32 / samples[2] as f32,
+        ];
+        let cell_weight = step[0] * step[1] * step[2];
+        let half_h = 0.5 * (ex[1].abs() * step[0] + ey[1].abs() * step[1] + ez[1].abs() * step[2]).max(1.0);
+        let span_h = 2.0 * half_h;
+        let has_shallow = !self.floor.is_empty();
+
+        // Precompute per-axis cell indices and centered local offsets (symmetric around body center).
+        let mut xs = [(0usize, 0.0f32); BUOYANCY_MAX_SAMPLES];
+        let mut ys = [(0usize, 0.0f32); BUOYANCY_MAX_SAMPLES];
+        let mut zs = [(0usize, 0.0f32); BUOYANCY_MAX_SAMPLES];
+        for k in 0..samples[0] {
+            let ix = ((k * size[0] + size[0] / 2) / samples[0]).min(size[0] - 1);
+            xs[k] = (ix, (k as f32 + 0.5) * step[0] - com[0]);
+        }
+        for k in 0..samples[1] {
+            let iy = ((k * size[1] + size[1] / 2) / samples[1]).min(size[1] - 1);
+            ys[k] = (iy, (k as f32 + 0.5) * step[1] - com[1]);
+        }
+        for k in 0..samples[2] {
+            let iz = ((k * size[2] + size[2] / 2) / samples[2]).min(size[2] - 1);
+            zs[k] = (iz, (k as f32 + 0.5) * step[2] - com[2]);
+        }
+
+        let mut total_solid_w = 0.0f32;
+        let mut total_mass_w = 0.0f32;
+        let mut r2_sum_w = 0.0f32;
+        let mut sub_vol_w = 0.0f32;
+        let mut buoy_force_y = 0.0f32;
+        let mut buoy_torque = [0.0f32; 3];
+        let mut drag_force_raw = [0.0f32; 3];
+        let mut drag_torque_raw = [0.0f32; 3];
+        let mut contact_sum = [0.0f32; 3];
+        let mut v_rel_sum = [0.0f32; 3];
+
+        for &(iy, ly) in &ys[..samples[1]] {
+            let y_base = iy * size[2];
+            let ry_vec = v_scale(ey, ly);
+            for &(iz, lz) in &zs[..samples[2]] {
+                let row_base = (y_base + iz) * size[0];
+                let ryz_vec = v_add(ry_vec, v_scale(ez, lz));
+                for &(ix, lx) in &xs[..samples[0]] {
+                    let kind = cells[row_base + ix];
+                    if kind == 0 {
+                        continue;
+                    }
+                    let r_world = v_add(ryz_vec, v_scale(ex, lx));
+                    total_solid_w += cell_weight;
+                    total_mass_w += weighs(material(kind)) * cell_weight;
+                    r2_sum_w += v_dot(r_world, r_world) * cell_weight;
+
+                    let wx = pos[0] + r_world[0];
+                    let wy = pos[1] + r_world[1];
+                    let wz = pos[2] + r_world[2];
+                    let bot = wy - half_h;
+
+                    // Determine active water surface and submergence fraction for this cell.
+                    let mut sub = 0.0f32;
+                    let mut flow = [0.0f32; 2];
+                    let mut active_y = f32::NEG_INFINITY;
+
+                    if let Some(sea) = sea_level {
+                        if bot < sea {
+                            sub = ((sea - bot) / span_h).clamp(0.0, 1.0);
+                            active_y = sea;
+                        }
+                    }
+                    if has_shallow {
+                        if let Some((floor, depth, sflow)) = self.shallow_at(wx, wz) {
+                            let top = floor + depth;
+                            if top >= active_y && bot < top && wy + half_h >= floor - 2.0 {
+                                let shallow_sub = ((top - bot) / span_h).clamp(0.0, (depth / span_h).min(1.0));
+                                if shallow_sub > 0.0 {
+                                    sub = shallow_sub;
+                                    flow = sflow;
+                                }
+                            }
+                        }
+                    }
+
+                    if sub <= 0.0 {
+                        continue;
+                    }
+
+                    let v_eff = sub * cell_weight;
+                    sub_vol_w += v_eff;
+                    contact_sum = v_add(contact_sum, v_scale([wx, wy, wz], v_eff));
+
+                    // Displaced water buoyancy force and torque about center of mass.
+                    let f_buoy_y = RHO_WATER * G * v_eff;
+                    buoy_force_y += f_buoy_y;
+                    // r_world x [0, f_buoy_y, 0] = [-r_world[2] * f_buoy_y, 0, r_world[0] * f_buoy_y]
+                    buoy_torque[0] -= r_world[2] * f_buoy_y;
+                    buoy_torque[2] += r_world[0] * f_buoy_y;
+
+                    // Local point velocity relative to water current.
+                    let v_cell = v_add(vel, v_cross(spin, r_world));
+                    let v_rel = [v_cell[0] - flow[0], v_cell[1], v_cell[2] - flow[1]];
+                    v_rel_sum = v_add(v_rel_sum, v_scale(v_rel, v_eff));
+                    let v_mag = v_dot(v_rel, v_rel).sqrt();
+                    let drag_coeff = v_eff * RHO_WATER * (0.5 * DRAG_QUAD * v_mag + DRAG_LIN);
+                    let f_drag = v_scale(v_rel, -drag_coeff);
+                    drag_force_raw = v_add(drag_force_raw, f_drag);
+                    drag_torque_raw = v_add(drag_torque_raw, v_cross(r_world, f_drag));
+                }
+            }
+        }
+
+        if total_solid_w <= 0.0 || sub_vol_w <= 0.0 {
+            return BuoyancyResult::default();
+        }
+
+        let submerged_ratio = (sub_vol_w / total_solid_w).clamp(0.0, 1.0);
+        let water_contact_pos = v_scale(contact_sum, 1.0 / sub_vol_w);
+        let total_mass = total_mass_w.max(0.1);
+        let l_char = total_solid_w.cbrt().max(1.0);
+        let area_per_cell = 1.0 / l_char;
+
+        // Enclosed hull air (e.g. hollow car cabin): supports heavy metal/glass hulls when upright,
+        // and floods smoothly as the body tilts past ~60 deg or flips upside down.
+        if enclosed_hull_air_cells > 0 {
+            let air_retention = (ey[1] / 0.5).clamp(0.0, 1.0);
+            if air_retention > 0.0 {
+                let air_buoy_y = RHO_WATER * G * (enclosed_hull_air_cells as f32) * submerged_ratio * air_retention;
+                buoy_force_y += air_buoy_y;
+                let r_cb = v_sub(water_contact_pos, pos);
+                buoy_torque[0] -= r_cb[2] * air_buoy_y;
+                buoy_torque[2] += r_cb[0] * air_buoy_y;
+            }
+        }
+
+        // Scale drag by surface-to-volume ratio and clamp for unconditional explicit-step stability.
+        let mut drag_force = v_scale(drag_force_raw, area_per_cell);
+        let v_rel_avg = v_scale(v_rel_sum, 1.0 / sub_vol_w);
+        let v_rel_mag = v_dot(v_rel_avg, v_rel_avg).sqrt();
+        let drag_mag = v_dot(drag_force, drag_force).sqrt();
+        let max_drag = total_mass * MAX_LIN_DAMP_RATE * v_rel_mag.max(1e-3);
+        if drag_mag > max_drag && drag_mag > 1e-6 {
+            drag_force = v_scale(drag_force, max_drag / drag_mag);
+        }
+
+        // Rotational water drag from per-cell drag plus explicit angular damping proportional to submerged_ratio.
+        let i_est = (total_mass * (r2_sum_w / total_solid_w + 1.0 / 6.0)).max(total_mass * 0.25);
+        let spin_mag = v_dot(spin, spin).sqrt();
+        let mut drag_torque = v_scale(drag_torque_raw, area_per_cell);
+        if spin_mag > 1e-6 {
+            let ang_rate = (submerged_ratio * (ANG_DAMP_LIN + ANG_DAMP_QUAD * spin_mag * l_char)).min(MAX_ANG_DAMP_RATE);
+            drag_torque = v_add(drag_torque, v_scale(spin, -ang_rate * i_est));
+            let dtq_mag = v_dot(drag_torque, drag_torque).sqrt();
+            let max_ang = MAX_ANG_DAMP_RATE * i_est * spin_mag;
+            if dtq_mag > max_ang && dtq_mag > 1e-6 {
+                drag_torque = v_scale(drag_torque, max_ang / dtq_mag);
+            }
+        }
+
+        let submerged_cells = (sub_vol_w.round() as usize).clamp(1, total_solid_w.round().max(1.0) as usize);
+        BuoyancyResult {
+            force: [drag_force[0], buoy_force_y + drag_force[1], drag_force[2]],
+            torque: v_add(buoy_torque, drag_torque),
+            submerged_cells,
+            submerged_ratio,
+            water_contact_pos,
+        }
     }
 
     fn open(&mut self, mid: [i32; 2]) {
@@ -411,5 +804,200 @@ mod tests {
         assert!((all - full).abs() < full * 0.01, "{all:.0} cells of water are accounted for, of {full:.0}");
         assert!(!w.flowing(), "it never came to rest");
         assert!(spent / (calls as f32) < 2.0, "a call took {:.2} ms on average", spent / calls as f32);
+    }
+
+    fn solid_box(size: [usize; 3], k: Kind) -> (Vec<Kind>, [f32; 3], f32) {
+        let count = size[0] * size[1] * size[2];
+        let cells = vec![k; count];
+        let com = [size[0] as f32 * 0.5, size[1] as f32 * 0.5, size[2] as f32 * 0.5];
+        let mass = count as f32 * weighs(material(k));
+        (cells, com, mass)
+    }
+
+    #[test]
+    fn wood_grass_leaves_float_and_wood_settles_at_equilibrium_waterline() {
+        use crate::kinds::{BRICK, CONCRETE, GRASS, LEAVES, OWN, STEEL, WOOD, kind};
+        let water = Water::default();
+        let sea = Some(0.0f32);
+        let size = [4, 4, 4];
+
+        // Verify buoyancy calibration against kinds::weighs when fully submerged.
+        for (mat, should_float, name) in [
+            (WOOD, true, "wood"),
+            (LEAVES, true, "leaves"),
+            (GRASS, true, "grass"),
+            (CONCRETE, false, "concrete"),
+            (BRICK, false, "brick"),
+            (STEEL, false, "steel"),
+        ] {
+            let (cells, com, mass) = solid_box(size, kind(mat, OWN));
+            let res = water.compute_buoyancy([0.0, -10.0, 0.0], [0.0, 0.0, 0.0, 1.0], com, size, &cells, [0.0; 3], [0.0; 3], sea, 0);
+            assert_eq!(res.submerged_cells, 64, "{name} should have all 64 cells submerged");
+            assert!((res.submerged_ratio - 1.0).abs() < 1e-4);
+            let net_accel = res.force[1] / mass - G;
+            if should_float {
+                assert!(net_accel > 0.0, "{name} should float (net_accel={net_accel:.2})");
+            } else {
+                assert!(net_accel < 0.0, "{name} should sink (net_accel={net_accel:.2})");
+            }
+        }
+
+        // Simulate a 4x4x4 wood block released fully submerged at y = -6.0; it should rise and settle near waterline.
+        let (cells, com, mass) = solid_box(size, kind(WOOD, OWN));
+        let mut pos = [0.0f32, -6.0, 0.0];
+        let mut vel = [0.0f32; 3];
+        let dt = 1.0 / 60.0;
+        let expected_y = 0.0 + (0.5 - weighs(WOOD) / RHO_WATER) * size[1] as f32;
+        let mut max_y = pos[1];
+        for _ in 0..360 {
+            let res = water.compute_buoyancy(pos, [0.0, 0.0, 0.0, 1.0], com, size, &cells, vel, [0.0; 3], sea, 0);
+            let ay = res.force[1] / mass - G;
+            vel[1] += ay * dt;
+            pos[1] += vel[1] * dt;
+            max_y = max_y.max(pos[1]);
+        }
+        assert!(max_y > -2.0, "submerged wood should rise to surface (max_y={max_y:.2})");
+        assert!((pos[1] - expected_y).abs() < 0.25, "wood should settle near equilibrium y={expected_y:.2}, got {:.2}", pos[1]);
+        assert!(vel[1].abs() < 0.5, "wood oscillation should damp out (vy={:.2})", vel[1]);
+    }
+
+    #[test]
+    fn steel_block_sinks_slower_than_free_fall_with_water_drag() {
+        use crate::kinds::{OWN, STEEL, kind};
+        let water = Water::default();
+        let sea = Some(0.0f32);
+        let size = [4, 4, 4];
+        let (cells, com, mass) = solid_box(size, kind(STEEL, OWN));
+        let mut pos = [0.0f32, -4.0, 0.0];
+        let mut vel = [0.0f32; 3];
+        let dt = 1.0 / 60.0;
+        let steps = 90; // 1.5 s
+        for _ in 0..steps {
+            let res = water.compute_buoyancy(pos, [0.0, 0.0, 0.0, 1.0], com, size, &cells, vel, [0.0; 3], sea, 0);
+            vel[1] += (res.force[1] / mass - G) * dt;
+            pos[1] += vel[1] * dt;
+        }
+        let t = steps as f32 * dt;
+        let free_fall_drop = 0.5 * G * t * t;
+        let actual_drop = -4.0 - pos[1];
+        assert!(actual_drop > 20.0, "steel should sink substantially (dropped {actual_drop:.1} cells)");
+        assert!(actual_drop < free_fall_drop * 0.8, "water drag + buoyancy should slow steel below free fall (dropped {actual_drop:.1} vs free fall {free_fall_drop:.1})");
+        assert!(vel[1] < -20.0 && vel[1] > -G * t * 0.7, "steel speed should approach terminal velocity (vy={:.1}, free fall {:.1})", vel[1], -G * t);
+    }
+
+    #[test]
+    fn hollow_steel_car_floats_upright_and_sinks_when_inverted() {
+        use crate::kinds::{OWN, STEEL, kind};
+        let water = Water::default();
+        let sea = Some(0.0f32);
+        let size = [10, 6, 16];
+        let mut cells = vec![0 as Kind; size[0] * size[1] * size[2]];
+        let steel = kind(STEEL, OWN);
+        let mut solid = 0usize;
+        let mut air = 0usize;
+        for y in 0..size[1] {
+            for z in 0..size[2] {
+                for x in 0..size[0] {
+                    let shell = x == 0 || x == size[0] - 1 || y == 0 || y == size[1] - 1 || z == 0 || z == size[2] - 1;
+                    if shell {
+                        cells[x + size[0] * (z + size[2] * y)] = steel;
+                        solid += 1;
+                    } else {
+                        air += 1;
+                    }
+                }
+            }
+        }
+        // Give the hull enough enclosed cabin air to offset its steel shell when upright.
+        let hull_air = air * 8;
+        let com = [size[0] as f32 * 0.5, size[1] as f32 * 0.5, size[2] as f32 * 0.5];
+        let mass = solid as f32 * weighs(STEEL);
+        let upright = water.compute_buoyancy([0.0, -10.0, 0.0], [0.0, 0.0, 0.0, 1.0], com, size, &cells, [0.0; 3], [0.0; 3], sea, hull_air);
+        let inverted = water.compute_buoyancy([0.0, -10.0, 0.0], [0.0, 0.0, 1.0, 0.0], com, size, &cells, [0.0; 3], [0.0; 3], sea, hull_air);
+        assert!(upright.force[1] > mass * G, "upright hollow hull should float (F={:.0} vs W={:.0})", upright.force[1], mass * G);
+        assert!(inverted.force[1] < mass * G, "inverted hull floods and sinks (F={:.0} vs W={:.0})", inverted.force[1], mass * G);
+    }
+
+    #[test]
+    fn tilted_plank_self_rights_and_angular_drag_opposes_spin() {
+        use crate::kinds::{OWN, WOOD, kind};
+        let water = Water::default();
+        let sea = Some(0.0f32);
+        let size = [12, 2, 4];
+        let (cells, com, _) = solid_box(size, kind(WOOD, OWN));
+        // Roll by -25 deg around Z so the +X end dips down into the water below y=0.
+        let half_ang = (-25.0f32).to_radians() * 0.5;
+        let rot = [0.0, 0.0, half_ang.sin(), half_ang.cos()];
+        let res = water.compute_buoyancy([0.0, 0.5, 0.0], rot, com, size, &cells, [0.0; 3], [0.0; 3], sea, 0);
+        assert!(res.submerged_cells > 0);
+        assert!(res.torque[2] > 0.0, "dipped +X side should produce +Z righting torque (got {:.2})", res.torque[2]);
+        assert!(res.water_contact_pos[0] > 0.0, "center of buoyancy should shift toward submerged +X end (got {:.2})", res.water_contact_pos[0]);
+
+        // Submerged spinning body experiences opposing angular damping torque.
+        let spin = [0.5, 1.2, -0.8];
+        let damped = water.compute_buoyancy([0.0, -10.0, 0.0], [0.0, 0.0, 0.0, 1.0], com, size, &cells, [0.0; 3], spin, sea, 0);
+        let dot_ts = v_dot(damped.torque, spin);
+        assert!(dot_ts < -10.0, "water angular drag must oppose spin (dot={dot_ts:.2})");
+    }
+
+    #[test]
+    fn flowing_shallow_water_current_pushes_floating_wood_crate_downstream() {
+        use crate::kinds::{OWN, WOOD, kind};
+        let mut water = Water::default();
+        // Seed a flowing river channel along X (floor=10, depth=8 => surface=18, flow=+25 cells/s in +X).
+        for z in (-20..=20).step_by(COL as usize) {
+            for x in (-20..=60).step_by(COL as usize) {
+                water.seed_column(x, z, 10.0, 8.0, [25.0, 0.0]);
+            }
+        }
+        let (surf_y, flow) = water.surface_at(0.5, 0.5, Some(0.0)).expect("shallow water surface should exist");
+        assert!((surf_y - 18.0).abs() < 1e-3, "expected surface y=18.0, got {surf_y}");
+        assert!(flow[0] > 20.0, "expected +X current > 20 cells/s, got {:?}", flow);
+
+        let size = [4, 4, 4];
+        let (cells, com, mass) = solid_box(size, kind(WOOD, OWN));
+        let mut pos = [0.0f32, 17.0, 0.0];
+        let mut vel = [0.0f32; 3];
+        let dt = 1.0 / 60.0;
+        for _ in 0..120 {
+            let res = water.compute_buoyancy(pos, [0.0, 0.0, 0.0, 1.0], com, size, &cells, vel, [0.0; 3], None, 0);
+            vel[0] += (res.force[0] / mass) * dt;
+            vel[1] += (res.force[1] / mass - G) * dt;
+            vel[2] += (res.force[2] / mass) * dt;
+            pos = v_add(pos, v_scale(vel, dt));
+        }
+        assert!(vel[0] > 10.0, "flowing current should push crate downstream (vx={:.2})", vel[0]);
+        assert!(pos[0] > 15.0, "crate should drift substantially downstream (x={:.2})", pos[0]);
+        assert!(pos[1] > 15.5 && pos[1] < 19.5, "crate should stay floating near surface y=18 (y={:.2})", pos[1]);
+    }
+
+    #[test]
+    fn large_body_buoyancy_stays_under_budget() {
+        use crate::kinds::{OWN, WOOD, kind};
+        let water = Water::default();
+        let size = [48, 24, 48]; // 55,296 cells
+        let (cells, com, _) = solid_box(size, kind(WOOD, OWN));
+        let t0 = std::time::Instant::now();
+        let mut acc = 0.0f32;
+        for i in 0..200 {
+            let res = water.compute_buoyancy(
+                [0.0, -4.0 + (i % 5) as f32 * 0.2, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+                com,
+                size,
+                &cells,
+                [5.0, -2.0, 0.0],
+                [0.1, 0.0, -0.1],
+                Some(0.0),
+                0,
+            );
+            acc += res.force[1];
+        }
+        let us_per_body = t0.elapsed().as_secs_f64() * 1e6 / 200.0;
+        eprintln!("large body (48x24x48 = 55,296 cells) buoyancy: {us_per_body:.2} us/body (acc={acc:.0})");
+        assert!(acc > 0.0);
+        // Budget is < 50 us (0.05 ms) in release; allow generous headroom in debug builds.
+        #[cfg(not(debug_assertions))]
+        assert!(us_per_body < 50.0, "expected < 50 us/body, took {us_per_body:.2} us");
     }
 }
