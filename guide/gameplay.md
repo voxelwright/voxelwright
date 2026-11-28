@@ -31,7 +31,8 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Switch between walking and flying | B | Fly / Walk key | D-pad down |
 | Camera behind you or in your head | V | - | R3 or D-pad up |
 | Get in a car, use an egg's thing | E, beside it | Tap its cue | Y / Triangle |
-| Summon a sports coupe | G (not in a shared world) | - | - |
+| Summon a sports coupe | G (not in a shared world, when not facing an NPC) | - | - |
+| Greet, antagonize, defuse or intercept an NPC (within 6 m ahead) | G (Greet), H (Antagonize), F (Defuse after antagonism, or Intercept an active witness) | Tap the contextual prompt buttons | - |
 | **Flying** | | | |
 | Move along the view | W A S D | Left half | Left stick |
 | Up and down | Space, and C or Left Ctrl | Up and Down keys | A / Cross, and B / Circle or LT |
@@ -232,6 +233,8 @@ Stunts in a row make a **combo**. A stunt of a different kind from the last rais
 - `classic`: the realm's controls without the wheel, for comparing the two.
 
 **Cues** appear beside your body when there is something to learn: "Open the parachute" while falling, "Take to the air" on the ground, and "Back on your feet" after flying. The street's name shows for 4.5 s when it changes.
+
+**Social interaction & living-city alerts (`engine/page/social.ts`).** On foot, facing any pedestrian, town resident or shared-world actor within 6 m (`60` cells) inside a 70° forward view cone reveals a compact contextual prompt pill: **G** Greet and **H** Antagonize, plus **F** Defuse after antagonizing someone or **F** Intercept when that actor is an active reporting witness. The prompt stays completely hidden at rest, while driving, typing, in the first view, or with the map or tool wheel open, shifts clear of your character's box if needed, and offers touch-friendly 44 px buttons on phones. In solo San Francisco, barks and 3-step Greet/Antagonize/Defuse exchanges resolve deterministically in 0 ms and appear directly over the pedestrian's head. In a [shared world](/multiplayer), actions sync with `POST /world/social`, reaching a 3rd greeting or high-tension confrontation surfaces a **Talk** (`Enter`) nudge to hand off to free-text conversation, and a subtle top-center status pill polls `GET /world/city` every 2.5 s to show Heat or an active Witness Alert only when `heat > 0` or a witness is reporting (staying invisible while the city is calm).
 
 **Touch.** The left half of the screen is a move stick and the right half turns the head. Keys at the right edge (a column when the phone is upright, two by two when it is on its side) hold Up (Jump or Chute on foot), Down, Use, Fly / Walk and the tool key, which opens the pie. The keys dim after 3 s untouched. While driving a car, the foot keys step aside for the touch driving scheme (below): the steering under one thumb and the pedals under the other. Quiet 44 px utility icons (Horn, Radio, Cam and Exit, plus Repair only when the car is damaged) sit along the top-right rail beside Settings (Cam goes round the views, the seat among them; there is no separate Seat key while driving).
 

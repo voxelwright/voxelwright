@@ -79,6 +79,7 @@ import { createRecorder, type Recorder } from './recorder.ts'
 import { steerScale, type SteerState } from './steer.ts'
 import { feedbackUi, type FeedbackUi } from './feedback.ts'
 import { initPwa } from './pwa.ts'
+import { createSocial, type SocialCandidate, type SocialController } from './social.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -502,8 +503,14 @@ async function main() {
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
   let streetLife: Street | null = null
   let neighborhood: Neighborhood | null = null
+  let social: SocialController | null = null
+  const observeNpcFolk = (src: (v: View, s: number) => readonly Person[]) => (v: View, s: number) => {
+    const list = src(v, s)
+    social?.observeLocal(list)
+    return list
+  }
   const lively = !!LOCAL?.street && query.get('street') !== '0'
-  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
+  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(observeNpcFolk(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay())))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** By the sun wherever it is (towards it, a unit direction): how much of the day it is, how low it is, and where the light comes from: by day the sun, never from under the ground; by night the moon, from a fixed place. */
@@ -997,6 +1004,7 @@ async function main() {
     telemetry?.onPresented(canvas)
     lap('draw')
     over.frame(project, playedHud?.parts())
+    social?.frame()
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
@@ -1459,6 +1467,17 @@ async function main() {
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
   // On foot a person is where their feet are, facing the way their body does; flying, where their eye is.
   const others = far ? presence(far, folk, over, () => { const f = me.feet; return f ? { at: [f.at[0], f.at[1] + 16.5, f.at[2]], yaw: f.yaw, frame: f.frame } : { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw } }, takenOff) : null
+  const remoteActors = new Map<string, SocialCandidate>()
+  if (far) {
+    const prevHere = far.onhere
+    far.onhere = (who) => {
+      prevHere?.(who)
+      if (who.gone) { remoteActors.delete(who.by); return }
+      if (who.by.includes('/')) {
+        remoteActors.set(who.by, { id: who.by, name: who.name || who.by.split('/').pop() || 'Resident', at: who.at, remote: true, seed: who.was ?? seedOf(who.name || who.by) })
+      }
+    }
+  }
   // A person's own body (#264, person.ts): B gets down onto the feet and back up to fly; `?walk=1` starts on foot.
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.
@@ -2273,7 +2292,7 @@ async function main() {
     })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
-    if (query.get('people') !== '0') folk.from.push(life.folk)
+    if (query.get('people') !== '0') folk.from.push(observeNpcFolk(life.folk))
   }
   if (BAY_ON && !far && query.get('neighborhood') !== '0') {
     void firstPicture.then(() => createNeighborhood({
@@ -2284,7 +2303,7 @@ async function main() {
     })).then((n) => {
       neighborhood = n
       if (landing && first && !first.engaged) n.enabled = false
-      if (query.get('people') !== '0') folk.from.push(n.folk)
+      if (query.get('people') !== '0') folk.from.push(observeNpcFolk(n.folk))
     }).catch((e: unknown) => { console.warn(`no neighborhood places: ${e instanceof Error ? e.message : String(e)}`) })
   }
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
@@ -2550,6 +2569,25 @@ async function main() {
   summonBtn.title = 'Summon sports car (G)'
   summonBtn.addEventListener('click', () => { if (!alive.riding && !(first && !first.engaged) && !far) void summonCarNow() })
   summonPanel.append(summonBtn)
+  // Client-side RDR2/GTA 6 social interaction & living-city status HUD (#164): auto-hidden at rest.
+  social = createSocial({
+    hud: over,
+    input: controls,
+    world: far ? { base: far.base, me: far.me, name: () => others?.name ?? 'player', fetch: far.fetch } : null,
+    observer: () => {
+      const f = me.feet
+      const v = view()
+      return f ? { at: f.at, forward: v.forward, yaw: f.yaw } : { at: [pose.x * M, pose.y * M, pose.z * M], forward: v.forward, yaw: pose.yaw }
+    },
+    candidates: () => [...remoteActors.values()],
+    disabled: () => Boolean((first && !first.engaged) || alive.riding || over.line.open || mapSys?.open || playedHud?.choosing),
+    suppressKey: (code) => (code === 'KeyG' && Boolean(grip.holding || grip.reach)) || grip.offered.some((o) => o.code === code),
+    avoidBoxes: () => playedHud?.parts() ?? null,
+    weather: () => march.rain > 0.25 ? 'rain' : marine.strength > 0.35 ? 'fog' : march.day < 0.25 ? 'night' : 'clear',
+    district: () => document.querySelector('#where > div')?.textContent?.trim() ?? '',
+    canTalk: () => Boolean(far && over.line.onsubmit),
+    openTalk: () => { if (far && over.line.onsubmit) over.line.show() },
+  })
   resetting.add(() => { carSummon.clear(); telemetry?.edit({ op: 'reset' }) })
   // Black-box gameplay flight recorder & passive anomaly watchers + F8 / /bug feedback UI (#64).
   telemetry = createRecorder({
@@ -2588,7 +2626,7 @@ async function main() {
   })
   feedback = feedbackUi({ hud: over, input: controls, recorder: telemetry })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) { const reach = e.radius ?? 44, runs: number[] = []; for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) { const half = Math.floor(Math.sqrt(reach * reach - dz * dz)); runs.push(e.at[0] - half, e.at[0] + half + 1, e.at[1] + dy, e.at[2] + dz, 0) } make(rows(Int32Array.from(runs), [e.at[0] - reach, e.at[1], e.at[2] - reach, e.at[0] + reach + 1, e.at[1] + 2, e.at[2] + reach + 1]), e.at); cuts.push({ at: e.at, radius: reach }) } else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, social, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: summonCarNow, wheels: carWheels, smoothing: () => smoothing.size, recorder: telemetry, feedback, set: (at: [number, number, number], radius: number, kind: number) => { telemetry?.edit({ op: 'set', at, radius, kind }); make(ball(at[0], at[1], at[2], radius, kind), at) }, replayEdit: (e: { op: string; at?: [number, number, number]; radius?: number; spark?: boolean; kind?: number; from?: [number, number, number]; speed?: [number, number, number] }) => { if (e.op === 'strike' && e.at) strike(e.at, e.radius ?? force, e.spark ?? sparks); else if (e.op === 'ignite' && e.at) { ticking = true; mover.postMessage({ ignite: e.at, radius: e.radius ?? 4, tick: 0 } satisfies Ask) } else if (e.op === 'shoot' && e.from && e.speed) { mover.postMessage({ ball: { from: e.from, speed: e.speed, radius: e.radius ?? 4, kind: 12 | (5 << 8) } } satisfies Ask); bodies = Math.max(bodies, 1) } else if (e.op === 'cut' && e.at) { const reach = e.radius ?? 44, runs: number[] = []; for (let dy = 0; dy < 2; dy++) for (let dz = -reach; dz <= reach; dz++) { const half = Math.floor(Math.sqrt(reach * reach - dz * dz)); runs.push(e.at[0] - half, e.at[0] + half + 1, e.at[1] + dy, e.at[2] + dz, 0) } make(rows(Int32Array.from(runs), [e.at[0] - reach, e.at[1], e.at[2] - reach, e.at[0] + reach + 1, e.at[1] + 2, e.at[2] + reach + 1]), e.at); cuts.push({ at: e.at, radius: reach }) } else if (e.op === 'place' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? (8 | (30 << 8))), e.at); else if (e.op === 'set' && e.at) make(ball(e.at[0], e.at[1], e.at[2], e.radius ?? 5, e.kind ?? 0), e.at) } })
   // Native in-game T3 Studio & Game-Use runtime (#98): local dev only; computed URL keeps it out of static sf/build.mjs deploys.
   const studioWanted = query.get('studio') !== '0' && (query.get('studio') === '1' || /(?:^|#|&)studio=/.test(location.hash) || (!navigator.webdriver && !!document.querySelector('meta[name="vw-studio"]')))
   if (!LOCAL && studioWanted) {
