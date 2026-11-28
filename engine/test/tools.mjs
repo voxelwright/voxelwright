@@ -11,7 +11,8 @@ const { city, check, failures, finish } = await start()
 try {
   const page = await city('scale=0.5&fire=0')
   await still(page)
-  const names = await page.evaluate(() => [...document.querySelectorAll('#tools button')].map((b) => b.textContent))
+  // (each button is its key's number, then its name)
+  const names = await page.evaluate(() => [...document.querySelectorAll('#tools button')].map((b) => b.textContent.replace(/^\d+/, '')))
   const first = ['Hammer', 'Charge', 'Big charge', 'Cannon', 'Torch', 'Cleave', 'Brick'], weapons = ['Lightsaber', 'Rifle', 'Rocket', 'Laser', 'Grapple', 'Tennis']
   check(names.length === 13 && first.every((n, i) => names[i] === n) && weapons.every((n, i) => names[7 + i] === n), `the bar has the seven tools, then the six weapons (${names.join(', ')})`)
   await page.evaluate(() => globalThis.engine.spells)
