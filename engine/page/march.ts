@@ -1,14 +1,15 @@
-// The drawer (#140): every pixel sends a ray through the world's boxes of sectors and their
-// trees. Empty space is crossed a block at a time (4 x 4 x 4 sectors, a sector, 16 cells,
-// 4 cells, a cell), and a ray that leaves a box carries on in the next, coarser one. What it
-// hits is lit by one sun, with a second ray towards the sun for the shadow.
-import { shader, type Target } from '../probe/gpu.ts'
+// The drawer (#140, #165): split into a 1/4-res conservative cone beam pre-pass (march-trace.ts),
+// a compute primary-geometry + glass visibility pass (vis0/vis1, march-trace.ts), and a deferred
+// GGX Metallic/Roughness PBR shading pass (march-shade.ts) that writes linear HDR color, frag_depth,
+// rg16float analytic motion vectors (prevUV - curUV), rgba16float world normals, and rgba16float panes.
+import { FAR, NEAR, shader, viewProjection, type Target } from '../probe/gpu.ts'
 import { SUN_SIDE, SUN_TILE, SunMaps } from './sun.ts'
 import { SIDE, type World } from './world.ts'
-import { grid as marksGrid, MARKS } from './marks.ts'
-import { createLocalLights, LOCAL_LIGHTS_STRUCT, localLightsEval, type LocalLights } from './lights.ts'
+import { grid as marksGrid } from './marks.ts'
+import { createLocalLights, type LocalLights } from './lights.ts'
+import { beamCode, sunCode, visCode, type TraceCodeDeps } from './march-trace.ts'
+import { shadeCode, type ShadeCodeDeps } from './march-shade.ts'
 
-// One more than as things are only where `?fine=2` (#259, finer boxes round the eye) asks for an eleventh box.
 /**
  * A number an address asks for (#81: the measuring knobs, `?workers=`, `?pool=`, `?farfaces=` and the like), kept
  * between `least` and `most`, and whole where `whole`. Where the address says nothing, or nothing that is a finite
@@ -23,6 +24,8 @@ export function bounded(said: string | null | undefined, fallback: number, least
 /** `?fine=` (#259): 0, 1 or 2 more boxes of finer cells. */
 export const FINE_ASKED = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('fine'), 0, 0, 2, true)
 export const MAX_LEVELS = 10 + Math.max(0, FINE_ASKED - 1)
+/** Diagnostic override: `?beam=0` disables the 1/4-res conservative beam pre-pass. */
+const BEAM_ON = new URLSearchParams(globalThis.location?.search ?? '').get('beam') !== '0'
 
 /** The colours every thing in the world shares: 0 is the material's own, 1 to 15 white to black, then 24 hues in ten tones (kinds.rs). */
 export function palette(): Float32Array<ArrayBuffer> {
@@ -88,9 +91,7 @@ fn landmarkLight(p: vec3f, wide: f32) -> vec3f {
   }
   return out;
 }
-// The lamp at a landmark's very top: far brighter than a wall, a point from across the city. Apart from its lit part,
-// which shows what the city's windows show and is put out by it as their lamps are: a beacon is no window, and put
-// out and lit again with every drop of the Matrix's rain it flickered, its glow with it, over the whole spire.
+// The lamp at a landmark's very top: far brighter than a wall, a point from across the city.
 fn landmarkLamp(p: vec3f) -> vec3f {
   for (var i = 0u; i < 8u; i++) {
     let h = g.beacon[i];
@@ -103,16 +104,11 @@ fn landmarkLamp(p: vec3f) -> vec3f {
 `
 
 /**
- * A tree's crown by night (#450). The march lights leaves by the moon at a tenth and by a street lamp's pool where
- * one is near, and the far model's faces by the moon alone: the park's big tree was a black mass before a lit city.
- * A crown in a city is lit from under and from the side: by the sky's own glow over the town (warm, the lamps' light
- * thrown back off the air), which its sides and top take, and by the street's lamps, which its underside and lower
- * leaves take, clump by clump. `at` is the point measured as the eye is (cells): the clumps keep their places.
- * The answer is light to add, before the weather's share of the dark is taken.
+ * A tree's crown by night (#450). A crown in a city is lit from under and from the side by the sky's glow and the
+ * street's lamps, clump by clump.
  */
 export const LEAF_NIGHT = /* wgsl */ `
 fn leafNight(albedo: vec3f, n: vec3f, at: vec3f) -> vec3f {
-  // Clumps of leaves three metres across, some turned to the light and some in the crown's own shade.
   let c = floor(at / 30.0);
   let clump = fract(sin(dot(c, vec3f(12.9898, 78.233, 37.719))) * 43758.5453);
   let glow = vec3f(0.62, 0.5, 0.46) * (0.35 + 0.3 * max(n.y, 0.0));
@@ -123,19 +119,7 @@ fn leafNight(albedo: vec3f, n: vec3f, at: vec3f) -> vec3f {
 
 /**
  * A wall's windows by night from where its panes are too small to be cells (#450): one rule for the far model's faces
- * (far.ts) and for the march's own coarse cells (`lit`, below), so that a tower is lit one way either side of where
- * the two meet. `fx` and `fy` count bays along the wall and storeys up it; `ax` and `ay` are how much of a bay and of
- * a storey a pixel covers; a pane is `pw` of its bay wide and stands from `y0` to `y0 + ph` of its storey.
- *
- * Offices are lit a floor at a time, in runs along the floor, with dark floors between and a dark band of wall
- * (the spandrel) over every row of panes: a tower at night is rows of light. So the two ways across a wall are worked
- * out apart. Along it, panes under two pixels wide become the share of their run that is lit, and runs under two
- * pixels the share of their floor. Up it, the band of panes is kept until a storey itself is under two pixels, and
- * only then do floors become the share of the building that is lit. (One measure for both ways, and a share drawn
- * anew for every three bays of every storey, made a tower from the park a chessboard of blocks five pixels by
- * three: a bay there is one pixel and a storey two and a half, so the rows were averaged away while they could still
- * be seen, and what was left was the noise.) `least` is the least share of the building that is at work (0: as it
- * falls out, building by building). What comes back is the light's colour and how much of it there is.
+ * (far.ts) and for the march's own coarse cells.
  */
 export const NIGHT_WALL = /* wgsl */ `
 fn within(at: f32, lo: f32, hi: f32, wide: f32) -> f32 {
@@ -146,17 +130,13 @@ fn wallHash(p: vec2f, k: u32) -> f32 {
   h = (h ^ (h >> 13u)) * 0x5bd1e995u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
-// How many bays a run of lit panes is.
 const WALL_RUN = 6.0;
 fn nightWall(fx: f32, fy: f32, ax: f32, ay: f32, pw: f32, y0: f32, ph: f32, seed: u32, least: f32) -> vec4f {
   let storey = floor(fy);
-  // The building: how much of it is at work tonight (a sixth to a half, or least if that is more), and how warm its lamps are.
   let whole = wallHash(vec2f(0.0, 0.0), seed);
   let busy = max(0.16 + 0.34 * whole, least);
-  // The floor: most of them a little lit, some dark, a few from end to end. (Its mean is the building's.)
   let hf = wallHash(vec2f(7.0, storey), seed);
   let floorShare = min(busy * (0.2 + 2.4 * hf * hf), 0.96);
-  // The run of bays, begun somewhere else on every floor, and the pane in it: a few dark, each as bright as its room.
   let run = floor(fx / WALL_RUN + hf * WALL_RUN);
   let on = step(1.0 - floorShare, wallHash(vec2f(run, storey), seed + 31u));
   let hp = wallHash(vec2f(floor(fx), storey), seed + 77u);
@@ -167,36 +147,39 @@ fn nightWall(fx: f32, fy: f32, ax: f32, ay: f32, pw: f32, y0: f32, ph: f32, seed
   let share = mix(mix(on, floorShare, brun), busy, by);
   let along = mix(within(fract(fx), 0.5 - pw * 0.5, 0.5 + pw * 0.5, ax) * own, pw * 0.67, bx);
   let up = mix(within(fract(fy), y0, y0 + ph, ay), ph, by);
-  // Warm lamps in most, a whiter light in offices, a floor in a dozen the cold white of tubes.
   let cold = step(0.92, wallHash(vec2f(3.0, storey), seed + 5u)) * (1.0 - by);
   let tint = mix(mix(vec3f(1.0, 0.64, 0.32), vec3f(1.0, 0.82, 0.56), fract(whole * 7.0)), vec3f(0.78, 0.9, 1.0), cold);
   return vec4f(tint, along * up * share);
 }
 `
-/** Each material's own colour and how its cells differ from one another (a fifth either way at 1), then how rough it is, how much it mirrors, how much it glows. Sixteen of each. */
+
+/**
+ * Each material's own colour and how its cells differ from one another (wander), then roughness, mirror, glow,
+ * and metallic (#165: steel/chrome/vehicles use GGX metallic Fresnel). Sixteen of each (32 bytes per material).
+ */
 export function materials(): Float32Array<ArrayBuffer> {
-  const M: [string, number, number, number, number][] = [
-    ['#000000', 0, 1, 0, 0],
-    ['#6b5440', 0.9, 0.95, 0, 0], // earth
-    ['#7d7a76', 0.8, 0.9, 0, 0], // rock
-    ['#5f8a3c', 0.7, 0.95, 0, 0], // grass
-    ['#d9c79a', 0.6, 0.95, 0, 0], // sand
-    ['#2f6f86', 0.15, 0.06, 0.9, 0], // water
-    ['#4c4e54', 0.35, 0.92, 0, 0], // asphalt
-    ['#a9a69f', 0.5, 0.85, 0, 0], // concrete
-    ['#a4553d', 0.9, 0.9, 0, 0], // brick
-    ['#cfc6b4', 0.3, 0.9, 0, 0], // plaster
-    ['#b98a5a', 0.7, 0.75, 0, 0], // wood
-    ['#9fc3d6', 0.1, 0.05, 0.75, 0], // glass
-    ['#8f959c', 0.25, 0.4, 0, 0], // steel: most of it here is painted. It glints (rough 0.4) and mirrors nothing: a street of parked cars each asking what is across from it cost 9 ms
-    ['#4f8a3a', 1.2, 0.95, 0, 0], // leaves
-    ['#4a4744', 0.6, 0.95, 0, 0], // roofing
-    ['#ffe2a8', 0.05, 0.5, 0, 1], // lamp
+  const M: [string, number, number, number, number, number][] = [
+    ['#000000', 0, 1, 0, 0, 0],
+    ['#6b5440', 0.9, 0.95, 0, 0, 0], // earth
+    ['#7d7a76', 0.8, 0.9, 0, 0, 0], // rock
+    ['#5f8a3c', 0.7, 0.95, 0, 0, 0], // grass
+    ['#d9c79a', 0.6, 0.95, 0, 0, 0], // sand
+    ['#2f6f86', 0.15, 0.06, 0.9, 0, 0], // water
+    ['#4c4e54', 0.35, 0.92, 0, 0, 0], // asphalt
+    ['#a9a69f', 0.5, 0.85, 0, 0, 0], // concrete
+    ['#a4553d', 0.9, 0.9, 0, 0, 0], // brick
+    ['#cfc6b4', 0.3, 0.9, 0, 0, 0], // plaster
+    ['#b98a5a', 0.7, 0.75, 0, 0, 0], // wood
+    ['#9fc3d6', 0.1, 0.05, 0.75, 0, 0], // glass
+    ['#8f959c', 0.25, 0.38, 0, 0, 0.82], // steel: metallic GGX specular & Fresnel without per-car reflection rays
+    ['#4f8a3a', 1.2, 0.95, 0, 0, 0], // leaves
+    ['#4a4744', 0.6, 0.95, 0, 0, 0], // roofing
+    ['#ffe2a8', 0.05, 0.45, 0, 1, 0.15], // lamp
   ]
   const out = new Float32Array(16 * 8)
-  M.forEach(([hex, wander, rough, mirror, glow], i) => {
+  M.forEach(([hex, wander, rough, mirror, glow, metallic], i) => {
     for (let c = 0; c < 3; c++) out[i * 8 + c] = (parseInt(hex.slice(1 + c * 2, 3 + c * 2), 16) / 255) ** 2.2
-    out.set([wander, rough, mirror, glow, 0], i * 8 + 3)
+    out.set([wander, rough, mirror, glow, metallic], i * 8 + 3)
   })
   return out
 }
@@ -205,12 +188,9 @@ export function materials(): Float32Array<ArrayBuffer> {
 export const GLOBALS = /* wgsl */ `
 struct Level {
   boxMin: vec3f, scale: f32,
-  // roof: the height nothing in this box stands above.
   boxSize: vec3f, roof: f32,
   wrap: vec3u, pad1: u32,
   cells: vec3i, pad2: i32,
-  // The same for each quarter of the box as seen from the eye's own sector: towards -x and -z, +x and -z, -x and +z,
-  // +x and +z. A look from the eye stays in one quarter, and need not be held up by a mountain that is behind it.
   roofs: vec4f,
 }
 struct Globals {
@@ -219,63 +199,28 @@ struct Globals {
   up: vec3f, time: f32,
   forward: vec3f, levels: u32,
   sun: vec3f, flags: u32,
-  // sea: how high the top of the sea is.
   res: vec2f, most: u32, sea: f32,
-  // How wide a pixel is one cell away, and how many pixels wide a thing must be to be drawn as itself.
-  // And the hour: day is 1 by day and 0 at night; low is how near the horizon the sun is, 1 at sunrise and sunset.
   pixel: f32, detail: f32, day: f32, low: f32,
-  // The sun's maps: their across and up, how far towards the sun the anchor is, whether to use them.
   sunU: vec3f, sunFar: f32,
   sunV: vec3f, sunMaps: u32,
   level: array<Level, ${MAX_LEVELS}>,
   sunLevel: array<SunLevel, ${MAX_LEVELS}>,
-  // The hour's colours, worked out once when the hour is set (Marcher.light) so that no pixel works them out:
-  // the light that comes straight (the sun's or the moon's) with how much of it the ground throws back; the sky's
-  // fill from above with how much comes from under; the sky overhead with the power its blend to the horizon goes
-  // by; the horizon away from the sun with how strong a low sun's wide glow is; the horizon towards the sun; the
-  // clouds' tint away from the sun and towards it. The last three carry where the sun is on the horizon (x, z) and
-  // how bright the sun's own disc is.
   lightSun: vec4f, lightFill: vec4f, skyZenith: vec4f, skyHorizon: vec4f, skyHorizonSun: vec4f, cloudTint: vec4f, cloudTintSun: vec4f,
-  // The weather: how hard it rains (0 to 1), how wet the ground is, and how far windows, lamps and signs are lit.
-  // Its last is how far the eye is in a room (Marcher.roofed), not the weather's: kept here for want of a slot.
-  // Not to be read in sky(): each of three tries at it there (the clouds' cover, the stars twice) made the dry day
-  // 8 to 10% dearer, though none of them runs by day.
   weather: vec4f,
-  // Where a look begins (#264, a window into another world): a plane, its normal and how far along it, measured as
-  // the eye is. Nothing nearer the eye than that plane is met. All zero: a look begins at the eye.
   starts: vec4f,
-  // The air (#450): how thick its haze is and how much cloud there is, against the town's own (1, 1). A realm says
-  // its own: the SF realm's is the clear afternoon of the landing's photograph (#423: haze 0.12, cloud 0.1).
-  // Then the eggs' two (#450, eggs.ts): z how far the window screen is up (0: off, and it is never read), w how much
-  // larger than its own the moon's disc is (0: its own size).
   air: vec4f,
-  // The fog (#450, after the air): a low bank in from the sea, what is lost in it worked out after the march (fogged), never in sky().
-  // x how thick it is a cell (0: no fog, and nothing of it is worked out); y the height of its top over the sea; z where
-  // its front is, measured east as the eye is (west of it is fog); w and fogTint's a, the corner everything is measured
-  // from (x, z), so that the lumps of its top stay where they are as the eye goes.
   fog: vec4f,
-  // The colour of the fog as the hour lights it.
   fogTint: vec4f,
-  // The landmarks' own lights by night (#450, LANDMARK_LIGHT): none where its strength is 0.
   beacon: array<Beacon, 8>,
-  // The moon (#524, Marcher.moon): towards the sun (xyz), and how its disc is drawn (w): 0 whole, as it always was; 1
-  // as much of its face as the sun lights, its disc at the light's place (the moon's own then); under 0 not at all.
   moon: vec4f,
 }
-// A landmark's light (heroes.rs \`night\`): the middle of its foot, measured as the eye is, and half its lit part's width
-// at its foot (m); that part's foot and top over the landmark's own foot, half its width at the top, and how far apart
-// its dark rings are (m); its colour and how strong (0: no light of its own); how tall its top's lamp is, a storey and
-// a bay of its glass (0: its glass is its windows already) and how far from its middle it reaches (m; 0: no more of them).
 struct Beacon { at: vec4f, span: vec4f, colour: vec4f, more: vec4f }
-// A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
 `
 
 /**
  * The window screen (#450, eggs.ts): a small picture the city's lit windows show, as if every pane were a pixel of
- * one screen the size of the view. Needs `g` and a `screen` texture bound by the shader that takes it (march, far).
- * `uv` is where in the view (0 to 1, top left first); the answer is light (rgb) and how much of a pane's own lamp
- * it puts out (a), both times how far the screen is up. Nothing there off the view, and nothing while it is down.
+ * one screen the size of the view.
  */
 export const SCREEN = /* wgsl */ `
 fn screenAt(uv: vec2f) -> vec4f {
@@ -283,20 +228,12 @@ fn screenAt(uv: vec2f) -> vec4f {
   return textureLoad(screen, vec2i(uv * vec2f(textureDimensions(screen))), 0) * g.air.z;
 }
 `
-/** The window screen's size, texels: a pane is a pixel of it, and the view is about 140 panes tall from the park. */
+/** The window screen's size, texels. */
 export const SCREEN_SIZE = [256, 144] as const
 
-/** How fast the fog thins over its top, a finest cell: to a third in 30 m. */
 const THIN = (1 / 280).toFixed(6)
-/**
- * How much of what is `dist` along a look is lost in the fog (#450), 0 to 1, and how high its top stands where the look
- * crosses it (0 to 1, a half is its middle): needs `g` (the globals) and `noise2`.
- * The bank is even below its top and thins above it, a cell in THIN at a time; only what is west of its front is in it.
- * Its top is lumpy where the look crosses it, and its front wavy, by a slow noise that drifts with the time.
- */
 /** A quick number for a place on a plane, and a smooth noise of them: the clouds', the fog's (FOG) and the far model's fog. */
 export const NOISE = /* wgsl */ `
-// A quick number for a place on a plane: clouds need many and need them only to look unruly.
 fn hash2i(c: vec2i) -> f32 {
   var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
   h = (h ^ (h >> 13u)) * 0x5bd1e995u;
@@ -311,19 +248,16 @@ fn noise2(p: vec2f) -> f32 {
 `
 export const FOG = /* wgsl */ `
 fn fogged(rd: vec3f, dist: f32) -> vec2f {
-  // The part of the look west of the front: from t0 to t1.
   var t0 = 0.0;
   var t1 = dist;
   let ax = vec2f(g.fog.w, g.fogTint.a);
   if (abs(rd.x) > 1e-5) {
     var meet = (g.fog.z - g.eye.x) / rd.x;
-    // The front is wavy: where the look crosses it, it stands a little east or west.
     let z = (g.eye.z + rd.z * meet + ax.y) * 0.00035;
     meet = (g.fog.z + (noise2(vec2f(z, g.time * 0.01)) - 0.5) * 2400.0 - g.eye.x) / rd.x;
     if (rd.x > 0.0) { t1 = min(t1, meet); } else { t0 = max(t0, meet); }
   } else if (g.eye.x > g.fog.z) { return vec2f(0.0); }
   if (t1 <= t0) { return vec2f(0.0); }
-  // The top, lumpy where the look crosses it.
   var top = g.sea + g.fog.y;
   var lump = 0.5;
   if (abs(rd.y) > 1e-4) {
@@ -334,7 +268,6 @@ fn fogged(rd: vec3f, dist: f32) -> vec2f {
   let ya = g.eye.y + rd.y * t0;
   let yb = g.eye.y + rd.y * t1;
   let span = t1 - t0;
-  // How much of it is under the top, and what the rest above it comes to as it thins.
   var under = 0.0;
   if (abs(yb - ya) < 0.01) { under = select(0.0, span, ya < top); }
   else {
@@ -350,8 +283,6 @@ fn fogged(rd: vec3f, dist: f32) -> vec2f {
   if (abs(y2 - y1) > 0.5) { over = (span - under) * (e1 - exp(-y2 * ${THIN})) / ((y2 - y1) * ${THIN}); }
   return vec2f(1.0 - exp(-min(g.fog.x * (under + over), 30.0)), lump);
 }
-// What is dist along a look, seen through the fog: seen from over it, its sunlit top is brighter than the fog one is
-// in, and its billows are lit on their tops. The cells' and the far model's (far.ts) alike.
 fn inFog(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
   let fog = fogged(rd, dist);
   let over = smoothstep(0.0, 600.0, g.eye.y - g.sea - g.fog.y);
@@ -359,16 +290,10 @@ fn inFog(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
 }
 `
 
-/** The sun's shadow at a point, from its maps: needs `g` (the globals) and `sunMap`. */
-/** `sunlit`; with `marks` (#259, `bricks=1` unless `finesun=0`) it also says where a cell of finer cells could shade the point. */
 const sunlitText = (marks: boolean) => /* wgsl */ `
-// Whether the sun reaches a point: 1 where it does, 0 where it does not, between the two across a shadow's edge,
-// and -1 where the maps cannot say. p is on a face whose normal is n, in box level. The map asked is the finest one
-// that holds the point's line to the sun and has that tile drawn; four of its texels are weighed, so an edge is soft.
 fn sunlit(p: vec3f, n: vec3f, level: u32) -> f32 {
   for (var L = level; L < g.levels; L++) {
     let texel = 1.0 / g.level[L].scale;
-    // Asked a little off the face, so a face does not shadow itself across a texel.
     let q = p + n * (0.6 * texel);
     let uv = vec2f(dot(q, g.sunU), dot(q, g.sunV)) / texel;
     let eye = vec2f(dot(g.eye, g.sunU), dot(g.eye, g.sunV)) / texel;
@@ -387,8 +312,6 @@ ${marks ? `    let r00 = textureLoad(sunMap, low & wrap, L, 0).r;
     let r10 = textureLoad(sunMap, (low + vec2i(1, 0)) & wrap, L, 0).r;
     let r01 = textureLoad(sunMap, (low + vec2i(0, 1)) & wrap, L, 0).r;
     let r11 = textureLoad(sunMap, (low + vec2i(1, 1)) & wrap, L, 0).r;
-    // What a texel's line last left may be a cell of finer cells (#259): the number's lowest bit says so (fs_sun). A
-    // point such a cell could shade is not answered from the map, which holds the whole cell as solid: -2, ask the world.
     if (((((bitcast<u32>(r00) & u32(d < r00)) | (bitcast<u32>(r10) & u32(d < r10)) | (bitcast<u32>(r01) & u32(d < r01)) | (bitcast<u32>(r11) & u32(d < r11)))) & 1u) != 0u) { return -2.0; }
     let s00 = step(r00, d);
     let s10 = step(r10, d);
@@ -405,13 +328,8 @@ ${marks ? `    let r00 = textureLoad(sunMap, low & wrap, L, 0).r;
 `
 export const SUNLIT = sunlitText(false)
 
-/**
- * Glass (#163), for the world and for bodies: how much of what is behind a pane comes through it, and how much of
- * what is across from it the pane throws back. Needs `looks`.
- */
+/** Glass (#163), for the world and for bodies: transmission tint and grazing reflection strength. */
 export const GLASS = /* wgsl */ `
-// What comes through glass: tinted a little by its colour (its hue, not how dark its paint is), the more the more
-// glass the look crosses (thick, in the world's cells). A pane also loses a little at its faces (pane, below).
 fn glassTint(kind: u32, thick: f32) -> vec3f {
   let ci = (kind >> 8u) & 255u;
   var base = looks.material[11].colour;
@@ -419,19 +337,13 @@ fn glassTint(kind: u32, thick: f32) -> vec3f {
   let hue = base / max(max(base.r, base.g), max(base.b, 0.001));
   return pow(mix(vec3f(1.0), hue, 0.25), vec3f(thick));
 }
-// How much a pane mirrors: a little face on (its two sides), most of all along it.
 fn glassMirror(rd: vec3f, n: vec3f) -> f32 {
   let facing = 1.0 - clamp(dot(-rd, n), 0.0, 1.0);
   return looks.material[11].mirror * (0.08 + 0.92 * pow(facing, 5.0));
 }
 `
 
-/**
- * Where the far model takes over from the cells at a point p (far.ts), the same for both: past `reach` from the eye,
- * or past `wedge.w` in #423's wedge (`inWedge`), whose faces are finer than the cells from there (`wedge`: its apex (x, z) from
- * where p is measured and how far it reaches, finest cells, 0 where there is none; `bear`: the compass bearings it
- * lies between, radians).
- */
+/** Where the far model takes over from the cells at a point p (far.ts), the same for both. */
 export const HANDOVER = /* wgsl */ `
 fn inWedge(p: vec3f, wedge: vec4f, bear: vec4f) -> bool {
   let d = p.xz - wedge.xy;
@@ -439,8 +351,6 @@ fn inWedge(p: vec3f, wedge: vec4f, bear: vec4f) -> bool {
   let bearing = select(b, b + 6.2831853, b < 0.0);
   return wedge.z > 0.0 && bearing > bear.x && bearing < bear.y && dot(d, d) < wedge.z * wedge.z;
 }
-// A box the wedge's nearer reach leaves to the cells (a lettering board's, #450: its letters are cells, which the
-// wedge's faces past 100 m know nothing of): its low and high corners, measured as p is; none where k1.w is 0.
 fn kept(p: vec3f, k0: vec4f, k1: vec4f) -> bool {
   return k1.w > 0.0 && all(p >= k0.xyz) && all(p <= k1.xyz);
 }
@@ -451,11 +361,6 @@ fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f, k0: vec4f, k1: vec4f
 
 /** Boxes the world was changed in that stay the cells' at any distance (far.ts `edited`): at most this many. */
 export const EDITS = 8
-/**
- * Whether p is in a box the world was changed in (far.ts `edited`): the cells hold the change, so there they are drawn
- * however far off, and the far model's faces are not. `boxes` is the array that holds them, two a box: its low corner,
- * its high corner (exclusive) and 1, measured as p is; none where w is 0.
- */
 export const EDITED = (boxes: string) => /* wgsl */ `
 fn edited(p: vec3f) -> bool {
   var hit = false;
@@ -468,27 +373,20 @@ fn edited(p: vec3f) -> bool {
 }
 `
 
-/** The sky's own colour along a look, and what the air between does to a thing seen far off: the same for the world and for the far model (far.ts). Needs `g`. */
+/** The sky's own colour along a look, and what the air between does to a thing seen far off. */
 export const AIR = /* wgsl */ `
-// The sky without sun or cloud: what the air between is the colour of.
 fn skyBase(rd: vec3f) -> vec3f {
   let up = clamp(rd.y, 0.0, 1.0);
   var horizon = g.skyHorizon.rgb;
   if (g.low > 0.0) {
-    // A low sun reddens the side of the sky it is on.
     let sunward = max(dot(normalize(rd.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a)), 0.0);
     horizon = mix(horizon, g.skyHorizonSun.rgb, sunward * sunward);
   }
   var col = mix(horizon, g.skyZenith.rgb, pow(up, g.skyZenith.a));
   let toward = max(dot(rd, g.sun), 0.0);
   col += g.lightSun.rgb * vec3f(1.0, 0.8, 0.56) * (pow(toward, 6.0) * 0.22 + pow(toward, 3.0) * g.skyHorizon.a);
-  // Below the horizon the sky is the haze the far ground fades into.
   return mix(col, horizon * 0.94, clamp(-rd.y * 6.0, 0.0, 1.0));
 }
-// How much of what is dist along a look from the eye is lost in the air: dist is in the finest cells, and the air
-// thickens over kilometres. It is thickest by the sea and thins upward (to a third in 1.3 km), so a mountain stands
-// clear over the haze its foot is lost in: what counts is the air along the look, from the eye's height to the
-// height of what is seen.
 fn haze(rd: vec3f, dist: f32) -> f32 {
   let low = (g.eye.y - g.sea) / 12000.0;
   let rise = rd.y * dist / 12000.0;
@@ -496,48 +394,91 @@ fn haze(rd: vec3f, dist: f32) -> f32 {
   if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
   return 1.0 - exp(-dist * 0.00003 * g.air.x * thick);
 }
-// The colour of that air.
 fn hazeColour(rd: vec3f) -> vec3f { return skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6; }
 fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f { return mix(col, hazeColour(rd), haze(rd, dist)); }
 `
 
-/** How a face is lit and how light becomes a picture: the same for the world and for bodies. */
-export const LIGHT = /* wgsl */ `
-// The light on a face: the sun where it reaches, the sky from above, what the lit ground throws back from below
-// and from the side away from the sun; less of the last two in corners (open: 1 in the open, 0 shut in).
-// With the eye in a room (g.weather.w, #163), the daylight the room is lit by too: let in at its doorway and windows
-// and thrown about off its sunlit floor and walls: warm as the sun is, weaker as it goes down, none at night.
-// Without it a room was lit as any shadow is, and a room of dark wood came out black by day.
-// How strong that is, against the sun straight on: dark wood reads at about 40 of 255 with it (10 without).
+/**
+ * Energy-Conserving GGX Metallic/Roughness PBR lighting model (#165), shared by the world, bodies, people, and far model.
+ * Keeps the exact 8-argument `shade(...)` signature (metallic = 0) and exposes `shadePbr(..., metallic)` for metallic materials.
+ */
+const lightWgsl = (useF16: boolean) => /* wgsl */ `
 const ROOM_LIGHT = 1.6;
-// Once a look has gone through glass (#163) it sees the other side of a wall: from a room, the outside, which is not
-// lit as the room is (roomLit 0); from outside, a room or a cabin, which less of the sky reaches (skyLit under 1).
 var<private> roomLit: f32 = 1.0;
 var<private> skyLit: f32 = 1.0;
-fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
+fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32, metallic: f32) -> vec3f {
+  let r = clamp(rough, 0.045, 1.0);
+  let a = r * r;
+  let a2 = a * a;
+  let v = -rd;
+  let ndv = max(dot(n, v), 0.001);
+  let hv = normalize(sun + v);
+  let ndh = max(dot(n, hv), 0.0);
+  let vdh = max(dot(v, hv), 0.0);
+  let ndl = max(dot(n, sun), 0.001);
+  // Trowbridge-Reitz GGX NDF + Height-Correlated Smith-GGX Visibility (f32 for denominator precision).
+  let dDen = ndh * ndh * (a2 - 1.0) + 1.0;
+  let D = a2 / max(3.14159265 * dDen * dDen, 1e-5);
+  let gv = ndl * sqrt(ndv * ndv * (1.0 - a2) + a2);
+  let gl = ndv * sqrt(ndl * ndl * (1.0 - a2) + a2);
+  let Vis = 0.5 / max(gv + gl, 1e-4);
+  let dv = min(D * Vis, 16.0);
+  let omVdh = 1.0 - vdh;
+  let omVdh2 = omVdh * omVdh;
+  let omVdh5 = omVdh2 * omVdh2 * omVdh;
+  let omNdv = 1.0 - ndv;
+  let omNdv2 = omNdv * omNdv;
+  let omNdv5 = omNdv2 * omNdv2 * omNdv;
   let above = 0.5 + 0.5 * n.y;
-  let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
-  let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
+  let refl = reflect(rd, n);
+  let envSky = mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(max(refl.y, 0.0), max(g.skyZenith.a, 0.25)));
+  let envUp = smoothstep(-0.15, 0.35, refl.y);
+  let roomMask = 1.0 - smoothstep(0.0, 0.15, direct);
+  let bounceW = (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
+  // Rough dielectrics (earth, sand, grass, brick) scatter ambient via skylight/bounce rather than mirror IBL;
+  // metallics and smooth dielectrics retain full GGX specular & hemisphere environment reflection.
+  let specEnergy = mix(1.0 - 0.78 * r * r, 1.0, metallic);
+  let envWeight = mix((1.0 - r) * (1.0 - r), 0.35 + 0.65 * (1.0 - r), metallic) * skyLit;
+  ${useF16 ? `let alb = vec3<f16>(min(max(albedo, vec3f(0.0)), vec3f(60000.0)));
+  let met = f16(clamp(metallic, 0.0, 1.0));
+  let f0 = mix(vec3<f16>(0.04h), alb, met);
+  let F = f0 + (vec3<f16>(1.0h) - f0) * f16(omVdh5);
+  let kD = (vec3<f16>(1.0h) - F * f16(specEnergy)) * (1.0h - met);
+  let sunCol = vec3<f16>(min(max(g.lightSun.rgb, vec3f(0.0)), vec3f(60000.0)));
+  let fillCol = vec3<f16>(min(max(g.lightFill.rgb, vec3f(0.0)), vec3f(60000.0)));
+  let openH = f16(open);
+  let directLit = sunCol * f16(direct * 3.6) * (kD * alb * (0.75h + 0.25h * openH) + F * f16(dv * 3.14159265 * specEnergy) * (0.65h + 0.35h * openH));
+  let skylight = mix(vec3<f16>(0.12h, 0.118h, 0.115h) * f16(g.lightFill.a), fillCol, f16(above));
+  let bounce = vec3<f16>(0.24h, 0.2h, 0.15h) * f16(bounceW);
+  let room = sunCol * f16(g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * roomMask);
+  let fEnv = f0 + (max(vec3<f16>(f16(1.0 - r)), f0) - f0) * f16(omNdv5);
+  let kDEnv = (vec3<f16>(1.0h) - fEnv * f16(mix(1.0 - r, 1.0, metallic))) * (1.0h - met);
+  let envGround = vec3<f16>(0.14h, 0.13h, 0.12h) * f16(g.lightFill.a) + vec3<f16>(0.18h, 0.15h, 0.12h) * f16(g.lightSun.a);
+  let envSkyH = vec3<f16>(min(max(envSky, vec3f(0.0)), vec3f(60000.0)));
+  let envSpec = mix(envGround, mix(fillCol, envSkyH, f16(1.0 - r * 0.75)), f16(envUp)) * fEnv * f16(envWeight);
+  let ambientLit = (alb * kDEnv * ((skylight + bounce) * f16(skyLit) + room) + envSpec) * openH;
+  return vec3f(directLit + ambientLit + alb * f16(glow * 3.2));` : `let f0 = mix(vec3f(0.04), albedo, metallic);
+  let F = f0 + (vec3f(1.0) - f0) * omVdh5;
+  let kD = (vec3f(1.0) - F * specEnergy) * (1.0 - metallic);
   let SUN_LIGHT = g.lightSun.rgb;
-  // (Only where the sun does not fall: a street seen out of the doorway keeps its sunlit fronts as they were.)
-  let room = SUN_LIGHT * g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * (1.0 - smoothstep(0.0, 0.15, direct));
-  var col = albedo * (SUN_LIGHT * direct * 3.6 * (0.75 + 0.25 * open) + ((skylight + bounce) * skyLit + room) * open);
-  let hv = normalize(sun - rd);
-  col += SUN_LIGHT * pow(max(dot(n, hv), 0.0), 2.0 / max(rough * rough, 0.002)) * direct * (1.0 - rough) * 0.6;
-  col += albedo * glow * 3.2;
-  return col;
+  let directLit = SUN_LIGHT * direct * 3.6 * (kD * albedo * (0.75 + 0.25 * open) + F * (dv * 3.14159265 * specEnergy) * (0.65 + 0.35 * open));
+  let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
+  let bounce = vec3f(0.24, 0.2, 0.15) * bounceW;
+  let room = SUN_LIGHT * g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * roomMask;
+  let fEnv = f0 + (max(vec3f(1.0 - r), f0) - f0) * omNdv5;
+  let kDEnv = (vec3f(1.0) - fEnv * mix(1.0 - r, 1.0, metallic)) * (1.0 - metallic);
+  let envGround = vec3f(0.14, 0.13, 0.12) * g.lightFill.a + vec3f(0.18, 0.15, 0.12) * g.lightSun.a;
+  let envSpec = mix(envGround, mix(g.lightFill.rgb, envSky, 1.0 - r * 0.75), envUp) * fEnv * envWeight;
+  let ambientLit = (albedo * kDEnv * ((skylight + bounce) * skyLit + room) + envSpec) * open;
+  return directLit + ambientLit + albedo * glow * 3.2;`}
+}
+fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
+  return shadePbr(albedo, n, rd, sun, direct, open, rough, glow, 0.0);
 }
 `
+export const LIGHT = lightWgsl(false)
 
-/**
- * What a face of a cell looks like: its material's colour or its own from the palette, then what the material is made
- * as. Bricks two cells long in courses, each its own shade; boards across a painted wall; planks; slabs with joints.
- * All of it is from where the cell is, so a wall keeps its courses as a body. Where a cell is some pixels wide it
- * is drawn finer than a cell (`q` is where on it, `sharp` how many pixels wide it is): mortar between bricks, a line
- * of shadow under each board's lap, seams between planks, joints between slabs, a grain. Further off those fade to
- * the cell's own shade. In the coarser copies a cell is many cells, and only the shade of a patch is kept. For the
- * world and for bodies.
- */
+/** What a face of a cell looks like: bricks, stucco, wood planks, concrete slabs, shingles, grass, and wear. */
 export const PAINT = /* wgsl */ `
 fn hash3i(c: vec3i, seed: u32) -> f32 {
   var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 19349663u) ^ (u32(c.z) * 83492791u) ^ (seed * 2654435761u);
@@ -545,14 +486,12 @@ fn hash3i(c: vec3i, seed: u32) -> f32 {
   h = (h ^ (h >> 12u)) * 0x297a2d39u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
-// A number for a place on a face that changes smoothly from one whole place to the next.
 fn soft(p: vec2f, seed: u32) -> f32 {
   let i = vec2i(floor(p));
   let f = fract(p);
   let u = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash3i(vec3i(i.x, i.y, 0), seed), hash3i(vec3i(i.x + 1, i.y, 0), seed), u.x), mix(hash3i(vec3i(i.x, i.y + 1, 0), seed), hash3i(vec3i(i.x + 1, i.y + 1, 0), seed), u.x), u.y);
 }
-// cell: the finest cell the face is of. n: which way the face looks. fine: 1 where a cell is drawn as a cell, 0 in the coarse copies.
 fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> vec3f {
   let stuff = kind & 15u;
   let m = looks.material[stuff];
@@ -562,46 +501,34 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
   let own = hash3i(cell, 1u);
   let blot = hash3i(cell >> vec3u(2u), 2u);
   var v = 1.0 + ((own - 0.5) * 0.4 * fine + (blot - 0.5) * 0.16) * m.wander;
-  // Along the face and up it: a wall's two ways, or a floor's.
   let wall = abs(n.y) < 0.5;
   var along = cell.x;
   var across = cell.z;
   if (abs(n.x) > 0.5) { along = cell.z; across = cell.x; }
   var up = cell.y;
   if (!wall) { up = cell.z; across = cell.y; }
-  // A diagonal wall (a smoothed normal) crosses the cell rows: its depth would step every few cells and its wear
-  // jump with it, a stripe at each step.
   if (wall && min(abs(n.x), abs(n.z)) > 0.02) { across = 0; }
-  // Where on the face, 0 to 1 across the cell: along it and up it.
   var fa = q.x;
   var fu = q.y;
   if (abs(n.x) > 0.5) { fa = q.z; }
   if (!wall) { fu = q.z; }
-  // Stains and wear, the size of a door, with no edge to them: squares of it read as a chessboard on grass and
-  // as patched paint on a wall. Each wall has its own, by how deep in the block it stands.
   let on = vec2f(f32(along), f32(up)) + vec2f(fa, fu) * fine;
   let worn = (soft(on / 16.0 + vec2f(f32(across >> 3u) * 7.3, 0.0), 3u) - 0.5) * 1.5;
-  // Lines finer than a cell show where a cell is some pixels wide, and grain where it is more.
   let lines = clamp((sharp - 2.0) / 4.0, 0.0, 1.0) * fine;
   let grain = clamp((sharp - 4.0) / 6.0, 0.0, 1.0) * fine;
   let sub = vec2u(clamp(vec2f(fa, fu) * 4.0, vec2f(0.0), vec2f(3.0)));
   let speck = hash3i(cell, 40u + sub.x + 4u * sub.y) - 0.5;
   var over = vec4f(0.0);
-  // Rubble (kinds.rs RUBBLE) is its stuff broken small: no courses, boards or joints, each bit its own shade, rough.
   if ((kind & 16u) != 0u) { return base * max(0.88 + (own - 0.5) * 0.34 * fine + (blot - 0.5) * 0.2 + speck * 0.24 * grain, 0.2); }
   if (stuff == 8u) {
-    // Brick: courses a cell high, bricks two long, every other course half a brick along.
     let brick = vec3i((along + (up & 1)) >> 1u, up, across);
     let shade = hash3i(brick, 4u);
     v = 1.0 + ((shade - 0.5) * 0.44 - select(0.0, 0.22, shade > 0.9)) * fine + (own - 0.5) * 0.08 * fine + worn * 0.12 + speck * 0.1 * grain;
-    // Mortar: a bed under each course and a joint at each brick's end.
     if (wall) {
       let starts = ((along + (up & 1)) & 1) == 0;
       over = vec4f(0.56, 0.54, 0.5, max(step(fu, 0.17), select(0.0, step(fa, 0.11), starts)) * lines * 0.85);
     }
   } else if (stuff == 9u) {
-    // Painted stucco & fine architectural siding: smooth troweled plaster finish with subtle horizontal course
-    // modulation so residential stucco walls stay crisp rather than ribbed barn clapboard (#60).
     if (wall) {
       let lower = (up & 1) == 0;
       let course = select(0.0, 1.0, !lower && fu > 0.78);
@@ -610,37 +537,30 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
     }
     v += worn * 0.11 + speck * 0.055 * grain;
   } else if (stuff == 10u) {
-    // Wood: planks two cells wide, upright on a wall and along a floor, each its own shade, with a grain along it.
     var plank = vec3i(along >> 1u, across, 0);
     var run = up;
     if (!wall) { plank = vec3i(cell.z >> 1u, cell.y, 1); run = cell.x; }
     v = 1.0 + ((hash3i(plank, 5u) - 0.5) * 0.3 + (hash3i(vec3i(plank.x, plank.y, run >> 2u), 6u) - 0.5) * 0.12) * fine + (own - 0.5) * 0.06 * fine;
-    // A seam between planks, and a grain along each.
     var pa = fa;
     var first = (along & 1) == 0;
     if (!wall) { pa = q.z; first = (cell.z & 1) == 0; }
     if (first && pa < 0.1) { v -= 0.4 * lines; }
     v += (hash3i(vec3i(plank.x * 8 + i32(pa * 4.0) + select(4, 0, first), plank.y, run >> 3u), 12u) - 0.5) * 0.12 * grain;
   } else if (stuff == 7u) {
-    // Concrete: slabs sixteen cells across with a joint between, and stains.
     if (((along & 15) == 0 || (up & 15) == 0)) {
       let joint = max(select(0.0, step(fa, 0.16), (along & 15) == 0), select(0.0, step(fu, 0.16), (up & 15) == 0));
       v -= mix(0.14 * fine, joint * 0.32, lines);
     }
     v += worn * 0.14 + speck * 0.08 * grain;
   } else if (stuff == 14u) {
-    // Roofing: rows of shingles two cells long, every other row half a shingle along.
     let shingle = vec3i((cell.x + (cell.z & 1)) >> 1u, cell.y, cell.z);
     v = 1.0 + (hash3i(shingle, 7u) - 0.5) * 0.3 * fine + worn * 0.1 + speck * 0.1 * grain;
   } else if (stuff == 6u || stuff == 1u || stuff == 3u) {
     if (stuff == 6u) {
-      // Road: rolled flat and dark, a fine grit in it with a pale stone here and there, worn paler in long patches.
       v += worn * 0.18 + speck * 0.09 * grain + select(0.0, 0.12, speck > 0.46) * grain;
     } else if (stuff == 1u) {
       v += worn * 0.14 + speck * 0.16 * grain;
     } else {
-      // Grass: swells of it gone dry and yellow, hollows of it deep, each drifting into the next; near, blades in
-      // tufts, some of them pale and some dark.
       let tuft = soft(on / 5.0, 31u) - 0.5;
       base = mix(base, vec3f(0.42, 0.4, 0.12), clamp(worn * 0.55 + tuft * 0.25 + 0.14, 0.0, 0.4));
       v += tuft * 0.22 + speck * 0.24 * grain;
@@ -653,1476 +573,10 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
 }
 `
 
-/**
- * A cell that holds finer cells (#259, `?bricks=1`; the core's tree.rs `encode_fine`). The march knows nothing of
- * them: it stops at such a cell as at any other, and its text is the same with the switch on or off (a walk of the
- * block inside the leaf's loop made every look 5% dearer with nothing fine in the world). What the march met is
- * looked at after it, here: a cell whose kind has the mark (64) has a block of 4 x 4 x 4 or 8 x 8 x 8 cells, found
- * again from the cell's place and walked. Where the ray meets one of them that is what it has met; where it passes
- * between them it is marched on from the cell's far side.
- */
-/** How many cells of finer cells a ray may pass through between their cells before one is taken whole (`tries`, for measuring). */
 const TRIES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('tries'), 16, 1, 64, true)
-const FINER = /* wgsl */ `
-// Where a cell's block of finer cells is in its sector's tree (and, in the top bit, whether it is 8 a side and not
-// 4): 0 where the cell holds none. The cell's leaf is found from the top: this is asked of a ray that met such a
-// cell, and of a texel of the sun's maps.
-fn fineWord(entry: u32, c: vec3i) -> u32 {
-  if (entry == 0u || (entry & UNIFORM) != 0u) { return 0u; }
-  let mid = midOf(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
-  if (mid < 2u) { return 0u; }
-  let cl = vec3u(c >> vec3u(2u)) & vec3u(3u);
-  let midLo = pool[mid]; let midHi = pool[mid + 1u];
-  let bit = cl.x + 4u * cl.z + 16u * cl.y;
-  if (!has(midLo, midHi, bit)) { return 0u; }
-  let leaf = entry + (pool[mid + 2u] & 0xfffffu) + 4u * before(midLo, midHi, bit);
-  if ((pool[leaf + 3u] & UNIFORM) != 0u) { return 0u; }
-  let leafLo = pool[leaf]; let leafHi = pool[leaf + 1u];
-  let cc = vec3u(c) & vec3u(3u);
-  let cell = cc.x + 4u * cc.z + 16u * cc.y;
-  if (!has(leafLo, leafHi, cell)) { return 0u; }
-  let nth = before(leafLo, leafHi, cell);
-  let kinds = entry + pool[leaf + 2u];
-  if (((pool[kinds + (nth >> 1u)] >> (16u * (nth & 1u))) & 64u) == 0u) { return 0u; }
-  return pool[kinds + ((countOneBits(leafLo) + countOneBits(leafHi) + 1u) >> 1u) + nth];
-}
-`
-
-const REFINE = /* wgsl */ `
-// What a ray met inside a cell of finer cells: kind 0 where it passed between them, and where it leaves the cell.
-struct Fine { t: f32, kind: u32, n: vec3f, leave: f32, out: f32, side: vec3f }
-fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
-  let lv = g.level[hit.level];
-  let c = hit.cell - lv.cells;
-  let q0 = (ro - lv.boxMin) * lv.scale;
-  let k = (1.0 / rd) / lv.scale;
-  let ahead = max(sign(rd), vec3f(0.0));
-  let toward = vec3i(sign(rd));
-  let out = ((vec3f(c) + ahead) - q0) * k;
-  var r: Fine;
-  r.kind = 0u;
-  r.leave = min(out.x, min(out.y, out.z)) + 0.002 / lv.scale;
-  // The face of the next cell a ray that leaves this one meets, if that cell is solid.
-  r.side = select(select(vec3f(0.0, 0.0, -f32(toward.z)), vec3f(0.0, -f32(toward.y), 0.0), out.y <= out.z), vec3f(-f32(toward.x), 0.0, 0.0), out.x <= out.y && out.x <= out.z);
-  let entry = sectorOf(c, hit.level);
-  let word = fineWord(entry, c);
-  if (word == 0u) { return r; }
-  // The block: 4 or 8 cells a side, a mask of them, then their kinds.
-  let block = entry + (word & 0x7fffffffu);
-  let side = select(4, 8, (word >> 31u) != 0u);
-  let fs = f32(side);
-  let words = u32(side * side * side) >> 5u;
-  var sub = clamp(vec3i(floor((q0 + rd * (hit.t * lv.scale) - vec3f(c)) * fs)), vec3i(0), vec3i(side - 1));
-  var next = ((vec3f(c) + (vec3f(sub) + ahead) / fs) - q0) * k;
-  let each = abs(k) / fs;
-  r.t = hit.t;
-  r.n = hit.n;
-  for (var j = 0; j < 24; j++) {
-    let bit = u32(sub.x + side * (sub.z + side * sub.y));
-    if (((pool[block + (bit >> 5u)] >> (bit & 31u)) & 1u) != 0u) {
-      r.out = min(next.x, min(next.y, next.z));
-      let one = pool[block + words];
-      if ((one & UNIFORM) != 0u) { r.kind = (one & 0xffffu) | 64u; return r; }
-      // Its kind is as far along as there are cells before it.
-      var i = countOneBits(pool[block + (bit >> 5u)] & ((1u << (bit & 31u)) - 1u));
-      for (var w = 0u; w < (bit >> 5u); w++) { i += countOneBits(pool[block + w]); }
-      r.kind = ((pool[block + words + 1u + (i >> 1u)] >> (16u * (i & 1u))) & 0xffffu) | 64u;
-      return r;
-    }
-    if (next.x <= next.y && next.x <= next.z) {
-      r.t = next.x; next.x += each.x; sub.x += toward.x; r.n = vec3f(-f32(toward.x), 0.0, 0.0);
-    } else if (next.y <= next.z) {
-      r.t = next.y; next.y += each.y; sub.y += toward.y; r.n = vec3f(0.0, -f32(toward.y), 0.0);
-    } else {
-      r.t = next.z; next.z += each.z; sub.z += toward.z; r.n = vec3f(0.0, 0.0, -f32(toward.z));
-    }
-    if (any(sub < vec3i(0)) || any(sub >= vec3i(side))) { break; }
-    work++;
-  }
-  return r;
-}
-// A ray that met a cell of finer cells: what it meets in it, or in what lies past it.
-fn refine(ro: vec3f, rd: vec3f, met: Hit, most: u32, wide: f32, spread: f32, rough: bool, eyed: bool) -> Hit {
-  var hit = met;
-  for (var tries = 0u; tries < ${TRIES}u; tries++) {
-    // A cell of finer cells narrower than the ray is taken whole, as any node is.
-    if ((wide + spread * hit.t) * g.level[hit.level].scale >= 1.0) { break; }
-    let f = finer(ro, rd, hit);
-    if (f.kind != 0u) { hit.t = f.t; hit.kind = f.kind; hit.n = f.n; hit.out = f.out; break; }
-    // Between them: on from the cell's far side. The last of many such cells is taken whole.
-    let leave = f.leave;
-    hit = march(ro, rd, leave, hit.level, most, wide, spread, rough, false, eyed);
-    // A march begun in a solid cell says no face (its normal is nought, and it was lit as facing the eye): it met that
-    // cell's face as it left this one. Through the carved quarter cells of a road's grade (bay.rs grade_rows) into the
-    // ground beside, every step up Filbert and Powell was a black line (#450).
-    if (hit.t >= 0.0 && hit.t <= leave + 0.5 / g.level[hit.level].scale && dot(hit.n, hit.n) < 0.5) { hit.n = f.side; }
-    if ((hit.kind & 64u) == 0u) { break; }
-  }
-  return hit;
-}
-`
-
-/**
- * What `trace` does with what the march met, where cells may hold finer cells. The first call of the march is the one
- * there always was, with the same things handed to it: one call in a loop, begun from wherever the last ended, was 2%
- * dearer at the street with nothing fine in the world. Only a ray that met a cell of finer cells goes on to `refine`.
- */
-const MARCHED = (bricks: boolean | undefined) => /* wgsl */ `var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through, eyed);${!bricks ? '' : `
-  if ((hit.kind & 64u) != 0u && !through) { hit = refine(ro, rd, hit, most, wide, spread, rough, eyed); }`}`
-
-/** How many pixels wide a cell of a pane must be for the look to go through it (`through`, for measuring). */
 const THROUGH = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('through'), 2, 0.1, 64).toFixed(2)
-/**
- * How many panes of glass a look may meet (#163, `panes` for measuring): it goes through all but the last, which is
- * drawn with what is likely behind it (a dim room, or from inside, the day outside). 1 is none. Past one pane, a
- * look out of a tower to the next one cost three quarters of the frame again, and the far side of a car or a room
- * is seldom made out through two tints.
- */
 const PANES = bounded(new URLSearchParams(globalThis.location?.search ?? '').get('panes'), 2, 1, 8, true)
-
 const INLOOP = new URLSearchParams(globalThis.location?.search ?? '').get('walk') === 'loop'
-
-/** The walk of a cell's block inside the leaf's loop (the other way, `walk=loop`): nothing is read for a cell without the mark. */
-const BLOCK = /* wgsl */ `
-          if ((kind & 64u) == 0u || width >= 1.0) { break; }
-          let word = pool[leafChild + ((countOneBits(leafLo) + countOneBits(leafHi) + 1u) >> 1u) + nth];
-          let block = entry + (word & 0x7fffffffu);
-          let fside = select(4, 8, (word >> 31u) != 0u);
-          let ff = f32(fside);
-          let fwords = u32(fside * fside * fside) >> 5u;
-          var sub = clamp(vec3i(floor((q0 + rd * (t * lv.scale) - vec3f(cell)) * ff)), vec3i(0), vec3i(fside - 1));
-          var fnext = ((vec3f(cell) + (vec3f(sub) + ahead) / ff) - q0) * k;
-          var ft = t;
-          var fnorm = n;
-          var found = false;
-          var fbit = 0u;
-          for (var j = 0; j < 24; j++) {
-            fbit = u32(sub.x + fside * (sub.z + fside * sub.y));
-            if (((pool[block + (fbit >> 5u)] >> (fbit & 31u)) & 1u) != 0u) { found = true; break; }
-            if (fnext.x <= fnext.y && fnext.x <= fnext.z) {
-              ft = fnext.x; fnext.x += each.x / ff; sub.x += toward.x; fnorm = vec3f(-f32(toward.x), 0.0, 0.0);
-            } else if (fnext.y <= fnext.z) {
-              ft = fnext.y; fnext.y += each.y / ff; sub.y += toward.y; fnorm = vec3f(0.0, -f32(toward.y), 0.0);
-            } else {
-              ft = fnext.z; fnext.z += each.z / ff; sub.z += toward.z; fnorm = vec3f(0.0, 0.0, -f32(toward.z));
-            }
-            if (any(sub < vec3i(0)) || any(sub >= vec3i(fside))) { break; }
-            work++;
-          }
-          if (found) {
-            let one = pool[block + fwords];
-            if ((one & UNIFORM) != 0u) { kind = (one & 0xffffu) | 0x10040u; } else {
-              var fi = countOneBits(pool[block + (fbit >> 5u)] & ((1u << (fbit & 31u)) - 1u));
-              for (var w = 0u; w < (fbit >> 5u); w++) { fi += countOneBits(pool[block + w]); }
-              kind = ((pool[block + fwords + 1u + (fi >> 1u)] >> (16u * (fi & 1u))) & 0xffffu) | 0x10040u;
-            }
-            t = ft;
-            n = fnorm;
-            break;
-          }
-          kind = 0u;`
-
-const code = (world: World, behind = false, grid = world.options.grid) => /* wgsl */ `
-${GLOBALS}
-// One tile of a map being drawn: where its first texel's middle is (across and up from the anchor), a texel's width, the box, the tile's corner in the map.
-struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2f }
-struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
-// far: where the far model (far.ts) takes over from the cells: the corner of its map of tiles (measured as the eye
-// is), a tile's size and the distance from the eye past which it draws, in the finest cells; cover: which of its
-// 64 x 64 tiles it holds; wedge and bear: where it takes over nearer (HANDOVER); edits: where it never does (EDITED).
-// letters: the lettering boards' own light (#450, letterlight.ts): the box their light reaches (low corner and how many
-// letters; high corner and 1 where 489's lamps on arms wash the boards), then two a letter (LIT_LETTERS at most): its
-// box's low corner and how far it is lit, its high corner and which way it faces plus its hue.
-struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f, letters: array<vec4f, ${2 + 2 * LIT_LETTERS}>, edits: array<vec4f, ${2 * EDITS}> }
-
-@group(0) @binding(0) var<uniform> g: Globals;
-@group(0) @binding(1) var<storage, read> pool: array<u32>;
-@group(0) @binding(2) var<storage, read> top: array<u32>;
-@group(0) @binding(3) var<uniform> looks: Looks;
-@group(0) @binding(4) var sunMap: texture_2d_array<f32>;
-@group(0) @binding(5) var screen: texture_2d<f32>;
-${world.options.surveyedWalls ? MARKS : ''}
-${LOCAL_LIGHTS_STRUCT}
-@group(0) @binding(7) var<uniform> localLights: LocalLights;
-@group(1) @binding(0) var<uniform> sunTile: SunTile;
-${SCREEN}
-// The window screen where a point of the world is in the view (the middle of a pane, for a pane to be one pixel of it).
-fn screenOf(at: vec3f) -> vec4f {
-  if (g.air.z <= 0.0) { return vec4f(0.0); }
-  let v = at - g.eye;
-  let z = max(dot(v, g.forward), 1e-3);
-  return screenAt(vec2f(dot(v, g.right) / (z * g.tanHalf * g.aspect), -dot(v, g.up) / (z * g.tanHalf)) * 0.5 + 0.5);
-}
-
-const GRID = vec3u(${grid[0]}u, ${grid[1]}u, ${grid[2]}u);
-const SLOTS = ${grid[0] * grid[1] * grid[2]}u;
-const STRIDE = ${world.stride}u;
-// Where, in a level's words, the height of each column of slots is, and of each 4 x 4 columns.
-const ROOFS = ${grid[0] * grid[1] * grid[2] + (grid[0] * grid[1] * grid[2] / 64) * 2}u;
-const BLOCK_ROOFS = ${grid[0] * grid[1] * grid[2] + (grid[0] * grid[1] * grid[2] / 64) * 2 + grid[0] * grid[2]}u;
-const UNIFORM = 0x80000000u;
-
-// left: the ray went out through the far side of the last box (it did not run out of steps). out: where it leaves
-// what it met when that is a finer cell (refine says; 0 otherwise), so a look can go on through glass (#163).
-struct Hit { t: f32, kind: u32, n: vec3f, level: u32, cell: vec3i, left: bool, out: f32 }
-// How many steps this pixel's rays have taken, all told.
-var<private> work: u32;
-
-fn has(lo: u32, hi: u32, i: u32) -> bool {
-  return ((select(lo, hi, i >= 32u) >> (i & 31u)) & 1u) != 0u;
-}
-// How many children come before child i.
-fn before(lo: u32, hi: u32, i: u32) -> u32 {
-  if (i >= 32u) { return countOneBits(lo) + countOneBits(hi & ((1u << (i - 32u)) - 1u)); }
-  return countOneBits(lo & ((1u << i) - 1u));
-}
-
-// Where a ray meets a box: how far along it comes through each pair of sides, and how far along it leaves.
-// q0 is the ray's start and k how far along the ray one cell is, each way.
-struct Met { near: vec3f, leave: f32 }
-fn meet(lo: vec3f, hi: vec3f, q0: vec3f, k: vec3f) -> Met {
-  let a = (lo - q0) * k;
-  let b = (hi - q0) * k;
-  let far = max(a, b);
-  return Met(min(a, b), min(far.x, min(far.y, far.z)));
-}
-
-${HANDOVER}
-${EDITED('looks.edits')}
-// Whether the far model holds the tile a point is in (far.ts).
-fn farHeld(p: vec3f) -> bool {
-  let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
-  if (any(t < vec2i(0)) || any(t >= vec2i(64))) { return false; }
-  let bit = u32(t.y * 64 + t.x);
-  let word = bit >> 5u;
-  return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
-}
-// Entering a protected box ends a run through far-owned land, even if the coarse node spans the box.
-fn beforeBox(next: f32, lo: vec4f, hi: vec4f, ro: vec3f, inv: vec3f, t: f32) -> f32 {
-  if (hi.w <= 0.0) { return next; }
-  let m = meet(lo.xyz, hi.xyz, ro, inv);
-  let enter = max(m.near.x, max(m.near.y, m.near.z));
-  return select(next, enter, enter > t && enter < min(next, m.leave));
-}
-// A held tile can precede an unheld ridge on the same look. Skip to the next ownership boundary.
-fn farExit(ro: vec3f, rd: vec3f, inv: vec3f, p: vec3f, t: f32) -> f32 {
-  let tile = floor((p.xz - looks.far.xy) / looks.far.z);
-  let sides = looks.far.xy + (tile + vec2f(rd.xz > vec2f(0.0))) * looks.far.z;
-  let ends = (sides - ro.xz) * inv.xz;
-  var next = min(ends.x, ends.y);
-  for (var i = 0u; i < ${EDITS}u; i++) {
-    next = beforeBox(next, looks.edits[2u * i], looks.edits[2u * i + 1u], ro, inv, t);
-  }
-  // Before the ordinary reach the ray is inside the wedge. Its ownership can end at either
-  // bearing, at the circle, or at the box kept for cells. Test them before skipping the tile.
-  if (t < looks.far.w) {
-    let d = ro.xz - looks.wedge.xy;
-    for (var i = 0u; i < 2u; i++) {
-      let normal = vec2f(cos(looks.bear[i]), sin(looks.bear[i]));
-      let along = dot(rd.xz, normal);
-      if (abs(along) > 1e-8) {
-        let cross = -dot(d, normal) / along;
-        if (cross > t) { next = min(next, cross); }
-      }
-    }
-    let a = dot(rd.xz, rd.xz);
-    let b = dot(d, rd.xz);
-    let c = dot(d, d) - looks.wedge.z * looks.wedge.z;
-    let leave = (-b + sqrt(max(0.0, b * b - a * c))) / a;
-    next = min(next, max(t, leave));
-    next = beforeBox(next, looks.keep0, looks.keep1, ro, inv, t);
-  }
-  return next;
-}
-
-// A ray from ro along rd (both in the finest cells from the anchor), starting t0 along it in box level0.
-// It need not see anything smaller than its own width, which is wide at its start and grows by spread a cell:
-// a node narrower than the ray is taken whole, as the kind most of it is. A rough ray (one towards the sun)
-// also takes the boxes two at a time once it has left the one it began in. A ray sent through does not stop
-// at what it meets: it goes on to the end and says where it last left something solid.
-// eyed: the ray lies in the quarter of each box, as seen from the eye, that it points into. So do looks from the
-// eye, and what the sea mirrors of them (a level mirror turns a look up, not aside).
-fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
-  var hit: Hit;
-  hit.t = -1.0;
-  let inv = 1.0 / rd;
-  let ahead = max(sign(rd), vec3f(0.0));
-  let toward = vec3i(sign(rd));
-  var t = t0;
-  var n = vec3f(0.0);
-  var L = level0;
-  let plain = (g.flags & 64u) != 0u;
-  // The nodes the ray is inside, kept from step to step: how deep they go (1 a sector, 2 a mid, 3 a leaf), a cell in them, their masks.
-  var have = 0u;
-  var held = vec3i(0);
-  var supAt = 0xffffffffu;
-  var supLo = 0u; var supHi = 0u;
-  var entry = 0u; var rootLo = 0u; var rootHi = 0u; var rootChild = 0u;
-  var midLo = 0u; var midHi = 0u; var midChild = 0u;
-  var leafLo = 0u; var leafHi = 0u; var leafChild = 0u;
-  // What is the same for every step in one box.
-  var lv: Level;
-  var q0 = vec3f(0.0);
-  var k = vec3f(0.0);
-  var eps = 0.0;
-  var leaveAt = 0.0;
-  var last = vec3i(0);
-  var fresh = true;
-  var skipping = false;
-  for (var i = 0u; i < most; i++) {
-    work++;
-    if (fresh) {
-      if (L >= g.levels) { break; }
-      lv = g.level[L];
-      q0 = (ro - lv.boxMin) * lv.scale;
-      k = inv / lv.scale;
-      eps = 0.002 / lv.scale;
-      last = vec3i(lv.boxSize) - 1;
-      // Where the ray comes into this box and where it leaves it: through a side, or, rising, over its roofs.
-      let a = -q0 * k;
-      let b = (lv.boxSize - q0) * k;
-      let near = min(a, b);
-      let far = max(a, b);
-      let comeAt = max(near.x, max(near.y, near.z));
-      leaveAt = min(far.x, min(far.y, far.z));
-      // The roof that counts: for a ray that keeps to one quarter, that quarter's.
-      var roof = lv.roof;
-      if (eyed) { roof = lv.roofs[u32(rd.x > 0.0) + 2u * u32(rd.z > 0.0)]; }
-      if (rd.y > 0.0 && !plain) { leaveAt = min(leaveAt, (roof - ro.y) * inv.y); }
-      // A ray that comes down from over the sea is taken no further than its top (trace says what it met there):
-      // under it is the floor and what grows on it, a long walk for nothing.
-      if (rd.y < 0.0 && ro.y > g.sea && !through) { leaveAt = min(leaveAt, (g.sea - ro.y) * inv.y); }
-      have = 0u;
-      supAt = 0xffffffffu;
-      fresh = false;
-      // A ray is only ever in a box it is inside of now: it never goes back to finer cells.
-      if (comeAt > t || leaveAt <= t) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
-      // Over everything in this box and coming down: skip to where the roofs begin.
-      // No further than to where the ray leaves the box: a box with nothing in it has its roofs at the bottom of
-      // everything, and a ray sent there was past every box. From 100 m up the town was not drawn at all.
-      if (rd.y < 0.0 && ro.y + rd.y * t > roof && !plain) { t = min((roof - ro.y) * inv.y, leaveAt) + eps; }
-    }
-    if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
-    var size = 0;
-    var low = vec3i(0);
-    var kind = 0u;
-    var cell = vec3i(0);
-    if (!FAR_MODEL || !skipping) {
-    let q = q0 + rd * (t * lv.scale);
-    let c = clamp(vec3i(floor(q)), vec3i(0), last);
-    // Which of the kept nodes still hold this cell: the highest bit in which it differs from the last one says.
-    let moved = c ^ held;
-    let apart = u32(moved.x | moved.y | moved.z);
-    if (apart >= 64u) { have = 0u; } else if (apart >= 16u) { have = min(have, 1u); } else if (apart >= 4u) { have = min(have, 2u); }
-    held = c;
-    let width = (wide + spread * t) * lv.scale;
-    low = c;
-    // A node's contents are met further on: the ray skips to them and looks again.
-    var skip = -1.0;
-    var face = vec3f(0.0);
-    if (have == 0u) {
-      let kSec = c >> vec3u(6u);
-      let w = (vec3u(kSec) + lv.wrap) & (GRID - 1u);
-      let base = L * STRIDE;
-      let sup = w >> vec3u(2u);
-      // The air over the roofs: a ray that stays above everything in these 4 x 4 columns of sectors, or in
-      // this one, crosses them in a step; one that comes down to the roofs inside them skips to there.
-      var roofTop = f32(bitcast<i32>(top[base + BLOCK_ROOFS + sup.x + (GRID.x >> 2u) * sup.z]) - lv.cells.y);
-      var across = 256.0;
-      var corner = vec2f((kSec.xz - vec2i(w.xz & vec2u(3u))) * 64);
-      if (q.y <= roofTop) {
-        roofTop = f32(bitcast<i32>(top[base + ROOFS + w.x + GRID.x * w.z]) - lv.cells.y);
-        across = 64.0;
-        corner = vec2f(kSec.xz * 64);
-      }
-      if (q.y > roofTop && !plain) {
-        let o = ((corner + ahead.xz * across) - q0.xz) * k.xz;
-        let leave = min(o.x, o.y);
-        if (q0.y + rd.y * (leave * lv.scale) > roofTop) {
-          n = -sign(rd) * vec3f(f32(o.x <= leave), 0.0, f32(o.y <= leave));
-          // Not past where the ray leaves the box: a box whose floor is over the ground is left through its floor,
-          // before these columns' far side, and the ray would be under the ground of the coarser copy when it got there.
-          t = min(max(leave, t), leaveAt) + eps;
-          continue;
-        }
-        let down = (roofTop - q0.y) * k.y;
-        if (down > t) {
-          n = vec3f(0.0, 1.0, 0.0);
-          t = down + eps;
-          continue;
-        }
-      }
-      let at = base + SLOTS + 2u * (sup.x + (GRID.x >> 2u) * (sup.z + (GRID.z >> 2u) * sup.y));
-      if (at != supAt) { supAt = at; supLo = top[at]; supHi = top[at + 1u]; }
-      if ((supLo | supHi) == 0u && !plain) {
-        size = 256;
-        low = (kSec - vec3i(w & vec3u(3u))) * 64;
-      } else if (!has(supLo, supHi, (w.x & 3u) + 4u * (w.z & 3u) + 16u * (w.y & 3u))) {
-        size = 64;
-        low = kSec * 64;
-      } else {
-        entry = top[base + w.x + GRID.x * (w.z + GRID.z * w.y)];
-        if ((entry & UNIFORM) != 0u) {
-          kind = (entry & 0xffffu) | 0x10000u;
-          size = 64;
-          low = kSec * 64;
-        } else {
-          let info = pool[entry + 3u];
-          let child = pool[entry + 2u];
-          // The box round what the sector holds, in leaves.
-          let m = meet(vec3f(kSec * 64 + vec3i((vec3u(info) >> vec3u(16u, 20u, 24u)) & vec3u(15u)) * 4), vec3f(kSec * 64 + vec3i(((vec3u(child) >> vec3u(20u, 24u, 28u)) & vec3u(15u)) + 1u) * 4), q0, k);
-          let enter = max(m.near.x, max(m.near.y, m.near.z));
-          if (m.leave <= max(enter, t)) {
-            size = 64;
-            low = kSec * 64;
-          } else if (width > 64.0) {
-            kind = (info & 0xffffu) | 0x10000u;
-            size = 64;
-            low = kSec * 64;
-          } else {
-            rootLo = pool[entry]; rootHi = pool[entry + 1u]; rootChild = entry + (child & 0xfffffu);
-            have = 1u;
-            if (enter > t) { skip = enter; face = vec3f(m.near >= vec3f(enter)); }
-          }
-        }
-      }
-    }
-    if (have == 1u && skip < 0.0) {
-      let kMid = c >> vec3u(4u);
-      let cc = vec3u(kMid) & vec3u(3u);
-      let bit = cc.x + 4u * cc.z + 16u * cc.y;
-      if (!has(rootLo, rootHi, bit)) {
-        size = 16;
-        low = kMid * 16;
-      } else {
-        let node = rootChild + 4u * before(rootLo, rootHi, bit);
-        let info = pool[node + 3u];
-        let child = pool[node + 2u];
-        let m = meet(vec3f(kMid * 16 + vec3i((vec3u(info) >> vec3u(16u, 20u, 24u)) & vec3u(15u))), vec3f(kMid * 16 + vec3i(((vec3u(child) >> vec3u(20u, 24u, 28u)) & vec3u(15u)) + 1u)), q0, k);
-        let enter = max(m.near.x, max(m.near.y, m.near.z));
-        if (m.leave <= max(enter, t)) {
-          size = 16;
-          low = kMid * 16;
-        } else if ((info & UNIFORM) != 0u || width > 16.0) {
-          kind = (info & 0xffffu) | 0x10000u;
-          size = 16;
-          low = kMid * 16;
-        } else {
-          midLo = pool[node]; midHi = pool[node + 1u]; midChild = entry + (child & 0xfffffu);
-          have = 2u;
-          if (enter > t) { skip = enter; face = vec3f(m.near >= vec3f(enter)); }
-        }
-      }
-    }
-    if (have == 2u && skip < 0.0 && size == 0 && kind == 0u) {
-      let kLeaf = c >> vec3u(2u);
-      let cc = vec3u(kLeaf) & vec3u(3u);
-      let bit = cc.x + 4u * cc.z + 16u * cc.y;
-      if (!has(midLo, midHi, bit)) {
-        size = 4;
-        low = kLeaf * 4;
-      } else {
-        let node = midChild + 4u * before(midLo, midHi, bit);
-        let info = pool[node + 3u];
-        let m = meet(vec3f(kLeaf * 4 + vec3i((vec3u(info) >> vec3u(16u, 18u, 20u)) & vec3u(3u))), vec3f(kLeaf * 4 + vec3i(((vec3u(info) >> vec3u(22u, 24u, 26u)) & vec3u(3u)) + 1u)), q0, k);
-        let enter = max(m.near.x, max(m.near.y, m.near.z));
-        if (m.leave <= max(enter, t)) {
-          size = 4;
-          low = kLeaf * 4;
-        } else if ((info & UNIFORM) != 0u || width > 4.0) {
-          kind = (info & 0xffffu) | 0x10000u;
-          size = 4;
-          low = kLeaf * 4;
-        } else {
-          leafLo = pool[node]; leafHi = pool[node + 1u]; leafChild = entry + pool[node + 2u];
-          have = 3u;
-          if (enter > t) { skip = enter; face = vec3f(m.near >= vec3f(enter)); }
-        }
-      }
-    }
-    if (skip >= 0.0) {
-      n = -sign(rd) * face;
-      t = skip + eps;
-      continue;
-    }
-    cell = c;
-    if (have == 3u && size == 0 && kind == 0u) {
-      // Inside a leaf: from cell to cell across whichever side comes first, until one is solid or the ray is out.
-      let leaf = c >> vec3u(2u);
-      var side = ((vec3f(cell) + ahead) - q0) * k;
-      let each = abs(k);
-      loop {
-        let cc = vec3u(cell) & vec3u(3u);
-        let bit = cc.x + 4u * cc.z + 16u * cc.y;
-        let full = has(leafLo, leafHi, bit);
-        if (full && !through) {
-          let nth = before(leafLo, leafHi, bit);
-          kind = ((pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu) | 0x10000u;
-          ${world.options.bricks && INLOOP ? BLOCK : 'break;'}
-        }
-        if (side.x <= side.y && side.x <= side.z) {
-          t = side.x; side.x += each.x; cell.x += toward.x; n = vec3f(-f32(toward.x), 0.0, 0.0);
-        } else if (side.y <= side.z) {
-          t = side.y; side.y += each.y; cell.y += toward.y; n = vec3f(0.0, -f32(toward.y), 0.0);
-        } else {
-          t = side.z; side.z += each.z; cell.z += toward.z; n = vec3f(0.0, 0.0, -f32(toward.z));
-        }
-        if (full${world.options.bricks && INLOOP ? ' && through' : ''}) {
-          // Glass lets the sun through (#163), and fine overhead wires (FINE | STEEL = 76) at L0..L2 do too (#154)
-          // so aerial trolley cables don't cast coarse solid-voxel sawtooth shadows across streets and crosswalks.
-          let nth = before(leafLo, leafHi, bit);
-          let k = (pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu;
-          if (((k & 15u) != 11u || L > 1u) && ((k & 79u) != 76u || L > 2u)) { hit.t = t; hit.kind = 1u; }
-        }
-        if (any((cell >> vec3u(2u)) != leaf)) { break; }
-        work++;
-      }
-      if (kind == 0u) { t += eps; continue; }
-    }
-    }
-    if (((FAR_MODEL && skipping) || kind != 0u) && !through) {
-      if (FAR_MODEL && eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
-        let p = ro + rd * (t + 0.25 * eps);
-        let reach = select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u);
-        if (t > reach && farHeld(p) && !edited(p)) {
-          // One shared farExit site: skip consecutive far-owned tiles without adding a nested loop or re-descending the octree.
-          let next = farExit(ro, rd, inv, p, t);
-          if (next <= t) { hit.t = -1.0; hit.left = true; return hit; }
-          t = next + eps;
-          skipping = true;
-          have = 0u;
-          continue;
-        }
-      }
-      if (FAR_MODEL && skipping) { skipping = false; continue; }
-      hit.t = t;
-      hit.kind = kind & 0xffffu;
-      hit.n = n;
-      hit.level = L;
-      hit.cell = cell + lv.cells;
-      return hit;
-    }
-    let out = ((vec3f(low) + ahead * f32(size)) - q0) * k;
-    let next = min(out.x, min(out.y, out.z));
-    if (kind != 0u && (((kind & 15u) != 11u || L > 1u) && ((kind & 79u) != 76u || L > 2u))) { hit.t = max(next, t); hit.kind = kind & 0xffffu; }
-    n = -sign(rd) * vec3f(out <= vec3f(next));
-    // Not past where the ray leaves the box: 4 x 4 x 4 sectors with nothing in them are stepped over as one, and
-    // they are counted from the box's own slots, so the step can reach outside it.
-    t = min(max(next, t), leaveAt) + eps;
-  }
-  hit.level = min(L, g.levels - 1u);
-  hit.left = L >= g.levels;
-  return hit;
-}
-${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
-// What a ray meets: what is in the world's cells (march), or the sea. The still sea is not cells: it is all that
-// lies under its top with nothing else in it. A look that comes down from over it meets the top where it crosses
-// that level, if it has met nothing before, or has gone out through the far side of the last box by then. Past the
-// last box there is no sea, as there is no land. This is asked once, after the march and not in it. The march is
-// left as it was, and a ray over deep water is walked on down to the floor (the far view is 8% dearer for it):
-// one more test a pass in there, or even one more number kept and one more min() a box, made every look a tenth
-// dearer, sea in it or not.
-fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
-  ${MARCHED(world.options.bricks && !INLOOP)}
-  if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
-  let t = (g.sea - ro.y) / rd.y;
-  if (hit.t >= 0.0 && hit.t <= t) { return hit; }
-  let p = ro + rd * t;
-  // The finest box the place is in.
-  var L = g.levels;
-  for (var k = level0; k < g.levels; k++) {
-    let q = (p.xz - g.level[k].boxMin.xz) * g.level[k].scale;
-    if (all(q >= vec2f(0.0)) && all(q < g.level[k].boxSize.xz)) { L = k; break; }
-  }
-  if (L == g.levels || (hit.t < 0.0 && !hit.left)) { return hit; }
-  let lv = g.level[L];
-  hit.t = t;
-  hit.kind = 5u;
-  hit.n = vec3f(0.0, 1.0, 0.0);
-  hit.level = L;
-  hit.cell = vec3i(floor((p - lv.boxMin) * lv.scale - vec3f(0.0, 0.5, 0.0))) + lv.cells;
-  return hit;
-}
-
-${LIGHT}
-${GLASS}
-${PAINT}
-${AIR}
-${NOISE}
-${NIGHT_WALL}
-${LANDMARK_LIGHT}
-${LEAF_NIGHT}
-fn cloud(p: vec2f) -> f32 {
-  var q = p;
-  var sum = 0.0;
-  var weight = 0.5;
-  for (var o = 0; o < 4; o++) {
-    sum += noise2(q) * weight;
-    q = q * 2.03 + vec2f(17.3, 9.1);
-    weight *= 0.5;
-  }
-  return sum;
-}
-// The sky as it is seen: the sun, and clouds on a level 1.5 km up that drift with the wind.
-fn sky(rd: vec3f) -> vec3f {
-  var col = skyBase(rd);
-  let toward = max(dot(rd, g.sun), 0.0);
-  // The sun, or at night the moon: a disc and the brightness round it.
-  if (g.day > 0.0) { col += g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a + pow(toward, 60.0) * 0.35) * g.day; }
-  if (g.day < 1.0 && g.moon.w >= 0.0) {
-    // The moon's disc, as large as the eggs make it (air.w, eggs.ts: shot at, it grows).
-    let r = (1.0 + g.air.w) * (1.0 + g.air.w);
-    var disc = smoothstep(1.0 - 0.00025 * r, 1.0 - 0.0002 * r, toward);
-    var halo = pow(toward, 400.0 / r) * 0.06;
-    if (g.moon.w > 0.0) {
-      // Its phase (#524): a point of the disc is lit where the ball behind it faces the sun. The disc is 0.02 (1 + air.w)
-      // across from its middle; the side unlit keeps a little earthshine, and the glow round it is as the part lit.
-      let across = (rd - g.sun * toward) / (0.02 * (1.0 + g.air.w));
-      let n = across - g.sun * sqrt(max(0.0, 1.0 - dot(across, across)));
-      disc *= mix(0.05, 1.0, smoothstep(-0.04, 0.04, dot(n, g.moon.xyz)));
-      halo *= 0.5 - 0.5 * dot(g.sun, g.moon.xyz);
-    }
-    col += vec3f(0.8, 0.86, 1.0) * (disc * 0.9 + halo) * (1.0 - g.day);
-  }
-  if (g.day < 0.98 && rd.y > 0.0) {
-    // Stars: one in some of the small squares the sky is cut into, the brighter the fewer. A star is a point a pixel
-    // or two across in its square, not the square: a square is a quarter of a degree, which through the SF realm's
-    // 25 degree lens is seven pixels, and the stars were grey specks with corners floating over the towers (#450).
-    let cell = rd * 220.0;
-    let square = vec3i(floor(cell));
-    var star = hash3i(square, 19u);
-    // (Only in a square that has one: three in a thousand.)
-    if (star > 0.9965) { star *= 1.0 - smoothstep(0.6, 1.4, length(cell - normalize(vec3f(square) + 0.5) * 220.0) / (220.0 * g.pixel)); }
-    // Fewer the brighter the sky overhead is, and none under a sky of rain (which is told by that brightness: the
-    // weather itself is not read here, see the globals).
-    col += vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9 * clamp(1.0 - (g.skyZenith.g - 0.012) * 40.0, 0.0, 1.0);
-  }
-  if (rd.y > 0.015) {
-    let far = (15000.0 - g.eye.y) / rd.y;
-    let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
-    let thick = cloud(at);
-    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
-    if (cover > 0.0) {
-      // Bright where it is thin, at its edges; grey in its thick middle.
-      var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
-      // Lit by whatever lights the day: gold and rose under a low sun, on the side towards it most; dark at night.
-      if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward); }
-      col = mix(col, body * mix(1.25, 1.85, g.day), cover * 0.92);
-    }
-  }
-  return col;
-}
-
-${sunlitText(!!world.options.fineSun)}
-// A box's sector that holds a cell: where its tree is (or, with UNIFORM, the one kind it is), 0 for none. Outside the box there is none.
-fn sectorOf(c: vec3i, L: u32) -> u32 {
-  let lv = g.level[L];
-  if (any(c < vec3i(0)) || any(c >= vec3i(lv.boxSize))) { return 0u; }
-  let w = (vec3u(c >> vec3u(6u)) + lv.wrap) & (GRID - 1u);
-  let base = L * STRIDE;
-  let sup = w >> vec3u(2u);
-  let at = base + SLOTS + 2u * (sup.x + (GRID.x >> 2u) * (sup.z + (GRID.z >> 2u) * sup.y));
-  if (!has(top[at], top[at + 1u], (w.x & 3u) + 4u * (w.z & 3u) + 16u * (w.y & 3u))) { return 0u; }
-  return top[base + w.x + GRID.x * (w.z + GRID.z * w.y)];
-}
-// The part of a sector 16 cells across that holds a cell: where its node is in the pool, 0 where it is empty, 1 where it is all one solid kind.
-fn midOf(entry: u32, rootLo: u32, rootHi: u32, rootChild: u32, c: vec3i) -> u32 {
-  let cm = vec3u(c >> vec3u(4u)) & vec3u(3u);
-  let bit = cm.x + 4u * cm.z + 16u * cm.y;
-  if (!has(rootLo, rootHi, bit)) { return 0u; }
-  let mid = entry + (rootChild & 0xfffffu) + 4u * before(rootLo, rootHi, bit);
-  let info = pool[mid + 3u];
-  if ((info & UNIFORM) != 0u) { return select(0u, 1u, (info & 0xffffu) != 0u); }
-  return mid;
-}
-// Whether a cell is solid, given its sector and the part of it that holds the cell (from midOf).
-fn solidInMid(entry: u32, mid: u32, c: vec3i) -> bool {
-  if (mid < 2u) { return mid == 1u; }
-  let cl = vec3u(c >> vec3u(2u)) & vec3u(3u);
-  let bit = cl.x + 4u * cl.z + 16u * cl.y;
-  let midLo = pool[mid];
-  let midHi = pool[mid + 1u];
-  if (!has(midLo, midHi, bit)) { return false; }
-  let leaf = entry + (pool[mid + 2u] & 0xfffffu) + 4u * before(midLo, midHi, bit);
-  if ((pool[leaf + 3u] & UNIFORM) != 0u) { return (pool[leaf + 3u] & 0xffffu) != 0u; }
-  let cc = vec3u(c) & vec3u(3u);
-  return has(pool[leaf], pool[leaf + 1u], cc.x + 4u * cc.z + 16u * cc.y);
-}
-// Whether a cell is solid, given its sector (from sectorOf) and that sector's first three words.
-fn solidIn(entry: u32, rootLo: u32, rootHi: u32, rootChild: u32, c: vec3i) -> bool {
-  if ((entry & UNIFORM) != 0u) { return (entry & 0xffffu) != 0u; }
-  return solidInMid(entry, midOf(entry, rootLo, rootHi, rootChild, c), c);
-}
-
-// Whether a cell of box L is solid, from nothing.
-fn solidAt(c: vec3i, L: u32) -> bool {
-  let entry = sectorOf(c, L);
-  if (entry == 0u) { return false; }
-  if ((entry & UNIFORM) != 0u) { return (entry & 0xffffu) != 0u; }
-  return solidIn(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
-}
-// Fast world occlusion for High-quality local lights (horizontal car headlights): 2-tap visibility test
-// in level 1 (20 cm cells, compact cache footprint) so beams never bleed through solid buildings or hills.
-fn worldSolid(q: vec3f) -> bool {
-  let lv1 = g.level[1];
-  let rel1 = (q - lv1.boxMin) * lv1.scale;
-  if (all(rel1 >= vec3f(0.0)) && all(rel1 < lv1.boxSize)) { return solidAt(vec3i(floor(rel1)), 1u); }
-  return false;
-}
-fn worldClear(p: vec3f, n: vec3f, lPos: vec3f) -> f32 {
-  let a = p + n * 2.5 + vec3f(0.0, 2.5, 0.0);
-  let b = lPos + vec3f(0.0, 1.5, 0.0);
-  var vis = 1.0;
-  if (worldSolid(mix(a, b, 0.36))) { vis -= 0.7; }
-  if (worldSolid(mix(a, b, 0.68))) { vis -= 0.7; }
-  return max(vis, 0.0);
-}
-${localLightsEval({ withOcclusion: true, withWet: true })}
-
-// What a cell of box L is (its kind; 1 for a part of a sector that is all one solid kind, which midOf does not say).
-fn kindAt(c: vec3i, L: u32) -> u32 {
-  let entry = sectorOf(c, L);
-  if (entry == 0u) { return 0u; }
-  if ((entry & UNIFORM) != 0u) { return entry & 0xffffu; }
-  let mid = midOf(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
-  if (mid < 2u) { return mid; }
-  let cl = vec3u(c >> vec3u(2u)) & vec3u(3u);
-  let midLo = pool[mid]; let midHi = pool[mid + 1u];
-  let bit = cl.x + 4u * cl.z + 16u * cl.y;
-  if (!has(midLo, midHi, bit)) { return 0u; }
-  let leaf = entry + (pool[mid + 2u] & 0xfffffu) + 4u * before(midLo, midHi, bit);
-  if ((pool[leaf + 3u] & UNIFORM) != 0u) { return pool[leaf + 3u] & 0xffffu; }
-  let leafLo = pool[leaf]; let leafHi = pool[leaf + 1u];
-  let cc = vec3u(c) & vec3u(3u);
-  let cell = cc.x + 4u * cc.z + 16u * cc.y;
-  if (!has(leafLo, leafHi, cell)) { return 0u; }
-  let nth = before(leafLo, leafHi, cell);
-  return (pool[entry + pool[leaf + 2u] + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu;
-}
-// Where a look leaves a pane it came into at a cell of glass (#163): a pane crossed aslant is two or three cells of
-// glass one after another, walked here cell by cell (a march begun again for each cost a fifth of the street).
-fn paneEnd(rd: vec3f, hit: Hit, leave: f32) -> f32 {
-  let lv = g.level[hit.level];
-  let q0 = (g.eye - lv.boxMin) * lv.scale;
-  let k = (1.0 / rd) / lv.scale;
-  let ahead = max(sign(rd), vec3f(0.0));
-  var out = leave;
-  for (var j = 0; j < 3; j++) {
-    let c = vec3i(floor(q0 + rd * (out * lv.scale)));
-    if (any(c < vec3i(0)) || any(c >= vec3i(lv.boxSize)) || (kindAt(c, hit.level) & 15u) != 11u) { break; }
-    let side = ((vec3f(c) + ahead) - q0) * k;
-    out = max(min(side.x, min(side.y, side.z)), out) + 0.002 / lv.scale;
-  }
-  return out;
-}
-
-// How open a point on a face is to the sky round it: 1 in the open, less where the cells beside the face stand
-// up round it. The four cells beside the one in front of the face are asked, and the four corners of the face are
-// weighed by where on it the point is: so a corner darkens smoothly into the wall. (Asking the four diagonal ones
-// too cost twice as much for a difference nobody would see.)
-fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
-  let lv = g.level[hit.level];
-  let front = hit.cell - lv.cells + vec3i(n);
-  var u = vec3i(1, 0, 0);
-  var v = vec3i(0, 0, 1);
-  if (abs(n.x) > 0.5) { u = vec3i(0, 1, 0); } else if (abs(n.z) > 0.5) { v = vec3i(0, 1, 0); }
-  let q = (p - lv.boxMin) * lv.scale - vec3f(hit.cell - lv.cells);
-  let fu = clamp(dot(q, vec3f(u)), 0.0, 1.0);
-  let fv = clamp(dot(q, vec3f(v)), 0.0, 1.0);
-  // The four are nearly always in one sector, and in one part of it 16 cells across: those are found once.
-  let entry = sectorOf(front, hit.level);
-  let whole = entry == 0u || (entry & UNIFORM) != 0u;
-  var rootLo = 0u; var rootHi = 0u; var rootChild = 0u;
-  var mid = 0u;
-  if (!whole) { rootLo = pool[entry]; rootHi = pool[entry + 1u]; rootChild = pool[entry + 2u]; mid = midOf(entry, rootLo, rootHi, rootChild, front); }
-  var side = array<f32, 4>(0.0, 0.0, 0.0, 0.0);
-  for (var i = 0; i < 4; i++) {
-    let c = front + select(u, v, i >= 2) * select(-1, 1, (i & 1) == 1);
-    if (all((c >> vec3u(6u)) == (front >> vec3u(6u)))) {
-      if (entry != 0u) {
-        if (!whole && all((c >> vec3u(4u)) == (front >> vec3u(4u)))) { side[i] = f32(solidInMid(entry, mid, c)); } else { side[i] = f32(solidIn(entry, rootLo, rootHi, rootChild, c)); }
-      }
-      // A street climbs a hill a cell at a time: a step one cell high beside a tread is the slope, not a corner.
-      // A sloped sub-cell kerb (FINE | CONCRETE = 71) capping the cell above a kerb is also a low lip, not a wall (#150).
-      if (ground && side[i] > 0.5) {
-        let over = kindAt(c + vec3i(0, 1, 0), hit.level);
-        if (over == 0u || (over & 79u) == 71u) { side[i] = 0.0; }
-      }
-    } else {
-      let other = sectorOf(c, hit.level);
-      if (other != 0u) {
-        if ((other & UNIFORM) != 0u) { side[i] = f32((other & 0xffffu) != 0u); } else { side[i] = f32(solidIn(other, pool[other], pool[other + 1u], pool[other + 2u], c)); }
-      }
-    }
-  }
-  let w = side[0]; let e = side[1]; let s = side[2]; let nn = side[3];
-  // A corner of the face with one side standing is a little dark; with both, as dark as it gets.
-  let c00 = 3.0 - (w + s + w * s);
-  let c10 = 3.0 - (e + s + e * s);
-  let c01 = 3.0 - (w + nn + w * nn);
-  let c11 = 3.0 - (e + nn + e * nn);
-  return mix(mix(c00, c10, fu), mix(c01, c11, fu), fv) / 3.0;
-}
-
-// The lettering boards' own light (#450, letterlight.ts): channel letters, lit from within. \`lamp\`: the cell is a
-// letter's lamp. Within the box the letters' light reaches (none of this is asked elsewhere): whether the point is on a
-// board (one of its letters' panels), the light of a lamp it is a letter's own (its face hot and near white, its sides,
-// the returns, softer; \`own\`), and else what the lit letters throw on it, falling off as a lamp's light does with the
-// distance from the middle of each letter's face, and on what faces it.
-struct Lettered { light: vec3f, own: bool, board: bool }
-fn lettered(p: vec3f, n: vec3f, lamp: bool) -> Lettered {
-  var out = Lettered(vec3f(0.0), false, false);
-  let count = u32(looks.letters[0].w);
-  if (count == 0u || any(p < looks.letters[0].xyz) || any(p > looks.letters[1].xyz)) { return out; }
-  for (var i = 0u; i < min(count, ${LIT_LETTERS}u); i++) {
-    let a = looks.letters[2u + 2u * i];
-    let b = looks.letters[3u + 2u * i];
-    let facing = u32(floor(b.w));
-    let hue = (fract(b.w) - 0.5) * 2.0;
-    let out_ = array<vec3f, 4>(vec3f(-1.0, 0.0, 0.0), vec3f(0.0, 0.0, -1.0), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0))[min(facing, 3u)];
-    // A warm white, each letter a little warmer or cooler than the next (its tubes and its acrylic are not one batch).
-    let colour = vec3f(1.0, 0.74 + 0.06 * hue, 0.46 + 0.12 * hue);
-    let inside = all(p >= a.xyz - vec3f(0.5)) && all(p <= b.xyz + vec3f(0.5));
-    if (inside) {
-      out.board = true;
-      if (lamp) {
-        out.own = true;
-        // Its face burns towards white (kept under what the last pass spreads by night, 1.2: a blot from the park was
-        // the letters' light over it, #450); its returns take a third of that.
-        out.light = min(mix(colour, vec3f(1.0, 0.95, 0.84), 0.4) * 1.15 * select(0.35, 1.0, dot(n, out_) > 0.5) * a.w, vec3f(1.19));
-        return out;
-      }
-    }
-    if (a.w <= 0.0) { continue; }
-    let size = max(b.y - a.y, 1.0);
-    let to = (a.xyz + b.xyz) * 0.5 + out_ * size * 0.25 - p;
-    let falls = 1.0 / (1.0 + dot(to, to) / (size * size * 0.3));
-    out.light += colour * a.w * falls * max(dot(n, normalize(to)), 0.0);
-  }
-  out.light *= 0.6;
-  return out;
-}
-
-// How bright a lit window's pane is (#450): a lit room, which is about as bright as a wall in the sun, and not a lamp.
-// Over 1.2 a pixel says it is brighter than any lit surface and the last pass spreads it (glow.ts: at night ten times
-// what is over). That is right for a street lamp a few pixels across; a pane at 2.4, which from before a tower is a
-// dozen pixels, was spread as five times its own light and a wall of them was white blots. So a pane is as bright as
-// that only while it is a few pixels across (a far window is a point of light), and this bright from near.
-const PANE_LIGHT = ${PANE_LIGHT};
-// Whether a pane of glass is a window with a light on behind it at night, and how bright: by the window, a storey
-// of a house or a bay of a tower, about two in five of them.
-fn litWindow(fine: vec3i) -> f32 {
-  let w = hash3i(vec3i(fine.x >> 4u, fine.y / 30, fine.z >> 4u), 23u);
-  return smoothstep(0.7, 0.72, w) * (0.35 + 0.65 * fract(w * 17.0));
-}
-// Where a cell is in its block of the town (city.rs: a block is 1280 cells by 800, its streets along its low sides).
-fn inBlock(fine: vec3i) -> vec2f {
-  return vec2f(f32(fine.x - i32(floor(f32(fine.x) / 1280.0)) * 1280), f32(fine.z - i32(floor(f32(fine.z) / 800.0)) * 800));
-}
-
-// How far along a ray it leaves the cell it met (or the finer cell, for a cell of finer cells): where a look through
-// glass goes on from (#163). whole: the way out of the whole cell, for a cell of finer cells too.
-fn leaving(ro: vec3f, rd: vec3f, hit: Hit, whole: bool) -> f32 {
-  let lv = g.level[hit.level];
-  let fine = (hit.kind & 64u) != 0u && !whole;
-  if (fine && hit.out > hit.t) { return hit.out + 0.0003 / lv.scale; }
-  // A finer cell whose way out was not said: the way out of the eighth of the cell it is in.
-  let size = select(1.0, 0.125, fine);
-  let q0 = (ro - lv.boxMin) * lv.scale / size;
-  let c = floor(q0 + rd * (hit.t * lv.scale / size) + rd * 0.001);
-  let out = ((c + max(sign(rd), vec3f(0.0))) - q0) * ((size / rd) / lv.scale);
-  return max(min(out.x, min(out.y, out.z)), hit.t) + 0.002 * size / lv.scale;
-}
-
-// What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray,
-// 2 from the maps only (and corners are not asked about: this is something seen in a mirror).
-fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
-  let m = looks.material[hit.kind & 15u];
-  let p = ro + rd * hit.t;
-  // Where the sun is asked about: the point itself, but for a step's riser.
-  var at = p;
-  var n = hit.n;
-  let faced = dot(n, n) >= 0.5;
-  if (!faced) { n = -rd; }
-  // The finest cell the hit's cell begins at; its pattern only where it is drawn as itself.
-  let lvh = g.level[hit.level];
-  let qc = clamp((p - lvh.boxMin) * lvh.scale - vec3f(hit.cell - lvh.cells), vec3f(0.0), vec3f(0.999));
-  // The face a material's courses and wear follow: a diagonal wall's own plane, below, not its cells' staircase.
-  var face = n;
-  // Earth, grass, sand, asphalt and paving lie on the hills in steps a cell high. A step's riser is lit as the tread
-  // is, so a street reads as a slope: a riser is a side face with air over its cell and ground under the cell before it.
-  let stuff = hit.kind & 15u;
-  let ground = stuff == 1u || stuff == 3u || stuff == 4u || stuff == 6u || stuff == 7u;
-  var slope = false;
-  if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
-    let c = hit.cell - g.level[hit.level].cells;
-    // (A kerb is not a step of the slope: paving over asphalt keeps its face, or the street had no kerb, #450, #150.)
-    let kerb = ${world.options.surveyedWalls ? 'stuff == 7u && ((kindAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level) & 15u) == 6u || (kindAt(c + vec3i(n) * 2 - vec3i(0, 1, 0), hit.level) & 15u) == 6u)' : 'false'};
-    if (!kerb && !solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
-      // And it is in the sun when the tread above it is: the sun is asked about from the middle of the cell's top.
-      let lv = g.level[hit.level];
-      at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
-      n = vec3f(0.0, 1.0, 0.0);
-      // And worn as the tread is: a riser in a wall's pattern was a grey dash at every step.
-      face = n;
-      slope = true;
-    }
-  }
-  ${world.options.surveyedWalls ? `// A bank steeper than a cell a cell is a staircase of 10 cm cells: treads lit, risers dark and the corner of every
-  // step shut in, a chessboard across Telegraph Hill (#450). Ground on a step is lit on the slope that the solid round
-  // it makes, asked about the sun from over its cell, and not darkened in the step's corner.
-  if (ground && faced && hit.level <= 1u && (hit.kind & 64u) == 0u) {
-    let c = hit.cell - lvh.cells;
-    let up = vec3i(0, 1, 0);
-    // Only where the ground rises a cell a cell or more for two cells: a riser with the ground behind it rising so (a
-    // kerb has the pavement level behind it), a tread with ground beside it rising so (a wall beside a pavement stands
-    // higher yet). A gentler slope is lit flat, its risers as its treads (above): lit on the slope, the tread under
-    // each step of a lawn or a street stood out from the rest, a line at every step from 100 m.
-    var step = false;
-    if (abs(hit.n.y) < 0.5) {
-      let back = -vec3i(hit.n);
-      step = solidAt(c + back + up, hit.level) && solidAt(c + back * 2 + up * 2, hit.level);
-    } else if (!solidAt(c + up, hit.level)) {
-      let beside = array<vec3i, 4>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
-      for (var i = 0u; i < 4u && !step; i++) {
-        step = solidAt(c + beside[i] + up, hit.level) && solidAt(c + beside[i] * 2 + up * 2, hit.level)
-          && !solidAt(c + beside[i] + up * 4, hit.level);
-      }
-    }
-    if (step) {
-      let around = array<vec3i, 13>(vec3i(3,0,0), vec3i(0,3,0), vec3i(0,0,3), vec3i(2,2,0), vec3i(2,-2,0), vec3i(2,0,2),
-        vec3i(2,0,-2), vec3i(0,2,2), vec3i(0,2,-2), vec3i(2,2,2), vec3i(2,2,-2), vec3i(2,-2,2), vec3i(2,-2,-2));
-      var grad = vec3f(0.0);
-      for (var i = 0u; i < 13u; i++) {
-        grad += vec3f(around[i]) * (f32(solidAt(c - around[i], hit.level)) - f32(solidAt(c + around[i], hit.level)));
-      }
-      if (grad.y > 0.0) {
-        n = normalize(grad);
-        at = p + n * (1.0 / lvh.scale);
-        slope = true;
-      }
-    }
-  }` : ''}
-  ${world.options.surveyedWalls ? `// Average the exposed horizontal normal over a short piece of the footprint.
-  // A diagonal plane otherwise alternates sunlit and dark cardinal cell faces.
-  if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
-    let c = hit.cell - lvh.cells;
-    let ring = array<vec2i, 8>(vec2i(5,0),vec2i(4,2),vec2i(3,3),vec2i(2,4),
-                                vec2i(0,5),vec2i(-2,4),vec2i(-3,3),vec2i(-4,2));
-    var outward = vec2f(0.0);
-    for (var i = 0u; i < 8u; i++) {
-      let d = vec3i(ring[i].x, 0, ring[i].y);
-      let delta = i32(solidAt(c-d,hit.level)) - i32(solidAt(c+d,hit.level));
-      outward += normalize(vec2f(ring[i])) * f32(delta);
-    }
-    if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
-      let plan = normalize(outward);
-      n = vec3f(plan.x,0.0,plan.y);
-      face = n;
-      at += n * (0.85/lvh.scale);
-      slope = true;
-    }
-  }` : ''}
-  var albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), face, select(0.0, 1.0, hit.level == 0u && faced), qc, select(0.0, 1.0 / (max(hit.t, 1.0) * g.pixel), hit.level == 0u && faced));
-  ${world.options.surveyedWalls ? '// The road\'s paint and rails as lines (marks.ts).\n  if (stuff == 6u) { albedo = marked(albedo, ro, rd, hit.t); }' : ''}
-  var direct = max(dot(n, g.sun), 0.0);
-  if (shadows > 0u && direct > 0.0) {
-    var sunny = -1.0;
-    ${world.options.bricks && !world.options.fineSun ? `// A face finer than its cell: the sun's maps hold its whole cell as solid, so it is asked about from past the cell, towards the sun.
-    // (Without a branch: one here made every lit pixel a hundredth dearer.)
-    at += g.sun * (1.8 * f32((hit.kind >> 6u) & 1u));` : ''}
-    if (g.sunMaps != 0u) { sunny = sunlit(at, n, hit.level); }
-    // (Past a pane and in a mirror, only the maps are asked: but with the maps off, K, the world is asked there too, or
-    // everything seen through glass was in shadow.)
-    if (sunny < 0.0 && (shadows == 1u || g.sunMaps == 0u)) {
-      // No map drawn here yet (or K: every shadow traced): ask the world itself. Through glass in the two finest boxes,
-      // as the maps let the sun through it: up to 23 cells of it, a cell at a time (a pane crossed aslant is two to
-      // four, a lump of glass a metre across twenty). Walked a pane at a time (paneEnd) it was a second copy of that
-      // walk in the shader, and every picture was a percent or two dearer.
-      let o = at + n * (0.05 / g.level[hit.level].scale);
-      var past = 0.0;
-      var level = hit.level;
-      sunny = 1.0;
-      for (var k = 0; k < 24; k++) {
-        let s = trace(o, g.sun, past, level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false, false);
-        if (s.t < 0.0) { break; }
-        if ((((s.kind & 15u) != 11u || s.level > 1u) && ((s.kind & 79u) != 76u || s.level > 2u)) || k == 23) { sunny = 0.0; break; }
-        past = leaving(o, g.sun, s, false);
-        level = s.level;
-      }
-    }
-    direct *= max(sunny, 0.0);
-  }
-  var open = 1.0;
-  // Corners are asked about where a cell is more than a pixel or so wide, and fade out before that.
-  let wide = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
-  if (shadows == 1u && faced && !slope && (g.flags & 32u) == 0u && wide > 1.5${world.options.bricks ? ' && (hit.kind & 64u) == 0u' : ''}) { let o = openness(p, hit.n, hit, ground && hit.n.y > 0.5); open = mix(1.0, 0.1 + 0.9 * o * o, clamp(wide - 1.5, 0.0, 1.0)); }
-  // A sign is lamp in any colour but a street lamp's own: it is lit only when the lights are.
-  let ci = (hit.kind >> 8u) & 255u;
-  let sign = stuff == 15u && ci != 46u;
-  var col = shade(albedo, n, rd, g.sun, direct, open, m.rough, select(m.glow, 0.0, sign));
-  if (NIGHT && g.weather.z > 0.0) {
-    // Windows, lamps and signs are lit well before the day has gone, and in rain.
-    let dark = g.weather.z;
-    // Its light is its colour made strong: a pale tint by day is a coloured tube by night.
-    // (Not a lettering board's letters, #450: lit of themselves at 3.2 they were over what the last pass spreads as a
-    // lamp's, and BLOG from the park was four blots. A billboard is lit by lamps on arms before its face: the box the
-    // boards keep, looks.keep, is washed by them, brighter towards the lamps at its top, and its pale letters are
-    // read by that light against their dark panels, under what is spread. Nor are its panels a wall with windows.)
-    // (Which board, by the boxes of its letters, not by the box round all of them: two boards on two roofs and the
-    // windows between them were one board.)
-    let letters = lettered(p, n, stuff == 15u && ci == 6u);
-    let board = letters.board;
-    if (sign && !letters.own) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
-    // A lit letter is its own light; what is round it takes the letters' light by what it is made of.
-    if (letters.own) { col = mix(col, letters.light, clamp(dot(letters.light, vec3f(1.0)), 0.0, 1.0)); } else { col += albedo * letters.light; }
-    if (board && !letters.own && n.y > -0.5 && looks.letters[1].w > 0.0) {
-      let up = clamp((p.y - looks.keep0.y) / max(looks.keep1.y - looks.keep0.y, 1.0), 0.0, 1.0);
-      col += albedo * vec3f(1.0, 0.92, 0.78) * (1.5 + 1.5 * up) * clamp(dark * 3.0, 0.0, 1.0);
-    }
-    // A street lamp's own light is far brighter than anything it falls on: the last pass spreads it into a glow. (Not
-    // the boards' lamps on arms while their light is off, boards.ts \`dark\`: the lamps in the box they keep.)
-    let boardsOff = looks.letters[1].w < 0.0 && looks.keep1.w > 0.0 && all(p >= looks.keep0.xyz) && all(p <= looks.keep1.xyz);
-    if (stuff == 15u && !sign && !boardsOff) { col += vec3f(1.0, 0.85, 0.60) * 10.5 * dark; }
-    let fine = hit.cell * i32(1u << hit.level);
-    let block = inBlock(fine);
-    // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
-    // brighter low in the room than at the ceiling. Glass out in the street is a car's and stays dark.
-    // (The real city's blocks are not the town's: any window there may have someone home, #450.)
-    let lot = (block.x >= 140.0 && block.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'};
-    if (stuff == 11u && lot) {
-      // A shop's window (its own pale glass) is always lit.
-      let w = max(litWindow(fine), select(0.0, 0.8, ci == 146u));
-      let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
-      // The window screen (eggs.ts): a pane shows its pixel of it, and its own lamp as much as the picture leaves on.
-      let pic = screenOf(p);
-      col += warm * w * dark * mix(1.5, PANE_LIGHT, smoothstep(1.5, 5.0, wide)) * (1.0 - 0.33 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
-    }${world.options.surveyedWalls ? `
-    // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
-    // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
-    // 1.6 m of each storey of 3.1 m, half the bay wide and half the storey tall, about a third of them with someone
-    // home, the same warm light, lit a floor and a run of bays at a time (NIGHT_WALL).
-    if (faced && abs(n.y) < 0.5 && !slope && !board && hit.level >= 2u && (stuff == 7u || stuff == 8u || stuff == 9u || stuff == 10u)) {
-      let s = f32(1u << hit.level);
-      let q = (vec3f(fine) + qc * s) * 0.1;
-      let fx = select(q.x, q.z, abs(n.x) > abs(n.z)) / 1.6;
-      let fy = q.y / 3.1;
-      let wide = max(hit.t, 1.0) * g.pixel * 0.1 / 1.6;
-      let inPane = smoothstep(0.24, 0.26, fract(fx)) * (1.0 - smoothstep(0.74, 0.76, fract(fx))) * smoothstep(0.24, 0.26, fract(fy)) * (1.0 - smoothstep(0.76, 0.78, fract(fy)));
-      let blur = smoothstep(0.3, 0.8, wide);
-      // (Which building it is the cells do not say: the block of 40 m it stands in and the way the wall looks.)
-      let seed = u32(hash2i(vec2i(floor(q.xz / 40.0)) + vec2i(i32(n.x * 7.0), i32(n.z * 13.0))) * 65535.0);
-      let wall = nightWall(fx, fy, wide, wide * 1.6 / 3.1, 0.5, 0.25, 0.52, seed, 0.0);
-      // The window screen (eggs.ts): each pane its own pixel of it, seen from where the pane's middle is; where panes
-      // are under two pixels, the wall shows it by the share of it that is glass.
-      var pic = vec4f(0.0);
-      if (g.air.z > 0.0) {
-        // From the point to its pane's middle, finest cells along the wall and up (a bay is 16, a storey 31).
-        let mid = (floor(vec2f(fx, fy)) + 0.5 - vec2f(fx, fy)) * vec2f(16.0, 31.0);
-        pic = screenOf(p + select(vec3f(mid.x, mid.y, 0.0), vec3f(0.0, mid.y, mid.x), abs(n.x) > abs(n.z)));
-      }
-      col += wall.rgb * wall.a * clamp(dark * 3.0, 0.0, 1.0) * mix(mix(2.4, PANE_LIGHT, smoothstep(1.5, 4.0, 0.5 / max(wide, 0.001))), 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
-    }` : `
-    // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
-    // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
-    // the sea or under it, nor in open country: a block whose middle is more than 3.5 km from where the page starts
-    // (land.rs HOME and open). (Skipped in surveyed real cities like San Francisco, where real SFST street lamps
-    // drive localLights below without paying for this 9-iteration town-block loop.)
-    let out = (floor(vec2f(fine.xz) / vec2f(1280.0, 800.0)) + 0.5) * vec2f(1280.0, 800.0) - vec2f(700.0, 4070.0);
-    let lamps = stuff != 5u && fine.y >= 0 && dot(out, out) < 35000.0 * 35000.0;
-    var pool = 0.0;
-    // On wet road and paving each lamp also shows as itself, thrown back: a warm streak drawn out towards the eye.
-    let wet = select(0.0, g.weather.y, (stuff == 6u || stuff == 7u) && n.y > 0.5);
-    let back = reflect(rd, vec3f(0.0, 1.0, 0.0));
-    let side = normalize(vec2f(-rd.z, rd.x) + vec2f(0.00001, 0.0));
-    var streak = 0.0;
-    for (var k = 0; k < 9 && lamps; k++) {
-      // Each lamp's light, by where it hangs in its block: four at the crossing, three down the street along x,
-      // two down the one along z.
-      let lamp = array<vec2f, 9>(vec2f(23.0, 9.0), vec2f(131.0, 23.0), vec2f(9.0, 117.0), vec2f(117.0, 131.0), vec2f(369.0, 35.0), vec2f(673.0, 105.0), vec2f(977.0, 35.0), vec2f(35.0, 361.0), vec2f(105.0, 581.0))[k];
-      // The same lamps stand in the next blocks along: the nearest of them is the one that counts.
-      var d = abs(block - lamp);
-      d = min(d, vec2f(1280.0, 800.0) - d);
-      pool += 1.0 / (1.0 + dot(d, d) / 6400.0);
-      if (wet > 0.0) {
-        // Which way the nearest of them is, and how far the look thrown back passes from it: narrow across, long along.
-        var to = lamp - block;
-        to -= round(to / vec2f(1280.0, 800.0)) * vec2f(1280.0, 800.0);
-        let off = back - normalize(vec3f(to.x, 68.0, to.y));
-        let across = dot(off.xz, side);
-        streak += exp(-across * across * 700.0 - max(dot(off, off) - across * across, 0.0) * 9.0) / (1.0 + dot(d, d) / 90000.0);
-      }
-    }
-    if (streak > 0.0) {
-      // Broken by the ripples of the film of water it lies on.
-      let rough = 0.45 + 1.1 * noise2(vec2f(fine.xz) * 0.31) * noise2(vec2f(fine.zx) * 0.07);
-      col += vec3f(1.0, 0.72, 0.4) * streak * rough * wet * dark * 2.6;
-    }
-    col += albedo * vec3f(1.0, 0.78, 0.48) * min(pool * pool, 1.2) * dark * (0.12 + 0.88 * max(n.y, 0.0)) * 1.5;`}
-    // A tree's crown takes the city's glow (LEAF_NIGHT): the lamps' pools above are its light from under where one is near.
-    if (stuff == 13u) { col += leafNight(albedo, n, p) * clamp(dark * 3.0, 0.0, 1.0) * 0.6; }
-    // A landmark's own light (heroes.rs night): its crown, its spire.
-    // (Its lamps are the city's too: what the windows show, the crown's screen shows, and its own light as much as that leaves on.)
-    let own = landmarkLight(p, max(hit.t, 1.0) * g.pixel * 0.1);
-    if (own.r + own.g + own.b > 0.0) {
-      let shown = screenOf(p);
-      // (Half of it, as the far model's crown takes, far.ts: the two meet where it hands over.)
-      col += own * clamp(dark * 3.0, 0.0, 1.0) * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.5;
-    }
-    col += landmarkLamp(p) * clamp(dark * 3.0, 0.0, 1.0);
-  }
-  if (NIGHT && localLights.info.x > 0u && stuff != 5u && hit.t < 1600.0) {
-    let wetSurf = select(0.0, 1.0, (stuff == 6u || stuff == 7u) && n.y > 0.5);
-    col += evalLocalLights(p, n, rd, albedo, m.rough, 0.0, wetSurf, shadows == 1u, hit.t);
-  }
-  return col;
-}
-
-// The net of light that waves throw on what is under them: bright lines where two slow patterns agree. at is a
-// place on the top of the sea, in cells.
-fn net(at: vec2f) -> f32 {
-  let a = noise2(at * 0.034 + vec2f(g.time * 0.21, g.time * 0.13));
-  let b = noise2(at * 0.047 - vec2f(g.time * 0.17, g.time * 0.24) + vec2f(7.3, 1.9));
-  return pow(clamp(1.0 - abs(a - b) * 3.2, 0.0, 1.0), 5.0);
-}
-// Under the sea. What is looked at is lit through the water over it, in the moving net of light the waves throw;
-// water takes the red out of light on its way down and back, and with distance everything goes to the water's
-// own colour. Looking up, the sky shows through a round window overhead and the rest of the top mirrors the deep.
-// Where the waves gather the light, shafts of it stand in the water. grain is a number that differs from pixel to
-// pixel (not used now: see the shafts).
-fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
-  let M = 0.1;
-  let down = (g.sea - g.eye.y) * M;
-  // Where the look leaves the water through its top, if it is rising.
-  var out = 1e9;
-  if (rd.y > 0.0) { out = (g.sea - g.eye.y) / rd.y; }
-  // The sun as it stands under water: bent towards overhead.
-  let sun = normalize(vec3f(g.sun.x * 0.75, sqrt(1.0 - dot(g.sun.xz, g.sun.xz) * 0.5625), g.sun.z * 0.75));
-  let strength = max(g.lightSun.r, max(g.lightSun.g, g.lightSun.b));
-  // The water's own light: brighter looking up, dimmer the deeper the eye.
-  // (Dark below and bright above: with one colour from top to bottom the water was a veil, and shafts stripes on it.)
-  let glow = mix(vec3f(0.0, 0.1, 0.19), vec3f(0.02, 0.66, 0.8), pow(smoothstep(-0.55, 1.0, rd.y), 1.6)) * exp(-down * 0.02) * (0.3 + 0.7 * strength);
-  var col: vec3f;
-  var far = min(out, 6000.0);
-  if (hit.t >= 0.0) {
-    far = hit.t;
-    let p = g.eye + rd * hit.t;
-    let under = max(g.sea - p.y, 0.0);
-    // The net lies on what faces up; on a wall it was a mesh drawn down the face.
-    col = lit(g.eye, rd, hit, shadows) * (1.05 + 1.1 * net(p.xz + sun.xz * (under / sun.y)) * (0.15 + 0.85 * max(hit.n.y, 0.0)));
-    col *= exp(-vec3f(0.075, 0.024, 0.02) * (under * M + hit.t * M * 0.4));
-    // Light comes from every side under water: what the sun does not reach is not black.
-    col += vec3f(0.01, 0.3, 0.36) * exp(-down * 0.02) * (0.3 + 0.7 * strength) * select(0.2, 0.36, abs(hit.n.y) < 0.5);
-  } else {
-    let at = g.eye.xz + rd.xz * out;
-    let ripple = vec2f(noise2(at * 0.09 + vec2f(g.time * 0.5, g.time * 0.3)), noise2(at.yx * 0.11 - vec2f(g.time * 0.4, g.time * 0.27))) - 0.5;
-    // Through the window the sky, bent as water bends it; outside it the top is a mirror of the deep.
-    let window = smoothstep(0.6, 0.74, rd.y + (ripple.x + ripple.y) * 0.22);
-    let flat = vec2f(rd.x, rd.z) * 1.33 + ripple * 0.35;
-    let bent = normalize(vec3f(flat.x, sqrt(max(1.0 - dot(flat, flat), 0.01)), flat.y));
-    // The waves seen from under them: lines of light all over the top, fine near and running together far off.
-    let wa = noise2(at * 0.13 + vec2f(g.time * 0.4, g.time * 0.23));
-    let wb = noise2(at * 0.19 - vec2f(g.time * 0.31, g.time * 0.37) + vec2f(3.1, 8.7));
-    let waves = pow(clamp(1.0 - abs(wa - wb) * 2.6, 0.0, 1.0), 2.0) * (0.45 + 0.55 * noise2(at * 0.023 + vec2f(g.time * 0.05, 0.0)));
-    // And where a wave's face turns the sky down to the eye, a patch of it bright: many and small far off.
-    let glint = sqrt(waves) * smoothstep(0.35, 0.7, noise2(at * 0.045 + vec2f(g.time * 0.11, g.time * 0.07)));
-    let mirror = glow * 0.7 + vec3f(0.3, 0.85, 0.82) * strength * waves * 0.5 + vec3f(0.55, 0.95, 0.95) * strength * glint * 0.8;
-    col = mix(mirror, sky(bent) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * (net(at) * 0.4 + waves * 0.22), window);
-  }
-  col = mix(col, glow, 1.0 - exp(-far * M * 0.021));
-  // Water out of the beams is in shade: the beams are light added to dark, not a veil over everything.
-  col *= 0.8;
-  // Shafts: beams that stand out from where the sun is overhead, as beams of one sun do to an eye among them. Which
-  // are lit goes by the way round the sun's own line that the look lies, and drifts: a few broad beams with hard
-  // sides and dark water between, more of them the more water the look goes through. (Samples along the look added
-  // every beam it crossed into an even veil of faint streaks, cost fourteen times the noise, and their grain was a
-  // screen of dots at the size the page holds here; sheets at set distances were round blots.) They go by the
-  // look's direction alone, so they pass by as the eye moves only because where the eye is shifts which are lit.
-  let towards = dot(rd, sun);
-  let across = rd - sun * towards;
-  let u = normalize(cross(sun, vec3f(1.0, 0.0, 0.0)));
-  let round = normalize(vec2f(dot(across, u), dot(across, cross(sun, u))) + vec2f(1e-5, 0.0));
-  let gathered = (noise2(round * 9.0 + g.eye.xz * 0.006 + vec2f(g.time * 0.05, g.time * 0.035)) * 0.7 + noise2(round * 23.0 - vec2f(g.time * 0.04, g.time * 0.06)) * 0.3) * (0.55 + 0.9 * noise2(round * 2.3 - vec2f(g.time * 0.03, 0.0) + vec2f(4.1, 9.2)));
-  // (Soft at their sides and fading as they go down: with hard sides all the way to the floor they were slabs.)
-  let shafts = smoothstep(0.42, 0.68, gathered) * (1.0 - exp(-far * M * 0.05)) * smoothstep(-0.35, 0.25, towards) * exp(-down * 0.03) * smoothstep(-0.55, 0.35, rd.y);
-  // Looking towards where the light comes from the water itself is bright.
-  col += g.lightSun.rgb * vec3f(0.25, 0.88, 0.95) * (shafts * 0.62 + pow(max(towards, 0.0), 6.0) * 0.25);
-  return col;
-}
-
-${FOG}
-
-// One texel of a sun map: along the line to the sun through it, how far towards the sun the last solid thing is.
-@fragment fn fs_sun(@builtin(position) at: vec4f) -> @location(0) vec4f {
-  let uv = sunTile.corner + (at.xy - sunTile.origin - 0.5) * sunTile.texel;
-  // A point on the line, level with the eye along the sun.
-  let o = g.sunU * uv.x + g.sunV * uv.y + g.sun * dot(g.eye, g.sun);
-  // The line is followed from where it comes into this box, on the side away from the sun.
-  let lv = g.level[sunTile.level];
-  let a = (lv.boxMin - o) / g.sun;
-  let b = (lv.boxMin + lv.boxSize / lv.scale - o) / g.sun;
-  let near = min(a, b);
-  let far = max(a, b);
-  let come = max(near.x, max(near.y, near.z));
-  if (come >= min(far.x, min(far.y, far.z))) { return vec4f(-1e30, 0.0, 0.0, 1.0); }
-  let hit = trace(o, g.sun, come + 0.01 * sunTile.texel, sunTile.level, 768u, 0.0, 0.0, false, true, false);
-  // The line starts wherever the eye is level with, so what it last left may well be behind that: only its kind says it met nothing.
-  if (hit.kind == 0u) { return vec4f(-1e30, 0.0, 0.0, 1.0); }
-  ${world.options.fineSun ? `// Whether what the line last left is a cell of finer cells goes in the number's lowest bit (sunlit).
-  let inside = vec3i(floor((o + g.sun * (hit.t - 0.01 / lv.scale) - lv.boxMin) * lv.scale));
-  let marked = fineWord(sectorOf(inside, sunTile.level), inside) != 0u;
-  return vec4f(bitcast<f32>((bitcast<u32>(dot(o, g.sun) + hit.t + g.sunFar) & 0xfffffffeu) | u32(marked)), 0.0, 0.0, 1.0);` : 'return vec4f(dot(o, g.sun) + hit.t + g.sunFar, 0.0, 0.0, 1.0);'}
-}
-
-// How much of the sky's light a room or a cabin looked into from outside gets (#163): a room is darker than the street.
-const INDOORS = 0.45;
-
-@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
-  let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
-  return vec4f(p * 2.0 - 1.0, 0.5, 1.0);
-}
-
-// How far off a thing is, as the depth other drawing is tested against: nearer than a cell is 0, further than 10 km is 1.
-const NEAR = 1.0;
-const FAR = 100000.0;
-// What a pixel draws: its colour; how far off the first pane it looks through is with what that pane lets through of
-// what is behind it (panes, #163: for what is drawn after the march, the wand among them; all 0 where no pane is
-// looked through); and the depth of what it sees, behind any pane.
-struct Drawn { @location(0) colour: vec4f, @location(1) panes: vec4f, @builtin(frag_depth) depth: f32 }
-// Mirrors on (the M key, ?mirrors=0 turns them off). The march with mirrors off is a pipeline of its own with this
-// false: none of what looks past what is met (a mirror, a pane) is in it, and with mirrors off it costs what it did
-// before glass was seen through (the same text with only a test of a flag made those pictures 5 to 17% dearer).
-override MIRRORS: bool = true;
-// Fog in the air (#450). The march without fog is the pipeline it always was, with this false and none of the fog's
-// text: a dry clear day costs what it did (the same text behind a test of the fog's thickness read 8 to 12% dearer).
-// The pipelines with fog are made the first time there is any.
-override FOGGY: bool = false;
-// Night lights, lit windows, landmarks and window screens (#139): stripped from clear daytime pipelines so
-// every inlined copy of lit() avoids carrying 100+ lines of night code and its register pressure.
-override NIGHT: bool = false;
-// Far-model tile handover in march() (#139): stripped from pipelines when no far model is active (town or near-only).
-override FAR_MODEL: bool = false;
-// Underwater shading (deep(), #139): stripped above the sea so fs() does not inline a third copy of lit().
-override UNDERWATER: bool = false;
-// Local-light world occlusion (worldClear octree probes): compiled only on High preset when local lights are active.
-override LOCAL_OCCLUDE: bool = false;
-
-@fragment fn fs(@builtin(position) at: vec4f) -> Drawn {
-  let uv = (at.xy / g.res) * 2.0 - 1.0;
-  var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
-  rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
-  let shadows = g.flags & 1u;
-  ${behind ? `// A marcher for a world behind a window (#264): its looks begin at a plane, not at the eye. Only that marcher's
-  // shader has these lines: measured by swapping them in and out of one page, they cost a far view 1 ms in 43.
-  let toward = dot(rd, g.starts.xyz);
-  let begins = select(0.0, max(0.0, (g.starts.w - dot(g.eye, g.starts.xyz)) / toward), toward != 0.0);` : 'let begins = 0.0;'}
-  // Glass is seen through (#163): a look that meets a pane goes on through it, tinted a little, and shows what it
-  // meets beyond (past one pane, what is likely there); the pane adds what it mirrors (a little face on, most along it) and, at
-  // night, the light of a room with someone home. What is seen through glass is the other side of a wall.
-  // One march, one lit() and one look across in the loop, each written once: every call of trace or lit is a copy
-  // of it in the compiled shader, and with a copy for each pane the street cost 40% more whether glass was in view or not.
-  var col = vec3f(0.0);
-  var keep = vec3f(1.0);
-  var depth = 1.0;
-  var first = -1.0;
-  var t0 = begins;
-  var level0 = 0u;
-  var panes = 0u;
-  var last = -1.0;
-  var seenThrough = vec4f(0.0);
-  // The air's colour along this look (worked out once: inside the loop as well as after it, it was 2% dearer).
-  let airColour = hazeColour(rd);
-  // Past a pane the look is marched more coarsely (what is two pixels wide is taken whole), for fewer steps, and
-  // what it meets is lit without its corners darkened or a shadow traced where the sun's maps cannot say (as what is
-  // seen in a mirror is): it is seen through a tint, and a room's back wall had cost as much as the front of the house.
-  var spread = g.pixel * g.detail;
-  var most = g.most;
-  var lights = shadows;
-  for (var i = 0u; i < select(1u, ${PANES * 2}u, MIRRORS); i++) {
-    var hit = trace(g.eye, rd, t0, level0, most, select(0.0, t0 * spread, i > 0u), spread, false, false, true);
-    if (i == 0u) {
-      // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
-      if (UNDERWATER && (g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
-      first = hit.t;
-      if ((g.flags & 16u) != 0u) {
-        // Asked what is under one point: how far (in eighths of a cell), what it is made of, what colour.
-        var v = 0u;
-        if (hit.t >= 0.0) { v = (u32(clamp(hit.t, 0.0, 131071.0) * 8.0) & 0xfffffu) | ((hit.kind & 15u) << 20u) | (((hit.kind >> 8u) & 255u) << 24u); }
-        if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
-        return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, vec4f(0.0), depth);
-      }
-      if (UNDERWATER && (g.flags & 128u) != 0u) {
-        if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
-        col = deep(rd, hit, shadows, fract(52.9829189 * fract(dot(at.xy, vec2f(0.06711056, 0.00583715)))));
-        break;
-      }
-    }
-    if (hit.t < 0.0) { col += keep * sky(rd); depth = 1.0; break; }
-    depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0);
-    let stuff = hit.kind & 15u;
-    // With mirrors off (the M key, ?mirrors=0: no look beyond what is met) glass is a face as any other, as it was.
-    let glass = stuff == 11u && MIRRORS;
-    let scale = g.level[hit.level].scale;
-    var leave = 0.0;
-    if (glass) {
-      // A pane of finer cells (#259) that the look past it would take whole, as it takes any cell narrower than it:
-      // left whole, or the look met the pane's own cell again and drew it, or the frame in it, for the room.
-      let whole = (hit.kind & 64u) != 0u && hit.t * g.pixel * max(g.detail, 2.0) * 2.0 * scale >= 1.0;
-      leave = leaving(g.eye, rd, hit, whole);
-      if ((hit.kind & 64u) == 0u || whole) { leave = paneEnd(rd, hit, leave); }
-      // A pane a look crosses aslant is two or three cells of glass one after another: one pane, thicker.
-      if (hit.t <= last + 0.01 / scale && i + 1u < ${PANES * 2}u) {
-        keep *= glassTint(hit.kind, max(leave - hit.t, 0.0));
-        last = leave; t0 = leave; level0 = hit.level;
-        continue;
-      }
-    }
-    let m = looks.material[stuff];
-    // A pane's own light is a tenth of what it shows: it is lit from the sun's maps alone, as what a mirror shows is.
-    // (Not lit at all for a pane seen through another, a branch round this call, the street was 3% dearer.)
-    var own = lit(g.eye, rd, hit, select(lights, lights * 2u, glass));
-    var n = hit.n;
-    if (dot(n, n) < 0.5) { n = -rd; }
-    let p = g.eye + rd * hit.t;
-    let across = 1.0 / (scale * max(hit.t, 1.0) * g.pixel);
-    // How much of what is across from it the face shows, and whether that is asked of the world.
-    var mirror = m.mirror;
-    var ask = false;
-    var goes = false;
-    var lamp = 0.0;
-    // Polished by a spell (kinds.rs POLISHED, bit 7): it mirrors, whatever it is made of. Bit 6 is the mark of a
-    // finer cell (the march sets it itself): read here, every finer cell was a mirror.
-    let polished = (hit.kind & 128u) != 0u;
-    if (glass) {
-      panes++;
-      // A window with someone home at night is lit from within: its blind is drawn and its light shows, not the room.
-      let fine = hit.cell * i32(1u << hit.level);
-      let lot = inBlock(fine);
-      if (NIGHT && g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
-      // A pane on the window screen (eggs.ts) shows its pixel, not what it mirrors.
-      if (NIGHT && g.air.z > 0.0) { lamp = max(lamp, screenOf(g.eye + rd * hit.t).a); }
-      mirror = glassMirror(rd, n);
-      // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
-      if (polished) { mirror = max(mirror, 0.62); }
-      mirror *= 1.0 - lamp;
-      // Its own faint film, or a lit room's light.
-      own *= mix(0.1, 1.0, lamp);
-      // Looked through in the two finest boxes, which have rooms (further off a house is solid), where a cell is
-      // two pixels or more (as what a pane mirrors is asked only there), and not past the last pane a look may cross.
-      // A pane asks the world one thing: what is behind it while it lets most through, what is across from it once
-      // it mirrors more than a third (looked at along it), with a dim room behind. Up the side of a tower of glass
-      // asking both cost half as much again as the old mirror did.
-      goes = hit.level <= 1u && across >= ${THROUGH} && panes < ${PANES}u && i + 1u < ${PANES * 2}u && mirror < 0.33;
-      // Face on a pane mirrors a tenth, and the sky a little darker stands in for what is across.
-      ask = !goes && across >= 2.0 && mirror * max(keep.r, max(keep.g, keep.b)) > 0.12;
-    } else {
-      if (polished) { mirror = max(mirror, 0.62); }
-      // Road and paving that are wet mirror too: a film of water everywhere, puddles where it gathers.
-      if (g.weather.y > 0.0 && (stuff == 6u || stuff == 7u) && hit.n.y > 0.5) {
-        let place = vec2f((hit.cell * i32(1u << hit.level)).xz);
-        mirror = g.weather.y * (0.45 + 0.5 * smoothstep(0.42, 0.6, noise2(place * 0.023)));
-        own *= 1.0 - 0.35 * g.weather.y;
-        // Wet road is not flat: what it mirrors is drawn out into streaks towards the eye.
-        n = normalize(n + vec3f(noise2(p.xz * 0.23) - 0.5, 0.0, noise2(p.zx * 0.29) - 0.5) * 0.022);
-      }
-      if (stuff == 5u) {
-        // Small waves, drawn as themselves only near: further off there are many to a pixel and they are noise.
-        let ripple = vec2f(noise2(p.xz * 0.11 + vec2f(g.time * 0.5, g.time * 0.31)), noise2(p.zx * 0.13 - vec2f(g.time * 0.43, g.time * 0.27))) - 0.5
-          + (vec2f(noise2(p.xz * 0.37 - vec2f(g.time * 0.9, 0.0)), noise2(p.zx * 0.41 + vec2f(0.0, g.time * 0.8))) - 0.5) * 0.5;
-        n = normalize(n + vec3f(ripple.x, 0.0, ripple.y) * 0.16 * clamp(600.0 / hit.t, 0.0, 1.0));
-      }
-      let fresnel = 0.04 + 0.96 * pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
-      mirror = clamp(mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0);
-      // What is across is asked of the world only where it can be made out: a face two pixels or more, water within
-      // 600 m. From high up every window of the town was a mirror a pixel wide, and asking for each was a third of
-      // the picture's cost there.
-      ask = (stuff == 5u && hit.t < 6000.0) || (stuff != 5u && across >= 2.0);
-    }
-    var add = own;
-    if (mirror > 0.0 && MIRRORS) {
-      var back = reflect(rd, n);
-      // A wave tilted towards the eye would send the look down into the water it came off, a dark speck: seen
-      // from low over water the waves hide those sides of each other, and what shows is sky.
-      if (stuff == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
-      var safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
-      // What the sea mirrors is kept on the look's own side of both ways across: a wave can tip it a little over,
-      // and it is then marched with the roofs of the quarter the look is in.
-      if (stuff == 5u) { safe = vec3f(abs(safe.x) * select(-1.0, 1.0, rd.x > 0.0), safe.y, abs(safe.z) * select(-1.0, 1.0, rd.z > 0.0)); }
-      // Unasked, it is the sky a little darker: half of what is across from a far window is town.
-      var seen = sky(safe) * 0.8;
-      if (ask) {
-        // What water mirrors is seen through its ripples, so it is asked for coarsely: three times as coarse as
-        // what a pane of glass mirrors, and every other box.
-        let coarse = select(2.0, 6.0, stuff == 5u);
-        let far = trace(p + n * (0.05 / scale), safe, 0.0, hit.level, 64u, hit.t * g.pixel * coarse, g.pixel * coarse, stuff == 5u, false, stuff == 5u);
-        seen = sky(safe);
-        if (far.t >= 0.0) { seen = air(lit(p, safe, far, shadows * 2u), safe, far.t); }
-      }
-      if (glass) { add += seen * mirror; } else { add = mix(own, seen, mirror); }
-      if (stuff == 5u) {
-        // The sun's path on water, or the moon's: all the small waves together smear its image into a streak that
-        // runs over the water towards it, narrow across and long, glinting. It is light thrown back, not a picture
-        // in a mirror, so it shows however steeply the water is looked at.
-        let flat = reflect(rd, vec3f(0.0, 1.0, 0.0));
-        let toward = dot(normalize(flat.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a));
-        let rise = flat.y - g.sun.y;
-        let glint = 0.35 + 1.3 * noise2(p.xz * 0.05 + vec2f(g.time * 1.1, g.time * 0.8)) * noise2(p.zx * 0.21 - vec2f(g.time * 0.7, g.time * 1.3));
-        add += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 3.6, g.day) * pow(max(toward, 0.0), 300.0) * exp(-rise * rise * 5.0) * glint;
-      }
-    }
-    // The air: everything is lost in it by its own distance, what is seen through a pane too (a hill far off seen out
-    // of a window is as hazy as beside it). The whole picture is given the air as far as the first thing met, after
-    // the loop; what is past a pane is given here what more it loses beyond that. (Kept through the loop instead, as
-    // how much air each thing adds, it made every picture 2 to 5% dearer.)
-    if (i > 0u) { add = mix(add, airColour, 1.0 - (1.0 - haze(rd, hit.t)) / max(1.0 - haze(rd, first), 0.0001)); }
-    if (!glass) { col += keep * add; break; }
-    var through = glassTint(hit.kind, max(leave - hit.t, 0.0) + 0.5) * 0.94 * (1.0 - mirror) * (1.0 - lamp);
-    // How much of what is behind is looked through: none where the pane is not, and less towards each edge of where it
-    // is (as near as two pixels a cell, the far side of the second box, a mirror of a third), so that a face of windows
-    // straddling one of them has no line across it and none comes and goes as the eye moves: the rest is what is
-    // likely there. (Hard edges showed as a line across a tower at each, and the tower's look jumped as the eye passed.)
-    var fade = 0.0;
-    if (goes) {
-      let lv = g.level[hit.level];
-      let q = (p - lv.boxMin) * lv.scale;
-      let side = min(q, lv.boxSize - q);
-      let edge = select(1e9, min(side.x, min(side.y, side.z)), hit.level == 1u);
-      fade = smoothstep(${THROUGH}, ${THROUGH} * 1.5, across) * smoothstep(0.0, 48.0, edge) * smoothstep(0.33, 0.26, mirror);
-    }
-    if (fade < 1.0) {
-      // What is likely behind a pane not looked through: from outside, a room about as bright as near rooms come out
-      // by day; seen through another pane, the day outside, a little darker than the haze.
-      let room = (g.lightFill.rgb * 0.3 + g.lightSun.rgb * g.lightSun.a * 0.12) * 0.35 * INDOORS;
-      add += through * (1.0 - fade) * select(room, skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 0.7, panes > 1u);
-      through *= fade;
-    }
-    col += keep * add;
-    keep *= through;
-    // The first pane looked through: how far off, and what it lets through (what is drawn after the march tints by it).
-    if (fade > 0.0 && panes == 1u) { seenThrough = vec4f(keep, hit.t); }
-    if (max(keep.r, max(keep.g, keep.b)) < 0.02) { break; }
-    last = leave; t0 = leave; level0 = hit.level;
-    spread = g.pixel * max(g.detail, 2.0);
-    most = min(g.most, 128u);
-    lights = shadows * 2u;
-    roomLit = 0.0;
-    skyLit = mix(INDOORS, 1.0, g.weather.w);
-  }
-  if ((!UNDERWATER || (g.flags & 128u) == 0u) && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
-  // The fog, over everything as far as the first thing met, and over the sky (a look that met nothing goes on for ever).
-  if (FOGGY && (!UNDERWATER || (g.flags & 128u) == 0u)) {
-    col = inFog(col, rd, select(1e7, first, first >= 0.0));
-  }
-  if ((g.flags & 4u) != 0u) {
-    // How hard each pixel was: steps as heat (scaled for linear HDR display).
-    let h = f32(work) / 128.0;
-    return Drawn(vec4f(h * 2.0, h * h * 2.0, pow(h, 4.0) * 2.0, 1.0), seenThrough, depth);
-  }
-  if ((g.flags & 8u) != 0u) { return Drawn(vec4f(f32(work & 255u) / 255.0, f32(work >> 8u) / 255.0, 0.0, 1.0), seenThrough, depth); }
-  // Output linear HDR radiance directly; glow.ts extracts luminance bloom and applies AgX tonemapping.
-  return Drawn(vec4f(max(col, vec3f(0.0)), 1.0), seenThrough, depth);
-}
-`
 
 export interface View {
   /** Where the eye is, in the finest cells of the world. */
@@ -2139,10 +593,10 @@ export interface View {
 export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64, UNDER = 128
 /** A tool's aim (`pick`): the far model takes it over only past its reach, not its wedge's (HANDOVER), so that an edit there finds the cells it changes. */
 export const CELLS = 256
-/** What the march leaves for what is drawn after it (Marcher.panes). */
-/** The fog bank (#450) when it is all in: how thick a finest cell (a third left in 260 m), and its top over the sea, 140 m. */
 const FOG_THICK = 1 / 2400, FOG_TOP = 1400
 export const PANES_FORMAT: GPUTextureFormat = 'rgba16float'
+export const VELOCITY_FORMAT: GPUTextureFormat = 'rg16float'
+export const VIS_NORMAL_FORMAT: GPUTextureFormat = 'rgba16float'
 /** Tiles of the sun's maps drawn each frame. */
 export const SUN_TILES_A_FRAME = 8
 
@@ -2153,30 +607,13 @@ export interface Marcher {
   draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number]): void
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
   rebind(): void
-  /** The road's paint and rails (#450, marks.ts `grid`: marks.bin as sf/marks.mjs writes it), drawn by a Bay world's march from now on. Returns how many segments, or -1 where the bytes are not marks. */
+  /** The road's paint and rails (#450, marks.ts `grid`), drawn by a Bay world's march from now on. */
   marks(bytes: ArrayBuffer): number
-  /**
-   * Where the far model (far.ts) takes over: past `reach` (finest cells from the eye), in the tiles `held` marks, what
-   * the cells meet is left for it to draw. Tiles are `size` cells a side, the map's corner `corner` tiles from the
-   * frame's; `held` is 64 x 64 bits, a row of tiles after another. A reach of 0 leaves every cell drawn. In `wedge`
-   * (HANDOVER: its apex x and z, how far it reaches and the reach in it, cells; its bearings, radians) the reach is its own,
-   * except in `keep` (low and high corners, cells), which is the cells' out to the reach. Each box of `edits` (low and
-   * high corners, cells, EDITS at most) is the cells' however far off.
-   */
+  /** Where the far model (far.ts) takes over from the cells. */
   farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>, wedge?: readonly number[] | null, keep?: readonly number[] | null, edits?: readonly (readonly number[])[]): void
-  /**
-   * The shader made again from its text as `change` returns it, while the page draws (#264, the workshop): the new
-   * pipelines are built in the background and take over between two frames. A shader that does not compile throws,
-   * and the one that was drawing goes on. Answers how long the text took to compile and how long it all took, ms.
-   * What it does to a frame's cost is not known until it is measured: `node test/bench.mjs` before and after.
-   */
+  /** Rebuilds the marcher's shaders while the page runs (#264, workshop). */
   reshade(change: (wgsl: string) => string): Promise<{ compiled: number; ms: number }>
-  /**
-   * Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands.
-   * `ready` is whether the world is made enough to draw them from, or the finest box from which it is (sun.ts `plan`).
-   * `most` is how many tiles this frame has room for (#73: SUN_TILES_A_FRAME at most, and where it is not said), and
-   * `timing` two places in a query set for when the first of them began and the last ended. Returns how many it drew.
-   */
+  /** Draws a few tiles of the sun's maps as they stand for this view. */
   tend(encoder: GPUCommandEncoder, view: View, ready: boolean | number, most?: number, timing?: { querySet: GPUQuerySet; begin: number; end: number }): number
   /** The sun's maps: an edit must spoil the tiles it touches. */
   readonly sun: SunMaps
@@ -2184,177 +621,411 @@ export interface Marcher {
   readonly looks: GPUBuffer
   /** What the shaders are told of the view, the boxes and the sun's maps (GLOBALS), for whatever else is lit by them. */
   readonly globals: GPUBuffer
-  /** Dynamic local lights (vehicles, SF street lamps, systemic emissives) shared across march, pieces, people and wheels. */
+  /** Dynamic local lights shared across march, pieces, people and wheels. */
   readonly localLights: LocalLights
-  /**
-   * What the march leaves beside its picture for what is drawn after it (#163), for a picture of this size: where a
-   * pane is looked through, what it lets through (rgb) and how far off it is along the look (a, finest cells); all 0
-   * elsewhere. The depth the march writes is of what is behind the pane, so that what stands in a room is drawn
-   * there; what aims at what is met (the wand) and what is tinted by the pane read this.
-   */
+  /** Glass pane transmittance & distance target for downstream passes. */
   panes(size: readonly [number, number]): GPUTextureView
+  /** Analytic screen-space motion vectors (rg16float: prevUV - curUV, active sub-rect to.size inside allocSize). */
+  readonly velocityView: GPUTextureView
+  /** World-space surface normals (rgba16float: xyz normal, w roughness; 0 on sky). */
+  readonly visNormalView: GPUTextureView
+  /** Primary geometry visibility buffer 0 (rgba32uint: cell xyz, packed kind/level/face/flags w). */
+  readonly vis0View: GPUTextureView
+  /** Primary geometry visibility buffer 1 (rgba32float: hitT, pane1T, pane1Meta, workSteps). */
+  readonly vis1View: GPUTextureView
   /** Whether the maps are used for shadows (they are, unless a check wants every shadow traced). */
   maps: boolean
-  /** What is straight ahead of a view: how far in the finest cells, what it is made of, its colour in the palette. Null for sky. */
   /** What is straight ahead: how far (finest cells), of what, what colour. `plain` asks without the skips over empty air. */
   pick(view: View, plain?: boolean): Promise<{ t: number; material: number; colour: number } | null>
   /** How many pixels wide a thing must be to be drawn as itself: 1 is every cell that can be seen, 2 is half as fine. */
   detail: number
-  /** How hard it rains, 0 to 1: the sky greys, the ground is wet and mirrors, lights come on. */
+  /** How hard it rains, 0 to 1. */
   rain: number
-  /** How overcast the sky is, 0 to 1: grey as rain greys it, with the ground dry. */
+  /** How overcast the sky is, 0 to 1. */
   cloud: number
-  /** How far the sea's fog has come in (#450), 0 to 1: how thick the bank is west of its front (`front`). */
+  /** How far the sea's fog has come in (#450), 0 to 1. */
   fog: number
-  /** Where the fog's front stands (finest cells east, as the world counts them): west of it is fog. */
+  /** Where the fog's front stands (finest cells east). */
   front: number
-  /** Whether the eye is under the sea: what is in it is then lit as under water. */
+  /** Whether the eye is under the sea. */
   under: boolean
-  /** How far the eye is in a room, 0 to 1 (main.ts says): what is shaded is lit by the daylight a room lets in (shade). */
+  /** How far the eye is in a room, 0 to 1. */
   roofed: number
-  /** How far windows, lamps and signs are lit, 0 (by day) to 1: what the shaders are told (Globals weather.z). */
+  /** How far windows, lamps and signs are lit, 0 to 1. */
   readonly lights: number
-  /** The lettering boards' own light (letterlight.ts): Looks.letters in world cells, (2 + 2 * LIT_LETTERS) vec4s; null for none. */
+  /** The lettering boards' own light (letterlight.ts). */
   letters(data: Float32Array | null): void
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
   light(sun: readonly [number, number, number], day: number, low: number): void
   readonly day: number
-  /** The air (#450): haze and cloud against the town's own (1), and a sky of its own by day (linear colours). */
+  /** The air (#450): haze and cloud against the town's own (1), and a sky of its own by day. */
   air: Air
-  /** The landmarks as the night knows them (heroes.rs `night`): their own lights, and their glass's storey and bay. Eight at most. */
+  /** The landmarks as the night knows them (heroes.rs `night`). Eight at most. */
   beacons: readonly Beacon[]
-  /**
-   * The window screen (#450, eggs.ts): the picture the city's lit windows show (SCREEN_SIZE, rgba8: light, and how
-   * much of a pane's own lamp it puts out), how far it is up (0: off, and no window asks it), and how much larger
-   * than its own the moon's disc is drawn (0: its own).
-   */
+  /** The window screen (#450, eggs.ts). */
   readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number; sky: boolean; rect: [number, number, number, number] }
-  /** The moon (#524): how its disc is drawn and how much light it gives. Set after `light`; WHOLE_MOON is the hour's own. */
+  /** The moon (#524). */
   moon: Moon
 }
 
-/**
- * The moon by night (#524, almanac.ts). `disc`: 0 its whole disc where the light comes from, as it always was; 1 that
- * disc lit on the side towards `sun` (the moon's phase: the light comes from the moon then); -1 none (it is down).
- * `light`: how much of the night's light it gives against a full moon's (1).
- */
 export interface Moon { readonly sun: readonly [number, number, number]; readonly disc: -1 | 0 | 1; readonly light: number }
 export const WHOLE_MOON: Moon = { sun: [0, -1, 0], disc: 0, light: 1 }
-
-/** A landmark as the night knows it: the middle of its foot in the world's finest cells, and its rule's twelve numbers (heroes.rs `night`). */
 export interface Beacon { at: readonly [number, number, number]; night: readonly number[]; /** How far from its middle it reaches, m. */ reach: number }
-/** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
 export interface Air { haze: number; clouds: number; sky?: { zenith: readonly [number, number, number]; horizon: readonly [number, number, number] } }
+
+interface TargetAux {
+  panes: GPUTexture
+  panesView: GPUTextureView
+  velocity: GPUTexture
+  velocityView: GPUTextureView
+  visNormal: GPUTexture
+  visNormalView: GPUTextureView
+}
 
 /** `behind` allows a look to begin at a window plane. A released city's first view can draw while Metal compiles its mirrors. */
 export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false, deferMirrors = false): Promise<Marcher> {
   const grid = world.options.grid
-  const module = await shader(device, 'march', code(world, behind))
-  // The sun stands in the south-west, two fifths of the way up.
+  const hasCompute = typeof device.createComputePipelineAsync === 'function'
+  const canF16 = device.features?.has?.('shader-f16') ?? false
+
+  const traceDeps: TraceCodeDeps = { GLOBALS, HANDOVER, EDITED, GLASS, LIT_LETTERS, EDITS, TRIES, THROUGH, PANES, INLOOP }
+  const shadeDepsFor = (useF16: boolean): ShadeCodeDeps => ({
+    GLOBALS, SCREEN, LIGHT: lightWgsl(useF16), GLASS, PAINT, AIR, NOISE,
+    NIGHT_WALL, LANDMARK_LIGHT, LEAF_NIGHT, FOG, sunlitText,
+    PANE_LIGHT, LIT_LETTERS, EDITS, TRIES, THROUGH, INLOOP,
+  })
+
+  const buildModules = async (change?: (wgsl: string) => string) => {
+    const shadeSrc = shadeCode(world, shadeDepsFor(canF16), canF16)
+    const [shadeMod, sunMod, beamMod, visMod] = await Promise.all([
+      shader(device, 'march-shade', change ? change(shadeSrc) : shadeSrc),
+      shader(device, 'march-sun', sunCode(world, traceDeps)),
+      hasCompute ? shader(device, 'march-beam', beamCode(world, traceDeps, behind)) : Promise.resolve(null),
+      hasCompute ? shader(device, 'march-vis', visCode(world, traceDeps, behind)) : Promise.resolve(null),
+    ])
+    return { shadeMod, sunMod, beamMod, visMod }
+  }
+
+  const initMods = await buildModules()
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
-  // The pipelines of a shader module: specialised by pipeline-overridable constants (MIRRORS, FOGGY, NIGHT, FAR_MODEL,
-  // UNDERWATER, LOCAL_OCCLUDE) so daytime / above-water / non-far / Low-Medium draws compile without dead code bloating
-  // register pressure. One explicit layout for all march pipelines and one for sun maps, so one bind group serves every variant.
+
   const F = GPUShaderStage.FRAGMENT
-  const marchLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 7, visibility: F, buffer: {} }] })
-  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [marchLayout0] })
-  const sunLayout0 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }] })
+  const C = GPUShaderStage.COMPUTE
+
+  // Explicit layouts so dead-code elimination from override constants never invalidates shared bind groups.
+  const beamLayout0 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: C, buffer: {} },
+      { binding: 1, visibility: C, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: C, buffer: { type: 'read-only-storage' } },
+    ],
+  })
+  const beamLayout1 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: C, buffer: {} },
+      { binding: 1, visibility: C, storageTexture: { access: 'write-only', format: 'r32float' } },
+    ],
+  })
+  const beamLayout = device.createPipelineLayout({ bindGroupLayouts: [beamLayout0, beamLayout1] })
+
+  const visLayout0 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: C, buffer: {} },
+      { binding: 1, visibility: C, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: C, buffer: { type: 'read-only-storage' } },
+      { binding: 3, visibility: C, buffer: {} },
+    ],
+  })
+  const visLayout1 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: C, buffer: {} },
+      { binding: 1, visibility: C, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 2, visibility: C, storageTexture: { access: 'write-only', format: 'rgba32uint' } },
+      { binding: 3, visibility: C, storageTexture: { access: 'write-only', format: 'rgba32float' } },
+    ],
+  })
+  const visLayout = device.createPipelineLayout({ bindGroupLayouts: [visLayout0, visLayout1] })
+
+  const shadeLayout0 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: F, buffer: {} },
+      { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 3, visibility: F, buffer: {} },
+      { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } },
+      { binding: 5, visibility: F, texture: {} },
+      { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 7, visibility: F, buffer: {} },
+    ],
+  })
+  const shadeLayout1 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: F, texture: { sampleType: 'uint' } },
+      { binding: 1, visibility: F, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 2, visibility: F, buffer: {} },
+    ],
+  })
+  const shadeLayout = device.createPipelineLayout({ bindGroupLayouts: [shadeLayout0, shadeLayout1] })
+
+  const sunLayout0 = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: F, buffer: {} },
+      { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } },
+    ],
+  })
   const sunLayout1 = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }] })
   const sunLayout = device.createPipelineLayout({ bindGroupLayouts: [sunLayout0, sunLayout1] })
-  const keyOf = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format) =>
-    `${targetFormat}:${(mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (far ? 8 : 0) | (isUnder ? 16 : 0) | (occ ? 32 : 0)}`
-  const marchDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format): GPURenderPipelineDescriptor => ({
-    label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${far ? ' far' : ''}${isUnder ? ' under' : ''}${occ ? ' occ' : ''} (${targetFormat})`,
-    layout: marchLayout,
+
+  // ── Compute pipeline caches (Pass 0 beam & Pass 1 vis) ──
+  const visKeyOf = (mirrors: boolean, far: boolean, isUnder: boolean) =>
+    `${(mirrors ? 1 : 0) | (far ? 2 : 0) | (isUnder ? 4 : 0)}`
+  const visDesc = (mod: GPUShaderModule, mirrors: boolean, far: boolean, isUnder: boolean): GPUComputePipelineDescriptor => ({
+    label: `march-vis${mirrors ? '' : ' plain'}${far ? ' far' : ''}${isUnder ? ' under' : ''}`,
+    layout: visLayout,
+    compute: {
+      module: mod,
+      entryPoint: 'cs_vis',
+      constants: { MIRRORS: mirrors ? 1 : 0, FAR_MODEL: far ? 1 : 0, UNDERWATER: isUnder ? 1 : 0 },
+    },
+  })
+  const makeBeamPipeline = (mod: GPUShaderModule | null) =>
+    mod && hasCompute ? device.createComputePipelineAsync({ label: 'march-beam', layout: beamLayout, compute: { module: mod, entryPoint: 'cs_beam' } }) : Promise.resolve(null)
+  const makeVisPipeline = (mod: GPUShaderModule | null, mirrors: boolean, far = false, isUnder = false) =>
+    mod && hasCompute ? device.createComputePipelineAsync(visDesc(mod, mirrors, far, isUnder)) : Promise.resolve(null)
+
+  // ── Deferred Shade pipeline cache (Pass 2: no FAR_MODEL permutation needed!) ──
+  const shadeKeyOf = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format, readback = false) =>
+    `${targetFormat}:${readback ? 'rb:' : ''}${(mirrors ? 1 : 0) | (foggy ? 2 : 0) | (night ? 4 : 0) | (isUnder ? 8 : 0) | (occ ? 16 : 0)}`
+  const shadeLabel = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ: boolean, targetFormat: GPUTextureFormat, readback: boolean) => {
+    if (!foggy && !night && !isUnder && !occ && !readback && targetFormat === format) return mirrors ? 'march' : 'march without mirrors'
+    return `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}${night ? ' night' : ''}${isUnder ? ' under' : ''}${occ ? ' occ' : ''}${readback ? ' readback' : ''} (${targetFormat})`
+  }
+  const shadeTargets = (mirrors: boolean, targetFormat: GPUTextureFormat, readback: boolean): GPUColorTargetState[] => {
+    if (readback) return [{ format: targetFormat }]
+    if (!hasCompute) return mirrors ? [{ format: targetFormat }, { format: PANES_FORMAT }] : [{ format: targetFormat }]
+    return mirrors
+      ? [{ format: targetFormat }, { format: VELOCITY_FORMAT }, { format: VIS_NORMAL_FORMAT }, { format: PANES_FORMAT }]
+      : [{ format: targetFormat }, { format: VELOCITY_FORMAT }, { format: VIS_NORMAL_FORMAT }]
+  }
+  const shadeDesc = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format, readback = false): GPURenderPipelineDescriptor => ({
+    label: shadeLabel(mirrors, foggy, night, isUnder, occ, targetFormat, readback),
+    layout: shadeLayout,
     vertex: { module: mod, entryPoint: 'vs' },
     fragment: {
       module: mod,
       entryPoint: 'fs',
-      constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, FAR_MODEL: far ? 1 : 0, UNDERWATER: isUnder ? 1 : 0, LOCAL_OCCLUDE: occ ? 1 : 0 },
-      targets: mirrors ? [{ format: targetFormat }, { format: PANES_FORMAT }] : [{ format: targetFormat }],
+      constants: { MIRRORS: mirrors && !isUnder ? 1 : 0, FOGGY: foggy ? 1 : 0, NIGHT: night ? 1 : 0, UNDERWATER: isUnder ? 1 : 0, LOCAL_OCCLUDE: occ ? 1 : 0 },
+      targets: shadeTargets(mirrors, targetFormat, readback),
     },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' },
   })
-  const marchingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, far = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format) =>
-    device.createRenderPipelineAsync(marchDesc(mod, mirrors, foggy, night, far, isUnder, occ, targetFormat))
-  const marching = (mod: GPUShaderModule, defer = false) => Promise.all([defer ? null : marchingAs(mod, true), marchingAs(mod, false)])
-  const sunning = (mod: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: sunLayout, vertex: { module: mod, entryPoint: 'vs' }, fragment: { module: mod, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
-  const [initMirrors, initPlain] = await marching(module, deferMirrors)
-  let shaderNow = module
-  const pipelines = new Map<string, GPURenderPipeline>([[keyOf(false, false, false, false, false, false, format), initPlain]])
-  if (initMirrors) pipelines.set(keyOf(true, false, false, false, false, false, format), initMirrors)
-  const making = new Map<string, Promise<unknown>>()
+  const shadingAs = (mod: GPUShaderModule, mirrors: boolean, foggy = false, night = false, isUnder = false, occ = false, targetFormat: GPUTextureFormat = format, readback = false) =>
+    device.createRenderPipelineAsync(shadeDesc(mod, mirrors, foggy, night, isUnder, occ, targetFormat, readback))
+  const shading = (mod: GPUShaderModule, defer = false) => Promise.all([defer ? null : shadingAs(mod, true), shadingAs(mod, false)])
+  const sunning = (mod: GPUShaderModule) => device.createRenderPipelineAsync({
+    label: 'sun map',
+    layout: sunLayout,
+    vertex: { module: mod, entryPoint: 'vs' },
+    fragment: { module: mod, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] },
+  })
+
+  const [[initMirrors, initPlain], initSun, initBeam, initVisPlain, initVisMirrors] = await Promise.all([
+    shading(initMods.shadeMod, deferMirrors),
+    sunning(initMods.sunMod),
+    makeBeamPipeline(initMods.beamMod),
+    makeVisPipeline(initMods.visMod, false, false, false),
+    deferMirrors ? Promise.resolve(null) : makeVisPipeline(initMods.visMod, true, false, false),
+  ])
+
+  let shadeModNow = initMods.shadeMod
+  let visModNow = initMods.visMod
+  let beamPipeline = initBeam
+  let sunPipeline = initSun
+
+  const visPipelines = new Map<string, GPUComputePipeline>()
+  if (initVisPlain) visPipelines.set(visKeyOf(false, false, false), initVisPlain)
+  if (initVisMirrors) visPipelines.set(visKeyOf(true, false, false), initVisMirrors)
+  const visMaking = new Map<string, Promise<unknown>>()
+
+  const shadePipelines = new Map<string, GPURenderPipeline>([[shadeKeyOf(false, false, false, false, false, format, false), initPlain]])
+  if (initMirrors) shadePipelines.set(shadeKeyOf(true, false, false, false, false, format, false), initMirrors)
+  const shadeMaking = new Map<string, Promise<unknown>>()
   let mirrorsStarted = !deferMirrors
   let mirrorsReady = !deferMirrors
-  const warm = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false, onReady?: () => void, targetFormat: GPUTextureFormat = format) => {
-    const k = keyOf(mirrors, foggy, night, far, isUnder, occ, targetFormat)
-    if (pipelines.has(k) || making.has(k)) return
-    const of = shaderNow
-    const p = marchingAs(of, mirrors, foggy, night, far, isUnder, occ, targetFormat).then(
-      (ready) => { if (of === shaderNow) { pipelines.set(k, ready); onReady?.() } },
+
+  const warmVis = (mirrors: boolean, far: boolean, isUnder: boolean) => {
+    if (!hasCompute || !visModNow) return
+    const k = visKeyOf(mirrors, far, isUnder)
+    if (visPipelines.has(k) || visMaking.has(k)) return
+    const of = visModNow
+    const p = makeVisPipeline(of, mirrors, far, isUnder).then(
+      (ready) => { if (ready && of === visModNow) visPipelines.set(k, ready) },
+      (error: unknown) => { console.error('The vis compute pipeline could not be compiled', error) },
+    ).finally(() => { if (visMaking.get(k) === p) visMaking.delete(k) })
+    visMaking.set(k, p)
+  }
+  const requireVisPipeline = (mirrors: boolean, far: boolean, isUnder: boolean) => {
+    const k = visKeyOf(mirrors, far, isUnder)
+    let p = visPipelines.get(k)
+    if (!p && visModNow) {
+      p = device.createComputePipeline(visDesc(visModNow, mirrors, far, isUnder))
+      visPipelines.set(k, p)
+    }
+    return p!
+  }
+
+  const warmShade = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, onReady?: () => void, targetFormat: GPUTextureFormat = format, readback = false) => {
+    const k = shadeKeyOf(mirrors, foggy, night, isUnder, occ, targetFormat, readback)
+    if (shadePipelines.has(k) || shadeMaking.has(k)) return
+    const of = shadeModNow
+    const p = shadingAs(of, mirrors, foggy, night, isUnder, occ, targetFormat, readback).then(
+      (ready) => { if (of === shadeModNow) { shadePipelines.set(k, ready); onReady?.() } },
       (error: unknown) => { console.error('The march pipeline could not be compiled', error) },
-    ).finally(() => { if (making.get(k) === p) making.delete(k) })
-    making.set(k, p)
+    ).finally(() => { if (shadeMaking.get(k) === p) shadeMaking.delete(k) })
+    shadeMaking.set(k, p)
   }
   // Background-warm the daytime blast / local-light mirrors variant so a sudden daytime explosion never snaps windows opaque while Metal compiles.
-  if (initMirrors && !behind) warm(true, false, true, false, false, true, undefined, format)
-  const requirePipeline = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format) => {
-    const k = keyOf(mirrors, foggy, night, far, isUnder, occ, targetFormat)
-    let p = pipelines.get(k)
+  if (initMirrors && !behind) warmShade(true, false, true, false, true, undefined, format, false)
+  const requireShadePipeline = (mirrors: boolean, foggy: boolean, night: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format, readback = false) => {
+    const k = shadeKeyOf(mirrors, foggy, night, isUnder, occ, targetFormat, readback)
+    let p = shadePipelines.get(k)
     if (!p) {
-      p = device.createRenderPipeline(marchDesc(shaderNow, mirrors, foggy, night, far, isUnder, occ, targetFormat))
-      pipelines.set(k, p)
+      p = device.createRenderPipeline(shadeDesc(shadeModNow, mirrors, foggy, night, isUnder, occ, targetFormat, readback))
+      shadePipelines.set(k, p)
     }
     return p
   }
-  // The panes beside each size of picture the march draws (a few: the page's, a measure's, the one pixel a pick asks).
-  const panesKept = new Map<string, GPUTexture>()
-  const panesFor = (size: readonly [number, number]) => {
-    const key = `${size[0]}x${size[1]}`
-    let t = panesKept.get(key)
-    if (!t) {
-      if (panesKept.size >= 4) { const [oldest, gone] = panesKept.entries().next().value!; gone.destroy(); panesKept.delete(oldest) }
-      t = device.createTexture({ size: [size[0], size[1]], format: PANES_FORMAT, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
-      panesKept.set(key, t)
-    }
-    return t
+
+  // ── Persistent grow-only Visibility & Beam textures (0 reallocs across steer scale changes!) ──
+  const traceParams = device.createBuffer({ label: 'march-trace-params', size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const shadeExtra = device.createBuffer({ label: 'march-shade-extra', size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const traceParamsBuf = new Uint32Array(12)
+  const shadeExtraBuf = new Float32Array(20)
+
+  let visAllocW = 0, visAllocH = 0
+  let beamTex: GPUTexture | null = null, beamView: GPUTextureView
+  let vis0Tex: GPUTexture | null = null, vis0View: GPUTextureView
+  let vis1Tex: GPUTexture | null = null, vis1View: GPUTextureView
+  let beamBind1: GPUBindGroup | null = null
+  let visBind1: GPUBindGroup | null = null
+  let shadeBind1: GPUBindGroup | null = null
+
+  const ensureVisTextures = (w: number, h: number) => {
+    const needW = Math.max(1, w), needH = Math.max(1, h)
+    if (needW <= visAllocW && needH <= visAllocH && beamTex && vis0Tex && vis1Tex) return
+    visAllocW = Math.max(visAllocW, needW)
+    visAllocH = Math.max(visAllocH, needH)
+    const bw = Math.max(1, Math.ceil(visAllocW / 4))
+    const bh = Math.max(1, Math.ceil(visAllocH / 4))
+    beamTex?.destroy()
+    vis0Tex?.destroy()
+    vis1Tex?.destroy()
+    beamTex = device.createTexture({ label: 'march-beam', size: [bw, bh], format: 'r32float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING })
+    vis0Tex = device.createTexture({ label: 'march-vis0', size: [visAllocW, visAllocH], format: 'rgba32uint', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING })
+    vis1Tex = device.createTexture({ label: 'march-vis1', size: [visAllocW, visAllocH], format: 'rgba32float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING })
+    beamView = beamTex.createView()
+    vis0View = vis0Tex.createView()
+    vis1View = vis1Tex.createView()
+    beamBind1 = device.createBindGroup({
+      layout: beamLayout1,
+      entries: [{ binding: 0, resource: { buffer: traceParams } }, { binding: 1, resource: beamView }],
+    })
+    visBind1 = device.createBindGroup({
+      layout: visLayout1,
+      entries: [
+        { binding: 0, resource: { buffer: traceParams } },
+        { binding: 1, resource: beamView },
+        { binding: 2, resource: vis0View },
+        { binding: 3, resource: vis1View },
+      ],
+    })
+    shadeBind1 = device.createBindGroup({
+      layout: shadeLayout1,
+      entries: [
+        { binding: 0, resource: vis0View },
+        { binding: 1, resource: vis1View },
+        { binding: 2, resource: { buffer: shadeExtra } },
+      ],
+    })
   }
-  const panesViews = new WeakMap<GPUTexture, GPUTextureView>()
-  // Those a march with mirrors has written: one without them (which writes none) clears them first.
+  ensureVisTextures(1, 1)
+
+  // Per-allocSize MRT auxiliary cache (panes + velocity + visNormal): matches exact target attachment dimensions
+  // while causing 0 reallocs on dynamic resolution scaling (`steer`), since `to.allocSize` is grow-only.
+  const auxKept = new Map<string, TargetAux>()
+  const auxFor = (size: readonly [number, number]): TargetAux => {
+    const w = Math.max(1, size[0]), h = Math.max(1, size[1])
+    const key = `${w}x${h}`
+    let a = auxKept.get(key)
+    if (!a) {
+      if (auxKept.size >= 4) {
+        const [oldest, gone] = auxKept.entries().next().value!
+        gone.panes.destroy()
+        gone.velocity.destroy()
+        gone.visNormal.destroy()
+        auxKept.delete(oldest)
+      }
+      const panes = device.createTexture({ label: 'march-panes', size: [w, h], format: PANES_FORMAT, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+      const velocity = device.createTexture({ label: 'march-velocity', size: [w, h], format: VELOCITY_FORMAT, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+      const visNormal = device.createTexture({ label: 'march-vis-normal', size: [w, h], format: VIS_NORMAL_FORMAT, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+      a = { panes, panesView: panes.createView(), velocity, velocityView: velocity.createView(), visNormal, visNormalView: visNormal.createView() }
+      auxKept.set(key, a)
+    }
+    return a
+  }
+  let lastAux = auxFor([1, 1])
   let glassReady = true
   const panesWritten = new WeakSet<GPUTexture>()
-  const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
+  const panesView = (size: readonly [number, number]) => auxFor(size).panesView
+
+  // ── Shared Buffers & Bind Groups ──
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512 + 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: EDITS_AT + EDITS * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
-  // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
   const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT })
   const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0, sky: false, rect: [0, 0, 1, 1] as [number, number, number, number] }
-  // The road's marks (marks.ts), empty until `marks` is told them.
   let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   const localLights = createLocalLights(device)
-  const binding = () => device.createBindGroup({
-    layout: marchLayout0,
-    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }, { binding: 7, resource: { buffer: localLights.buffer } }],
+
+  const makeBeamBind0 = () => device.createBindGroup({
+    layout: beamLayout0,
+    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }],
   })
-  let bind = binding()
-  // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
-  let sunPipeline = await sunning(module)
-  const sunBinding = () => device.createBindGroup({ layout: sunLayout0, entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }] })
-  let sunBind = sunBinding()
+  const makeVisBind0 = () => device.createBindGroup({
+    layout: visLayout0,
+    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }],
+  })
+  const makeShadeBind0 = () => device.createBindGroup({
+    layout: shadeLayout0,
+    entries: [
+      { binding: 0, resource: { buffer: globals } },
+      { binding: 1, resource: { buffer: world.poolBuffer } },
+      { binding: 2, resource: { buffer: world.topBuffer } },
+      { binding: 3, resource: { buffer: looks } },
+      { binding: 4, resource: sunMaps.all },
+      { binding: 5, resource: screen.view },
+      { binding: 6, resource: { buffer: marksBuffer } },
+      { binding: 7, resource: { buffer: localLights.buffer } },
+    ],
+  })
+  const makeSunBind0 = () => device.createBindGroup({
+    layout: sunLayout0,
+    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }],
+  })
+
+  let beamBind0 = makeBeamBind0()
+  let visBind0 = makeVisBind0()
+  let shadeBind0 = makeShadeBind0()
+  let sunBind0 = makeSunBind0()
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunLayout1, entries: [{ binding: 0, resource: { buffer } }] }) }
   })
+
   const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192 + 512 + 16), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
-  /**
-   * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
-   * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
-   * light at a tenth, a night to see by, as films light it.
-   */
-  /** How far windows, lamps and signs are lit (Globals weather.z): as the day goes (the same ease as a shader's smoothstep), in rain, and a little in fog and under cloud. */
   const lightsNow = () => Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain, 0.45 * fog, 0.25 * cloud)
   const colours = () => {
     type Colour = readonly [number, number, number]
@@ -2362,14 +1033,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const times = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k]
     const hour = (night: Colour, noon: Colour, dusk: Colour) => mix(night, mix(noon, dusk, low), day)
     const [sx, , sz] = sunMaps.s, flat = Math.hypot(sx, sz) || 1, white: Colour = [1, 1, 1], dark: Colour = [0.03, 0.045, 0.085], cloudy: Colour = [0.035, 0.045, 0.075]
-    // Rain and an overcast sky: the sun is behind cloud, the sky and its fill go grey, the clouds darken. A sky of fog
-    // is a little of that: over the bank the sky stays blue, as over the Golden Gate it does. (Rain was the only grey: it still is
-    // where the others are clear, so a dry clear day is told exactly what it was told before.)
     const overcast = Math.max(rain, cloud, 0.2 * fog)
     const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, overcast * by)
-    // The real city's shade is lit by its sky and by the sunlit fronts across the street, and a photograph's white
-    // balance takes the blue out of it: lit by the sky's blue alone, every shaded road and front came out navy where
-    // the panel's photographs are grey (#450, render_checks.py shade).
     const fill = (c: Colour): Colour => world.options.surveyedWalls ? mix(c, times(white, 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), 0.55) : c
     f.set([
       ...times(mix(times([0.45, 0.58, 0.9], 0.26 * moon.light), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
@@ -2379,125 +1044,120 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       ...wet(hour(dark, [0.5, 0.66, 0.88], [1.25, 0.5, 0.1])), sx / flat,
       ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * overcast), sz / flat,
       ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * overcast), (30 - 18 * low) * (1 - overcast),
-      // Lights come on as the day goes (the same ease as a shader's smoothstep), in rain, and a little in fog and under cloud.
       rain, rain, lightsNow(), roofed,
     ], 36 + MAX_LEVELS * 32)
-    // The fog's colour: by day white lit through, grey under cloud, warm under a low sun; at night the city's lamps
-    // light it from under, a dull amber over a dark blue.
     const s = (144 + MAX_LEVELS * 128 + 128) / 4
     const lit = mix(mix([0.8, 0.82, 0.85], [0.95, 0.72, 0.6], low), [0.6, 0.62, 0.66], Math.max(rain, cloud) * 0.8)
     f.set(mix([0.07, 0.065, 0.075], times(lit, 0.9), Math.min(1, day * 1.15)), s + 12)
-    // A sky of the realm's own by day (#450, #423's photograph's: overhead and at the horizon), in place of the hour's.
-    // It gives way to the hour's as the day goes, from nine tenths of the day to half: held whole until half and then
-    // dropped, the afternoon's sky (as bright as a lamp to the last pass, which spreads such light as night comes)
-    // stood over the evening and was spread white across the picture at six o'clock, then went purple at a stroke.
     if (air.sky && day > 0.5 && !rain) {
       const own = Math.min(1, (day - 0.5) / 0.4)
       for (const [at, colour] of [[44, air.sky.zenith], [48, air.sky.horizon], [52, air.sky.horizon]] as const) { const i = at + MAX_LEVELS * 32; for (let k = 0; k < 3; k++) f[i + k] += (colour[k] - f[i + k]) * own }
     }
   }
-  /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
-  /** Where the far model's map of tiles begins (cells from the frame's corner, x and z), a tile's size, and its reach (farCover). */
+
   let farMap = [0, 0, 1, 0]
-  /** Its wedge (farCover): the apex (cells from the frame's corner, x and z), how far it reaches and the reach in it (cells), its bearings (radians). */
   let farWedge: readonly number[] | null = null
-  /** The box the wedge leaves to the cells (farCover's `keep`): low and high corners, cells from the frame's corner. */
   let farKeep: readonly number[] | null = null
-  /** The boxes the world was changed in (farCover's `edits`): low and high corners, finest cells. */
   let farEdits: readonly (readonly number[])[] = []
-  /** The lettering boards' own light (letters): world cells, as `Looks.letters` lays it out; null for none. */
   let lit: Float32Array | null = new Float32Array((2 + 2 * LIT_LETTERS) * 4)
   const farBuf = new Float32Array(4), wedgeBuf = new Float32Array(8), keepBuf = new Float32Array(8), editsBuf = new Float32Array(EDITS * 8)
   const litBuf = new Float32Array((2 + 2 * LIT_LETTERS) * 4)
+
+  // Zero-GC previous frame camera pose for analytic motion vectors (prevViewProj relative to current anchor).
+  let hasPrevView = false
+  const prevEye: [number, number, number] = [0, 0, 0]
+  const prevFwd: [number, number, number] = [0, 0, -1]
+  const prevRight: [number, number, number] = [1, 0, 0]
+  const prevUp: [number, number, number] = [0, 1, 0]
+  const prevEyeRel: [number, number, number] = [0, 0, 0]
+  const prevCam = { eye: prevEyeRel, forward: prevFwd, right: prevRight, up: prevUp, tanHalf: 1 }
+  let prevAspect = 1
+
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
-      // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
-      const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
-      // The far model's map is measured from the same corner (farCover).
-      if (farMap[3] > 0) {
-        farBuf[0] = farMap[0] - anchor[0]; farBuf[1] = farMap[1] - anchor[2]; farBuf[2] = farMap[2]; farBuf[3] = farMap[3]
-        device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, farBuf)
+    const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
+    if (farMap[3] > 0) {
+      farBuf[0] = farMap[0] - anchor[0]; farBuf[1] = farMap[1] - anchor[2]; farBuf[2] = farMap[2]; farBuf[3] = farMap[3]
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, farBuf)
+    }
+    if (farWedge) {
+      wedgeBuf[0] = farWedge[0] - anchor[0]; wedgeBuf[1] = farWedge[1] - anchor[2]
+      wedgeBuf[2] = farWedge[2]; wedgeBuf[3] = farWedge[3]; wedgeBuf[4] = farWedge[4]; wedgeBuf[5] = farWedge[5]
+      wedgeBuf[6] = 0; wedgeBuf[7] = 0
+    } else wedgeBuf.fill(0)
+    device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, wedgeBuf)
+    if (lit) {
+      for (let i = 0; i < lit.length; i += 4) {
+        litBuf[i] = lit[i] - anchor[0]; litBuf[i + 1] = lit[i + 1] - anchor[1]; litBuf[i + 2] = lit[i + 2] - anchor[2]; litBuf[i + 3] = lit[i + 3]
       }
-      if (farWedge) {
-        wedgeBuf[0] = farWedge[0] - anchor[0]; wedgeBuf[1] = farWedge[1] - anchor[2]
-        wedgeBuf[2] = farWedge[2]; wedgeBuf[3] = farWedge[3]; wedgeBuf[4] = farWedge[4]; wedgeBuf[5] = farWedge[5]
-        wedgeBuf[6] = 0; wedgeBuf[7] = 0
-      } else wedgeBuf.fill(0)
-      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, wedgeBuf)
-      if (lit) {
-        for (let i = 0; i < lit.length; i += 4) {
-          litBuf[i] = lit[i] - anchor[0]; litBuf[i + 1] = lit[i + 1] - anchor[1]; litBuf[i + 2] = lit[i + 2] - anchor[2]; litBuf[i + 3] = lit[i + 3]
-        }
-        device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 64, litBuf.subarray(0, lit.length))
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 64, litBuf.subarray(0, lit.length))
+    }
+    if (farKeep) {
+      keepBuf[0] = farKeep[0] - anchor[0]; keepBuf[1] = farKeep[1] - anchor[1]; keepBuf[2] = farKeep[2] - anchor[2]; keepBuf[3] = 0
+      keepBuf[4] = farKeep[3] - anchor[0]; keepBuf[5] = farKeep[4] - anchor[1]; keepBuf[6] = farKeep[5] - anchor[2]; keepBuf[7] = 1
+    } else keepBuf.fill(0)
+    device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, keepBuf)
+    editsBuf.fill(0)
+    const nEdits = Math.min(farEdits.length, EDITS)
+    for (let i = 0; i < nEdits; i++) {
+      const b = farEdits[i], o = i * 8
+      editsBuf[o] = b[0] - anchor[0]; editsBuf[o + 1] = b[1] - anchor[1]; editsBuf[o + 2] = b[2] - anchor[2]; editsBuf[o + 3] = 0
+      editsBuf[o + 4] = b[3] - anchor[0]; editsBuf[o + 5] = b[4] - anchor[1]; editsBuf[o + 6] = b[5] - anchor[2]; editsBuf[o + 7] = 1
+    }
+    device.queue.writeBuffer(looks, EDITS_AT, editsBuf)
+    f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
+    f.set([...view.right, size[0] / size[1]], 4)
+    f.set([...view.up, time], 8)
+    f.set(view.forward, 12)
+    u[15] = world.levels.length
+    f.set(sunMaps.s, 16)
+    u[19] = flags | (under ? UNDER : 0)
+    f.set(size, 20)
+    u[22] = 384
+    f[23] = -anchor[1]
+    f[24] = (2 * view.tanHalf) / size[1]
+    f[25] = detail
+    f[26] = day
+    f[27] = low
+    f.set(sunMaps.u, 28)
+    f[31] = sunMaps.s[0] * anchor[0] + sunMaps.s[1] * anchor[1] + sunMaps.s[2] * anchor[2]
+    f.set(sunMaps.v, 32)
+    u[35] = maps ? 1 : 0
+    world.levels.forEach((level, k) => {
+      const told = sunMaps.tell(k, anchor as [number, number, number]), sunAt = 36 + MAX_LEVELS * 20 + k * 12
+      f.set(told.base, sunAt)
+      u.set(told.drawn, sunAt + 4)
+      const at = 36 + k * 20, cell = 1 << k, { low, high } = level.whole
+      for (let a = 0; a < 3; a++) {
+        f[at + a] = low[a] * SIDE * cell - anchor[a]
+        f[at + 4 + a] = (high[a] - low[a]) * SIDE
+        u[at + 8 + a] = ((low[a] % grid[a]) + grid[a]) % grid[a]
+        i32[at + 12 + a] = low[a] * SIDE
       }
-      if (farKeep) {
-        keepBuf[0] = farKeep[0] - anchor[0]; keepBuf[1] = farKeep[1] - anchor[1]; keepBuf[2] = farKeep[2] - anchor[2]; keepBuf[3] = 0
-        keepBuf[4] = farKeep[3] - anchor[0]; keepBuf[5] = farKeep[4] - anchor[1]; keepBuf[6] = farKeep[5] - anchor[2]; keepBuf[7] = 1
-      } else keepBuf.fill(0)
-      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, keepBuf)
-      editsBuf.fill(0)
-      const nEdits = Math.min(farEdits.length, EDITS)
-      for (let i = 0; i < nEdits; i++) {
-        const b = farEdits[i], o = i * 8
-        editsBuf[o] = b[0] - anchor[0]; editsBuf[o + 1] = b[1] - anchor[1]; editsBuf[o + 2] = b[2] - anchor[2]; editsBuf[o + 3] = 0
-        editsBuf[o + 4] = b[3] - anchor[0]; editsBuf[o + 5] = b[4] - anchor[1]; editsBuf[o + 6] = b[5] - anchor[2]; editsBuf[o + 7] = 1
-      }
-      device.queue.writeBuffer(looks, EDITS_AT, editsBuf)
-      f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
-      f.set([...view.right, size[0] / size[1]], 4)
-      f.set([...view.up, time], 8)
-      f.set(view.forward, 12)
-      u[15] = world.levels.length
-      f.set(sunMaps.s, 16)
-      u[19] = flags | (under ? UNDER : 0)
-      f.set(size, 20)
-      u[22] = 384
-      // The top of the sea is the world's zero (city.rs SEA).
-      f[23] = -anchor[1]
-      f[24] = (2 * view.tanHalf) / size[1]
-      f[25] = detail
-      f[26] = day
-      f[27] = low
-      f.set(sunMaps.u, 28)
-      f[31] = sunMaps.s[0] * anchor[0] + sunMaps.s[1] * anchor[1] + sunMaps.s[2] * anchor[2]
-      f.set(sunMaps.v, 32)
-      u[35] = maps ? 1 : 0
-      world.levels.forEach((level, k) => {
-        const told = sunMaps.tell(k, anchor as [number, number, number]), sunAt = 36 + MAX_LEVELS * 20 + k * 12
-        f.set(told.base, sunAt)
-        u.set(told.drawn, sunAt + 4)
-        const at = 36 + k * 20, cell = 1 << k, { low, high } = level.whole
-        for (let a = 0; a < 3; a++) {
-          f[at + a] = low[a] * SIDE * cell - anchor[a]
-          f[at + 4 + a] = (high[a] - low[a]) * SIDE
-          u[at + 8 + a] = ((low[a] % grid[a]) + grid[a]) % grid[a]
-          i32[at + 12 + a] = low[a] * SIDE
-        }
-        f[at + 3] = 1 / cell
-        f[at + 7] = level.roof - anchor[1]
-        for (let q = 0; q < 4; q++) f[at + 16 + q] = level.roofs[q] - anchor[1]
-      })
-      // Where looks begin: the plane's normal, and how far along it the plane is from the corner everything is measured from.
-      const s = (144 + MAX_LEVELS * 128 + 128) / 4
-      if (starts) f.set([starts[0], starts[1], starts[2], starts[3] - starts[0] * anchor[0] - starts[1] * anchor[1] - starts[2] * anchor[2]], s); else f.fill(0, s, s + 4)
-      // The air (#450, the realm's own or the town's), then the fog: how thick, its top, its front and the corner,
-      // measured as the eye is; its colour is the hour's (colours).
-      f.set([air.haze, air.clouds, screen.up, screen.moon], s + 4)
-      f.set([fog * FOG_THICK, FOG_TOP, front - anchor[0], anchor[0]], s + 8)
-      f[s + 15] = anchor[2]
-      for (let i = 0; i < 8; i++) {
-        const b = beacons[i], at = s + 16 + i * 16
-        if (!b) { f.fill(0, at, at + 16); continue }
-        f.set([b.at[0] - anchor[0], b.at[1] - anchor[1], b.at[2] - anchor[2], b.night[2], b.night[0], b.night[1], b.night[3], b.night[8], b.night[4], b.night[5], b.night[6], b.night[7], b.night[9], b.night[10], b.night[11], b.reach], at)
-      }
-      f.set([...moon.sun, moon.disc], s + 16 + 8 * 16)
-      device.queue.writeBuffer(globals, 0, block)
-      return anchor as [number, number, number]
+      f[at + 3] = 1 / cell
+      f[at + 7] = level.roof - anchor[1]
+      for (let q = 0; q < 4; q++) f[at + 16 + q] = level.roofs[q] - anchor[1]
+    })
+    const s = (144 + MAX_LEVELS * 128 + 128) / 4
+    if (starts) f.set([starts[0], starts[1], starts[2], starts[3] - starts[0] * anchor[0] - starts[1] * anchor[1] - starts[2] * anchor[2]], s); else f.fill(0, s, s + 4)
+    f.set([air.haze, air.clouds, screen.up, screen.moon], s + 4)
+    f.set([fog * FOG_THICK, FOG_TOP, front - anchor[0], anchor[0]], s + 8)
+    f[s + 15] = anchor[2]
+    for (let i = 0; i < 8; i++) {
+      const b = beacons[i], at = s + 16 + i * 16
+      if (!b) { f.fill(0, at, at + 16); continue }
+      f.set([b.at[0] - anchor[0], b.at[1] - anchor[1], b.at[2] - anchor[2], b.night[2], b.night[0], b.night[1], b.night[3], b.night[8], b.night[4], b.night[5], b.night[6], b.night[7], b.night[9], b.night[10], b.night[11], b.reach], at)
+    }
+    f.set([...moon.sun, moon.disc], s + 16 + 8 * 16)
+    device.queue.writeBuffer(globals, 0, block)
+    return anchor as [number, number, number]
   }
+
   let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0, cloud = 0, fog = 0, front = 0
   let air: Air = { haze: 1, clouds: 1 }
   let beacons: readonly Beacon[] = []
   let moon: Moon = WHOLE_MOON
   colours()
+
   // One pixel to ask what is under a point (always 4-byte rgba8unorm for exact integer bit-packing readback).
   const pickFormat: GPUTextureFormat = 'rgba8unorm'
   const pointTexture = device.createTexture({ size: [1, 1], format: pickFormat, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -2516,6 +1176,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     return material ? { t: (v & 0xfffff) / 8, material, colour: v >>> 24 } : null
   }
   let picking: Promise<unknown> = Promise.resolve()
+
   const self: Marcher = {
     get rain() { return rain },
     set rain(v: number) { rain = Math.max(0, Math.min(1, v)); colours() },
@@ -2534,15 +1195,20 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     get day() { return day },
     get moon() { return moon },
     set moon(m: Moon) { if (m.disc !== moon.disc || m.light !== moon.light || m.sun.some((v, i) => v !== moon.sun[i])) { moon = m; colours() } },
-    light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
+    light(sun, isDay, isLow) {
+      sunMaps.turn(sun); day = isDay; low = isLow; colours()
+      if (lightsNow() > 0) {
+        const wantOcc = localLights.count > 0 && localLights.stats.quality === 'high'
+        warmShade(false, false, true, under, wantOcc)
+        if (mirrorsStarted || mirrorsReady) warmShade(true, false, true, under, wantOcc, () => { mirrorsReady = true })
+      }
+    },
     get air() { return air },
     set air(a: Air) { air = a; colours() },
     get beacons() { return beacons },
-    // (Those with a light of their own first: the light's loop stops at the first without.)
     set beacons(b: readonly Beacon[]) { beacons = [...b].sort((p, q) => (q.night[7] > 0 ? 1 : 0) - (p.night[7] > 0 ? 1 : 0)).slice(0, 8) },
     screen,
     pick(view, plain = false) {
-      // One at a time: there is one buffer to read the answer from, and a tool and the wand may both be asking.
       const next = picking.then(() => once(view, plain))
       picking = next.catch(() => {})
       return next
@@ -2553,20 +1219,23 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     get globals() { return globals },
     get localLights() { return localLights },
     panes: panesView,
+    get velocityView() { return lastAux.velocityView },
+    get visNormalView() { return lastAux.visNormalView },
+    get vis0View() { return vis0View },
+    get vis1View() { return vis1View },
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
     tend(encoder, view, ready, most = SUN_TILES_A_FRAME, timing) {
       const anchor = tell(view, [1, 1], 0, 0), tiles = sunMaps.plan(view.eye, Math.min(SUN_TILES_A_FRAME, most), ready)
       tiles.forEach((tile, i) => {
-        const { buffer, bind: tileBind } = sunTiles[i], corner = sunMaps.corner(tile, anchor), block = new ArrayBuffer(32)
-        new Float32Array(block).set([corner[0], corner[1], 1 << tile.level, 0, tile.slotX * SUN_TILE, tile.slotY * SUN_TILE])
-        new Uint32Array(block)[3] = tile.level
-        device.queue.writeBuffer(buffer, 0, block)
-        // (The GPU's clock, where it is asked: read as the first tile's pass begins and as the last one's ends.)
+        const { buffer, bind: tileBind } = sunTiles[i], corner = sunMaps.corner(tile, anchor), tileBlock = new ArrayBuffer(32)
+        new Float32Array(tileBlock).set([corner[0], corner[1], 1 << tile.level, 0, tile.slotX * SUN_TILE, tile.slotY * SUN_TILE])
+        new Uint32Array(tileBlock)[3] = tile.level
+        device.queue.writeBuffer(buffer, 0, tileBlock)
         const first = timing && i === 0, last = timing && i === tiles.length - 1
         const pass = encoder.beginRenderPass({ colorAttachments: [{ view: sunMaps.layers[tile.level], loadOp: 'load', storeOp: 'store' }], ...(first || last ? { timestampWrites: { querySet: timing!.querySet, ...(first ? { beginningOfPassWriteIndex: timing!.begin } : {}), ...(last ? { endOfPassWriteIndex: timing!.end } : {}) } } : {}) })
         pass.setPipeline(sunPipeline)
-        pass.setBindGroup(0, sunBind)
+        pass.setBindGroup(0, sunBind0)
         pass.setBindGroup(1, tileBind)
         pass.setViewport(tile.slotX * SUN_TILE, tile.slotY * SUN_TILE, SUN_TILE, SUN_TILE, 0, 1)
         pass.setScissorRect(tile.slotX * SUN_TILE, tile.slotY * SUN_TILE, SUN_TILE, SUN_TILE)
@@ -2575,14 +1244,19 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
       return tiles.length
     },
-    rebind() { bind = binding(); sunBind = sunBinding() },
+    rebind() {
+      beamBind0 = makeBeamBind0()
+      visBind0 = makeVisBind0()
+      shadeBind0 = makeShadeBind0()
+      sunBind0 = makeSunBind0()
+    },
     marks(bytes) {
       const words = marksGrid(bytes)
       if (!words) return -1
       marksBuffer.destroy()
       marksBuffer = device.createBuffer({ label: 'marks', size: Math.max(32, words.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
       device.queue.writeBuffer(marksBuffer, 0, words)
-      bind = binding()
+      shadeBind0 = makeShadeBind0()
       return words.length > 8 ? words[7] : 0
     },
     letters(data) { lit = data ?? new Float32Array((2 + 2 * LIT_LETTERS) * 4) },
@@ -2594,32 +1268,50 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       farEdits = edits
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
       if (reach > 0) {
+        warmVis(false, true, under)
+        if (mirrorsStarted || mirrorsReady) warmVis(true, true, under)
         const hasLocal = localLights.count > 0
         const wantNight = lightsNow() > 0 || screen.up > 0 || hasLocal
         const wantOcc = wantNight && hasLocal && localLights.stats.quality === 'high'
-        warm(false, false, wantNight, true, under, wantOcc)
-        if (mirrorsStarted || mirrorsReady) warm(true, false, wantNight, true, under, wantOcc, () => { mirrorsReady = true })
+        warmShade(false, false, wantNight, under, wantOcc)
+        if (mirrorsStarted || mirrorsReady) warmShade(true, false, wantNight, under, wantOcc, () => { mirrorsReady = true })
       }
     },
     async reshade(change) {
-      const began = performance.now(), next = await shader(device, 'march', change(code(world, behind)))
-      const compiled = performance.now() - began, [[a, plain], b] = await Promise.all([marching(next), sunning(next)])
-      // Between two frames: the pipelines, and everything bound by their layouts.
-      shaderNow = next
-      pipelines.clear()
-      making.clear()
-      pipelines.set(keyOf(false, false, false, false, false, false, format), plain)
-      if (a) pipelines.set(keyOf(true, false, false, false, false, false, format), a)
+      const began = performance.now()
+      const nextMods = await buildModules(change)
+      const compiled = performance.now() - began
+      const [[nextMirrors, nextPlain], nextSun, nextBeam, nextVisPlain, nextVisMirrors] = await Promise.all([
+        shading(nextMods.shadeMod),
+        sunning(nextMods.sunMod),
+        makeBeamPipeline(nextMods.beamMod),
+        makeVisPipeline(nextMods.visMod, false, false, false),
+        makeVisPipeline(nextMods.visMod, true, false, false),
+      ])
+      shadeModNow = nextMods.shadeMod
+      visModNow = nextMods.visMod
+      beamPipeline = nextBeam
+      sunPipeline = nextSun
+      visPipelines.clear()
+      visMaking.clear()
+      if (nextVisPlain) visPipelines.set(visKeyOf(false, false, false), nextVisPlain)
+      if (nextVisMirrors) visPipelines.set(visKeyOf(true, false, false), nextVisMirrors)
+      shadePipelines.clear()
+      shadeMaking.clear()
+      shadePipelines.set(shadeKeyOf(false, false, false, false, false, format, false), nextPlain)
+      if (nextMirrors) shadePipelines.set(shadeKeyOf(true, false, false, false, false, format, false), nextMirrors)
       mirrorsStarted = true
       mirrorsReady = true
-      sunPipeline = b; bind = binding(); sunBind = sunBinding()
+      beamBind0 = makeBeamBind0()
+      visBind0 = makeVisBind0()
+      shadeBind0 = makeShadeBind0()
+      sunBind0 = makeSunBind0()
       return { compiled, ms: performance.now() - began }
     },
     draw(encoder, to, view, flags, time, timing, only, starts) {
-      tell(view, to.size, flags, time, starts)
+      const anchor = tell(view, to.size, flags, time, starts)
       const isReadback = (flags & (PICK | COUNT)) !== 0
       const targetFormat: GPUTextureFormat = to.format ?? (isReadback ? pickFormat : format)
-      // With mirrors off no pane is looked through, and the march writes no panes (writing them was 1 to 2% of its time with mirrors off).
       const wantsMirrors = !isReadback && (flags & MIRRORS) !== 0
       const hasLocal = localLights.count > 0
       const wantNight = !isReadback && (lightsNow() > 0 || screen.up > 0 || hasLocal)
@@ -2627,56 +1319,169 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       const wantFar = farMap[3] > 0
       const wantUnder = !isReadback && (under || (flags & UNDER) !== 0)
       const wantFog = !isReadback && fog > 0
-      // Never block the main thread compiling a MIRRORS variant synchronously: warm in the background while keeping
-      // the frame running on the non-mirrors (or already-compiled daytime/non-occluded mirrors) pipeline until Metal finishes compiling.
+
+      // Select active shade pipeline (non-blocking async warming for mirrors/fog/local-occlude variants).
       let mirrors = false
       let useNight = wantNight
       let useOcc = wantOcc
       if (wantsMirrors) {
-        const wantMirrorFog = wantFog && pipelines.has(keyOf(true, true, wantNight, wantFar, wantUnder, wantOcc, targetFormat))
-        if (pipelines.has(keyOf(true, wantMirrorFog, wantNight, wantFar, wantUnder, wantOcc, targetFormat))) {
+        const wantMirrorFog = wantFog && shadePipelines.has(shadeKeyOf(true, true, wantNight, wantUnder, wantOcc, targetFormat, false))
+        if (shadePipelines.has(shadeKeyOf(true, wantMirrorFog, wantNight, wantUnder, wantOcc, targetFormat, false))) {
           mirrors = true
           mirrorsReady = true
-        } else if (wantOcc && pipelines.has(keyOf(true, false, wantNight, wantFar, wantUnder, false, targetFormat))) {
+        } else if (wantOcc && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, false, targetFormat, false))) {
           mirrors = true
           useOcc = false
-          warm(true, false, wantNight, wantFar, wantUnder, true, undefined, targetFormat)
-        } else if (wantNight && lightsNow() === 0 && screen.up === 0 && pipelines.has(keyOf(true, false, false, wantFar, wantUnder, false, targetFormat))) {
+          warmShade(true, false, wantNight, wantUnder, true, undefined, targetFormat, false)
+        } else if (wantNight && lightsNow() === 0 && screen.up === 0 && shadePipelines.has(shadeKeyOf(true, false, false, wantUnder, false, targetFormat, false))) {
           // Transient daytime local light (e.g. a blast): keep transparent glass alive while the night+mirrors variant warms in the background.
           mirrors = true
           useNight = false
           useOcc = false
-          warm(true, false, true, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat)
+          warmShade(true, false, true, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false)
         } else {
           mirrorsStarted = true
-          warm(true, false, wantNight, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat)
-          if (wantFog) warm(true, true, wantNight, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat)
+          warmShade(true, false, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false)
+          if (wantFog) warmShade(true, true, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false)
         }
       }
       let useFog = false
       if (wantFog) {
-        if (pipelines.has(keyOf(mirrors, true, useNight, wantFar, wantUnder, useOcc, targetFormat))) useFog = true
-        else warm(mirrors, true, useNight, wantFar, wantUnder, useOcc, undefined, targetFormat)
+        if (shadePipelines.has(shadeKeyOf(mirrors, true, useNight, wantUnder, useOcc, targetFormat, false))) useFog = true
+        else warmShade(mirrors, true, useNight, wantUnder, useOcc, undefined, targetFormat, false)
       }
-      const active = requirePipeline(mirrors, useFog, useNight, wantFar, wantUnder, useOcc, targetFormat)
+      const activeShade = requireShadePipeline(mirrors, useFog, useNight, wantUnder, useOcc, targetFormat, isReadback)
+
       const allocSize = to.allocSize ?? to.size
-      const panes = panesFor(allocSize)
+      const w = Math.max(1, to.size[0]), h = Math.max(1, to.size[1])
+      const runCompute = hasCompute && typeof encoder.beginComputePass === 'function'
+
+      if (runCompute) {
+        ensureVisTextures(allocSize[0], allocSize[1])
+        const ox = only ? only[0] : 0
+        const oy = only ? only[1] : 0
+        const ow = only ? only[2] : w
+        const oh = only ? only[3] : h
+        const beamW = Math.max(1, Math.ceil(w / 4))
+        const beamH = Math.max(1, Math.ceil(h / 4))
+        const useBeam = BEAM_ON
+          && (flags & (PLAIN | PICK | HEAT | COUNT | UNDER)) === 0
+          && !under
+          && w >= 16 && h >= 16
+          && beamPipeline !== null
+        const bx0 = Math.max(0, Math.floor(ox / 4) - 1)
+        const by0 = Math.max(0, Math.floor(oy / 4) - 1)
+        const bx1 = Math.min(beamW, Math.ceil((ox + ow) / 4) + 1)
+        const by1 = Math.min(beamH, Math.ceil((oy + oh) / 4) + 1)
+
+        traceParamsBuf[0] = ox; traceParamsBuf[1] = oy; traceParamsBuf[2] = ow; traceParamsBuf[3] = oh
+        traceParamsBuf[4] = bx0; traceParamsBuf[5] = by0; traceParamsBuf[6] = bx1; traceParamsBuf[7] = by1
+        traceParamsBuf[8] = beamW; traceParamsBuf[9] = beamH; traceParamsBuf[10] = useBeam ? 1 : 0; traceParamsBuf[11] = 0
+        device.queue.writeBuffer(traceParams, 0, traceParamsBuf)
+
+        // Pass 0: 1/4-res conservative cone beam pre-pass.
+        if (useBeam && beamPipeline && beamBind1) {
+          const beamPass = encoder.beginComputePass({
+            label: 'march-beam',
+            ...(timing?.beginningOfPassWriteIndex !== undefined ? { timestampWrites: { querySet: timing.querySet, beginningOfPassWriteIndex: timing.beginningOfPassWriteIndex } } : {}),
+          })
+          beamPass.setPipeline(beamPipeline)
+          beamPass.setBindGroup(0, beamBind0)
+          beamPass.setBindGroup(1, beamBind1)
+          beamPass.dispatchWorkgroups(Math.ceil((bx1 - bx0) / 8), Math.ceil((by1 - by0) / 8), 1)
+          beamPass.end()
+        }
+
+        // Pass 1: Full-res compute primary geometry + glass visibility pass (vis0/vis1).
+        const visMirrors = mirrors && !wantUnder
+        const activeVis = requireVisPipeline(visMirrors, wantFar, wantUnder)
+        if (visBind1) {
+          const visPass = encoder.beginComputePass({
+            label: 'march-vis',
+            ...(!useBeam && timing?.beginningOfPassWriteIndex !== undefined ? { timestampWrites: { querySet: timing.querySet, beginningOfPassWriteIndex: timing.beginningOfPassWriteIndex } } : {}),
+          })
+          visPass.setPipeline(activeVis)
+          visPass.setBindGroup(0, visBind0)
+          visPass.setBindGroup(1, visBind1)
+          visPass.dispatchWorkgroups(Math.ceil(ow / 8), Math.ceil(oh / 8), 1)
+          visPass.end()
+        }
+      }
+
+      // Upload previous-frame viewProjection relative to CURRENT anchor for analytic rg16float motion vectors.
+      if (!isReadback && hasPrevView) {
+        prevEyeRel[0] = prevEye[0] - anchor[0]
+        prevEyeRel[1] = prevEye[1] - anchor[1]
+        prevEyeRel[2] = prevEye[2] - anchor[2]
+        const vp = viewProjection(prevCam, prevAspect, NEAR, FAR)
+        shadeExtraBuf.set(vp, 0)
+        shadeExtraBuf[16] = 1
+        shadeExtraBuf[17] = w
+        shadeExtraBuf[18] = h
+        shadeExtraBuf[19] = 0
+      } else {
+        shadeExtraBuf.fill(0)
+        shadeExtraBuf[17] = w
+        shadeExtraBuf[18] = h
+      }
+      device.queue.writeBuffer(shadeExtra, 0, shadeExtraBuf)
+
+      const aux = isReadback ? lastAux : auxFor(allocSize)
+      if (!isReadback) lastAux = aux
       glassReady = !wantsMirrors || mirrors
-      if (mirrors) panesWritten.add(panes)
-      else if (panesWritten.has(panes)) { encoder.beginRenderPass({ colorAttachments: [{ view: panesView(allocSize), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end(); panesWritten.delete(panes) }
+      if (!isReadback) {
+        if (mirrors) panesWritten.add(aux.panes)
+        else if (panesWritten.has(aux.panes)) {
+          encoder.beginRenderPass({ colorAttachments: [{ view: aux.panesView, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end()
+          panesWritten.delete(aux.panes)
+        }
+      }
+
+      const colorAttachments: GPURenderPassColorAttachment[] = isReadback
+        ? [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }]
+        : !hasCompute
+          ? [
+              { view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
+              ...(mirrors ? [{ view: aux.panesView, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] } as const] : []),
+            ]
+          : [
+              { view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
+              { view: aux.velocityView, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] },
+              { view: aux.visNormalView, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] },
+              ...(mirrors ? [{ view: aux.panesView, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] } as const] : []),
+            ]
+
+      // Pass 2: Deferred shading, reflections, sky, depth, world normals, and analytic motion vectors.
+      const passTiming: GPURenderPassTimestampWrites | undefined = timing
+        ? runCompute
+          ? timing.endOfPassWriteIndex !== undefined
+            ? { querySet: timing.querySet, endOfPassWriteIndex: timing.endOfPassWriteIndex }
+            : undefined
+          : timing
+        : undefined
       const pass = encoder.beginRenderPass({
-        colorAttachments: [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }, ...(mirrors ? [{ view: panesView(allocSize), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] } as const] : [])],
+        colorAttachments,
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
-        ...(timing ? { timestampWrites: timing } : {}),
+        ...(passTiming ? { timestampWrites: passTiming } : {}),
       })
-      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
-      if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
-      else pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      // With mirrors off, the pipeline that has none of their text (MIRRORS): its bindings are the same.
-      pass.setPipeline(active)
-      pass.setBindGroup(0, bind)
+      pass.setViewport?.(0, 0, w, h, 0, 1)
+      if (only) pass.setScissorRect?.(only[0], only[1], only[2], only[3])
+      else pass.setScissorRect?.(0, 0, w, h)
+      pass.setPipeline(activeShade)
+      pass.setBindGroup(0, shadeBind0)
+      if (shadeBind1) pass.setBindGroup(1, shadeBind1)
       pass.draw(3)
       pass.end()
+
+      if (!isReadback) {
+        prevEye[0] = view.eye[0]; prevEye[1] = view.eye[1]; prevEye[2] = view.eye[2]
+        prevFwd[0] = view.forward[0]; prevFwd[1] = view.forward[1]; prevFwd[2] = view.forward[2]
+        prevRight[0] = view.right[0]; prevRight[1] = view.right[1]; prevRight[2] = view.right[2]
+        prevUp[0] = view.up[0]; prevUp[1] = view.up[1]; prevUp[2] = view.up[2]
+        prevCam.tanHalf = view.tanHalf
+        prevAspect = w / h
+        hasPrevView = true
+      }
     },
   }
   return self
