@@ -839,7 +839,7 @@ function handleSocial(req) {
 }
 
 /** How bodies get about: round what is in the way, after or away from someone, and who is near whom (about.mjs). */
-const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, z), tall: TALL, pace: PACE, say: inTheWay, hear: (rule, event, e) => ruled.happen(event, e, rule), rate: () => body.rate })
+const getting = about({ folk, footing, kind: (x, y, z) => core.world_kind(x, y, z), tall: TALL, pace: PACE, say: inTheWay, hear: (rule, event, e) => ruled.happen(event, e, rule), rate: () => body.rate, core: () => core })
 // Ten times a second: bodies with somewhere to go take a step, and everyone is told where they are.
 let ticks = 0
 setInterval(() => {

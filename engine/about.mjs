@@ -26,6 +26,21 @@ const NO_WAY_FOR = 3000, AGAIN_AFTER = 700
 export const APART = 6
 export const REACH_MOST = 600, MARK_WITHIN_MOST = 2000, MARKS_MOST = 32
 
+// Rust WASM NavMesh / Flow-Field / ORCA-RVO2 constants (matching engine/core/src/nav/).
+const NAV_ALLOW_VAULT = 1 << 0
+const NAV_ALLOW_DROP = 1 << 1
+const NAV_ALLOW_CLIMB = 1 << 2
+const CROWD_FLAG_STATIC = 1 << 0
+const CROWD_FLAG_IGNORE_WORLD = 1 << 2
+const FIELD_POS_X = 0, FIELD_POS_Z = 1, FIELD_POS_Y = 2
+const FIELD_VEL_X = 3, FIELD_VEL_Z = 4
+const FIELD_PREF_VX = 5, FIELD_PREF_VZ = 6
+const FIELD_RADIUS = 7, FIELD_MAX_SPEED = 8, FIELD_FLAGS = 9
+/** Fast WASM nav searches allowed per tick (vs 1/tick for JS A* fallback). */
+const WASM_SEARCHES_PER_TICK = 12
+/** Maximum vertical rise supported by Rust WASM nav climb edges (CLIMB_MAX = 64). */
+const WASM_CLIMB_MAX = 64
+
 /**
  * @param folk     everyone with a body, by key
  * @param footing  (x, y, z) => where feet come to rest in a column, coming to it at a height (a step of two up, a drop), or null
@@ -34,8 +49,13 @@ export const REACH_MOST = 600, MARK_WITHIN_MOST = 2000, MARKS_MOST = 32
  * @param pace     a walk, cells a second
  * @param say      what stopped a body, as a sentence: (x, y, z) => string
  * @param hear     (ruleId, event, e) => a rule is told something
+ * @param rate     optional clock rate multiplier () => number
+ * @param core     optional WASM core exports (or getter () => core) providing nav_* / crowd_* fast paths
+ * @param memory   optional WebAssembly.Memory override if separate from core.memory
  */
-export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }) {
+export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate, core: coreOpt, memory: memoryOpt }) {
+  const getCore = () => (typeof coreOpt === 'function' ? coreOpt() : coreOpt) ?? null
+  const getMemory = (c) => memoryOpt ?? c?.memory ?? null
   // ── Bodies do not pass through each other ──
   // A body the world moves does not step to within a body's width of anyone else with a body: a person, a seat,
   // another actor. Going away from someone is always allowed (two put on one spot can part). Whoever is near the
@@ -174,9 +194,238 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     return out
   }
   way.spent = 0
-  /** One search a tick for everyone together: the rest wait their turn standing. */
+  /** One JS A* search a tick for everyone together; WASM HPA* allows up to WASM_SEARCHES_PER_TICK searches/tick. */
   let searched = -1
-  const stats = { ways: 0, none: 0, looked: 0, ms: 0, worst: 0 }
+  let wasmSearchedTick = -1, wasmSearchesThisTick = 0
+  const stats = { ways: 0, none: 0, looked: 0, ms: 0, worst: 0, wasmWays: 0, rvoSteps: 0, rvoAgents: 0, flowActive: false }
+
+  /**
+   * Fast Rust WASM multi-layer HPA* pathfinding via `core.nav_find_path` (#164).
+   * Returns `[x, z]` waypoints compatible with `step()`, or `null` to fall back to JS `way()`
+   * (e.g. when `core` lacks WASM exports, for horizontal jump arcs, high climbs > 64 cells, or partial approach to unreachable goals).
+   */
+  function wasmWay(from, to, c) {
+    const mem = getMemory(c)
+    if (!c || !mem || typeof c.nav_find_path !== 'function' || typeof c.nav_path_ptr !== 'function' || typeof c.nav_path_len !== 'function') return null
+    if (able.jump || (able.climb ?? 0) > WASM_CLIMB_MAX) return null
+    // Rebake any nearby dirty tiles (e.g., fresh crater or player bridge) before querying.
+    if (typeof c.nav_rebake_budget === 'function' && (typeof c.nav_dirty_count !== 'function' || c.nav_dirty_count() > 0)) {
+      c.nav_rebake_budget((from[0] + to[0]) * 0.5, (from[2] + to[1]) * 0.5, 4)
+    }
+    const climbCap = able.climb ?? 0
+    let flags = NAV_ALLOW_VAULT | NAV_ALLOW_DROP
+    if (climbCap > HANDS) flags |= NAV_ALLOW_CLIMB
+    const standAt = footing(to[0], from[1], to[1]) ?? stand(to[0], from[1], to[1])?.[0]
+    let gy = standAt
+    if (gy === null || gy === undefined) {
+      const fy = typeof c.feet_at === 'function' ? c.feet_at(Math.round(to[0]), Math.round(to[1])) : from[1]
+      // Only use procedural `feet_at` when the live edited world actually has standing room there (not buried inside a built shed/wall).
+      if (Number.isFinite(fy) && kind(Math.round(to[0]), Math.round(fy) - 1, Math.round(to[1])) !== 0 && clear(to[0], fy, to[1])) {
+        gy = fy
+      } else {
+        return null
+      }
+    }
+    if (!Number.isFinite(gy)) return null
+    const count = c.nav_find_path(from[0], from[1], from[2], to[0], gy, to[1], flags)
+    if (!count || count <= 0) return null
+    const view = new Float32Array(mem.buffer, c.nav_path_ptr(), count * 4)
+    const out = []
+    let prevY = from[1]
+    for (let i = 0; i < count; i++) {
+      const wx = view[i * 4], wy = view[i * 4 + 1], wz = view[i * 4 + 2]
+      if (!Number.isFinite(wx) || !Number.isFinite(wy) || !Number.isFinite(wz)) return null
+      if (climbCap > HANDS && wy - prevY > climbCap + 1) return null
+      if (climbCap <= HANDS && wy - prevY > HANDS + 1) return null
+      prevY = wy
+      if (i === 0 && count > 1 && Math.hypot(wx - from[0], wz - from[2]) < 3) continue
+      out.push([wx, wz])
+    }
+    if (!out.length) return null
+    const end = out[out.length - 1]
+    const startDist = Math.hypot(to[0] - from[0], to[1] - from[2])
+    const endDist = Math.hypot(to[0] - end[0], to[1] - end[1])
+    // Reject degenerate paths that do not make progress toward the goal (avoids stall loops at walls).
+    if (endDist > GRID * 2 && endDist > startDist - GRID * 2) return null
+    if (Math.hypot(end[0] - from[0], end[1] - from[2]) < 2 && endDist > GRID) return null
+    if (endDist <= GRID * 1.5 && endDist > 0.5) {
+      out.push([to[0], to[1]])
+    }
+    return out
+  }
+
+  // ── Batched Rust WASM ORCA/RVO2 local crowd avoidance + budgeted nav rebake (#164) ──
+  let rvoTick = -1
+  const rvoPlan = new Map()
+  const rvoVel = new WeakMap()
+
+  function prepareTick(now, tick, dt) {
+    if (tick === rvoTick) return
+    rvoTick = tick
+    rvoPlan.clear()
+    const c = getCore()
+    if (!c) return
+
+    // Collect active ground movers for budgeted rebake & optional ORCA/RVO2 batch avoidance.
+    const movers = []
+    for (const p of folk.values()) {
+      if (p.gone || p.asleep || p.aloft || p.leap || p.scales || p.falls || p.can?.fly || p.down > now || (p.climbs ?? 0) > now) continue
+      if (p.follow) towards(p, now)
+      if (!p.goal) continue
+      movers.push(p)
+    }
+
+    // Small budgeted nav rebake near moving actors every tick so blasts/bridges update live.
+    if (movers.length && typeof c.nav_rebake_budget === 'function' && (typeof c.nav_dirty_count !== 'function' || c.nav_dirty_count() > 0)) {
+      const focus = movers[Math.abs(tick) % movers.length]
+      c.nav_rebake_budget(focus.at[0], focus.at[2], 2)
+    }
+
+    const mem = getMemory(c)
+    if (movers.length < 2 || !mem || typeof c.crowd_step !== 'function' || typeof c.crowd_agents_ptr !== 'function' || dt <= 0) {
+      stats.rvoAgents = 0
+      return
+    }
+
+    // Only run ORCA batch when at least two active movers are near enough to interact.
+    let pairNear = false
+    for (let i = 0; i < movers.length && !pairNear; i++) {
+      const a = movers[i]
+      for (let j = i + 1; j < movers.length; j++) {
+        const b = movers[j]
+        if (Math.abs(a.at[1] - b.at[1]) < tall && Math.hypot(a.at[0] - b.at[0], a.at[2] - b.at[2]) < 140) {
+          pairNear = true
+          break
+        }
+      }
+    }
+    if (!pairNear) {
+      stats.rvoAgents = 0
+      return
+    }
+
+    // Ensure nav tiles around active movers exist so RVO wall clamping sees static voxel doorways/walls.
+    if (typeof c.nav_bake_area === 'function') {
+      c.nav_bake_area(movers[0].at[0], movers[0].at[2], 2, 4)
+    }
+    if (typeof c.crowd_clear_obstacles === 'function') c.crowd_clear_obstacles()
+
+    const cap = typeof c.crowd_capacity === 'function' ? c.crowd_capacity() : 512
+    const active = []
+    for (const p of movers) {
+      if (active.length >= cap) break
+      const to = p.path?.length ? p.path[0] : p.goal
+      if (p.path?.length && to.length === 3) continue
+      // Let standard `pressed()` handle stopping cleanly beside someone standing right on `p.goal`.
+      const atGoal = blocked(p.goal[0], p.goal[1], p, p.at[1])
+      if (atGoal && Math.hypot(p.goal[0] - p.at[0], p.goal[1] - p.at[2]) < APART + 5) continue
+      active.push(p)
+    }
+    if (active.length < 2) {
+      stats.rvoAgents = 0
+      return
+    }
+
+    const activeSet = new Set(active)
+    const statics = []
+    for (const o of folk.values()) {
+      if (active.length + statics.length >= cap) break
+      if (o.gone || o.asleep || activeSet.has(o)) continue
+      for (let i = 0; i < active.length; i++) {
+        const a = active[i]
+        if (Math.abs(o.at[1] - a.at[1]) < tall && Math.hypot(o.at[0] - a.at[0], o.at[2] - a.at[2]) < 100) {
+          statics.push(o)
+          break
+        }
+      }
+    }
+
+    const total = active.length + statics.length
+    const ptr = c.crowd_agents_ptr()
+    let soa = new Float32Array(mem.buffer, ptr, cap * 10)
+    const radius = APART * 0.51 // 3.06 cells -> min pair separation 6.12 > APART (6.0)
+    for (let i = 0; i < active.length; i++) {
+      const p = active[i]
+      const to = p.path?.length ? p.path[0] : p.goal
+      const dx = to[0] - p.at[0], dz = to[1] - p.at[2], far = Math.hypot(dx, dz)
+      const spd = p.pace ?? PACE
+      const prefSpd = far > 0.5 ? Math.min(spd, far / dt) : 0
+      const pvx = far > 0.5 ? (dx / far) * prefSpd : 0
+      const pvz = far > 0.5 ? (dz / far) * prefSpd : 0
+      const prev = rvoVel.get(p)
+      const vx = prev && tick - prev.tick <= 2 ? prev.vx : pvx
+      const vz = prev && tick - prev.tick <= 2 ? prev.vz : pvz
+      const flags = p.can?.climb || p.can?.jump ? CROWD_FLAG_IGNORE_WORLD : 0
+      soa[FIELD_POS_X * cap + i] = p.at[0]
+      soa[FIELD_POS_Z * cap + i] = p.at[2]
+      soa[FIELD_POS_Y * cap + i] = p.at[1]
+      soa[FIELD_VEL_X * cap + i] = vx
+      soa[FIELD_VEL_Z * cap + i] = vz
+      soa[FIELD_PREF_VX * cap + i] = pvx
+      soa[FIELD_PREF_VZ * cap + i] = pvz
+      soa[FIELD_RADIUS * cap + i] = radius
+      soa[FIELD_MAX_SPEED * cap + i] = spd
+      soa[FIELD_FLAGS * cap + i] = flags
+    }
+    for (let k = 0; k < statics.length; k++) {
+      const i = active.length + k, o = statics[k]
+      soa[FIELD_POS_X * cap + i] = o.at[0]
+      soa[FIELD_POS_Z * cap + i] = o.at[2]
+      soa[FIELD_POS_Y * cap + i] = o.at[1]
+      soa[FIELD_VEL_X * cap + i] = 0
+      soa[FIELD_VEL_Z * cap + i] = 0
+      soa[FIELD_PREF_VX * cap + i] = 0
+      soa[FIELD_PREF_VZ * cap + i] = 0
+      soa[FIELD_RADIUS * cap + i] = radius
+      soa[FIELD_MAX_SPEED * cap + i] = 0
+      soa[FIELD_FLAGS * cap + i] = CROWD_FLAG_STATIC
+    }
+
+    c.crowd_step(total, dt, 1.8)
+    soa = new Float32Array(mem.buffer, c.crowd_agents_ptr(), cap * 10)
+    for (let i = 0; i < active.length; i++) {
+      const p = active[i]
+      const nx = soa[FIELD_POS_X * cap + i], nz = soa[FIELD_POS_Z * cap + i]
+      const vx = soa[FIELD_VEL_X * cap + i], vz = soa[FIELD_VEL_Z * cap + i]
+      if (Number.isFinite(nx) && Number.isFinite(nz) && Number.isFinite(vx) && Number.isFinite(vz)) {
+        rvoPlan.set(p, { x: nx, z: nz, vx, vz })
+        rvoVel.set(p, { vx, vz, tick })
+      }
+    }
+    stats.rvoSteps++
+    stats.rvoAgents = active.length
+  }
+
+  // ── Panic flow-field helper using Rust WASM `nav_flow_*` (#164) ──
+  function setThreats(threats) {
+    const c = getCore()
+    if (!c || typeof c.nav_flow_clear !== 'function' || typeof c.nav_flow_add_threat !== 'function' || typeof c.nav_flow_build !== 'function') {
+      stats.flowActive = false
+      return 0
+    }
+    c.nav_flow_clear()
+    const list = Array.isArray(threats) ? threats : []
+    if (!list.length) {
+      stats.flowActive = false
+      return 0
+    }
+    for (const th of list) {
+      if (Array.isArray(th) && th.length >= 4) c.nav_flow_add_threat(th[0], th[1], th[2], th[3])
+      else if (th && Array.isArray(th.at) && Number.isFinite(th.radius)) c.nav_flow_add_threat(th.at[0], th.at[1], th.at[2], th.radius)
+    }
+    const spans = c.nav_flow_build()
+    stats.flowActive = spans > 0
+    return spans
+  }
+
+  function fleeVector(x, y, z) {
+    const c = getCore(), mem = getMemory(c)
+    if (!c || !mem || typeof c.nav_flow_sample !== 'function' || typeof c.nav_flow_vec_ptr !== 'function') return null
+    if (c.nav_flow_sample(x, y, z) !== 1) return null
+    const v = new Float32Array(mem.buffer, c.nav_flow_vec_ptr(), 2)
+    if (!Number.isFinite(v[0]) || !Number.isFinite(v[1])) return null
+    return [v[0], v[1]]
+  }
 
   /** A body that follows someone, or keeps away from them, is given where to go this tick. */
   function towards(p, now) {
@@ -205,6 +454,7 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     if (p.down > now || (p.climbs ?? 0) > now) return false
     mind(p)
     const dt = 0.1 * (rate?.() ?? 1)
+    prepareTick(now, tick, dt)
     // In the air: a leap is an arc from where it left to where it lands.
     if (p.leap) {
       const l = p.leap, t = Math.min(1, (l.t += dt) / l.long)
@@ -232,10 +482,62 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     if (p.aloft) { p.frame = undefined; let y = Math.round(p.at[1]); while (y > p.at[1] - FAR_UP && !kind(Math.round(p.at[0]), y - 1, Math.round(p.at[2]))) y--; p.falls = { y, speed: 0 }; return true }
     if (!p.goal) return false
     gather(p, 90 + (p.pace ?? PACE))
+
+    // Rust WASM ORCA/RVO2 local crowd-avoidance step when 2+ actors are moving nearby (#164).
+    const plan = rvoPlan.get(p)
+    if (plan) {
+      rvoPlan.delete(p)
+      if (p.path?.length > 1 && p.path[0].length < 3 && p.path[1].length < 3) {
+        if (straight(p.at, p.path[1], 48) !== null || Math.hypot(p.path[0][0] - p.at[0], p.path[0][1] - p.at[2]) < GRID) p.path.shift()
+      }
+      const to0 = p.path?.length ? p.path[0] : p.goal
+      const dx0 = to0[0] - p.at[0], dz0 = to0[1] - p.at[2], far0 = Math.hypot(dx0, dz0)
+      if (far0 < (p.path?.length > 1 ? GRID : 1.0)) {
+        if (!p.path?.length) { p.goal = null; p.rvoYield = 0; return true }
+        p.path.shift()
+        if (!p.path.length) {
+          p.path = undefined
+          if (p.short_of) { p.stopped = p.short_of; p.short_of = undefined; p.goal = null; p.rvoYield = 0; return true }
+        }
+      }
+      const probeDist = Math.min(far0, Math.max(1.5, (p.pace ?? PACE) * dt))
+      const staticBlocked = !p.path && far0 > 1 && footing(p.at[0] + (dx0 / far0) * probeDist, p.at[1], p.at[2] + (dz0 / far0) * probeDist) === null
+      if (!staticBlocked && !(p.path?.length && p.path[0].length === 3)) {
+        const rvoWho = crowd.length ? pressed(p.at[0], p.at[2], plan.x, plan.z, APART - 0.25) : null
+        const rvoFeet = p.path || rvoWho ? null : footing(plan.x, p.at[1], plan.z)
+        const rvoAt = rvoWho ? null : p.path ? stand(plan.x, p.at[1], plan.z) : rvoFeet === null || (able.jump && p.at[1] - rvoFeet > HANDS) ? null : [rvoFeet, false]
+        if (rvoAt && rvoAt[0] - p.at[1] <= HANDS && p.at[1] - rvoAt[0] <= 30 && !rvoAt[1]) {
+          const moved = Math.hypot(plan.x - p.at[0], plan.z - p.at[2])
+          const spd = Math.hypot(plan.vx, plan.vz)
+          if (moved > 0.05 || spd > 0.5) {
+            p.rvoYield = 0
+            p.pressed = 0
+            if (spd > 0.5) p.yaw = Math.atan2(plan.vx, -plan.vz)
+            p.at = [plan.x, rvoAt[0], plan.z]
+            if (p.path?.length && p.path[0].length < 3 && Math.hypot(p.path[0][0] - p.at[0], p.path[0][1] - p.at[2]) < (p.path.length > 1 ? GRID : 1.5)) {
+              p.path.shift()
+              if (!p.path.length) {
+                p.path = undefined
+                if (p.short_of) { p.stopped = p.short_of; p.short_of = undefined; p.goal = null }
+              }
+            } else if (!p.path?.length && Math.hypot(p.goal[0] - p.at[0], p.goal[1] - p.at[2]) < 1.2) {
+              p.goal = null
+            }
+            return true
+          }
+          if ((p.rvoYield = (p.rvoYield ?? 0) + 1) <= 30) {
+            p.pressed = 0
+            return true
+          }
+          p.rvoYield = 0
+        }
+      }
+    }
+
     // By the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
     for (let left = (p.pace ?? PACE) / 10 * (rate?.() ?? 1); left > 0 && p.goal;) {
       // A way's next place is cut out when the one after can be walked to straight: the body does not zigzag a grid.
-      if (p.path?.length > 1 && p.path[0].length < 3 && p.path[1].length < 3 && straight(p.at, p.path[1], 48) !== null) p.path.shift()
+      if (p.path?.length > 1 && p.path[0].length < 3 && p.path[1].length < 3 && (straight(p.at, p.path[1], 48) !== null || Math.hypot(p.path[0][0] - p.at[0], p.path[0][1] - p.at[2]) < GRID)) p.path.shift()
       const to = p.path?.length ? p.path[0] : p.goal
       const dx = to[0] - p.at[0], dz = to[1] - p.at[2], far = Math.hypot(dx, dz), stride = Math.min(far, left, PACE / 10)
       left -= stride
@@ -276,11 +578,30 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
         if (at[1]) { p.climbs = now + CLIMB_MS; p.move = { n: (p.move?.n ?? 0) + 1, since: now, name: 'climb', long: 0.7, stays: false }; break }
         continue
       }
-      // Stopped. A way round is looked for: one search a tick for everyone, and not again at once for one not found.
+      // Stopped. Try fast Rust WASM HPA* first (up to WASM_SEARCHES_PER_TICK/tick), then fall back to JS A* (1/tick).
       const goal = p.goal
       // Kept standing by someone for two seconds, way or no way: it says so and stops, and does not look for ever.
       if (who && (p.pressed = (p.pressed ?? 0) + 1) > 20) { p.pressed = 0; p.stopped = `${who.name || 'someone'} in the way, ${Math.round(Math.hypot(goal[0] - p.at[0], goal[1] - p.at[2]))} cells short of where you were going`; p.goal = null; p.path = undefined; break }
       if (p.noWay && now < p.noWay.until && Math.hypot(goal[0] - p.noWay.to[0], goal[1] - p.noWay.to[1]) < 12) { p.stopped = p.noWay.why; p.goal = null; p.path = undefined; break }
+      const c = getCore()
+      const useWasm = !who && c && typeof c.nav_find_path === 'function' && typeof c.nav_path_ptr === 'function' && getMemory(c) && !able.jump && (able.climb ?? 0) <= WASM_CLIMB_MAX
+      if (useWasm) {
+        if (wasmSearchedTick !== tick) { wasmSearchedTick = tick; wasmSearchesThisTick = 0 }
+        if (wasmSearchesThisTick < WASM_SEARCHES_PER_TICK) {
+          wasmSearchesThisTick++
+          const began = performance.now(), wFound = wasmWay(p.at, goal, c), took = performance.now() - began
+          stats.ms += took; stats.worst = Math.max(stats.worst, took)
+          if (wFound) {
+            stats.ways++; stats.wasmWays++
+            p.path = wFound; p.pathTo = goal; p.pathAt = now
+            const end = wFound[wFound.length - 1], short = Math.hypot(goal[0] - end[0], goal[1] - end[1])
+            p.short_of = short > GRID * 1.5 ? `${say(x, p.at[1], z)}, and no way round was found: ${Math.round(short)} cells short of where it was going` : undefined
+            break
+          }
+        } else {
+          break
+        }
+      }
       if (searched === tick) break
       searched = tick
       const began = performance.now(), found = way(p.at, goal), took = performance.now() - began
@@ -382,5 +703,5 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     for (const [name, m] of Object.entries(from).slice(0, MARKS_MOST)) if (/^[a-z0-9][a-z0-9-]{0,23}$/.test(name) && Array.isArray(m?.at) && m.at.length === 2 && m.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30) && Number.isFinite(m.within) && m.within > 0) mine.set(name, { at: [m.at[0], m.at[1]], within: Math.min(MARK_WITHIN_MOST, m.within) })
     if (mine.size) marks.set(id, mine)
   }
-  return { blocked, room, step, mark, nearness, dropped: (id) => { marks.delete(id) }, stats, way, kept, back }
+  return { blocked, room, step, mark, nearness, dropped: (id) => { marks.delete(id) }, stats, way, kept, back, setThreats, fleeVector }
 }
