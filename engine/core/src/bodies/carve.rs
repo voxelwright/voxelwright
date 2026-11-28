@@ -579,6 +579,8 @@ fn finalize_carve(body: &mut Body, removed_cells: Vec<([usize; 3], Kind)>, next_
                     born: new_born,
                     live: None,
                     asleep: false,
+                    persist_sleep: false,
+                    island_id: 0,
                 };
                 rebuild_physics(&mut island, &mut s.sharp, &mut s.flat);
                 let com_in_parent = [
