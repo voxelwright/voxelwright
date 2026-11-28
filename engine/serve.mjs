@@ -4,6 +4,7 @@
 //
 //   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--inbox ~/.village/engine/inbox] [--world file] [--realms dir] [--idle 300]
 //                  [--release <folder or address of a current.json>] [--release-cache dir] [--arrive x,y,z,yaw]
+//                  [--anchor-regen-ttl seconds] [--anchor-regen-cells 256] [--anchor-compact-interval 60]
 //
 // With --world it also keeps one shared world (world.mjs): everyone who opens the page with ?shared=1 is in it,
 // what any of them breaks all of them see, and it is kept in that file across restarts. Without it there is none.
@@ -11,6 +12,10 @@
 // its own under --realms (unsaid: a folder named after the world's file; --realms alone keeps home there too), each
 // with a process of its own that is started when someone needs it and stopped when nobody has for --idle seconds.
 // "The realms" below says how.
+//
+// With --anchor-regen-ttl every world it keeps heals what is done outside its anchor zones once that has been left
+// alone so long, at most --anchor-regen-cells cells a second, and its file is compacted at most every
+// --anchor-compact-interval seconds ("Anchor zones", below). Without it nothing heals. Not with --release yet.
 //
 // With --release every world it keeps stands on San Francisco from that pinned release (sf/release.md, ground.mjs)
 // in place of the generated town: each world's process holds the release's tiles as a page's cores do, and the
@@ -40,6 +45,7 @@ import { text } from './text.mjs'
 import { controlsOf } from './page/living.ts'
 import { arrival, ground as groundOf } from './ground.mjs'
 import { createInboxRoutes, DEFAULT_INBOX } from './inbox.mjs'
+import { AnchorZoneManager, ballCovers, blocksOf, compactLogEntries, policyOf, worldRows, zoneOf } from './anchor-zones.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -510,6 +516,82 @@ function recorded(r) {
 }
 /** A realm's record after a change to it: what is given replaces what was there, and of how it looks, each part given. */
 const changed = (record, change) => ({ ...record, ...change, ...(change.look ? { look: { ...record.look, ...change.look } } : {}) })
+// ── Anchor zones (#226) ──────────────────────────────────────────────────
+// A realm's zones and what it remembers to heal are the world's process's (anchor-zones.mjs, world.mjs). This server
+// turns it on, keeps what that process remembers beside the world's file (<file>.anchors.json), compacts the file
+// when asked to, and answers for it:
+//   GET    /world/anchors        {enabled, anchors, ephemeralCells, healedTotal, untrackedCells, policy}
+//   POST   /world/anchors        {by, id, name, center: [x, y, z], radius} keeps a zone (one of that id is replaced)
+//   DELETE /world/anchors/<id>   takes one out
+// (and the same under /realm/<id>). The door (door.mjs) passes none of these: they are asked on this machine or its tailnet.
+const regenTtl = Number(arg('anchor-regen-ttl', ''))
+const ANCHORS = !process.argv.includes('--anchor-regen-ttl') ? null : policyOf({ enabled: true, regenTtlMs: regenTtl * 1000, maxCellsPerTick: Number(arg('anchor-regen-cells', '256')), compactIntervalMs: Number(arg('anchor-compact-interval', '60')) * 1000 })
+if (ANCHORS && !(regenTtl > 0)) { console.error('--anchor-regen-ttl is how many seconds what is done outside an anchor zone is left before it is healed: a number over 0'); process.exit(1) }
+// (The two cores that say what a cell was hold no release's tiles, so on one they would answer wrongly.)
+if (ANCHORS && ground) { console.error('--anchor-regen-ttl does not work on a released ground (--release) yet'); process.exit(1) }
+const anchorsFile = (worldFile) => `${worldFile}.anchors.json`
+/** Writes whole or not at all: to one side, then moved into place. */
+const replace = (file, bytes) => { writeFileSync(`${file}.part`, bytes); renameSync(`${file}.part`, file) }
+/**
+ * What a world's process is told of its anchor zones as it starts, or null where it is to do nothing of them. A server
+ * not healing forgets what was to be healed (kept things may be done over it meanwhile) and keeps the zones. A file
+ * that cannot be read turns healing off for that world: healed without its zones, what they keep would be lost.
+ */
+function anchorsFor(worldFile) {
+  let kept = null
+  try {
+    if (existsSync(anchorsFile(worldFile))) kept = AnchorZoneManager.deserialize(readFileSync(anchorsFile(worldFile), 'utf8'))
+    if (!ANCHORS && kept?.ephemeralCells) replace(anchorsFile(worldFile), JSON.stringify({ ...JSON.parse(kept.serialize()), cells: [] }))
+  } catch (e) { console.error(`${anchorsFile(worldFile)} was not read (${e.message}): nothing heals in that world`); return null }
+  return ANCHORS && { policy: ANCHORS, kept: kept?.serialize() ?? null }
+}
+/** What one of a world's frames says to compacting (anchor-zones.mjs `compactLogEntries`): one entry, or one for each of a log frame's records. */
+function entriesOf(f, frameAt) {
+  if (f.readUInt32LE(0) === ECHO) {
+    const ask = JSON.parse(f.subarray(12).toString('utf8'))
+    if (ask.restated) return [{ frameAt, restated: true }]
+    if (ask.blast) return [{ frameAt, fixed: true, covers: ballCovers([...ask.blast, ask.radius, 0]) }]
+    if (!ask.edit) return [{ frameAt, fixed: true }]
+    const blocks = [...blocksOf(ask.edit)], balls = blocks.filter((b) => b.ball).map((b) => ballCovers(b.ball)), runs = blocks.flatMap((b) => (b.ball ? [] : worldRows(b.runs, b.per)))
+    // Rows of the world's cells that are no thing's and no rule's may be cut down.
+    const plain = !balls.length && blocks.every((b) => b.per === 1) && !ask.thing && ask.gone === undefined && ask.put === undefined && ask.hold === undefined && !ask.built
+    return [plain ? { frameAt, runs, ask, ...(ask.heal ? { heal: ask.heal } : {}) } : { frameAt, fixed: true, runs, ...(balls.length ? { covers: (x, y, z) => balls.some((c) => c(x, y, z)) } : {}) }]
+  }
+  const w = new Uint32Array(f.buffer.slice(f.byteOffset + 28, f.byteOffset + f.length)), out = []
+  for (let i = 0; i < w.length; i += 2 + w[i + 1]) {
+    const record = w.subarray(i, i + 2 + w[i + 1])
+    if (record[0] !== 1) { out.push({ frameAt, fixed: true, record }); continue }
+    const runs = []
+    for (let k = 8; k < record.length; k += 5) runs.push([record[k] | 0, record[k + 1] | 0, record[k + 2] | 0, record[k + 3] | 0, record[k + 4]])
+    out.push({ frameAt, runs, record, rows: runs })
+  }
+  return out
+}
+/** The box round rows, high corner not included. */
+const boxRound = (runs) => runs.reduce((b, [x0, x1, y, z]) => [Math.min(b[0], x0), Math.min(b[1], y), Math.min(b[2], z), Math.max(b[3], x1), Math.max(b[4], y + 1), Math.max(b[5], z + 1)], [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity])
+/**
+ * A world's frames without what heals have made worthless: each [where it was, the frame as it is now] that still says
+ * something, in order; or null if all of them say what they did. A frame nothing was cut from is the same bytes.
+ */
+function compacted(log) {
+  const entries = log.flatMap(entriesOf), left = compactLogEntries(entries, Date.now())
+  if (left.length === entries.length && left.every((e, i) => e === entries[i])) return null
+  const whole = new Set(entries), byFrame = new Map()
+  for (const e of left) { const of = byFrame.get(e.frameAt); if (of) of.push(e); else byFrame.set(e.frameAt, [e]) }
+  const all = new Map()
+  for (const e of entries) all.set(e.frameAt, (all.get(e.frameAt) ?? 0) + 1)
+  return [...byFrame].map(([at, es]) => {
+    const f = log[at], kind = f.readUInt32LE(0)
+    // (A copy of an entry that was cut has other rows than it came with.)
+    if (es.length === all.get(at) && es.every((e) => whole.has(e))) return [at, f]
+    if (kind === ECHO) { const { ask, runs } = es[0]; return [at, frame(ECHO, 0, Buffer.from(JSON.stringify({ ...ask, edit: [1, runs.length, ...runs.flat()], box: boxRound(runs) })))] }
+    const records = es.map((e) => (e.record && e.runs === e.rows ? e.record : Uint32Array.from([1, 6 + e.runs.length * 5, ...boxRound(e.runs), ...e.runs.flat()])))
+    const w = new Uint32Array(records.reduce((n, r) => n + r.length, 0))
+    let i = 0
+    for (const r of records) { w.set(r, i); i += r.length }
+    return [at, frame(LOG, 0, words([0, 1, 2, 3].map((k) => f.readUInt32LE(12 + k * 4)), w))]
+  })
+}
 /** An ask as the world will do it, with nothing in it but what it may hold; or why it may not be done. */
 function allowed(body) {
   if (!body || typeof body !== 'object') return 'an ask is an object'
@@ -663,7 +745,8 @@ function open(of) {
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
   let questions = 0
-  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, fineDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, kerbs: ground.kerbs, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
+  const anchorZones = anchorsFor(worldFile)
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, fineDir, anchorZones, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, kerbs: ground.kerbs, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
   // that were in the air when the world last stopped are lost; where they came from is as they left it).
   const log = []
@@ -763,6 +846,20 @@ function open(of) {
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
   let offered = null, showing = null, bodied = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); logBytes += f.length; appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
+  /** Takes out of the world's file, and of what a page that joins is sent, what heals have made worthless. Pages here already have done it all. */
+  function compact() {
+    const began = performance.now(), had = log.length, bytes = logBytes, left = compacted(log)
+    if (!left) return
+    const now = new Map(left.map(([was], i) => [was, i]))
+    const next = left.map(([, f], i) => { const out = Buffer.from(f); out.writeUInt32LE(i, 4); return out })
+    replace(worldFile, Buffer.concat(next))
+    // (A thing's cells are a frame of its own, which is never cut: it is only somewhere else now.)
+    for (const t of things.values()) t.at = now.get(t.at)
+    log.length = 0
+    for (const f of next) log.push(f)
+    logBytes = log.reduce((n, f) => n + f.length, 0)
+    console.log(`the file of ${of.id === HOME ? 'the shared world' : `the realm ${of.id}`} was compacted: ${had} frames to ${log.length}, ${bytes} bytes to ${logBytes}, in ${(performance.now() - began).toFixed(0)} ms`)
+  }
   const minds = door({ send, answer: (thought) => thread.postMessage({ thought }), voiced: (voiced) => {
     thread.postMessage({ voiced })
     // People answer by default (#264): when someone's model first comes to answer, a world that has not put a rule of its own under that id, or taken it out, is given the engine's. It is not in the world's file: it is whatever the engine has now. Until then a world runs nothing it did not ask for.
@@ -772,6 +869,9 @@ function open(of) {
     // An object of an address's release the world's process has not on disk (#526): asked of the host once for every world here.
     if (m.wants) return void ground.fetchOnce(m.wants.url).then((got) => thread.postMessage({ got: { n: m.wants.n, ...got } }))
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
+    // What the anchor zones remember (#226), written beside the world's file; and the file compacted after heals.
+    if (m.anchorsKept !== undefined) { try { replace(anchorsFile(worldFile), m.anchorsKept) } catch (e) { console.error(`the anchor zones were not kept: ${e}`) } return }
+    if (m.compact) { try { compact() } catch (e) { console.error(`the world's file was not compacted: ${e.stack ?? e}`) } return }
     // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
     if (m.think) return minds.think(m.think)
     if (m.echo) {
@@ -983,6 +1083,25 @@ function open(of) {
       const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ social: { by, actorId, action, seed, quiet, ...(district ? { district } : {}) }, id }) })
       if (m.error) return send(res, m.status || 409, m.error)
       send(res, 200, JSON.stringify(m.social), TYPES['.json'])
+    },
+    /** Its anchor zones (#226): how they stand, one kept (a body) or one taken out (an id). */
+    async anchors(req, res, taken) {
+      if (down) return send(res, 503, 'the world has stopped')
+      if (!anchorZones) return req.method === 'GET' ? send(res, 200, JSON.stringify({ enabled: false, anchors: [], ephemeralCells: 0, healedTotal: 0 }), TYPES['.json']) : send(res, 409, 'anchor zones are not on here')
+      let op = { op: 'stats' }
+      if (req.method === 'DELETE') op = { op: 'remove', remove: taken }
+      if (req.method === 'POST') {
+        const b = await body(req, 2048)
+        if (b === null) return send(res, 413, 'too much')
+        const zone = zoneOf({ id: b?.id, name: text(b?.name, 60) || b?.id, owner: text(b?.by, 24), center: b?.center, radius: b?.radius })
+        if (typeof zone === 'string') return send(res, 400, zone)
+        op = { op: 'add', zone }
+      }
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ anchors: op, id }) })
+      if (m.error) return send(res, 409, m.error)
+      if (m.removed === false) return send(res, 404, 'no anchor zone of that id is in the world')
+      send(res, m.added ? 201 : 200, JSON.stringify(m.stats ?? (m.added ? { anchor: m.added, promoted: m.promoted } : { removed: true })), TYPES['.json'])
     },
     /** What it stands on, and what of that its process holds now (tiles by level), with this server's memory. */
     async ground(res) {
@@ -1310,7 +1429,12 @@ async function remove(r, res) {
   if (r.id === HOME) return send(res, 409, 'home is not taken out')
   realms.delete(r.id)
   await rest(r)
-  if (existsSync(r.file)) { mkdirSync(join(dirname(r.file), 'gone'), { recursive: true }); renameSync(r.file, join(dirname(r.file), 'gone', `${basename(r.file, '.log')}-${Date.now()}.log`)) }
+  if (existsSync(r.file)) {
+    const gone = join(dirname(r.file), 'gone', `${basename(r.file, '.log')}-${Date.now()}.log`)
+    mkdirSync(dirname(gone), { recursive: true }); renameSync(r.file, gone)
+    // Its anchor zones go with it: a realm made anew under its id has none.
+    if (existsSync(anchorsFile(r.file))) renameSync(anchorsFile(r.file), anchorsFile(gone))
+  }
   console.log(`the realm ${r.id} was taken out`)
   send(res, 200, '{"gone":true}', TYPES['.json'])
 }
@@ -1428,6 +1552,9 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && route === '/world/rules') return done(world.rules(url, res))
     if (req.method === 'GET' && route === '/world/realm') return world.realm(res)
     if (req.method === 'GET' && route === '/world/city') return done(world.city(res))
+    if ((req.method === 'GET' || req.method === 'POST') && route === '/world/anchors') return done(world.anchors(req, res))
+    const anchor = /^\/world\/anchors\/([a-z0-9][a-z0-9-]{0,39})$/.exec(route)
+    if (req.method === 'DELETE' && anchor) return done(world.anchors(req, res, anchor[1]))
     if (req.method === 'POST' && route === '/world/social') return done(world.social(req, res))
     if (req.method === 'GET' && route === '/world/minds') return world.minds(url, res)
     if (req.method === 'POST' && route === '/world/mind') return done(world.mind(req, res))

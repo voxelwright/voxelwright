@@ -2,6 +2,8 @@
 // world's server by its address, make/served.mjs; or a page's own world, page/maker.ts): what is under a footprint is
 // asked of it (`world.tops`). Nothing here talks to anything.
 import { FACINGS, ROWS_MOST, footprint, rows } from './form.mjs'
+import { bounds } from './qa-probes.mjs'
+export { bounds, probeMadeRows as probePlacement } from './qa-probes.mjs'
 import { compiled } from './core.mjs'
 
 /** How uneven the ground under a thing's feet may be, and how far above or below the middle of its place anything may stand in its footprint, in cells. */
@@ -73,7 +75,6 @@ export const outOf = (facing) => { const [, xz, , zz] = FACINGS[facing]; return 
 
 /** The rows as an edit (page/edits.ts), and with every row emptied: the same edit undone. */
 export const edit = (made, kind, grain = 1) => { const out = [grain === 4 ? 3 : grain === 8 ? 4 : 1, made.length]; for (const r of made) out.push(r[0], r[1], r[2], r[3], kind === undefined ? r[4] : kind); return out }
-export const bounds = (made) => { const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (const r of made) [[r[0], r[1] - 1], [r[2], r[2]], [r[3], r[3]]].forEach(([a, b], k) => { lo[k] = Math.min(lo[k], a); hi[k] = Math.max(hi[k], b) }); return [lo, hi] }
 export const middle = (made) => { const [lo, hi] = bounds(made); return lo.map((v, k) => Math.round((v + hi[k]) / 2)) }
 /**
  * Where the world is asked what an edit left unheld: a cell of air beside the thing, never one of its own. The

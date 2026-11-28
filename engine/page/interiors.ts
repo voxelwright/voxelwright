@@ -321,7 +321,7 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
     // Checkout lanes near the front left
     const chkX = mx(2.4)
     modules.push({ id: 'checkout-1', kind: 'checkout_lane', x: chkX, z: 3.0, yaw: Math.PI * 0.5 })
-    pickupPoint = [chkX + (mirror ? -1.4 : 1.4), 3.0]
+    pickupPoint = [chkX + (mirror ? -1.45 : 1.45), 3.0]
     signs.push({
       id: 'market-banner',
       title: place.name.toUpperCase(),
@@ -336,14 +336,19 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
       style,
     })
     // Supermarket NPCs: cashier worker, stock clerk, browsing shoppers, and fellow DoorSmash shoppers!
-    npcs.push({ id: 'worker-cashier', role: 'worker', x: chkX + (mirror ? 0.8 : -0.8), z: 3.1, yaw: mirror ? -Math.PI * 0.5 : Math.PI * 0.5, seed: seed + 11, label: 'Cashier', apronColor: style.bg })
+    npcs.push({ id: 'worker-cashier', role: 'worker', x: chkX + (mirror ? 0.95 : -0.95), z: 3.1, yaw: mirror ? -Math.PI * 0.5 : Math.PI * 0.5, seed: seed + 11, label: 'Cashier', apronColor: style.bg })
     npcs.push({ id: 'worker-stock', role: 'worker', x: widthM * 0.52, z: depthM - 1.8, yaw: 0, seed: seed + 22, label: 'Clerk', apronColor: style.bg })
     for (let s = 0; s < 3; s++) {
+      // Place browsing shoppers along the open aisle corridors so they never spawn inside gondola shelves.
+      const zone = shoppingZones[s % shoppingZones.length]
+      const sz = zone
+        ? Math.max(4.4, Math.min(depthM - 2.4, zone.z + (hash01(seed, 40 + s) - 0.5) * 2.0))
+        : 4.5 + hash01(seed, 40 + s) * (depthM - 6.8)
       npcs.push({
         id: `shopper-${s}`,
         role: 'shopper',
-        x: 2.0 + hash01(seed, 30 + s) * (widthM - 4.0),
-        z: 4.5 + hash01(seed, 40 + s) * (depthM - 6.8),
+        x: zone ? zone.x : 2.0 + hash01(seed, 30 + s) * (widthM - 4.0),
+        z: sz,
         yaw: hash01(seed, 50 + s) * Math.PI * 2,
         seed: seed + 100 + s * 17,
       })
@@ -352,9 +357,9 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
       npcs.push({
         id: `driver-mkt-${d}`,
         role: 'delivery_driver',
-        x: Math.max(1.4, Math.min(widthM - 1.4, pickupPoint[0] + (d - 0.5) * 1.1)),
-        z: pickupPoint[1] + 1.3 + d * 0.5,
-        yaw: Math.PI,
+        x: Math.max(1.4, Math.min(widthM - 1.4, pickupPoint[0] + (mirror ? -0.15 : 0.15) * d)),
+        z: 2.35 + d * 0.95,
+        yaw: mirror ? Math.PI * 0.5 : -Math.PI * 0.5,
         seed: seed + 300 + d * 29,
         label: 'Courier',
         packColor: d % 2 === 0 ? '#e63946' : '#2ec4b6',
@@ -362,7 +367,8 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
     }
   } else {
     // ── Non-Cookie-Cutter Restaurant / Pizzeria / Diner / Cafe / Bakery / Gelato Layout ──
-    const counterZ = depthM - 2.3
+    // Leave a full walkable kitchen aisle behind the counter (deeper for the 1.9 m wood-fired pizza oven).
+    const counterZ = cat === 'pizza' ? depthM - 3.35 : depthM - 2.65
     const counterKind: ModuleKind =
       cat === 'coffee' ? 'espresso_bar'
       : cat === 'burger' ? 'counter_steel'
@@ -379,14 +385,14 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
 
     // Signature kitchen centerpiece behind the counter!
     if (cat === 'pizza') {
-      modules.push({ id: 'hero-oven', kind: 'pizza_oven', x: mx(widthM * 0.34), z: depthM - 1.15, yaw: 0 })
+      modules.push({ id: 'hero-oven', kind: 'pizza_oven', x: mx(widthM * 0.34), z: depthM - 1.10, yaw: 0 })
       modules.push({ id: 'wine-wall', kind: 'wine_rack', x: mx(widthM - 1.2), z: depthM - 0.55, yaw: 0 })
     } else if (cat === 'coffee' || cat === 'bakery') {
-      modules.push({ id: 'back-case', kind: cat === 'coffee' ? 'bakery_case' : 'espresso_bar', x: mx(widthM * 0.72), z: depthM - 1.1, yaw: 0 })
-      modules.push({ id: 'plant-1', kind: 'planter_indoor', x: mx(1.1), z: 2.0, yaw: 0 })
+      modules.push({ id: 'back-case', kind: cat === 'coffee' ? 'bakery_case' : 'espresso_bar', x: mx(widthM * 0.72), z: depthM - 0.90, yaw: 0 })
+      modules.push({ id: 'plant-1', kind: 'planter_indoor', x: mx(0.85), z: 1.35, yaw: 0 })
     } else {
-      modules.push({ id: 'kitchen-pass', kind: 'kitchen_pass', x: mx(widthM * 0.46), z: depthM - 0.85, yaw: 0 })
-      modules.push({ id: 'plant-1', kind: 'planter_indoor', x: mx(1.0), z: depthM - 2.6, yaw: 0 })
+      modules.push({ id: 'kitchen-pass', kind: 'kitchen_pass', x: mx(widthM * 0.46), z: depthM - 0.80, yaw: 0 })
+      modules.push({ id: 'plant-1', kind: 'planter_indoor', x: mx(0.85), z: 1.35, yaw: 0 })
     }
 
     // Distinct seating arrangement by archetype (booths vs bistro tables vs window bar!)
@@ -463,16 +469,16 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
     })
 
     // NPC Workers behind the counter (yaw 0 faces -z toward customers at the entrance)
-    npcs.push({ id: 'worker-main', role: 'worker', x: mx(widthM * 0.42), z: counterZ + 0.68, yaw: 0, seed: seed + 9, label: 'Staff', apronColor: style.bg })
+    npcs.push({ id: 'worker-main', role: 'worker', x: mx(widthM * 0.42), z: counterZ + 0.80, yaw: 0, seed: seed + 9, label: 'Staff', apronColor: style.bg })
     if (widthM >= 8.2) {
-      npcs.push({ id: 'worker-cook', role: 'worker', x: mx(widthM * 0.28), z: depthM - 1.45, yaw: 0, seed: seed + 17, label: 'Chef', apronColor: '#f3f4f6' })
+      npcs.push({ id: 'worker-cook', role: 'worker', x: mx(widthM * 0.28), z: counterZ + 0.86, yaw: 0, seed: seed + 17, label: 'Chef', apronColor: '#f3f4f6' })
     }
 
     // Line of waiting NPC delivery drivers holding phones beside the pickup rack (staggered so labels stay crisp!)
     const qCount = Math.max(1, Math.min(4, driverQueueCount))
     for (let d = 0; d < qCount; d++) {
       const qx = Math.max(1.2, Math.min(widthM - 1.2, shelfX + (mirror ? 0.55 : -0.55) + (d % 2 === 0 ? 0.35 : -0.35)))
-      const qz = Math.max(2.6, counterZ - 1.65 - d * 1.35)
+      const qz = Math.max(2.3, counterZ - 1.35 - d * 0.95)
       npcs.push({
         id: `queue-driver-${d}`,
         role: 'delivery_driver',

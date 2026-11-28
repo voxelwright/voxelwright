@@ -52,10 +52,19 @@ Press `F2` or `Cmd/Ctrl+Shift+I` to toggle the dockable Studio IDE drawer (Right
 - **Live safety (`SessionControl`)**: read-only tools (`game_status`, `game_snapshot`, `game_frame`, `game_pick`, `game_perf`, `game_flight_recorder`, `game_assert`) never interrupt play. Mutating tools (`game_camera`, `game_act`, `game_world`, `game_debug`, `game_eval`) are blocked whenever a human controls a live tab, and any live key press or `Esc` instantly takes control back and invalidates in-flight agent turns.
 - **Extensible tools**: plugins calling `engine.studio?.registerExtension({ id, panels, collectors, gameTools, actions })` automatically expose new panels in **IDE Lab**, extra context records on `F9`/`F10`, and live `game_ext_<ext>_<tool>` MCP tools.
 
+## Cutaway review helpers
+
+`engine/page/studio/cutaway.ts` (#226) holds the parts of a four-view review of a made thing. Neither the Studio panels nor any shader uses them yet.
+
+- `computeReviewCameras` frames a box from a three-quarter view, the front, the side and from above into a horizontal cutaway. The cut is 14 cells above the box's base, or half way up a box no taller than that.
+- `createCutawayController` holds the cut plane's state, and `CUTAWAY_WGSL` has the clip and back-face shading functions for a shader to include.
+- `composeContactSheet` lays four equal RGBA frames out two by two with captions.
+
 ## Check
 
 ```sh
 cd engine
 npm run typecheck
 node test/studio.mjs
+node test/maker-qa.mjs   # the cutaway cameras and contact sheet, with the maker's probes
 ```

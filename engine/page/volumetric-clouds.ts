@@ -671,6 +671,41 @@ fn rayDirForUv(uv: vec2f) -> vec3f {
 }
 `
 
+// One word per 8x8 weather texels, one bit per radial altitude band.
+const MACRO_DIM = CLOUD_LUT_DIMS.weatherSize / 8
+const MACRO_WGSL = /* wgsl */ `
+${RUNTIME_UNIFORMS_WGSL}
+@group(0) @binding(0) var<uniform> u: CloudUniforms;
+@group(0) @binding(1) var weatherTex: texture_2d<f32>;
+@group(0) @binding(2) var<storage, read_write> occupancy: array<atomic<u32>>;
+
+@compute @workgroup_size(8, 8)
+fn cs_cloud_occupancy(@builtin(global_invocation_id) gid: vec3u) {
+  if (any(gid.xy >= vec2u(${MACRO_DIM}))) { return; }
+  var bounds = vec2f(0.0);
+  // Bilinear support crosses the repeat seam on both sides of this tile.
+  for (var y = -1; y <= 8; y++) {
+    for (var x = -1; x <= 8; x++) {
+      let texel = (vec2i(gid.xy) * 8 + vec2i(x,y)) & vec2i(${CLOUD_LUT_DIMS.weatherSize - 1});
+      bounds = max(bounds, textureLoad(weatherTex, texel, 0).rb);
+    }
+  }
+  let cov = clamp(mix(bounds.x * u.weather.x * 1.56, 1.0, u.weather.x * u.weather.x * 0.38), 0.0, 1.0);
+  let kind = mix(bounds.y, u.weather.z, 0.55);
+  var bits = 0u;
+  for (var i = 0u; i < 32u; i++) {
+    let lo = f32(i) / 32.0;
+    let hi = f32(i + 1u) / 32.0;
+    let grad = smoothstep(0.0, 0.10, hi) *
+      (1.0 - smoothstep(mix(0.22, 0.72, kind), mix(0.44, 0.98, kind), lo));
+    // Base shape <= 1 and detail erosion only reduces it. Final smoothstep
+    // removes densities up to 0.03. Round outward near the cutoff.
+    if (grad + cov - 1.0 >= 0.02999) { bits |= 1u << i; }
+  }
+  atomicOr(&occupancy[gid.x + gid.y * ${MACRO_DIM}u], bits);
+}
+`
+
 const TRACE_CLOUDS_WGSL = /* wgsl */ `
 ${RUNTIME_UNIFORMS_WGSL}
 
@@ -692,6 +727,46 @@ const LIGHT_CONE_XY = array<vec2f, 6>(
   vec2f(-0.52, -0.18),
   vec2f(0.28, 0.44),
 );
+
+@group(0) @binding(7) var<storage, read> cloudBits: array<u32>;
+
+// Walk horizontal columns and clip their occupied radial bands against the curved
+// shell. Return the envelope of all hits. Very long user-specified rays retain
+// their unvisited tail when the DDA budget runs out.
+fn cloudOccupiedInterval(rd: vec3f, shellSpan: vec2f) -> vec2f {
+  let scale = u.scales.x * ${MACRO_DIM}.0;
+  let origin = (u.camPosTan.xz + u.windTime.xz * u.windTime.w * 0.45) * scale;
+  let v = rd.xz * scale;
+  var cell = vec2i(floor(origin + v * shellSpan.x));
+  var t = shellSpan.x;
+  var hits = shellSpan.yx;
+  let radius = u.shell.x + u.camPosTan.y;
+  let thickness = u.shell.z - u.shell.y;
+  // Margin covers the f32 rounding in length(pPlanet)-rEarth in the marcher.
+  let pad = 4e-7 * (radius + shellSpan.y + u.shell.z);
+  for (var n = 0; n < 64 && t < shellSpan.y; n++) {
+    let faces = vec2f(cell) + select(vec2f(0), vec2f(1), v > vec2f(0));
+    let crossing = select(vec2f(1e30), (faces - origin) / v, v != vec2f(0));
+    let end = max(t, min(shellSpan.y, min(crossing.x, crossing.y)));
+    let wrapped = vec2u(cell) & vec2u(${MACRO_DIM - 1}u);
+    let bits = cloudBits[wrapped.x + wrapped.y * ${MACRO_DIM}u];
+    if (bits != 0u) {
+      let bottom = u.shell.x + u.shell.y + thickness * f32(firstTrailingBit(bits)) / 32.0 - pad;
+      let top = u.shell.x + u.shell.y + thickness * f32(firstLeadingBit(bits) + 1u) / 32.0 + pad;
+      let outer = intersectPlanetSphere(radius, rd.y, top);
+      let inner = intersectPlanetSphere(radius, rd.y, bottom);
+      var a = max(t, outer.x);
+      var b = min(end, outer.y);
+      if (a >= inner.x && a < inner.y) { a = inner.y; }
+      if (b > inner.x && b <= inner.y) { b = inner.x; }
+      if (b > a) { hits = vec2f(min(hits.x, a), max(hits.y, b)); }
+    }
+    cell += select(vec2i(0), vec2i(sign(v)), crossing <= vec2f(end));
+    t = end;
+  }
+  if (t < shellSpan.y) { hits = vec2f(min(hits.x,t), shellSpan.y); }
+  return hits;
+}
 
 fn ignNoise(xy: vec2f) -> f32 {
   return fract(52.9829189 * fract(dot(xy, vec2f(0.06711056, 0.00583715))));
@@ -870,11 +945,21 @@ fn cs_trace_clouds(@builtin(global_invocation_id) gid: vec3u) {
   var distWeight = 0.0;
   var zeroStreak = 0;
 
+  let occupied = cloudOccupiedInterval(rd, interval);
+  // Preserve the baseline three fine empty steps and subsequent two-step stride.
+  // Entry refinement and distance fading still use the original shell origin.
+  var firstStep = 0;
+  if (occupied.x > t + 3.0 * baseDt) {
+    let pairs = floor((occupied.x - t - 3.0 * baseDt) / (2.0 * baseDt));
+    t += (3.0 + 2.0 * pairs) * baseDt;
+    zeroStreak = 3;
+    firstStep = 3 + i32(pairs);
+  }
   let maxRayDist = u.camFwdMaxDist.w;
   let sunActive = dot(sunColor, vec3f(1.0)) > 1e-5;
 
-  for (var step = 0; step < 96; step++) {
-    if (step >= maxSteps || t >= tEnd || transmittance < 0.01) {
+  for (var step = firstStep; step < 96; step++) {
+    if (step >= maxSteps || t > occupied.y || t >= tEnd || transmittance < 0.01) {
       break;
     }
 
@@ -1144,13 +1229,14 @@ export async function createVolumetricClouds(
   const reportedMaxCloud: readonly [number, number] = [maxCloudW, maxCloudH]
 
   // Compile init + runtime compute shaders and sky composite shader in parallel.
-  const [genShapeMod, genDetailMod, genWeatherMod, traceMod, reprojectMod, compSkyMod] = await Promise.all([
+  const [genShapeMod, genDetailMod, genWeatherMod, traceMod, reprojectMod, compSkyMod, macroMod] = await Promise.all([
     shader(device, 'vol-clouds-gen-shape', GEN_SHAPE_WGSL),
     shader(device, 'vol-clouds-gen-detail', GEN_DETAIL_WGSL),
     shader(device, 'vol-clouds-gen-weather', GEN_WEATHER_WGSL),
     shader(device, 'vol-clouds-trace', TRACE_CLOUDS_WGSL),
     shader(device, 'vol-clouds-reproject', REPROJECT_CLOUDS_WGSL),
     shader(device, 'vol-clouds-composite-sky', COMPOSITE_SKY_WGSL),
+    shader(device, 'vol-clouds-occupancy', MACRO_WGSL),
   ])
 
   // Explicit bind group layouts (zero layout:'auto' surprises).
@@ -1175,6 +1261,7 @@ export async function createVolumetricClouds(
       { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: '2d' } },
       { binding: 4, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
       { binding: 5, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'rgba16float', viewDimension: '2d' } },
+      { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       { binding: 6, visibility: GPUShaderStage.COMPUTE, storageTexture: { access: 'write-only', format: 'r32float', viewDimension: '2d' } },
     ],
   })
@@ -1365,6 +1452,19 @@ export async function createVolumetricClouds(
   const cf = new Float32Array(compositeBacking)
   const sunTransScratch: [number, number, number] = [1, 1, 1]
 
+  const macroBuffer = device.createBuffer({
+    size: MACRO_DIM * MACRO_DIM * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  })
+  const macroPipe = await device.createComputePipelineAsync({
+    layout: 'auto', compute: { module: macroMod, entryPoint: 'cs_cloud_occupancy' },
+  })
+  const macroBind = device.createBindGroup({
+    layout: macroPipe.getBindGroupLayout(0),
+    entries: [
+      { binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: weatherView },
+      { binding: 2, resource: { buffer: macroBuffer } },
+    ],
+  })
   const traceBindGroup = device.createBindGroup({
     label: 'vol-clouds-trace-bg',
     layout: traceBgl,
@@ -1376,6 +1476,7 @@ export async function createVolumetricClouds(
       { binding: 4, resource: repeatSampler },
       { binding: 5, resource: traceView },
       { binding: 6, resource: distView },
+      { binding: 7, resource: { buffer: macroBuffer } },
     ],
   })
 
@@ -1408,7 +1509,7 @@ export async function createVolumetricClouds(
   ]
 
   // Estimated persistent GPU VRAM footprint (bytes).
-  const vramBytes =
+  const vramBytes = macroBuffer.size +
     CLOUD_LUT_DIMS.shapeSize ** 3 * 4 +
     CLOUD_LUT_DIMS.detailSize ** 3 * 4 +
     CLOUD_LUT_DIMS.weatherSize ** 2 * 4 +
@@ -1693,6 +1794,13 @@ export async function createVolumetricClouds(
       cf[7] = cloudH
       device.queue.writeBuffer(compositeUniforms, 0, compositeBacking)
 
+      encoder.clearBuffer(macroBuffer)
+      const macro = encoder.beginComputePass({ label: 'vol-clouds-occupancy' })
+      macro.setPipeline(macroPipe)
+      macro.setBindGroup(0, macroBind)
+      macro.dispatchWorkgroups(Math.ceil(MACRO_DIM / 8), Math.ceil(MACRO_DIM / 8))
+      macro.end()
+
       const ts = params.timestampWrites
 
       // Pass 1: Volumetric cloud raymarch (full quarter-res on reset, 4x4 Bayer block dispatch otherwise).
@@ -1842,6 +1950,7 @@ export async function createVolumetricClouds(
       distTex.destroy()
       historyTextures[0].destroy()
       historyTextures[1].destroy()
+      macroBuffer.destroy()
       uniformBuffer.destroy()
       compositeUniforms.destroy()
       compSkyUniformBuf?.destroy()
