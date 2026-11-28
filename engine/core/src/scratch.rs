@@ -251,7 +251,6 @@ impl Scratch {
     /// through the middle of one of its cells sets or empties that cell, a later row over an earlier. So what rows put there, the same rows of
     /// kind 0 take away. It has no blocks and no limit, and takes rows the finest copy refused for a limit.
     pub fn fine_runs(&mut self, runs: &[Run], shift: u32) -> bool {
-        use crate::kinds::FINE;
         if !self.finer || !(2..=3).contains(&shift) {
             self.refused += 1;
             return false;
@@ -279,6 +278,18 @@ impl Scratch {
             }
             return true;
         }
+        self.sector_fine_runs(runs, shift)
+    }
+
+    /// Rows of fine subcells (`1 << shift` per sector cell, 4 or 8) in this sector's own cell coordinates
+    /// (`self.low * (1 << shift)`), allowing thin features like overhead wires to stay fine at L1/L2 too (#154).
+    pub fn sector_fine_runs(&mut self, runs: &[Run], shift: u32) -> bool {
+        use crate::kinds::FINE;
+        if !self.finer || !(2..=3).contains(&shift) {
+            self.refused += 1;
+            return false;
+        }
+        let (low, side) = (self.low.map(|v| v as i64), SIDE as i64);
         let per = 1i64 << shift;
         // The part of a row that lies in this sector: its line of cells, and from which fine cell to which along it,
         // counted from the sector's side.
