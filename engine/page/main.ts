@@ -1097,17 +1097,20 @@ async function main() {
       const aspect = to.size[0] / Math.max(1, to.size[1])
       const isDebugOrPlain = (flags & (PICK | COUNT | HEAT | PLAIN)) !== 0 || march.under
       const fogLvl = Math.max(march.fog, marine.strength)
-      const overcast = Math.max(march.rain, march.cloud, 0.25 * fogLvl)
+      const overcast = Math.max(march.rain, march.cloud, 0.72 * fogLvl)
       const dayT = Math.max(0, Math.min(1, march.day / 0.22))
       const dayFade = dayT * dayT * (3 - 2 * dayT)
       const camAltKm = Math.max(0.005, pose.y * 0.001)
       const physSun = shown.rawSun
+      const weatherFogActive = fogLvl >= 0.02 || march.rain >= 0.02 || march.cloud >= 0.15
 
       const clusterActive = Boolean(clusterLightsEnabled && march.localLights.clustered && !off.has('lights') && !off.has('clusterLights'))
       const dynShadowActive = Boolean(dynShadowsEnabled && dynShadows && preset !== 'low' && (flags & SHADOWS) !== 0 && !isDebugOrPlain && !off.has('dynShadows') && march.day > 0.05 && march.sun.s[1] > 0.04)
       const skyLutActive = Boolean(skyLutEnabled && skyLut && !isDebugOrPlain && !off.has('skyLut'))
-      const volCloudsActive = Boolean(volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01)
-      const froxelFogActive = Boolean(froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500)
+      const volCloudsActive = Boolean(volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01 && dayFade >= 0.12)
+      const froxelFogActive = Boolean(froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500 && weatherFogActive)
+      if (!volCloudsActive) volCloudsNeedsReset = true
+      if (!froxelFogActive) froxelFogNeedsReset = true
       lastClusterActive = clusterActive
       lastDynShadowActive = dynShadowActive
       lastSkyLutActive = skyLutActive
@@ -1132,11 +1135,12 @@ async function main() {
       }
 
       // 2. Physically based Sky & Atmosphere LUTs (dirty-tracked; ~0.03 ms cached noop).
-      let skyExposure = 0.68
+      let skyExposure = 1.12
       let aerialStrength = 0
       if (skyLutActive && skyLut) {
         const altQuantKm = Math.round(Math.max(0.01, camAltKm) * 100) / 100
-        const atmoHaze = Math.max(0.65, Math.min(4.0, (march.air.haze ?? 1.0) * (1.0 + fogLvl * 1.4 + march.rain * 0.8 + march.cloud * 0.4)))
+        // Cap warm Mie haze during fog so foreground glass reflects cool misty coastal slate-blue sky.
+        const atmoHaze = Math.max(0.65, Math.min(2.6, (march.air.haze ?? 1.0) * (1.0 + Math.min(0.35, fogLvl * 0.35) + march.rain * 0.55 + march.cloud * 0.30)))
         skyLut.update(encoder, {
           sunDir: physSun,
           haze: atmoHaze,
@@ -1147,45 +1151,54 @@ async function main() {
           cameraTanHalfFovY: v.tanHalf,
           cameraAspect: aspect,
         })
-        // Calibrate physical Hillaire radiance to Voxelwright's linear HDR / AgX exposure across noon, sunset & night.
-        skyExposure = (0.68 + 0.95 * shown.low) * (1.0 - 0.10 * overcast)
-        aerialStrength = Math.exp(-Math.max(camAltKm - 1.0, 0) * 0.65) * dayFade * (1.0 - Math.min(1, fogLvl * 0.8))
+        // Calibrate physical Hillaire radiance to vibrant California clear-day blue (~1.12) and a gentle
+        // golden-hour boost (~1.26 max) so sunset stays rich amber without clipping or bleaching downtown.
+        skyExposure = (1.12 + 0.14 * shown.low) * (1.0 - 0.18 * overcast)
+        aerialStrength = Math.exp(-Math.max(camAltKm - 1.0, 0) * 0.65) * dayFade * (1.0 - Math.min(1, fogLvl * 0.85)) * (1.0 - 0.38 * shown.low)
       }
 
-      // 3. Quarter-res 4x4 temporally amortized Volumetric 3D Clouds.
+      // 3. Quarter-res 4x4 temporally amortized Volumetric 3D Clouds (faded cleanly off at night).
       if (volCloudsActive && volClouds) {
         if (to.size[0] > volCloudsMax[0] || to.size[1] > volCloudsMax[1]) {
           ensureVolCloudsSize(to.size[0], to.size[1])
         }
         const airCloud = Math.max(0, Math.min(1, march.air.clouds))
-        let cov = airCloud <= 0 ? 0 : 0.56 + 0.08 * airCloud
-        let dens = 4.6
-        let cType = 0.68
-        let erosion = 0.18
+        let cov = airCloud <= 0 ? 0 : 0.49 + 0.07 * airCloud
+        let dens = 7.4
+        let cType = 0.78
+        let erosion = 0.36
         if (march.cloud > 0) {
-          cov = Math.max(cov, 0.58 + march.cloud * 0.34)
-          dens = Math.max(dens, 4.6 + march.cloud * 2.4)
-          cType = Math.min(cType, 0.68 - march.cloud * 0.42)
+          cov = Math.max(cov, 0.58 + march.cloud * 0.32)
+          dens = Math.max(dens, 7.2 + march.cloud * 2.0)
+          cType = Math.min(cType, 0.78 - march.cloud * 0.46)
+          erosion = Math.min(erosion, 0.36 - march.cloud * 0.12)
         }
         if (fogLvl > 0) {
           cov = Math.max(cov, 0.60 + fogLvl * 0.26)
-          dens = Math.max(dens, 4.6 + fogLvl * 1.6)
+          dens = Math.max(dens, 6.2 + fogLvl * 1.8)
           cType = Math.min(cType, 0.35)
+          erosion = Math.min(erosion, 0.24)
         }
         if (march.rain > 0) {
-          cov = Math.max(cov, 0.62 + march.rain * 0.30)
-          dens = Math.max(dens, 4.6 + march.rain * 3.0)
+          cov = Math.max(cov, 0.66 + march.rain * 0.28)
+          dens = Math.max(dens, 6.4 + march.rain * 2.8)
           cType = Math.min(cType, 0.22)
+          erosion = Math.min(erosion, 0.20)
         }
-        const isNightClouds = march.day < 0.05 || physSun[1] < -0.04
-        cov = Math.min(0.94, cov * (isNightClouds ? 0.85 : 1.0))
-        const cloudStrength = isNightClouds ? 0.45 : (0.78 + 0.22 * Math.max(airCloud, march.cloud, fogLvl, march.rain))
-        const sunAtten = 1.0 - march.rain * 0.42 - march.cloud * 0.25 - fogLvl * 0.18
-        const cloudSunDir: [number, number, number] = isNightClouds ? [march.sun.s[0], march.sun.s[1], march.sun.s[2]] : [physSun[0], physSun[1], physSun[2]]
-        const cloudSunCol: [number, number, number] = isNightClouds
-          ? [0.032 * march.moon.light, 0.042 * march.moon.light, 0.072 * march.moon.light]
-          : [3.35 * sunAtten, 3.18 * sunAtten, 2.98 * sunAtten]
-        const fogAmbBoost = !isNightClouds && (fogLvl > 0.05 || march.cloud > 0.1) ? Math.max(fogLvl, march.cloud) : 0
+        cov = Math.min(0.94, cov)
+        const twilightFade = Math.min(1, Math.max(0, (dayFade - 0.12) / 0.26))
+        const cloudStrength = twilightFade * (0.86 + 0.14 * Math.max(airCloud, march.cloud, fogLvl, march.rain))
+        const sunAtten = (1.0 - march.rain * 0.45 - march.cloud * 0.28 - fogLvl * 0.30) * (1.0 - 0.34 * shown.low)
+        const cloudSunDir: [number, number, number] = [physSun[0], physSun[1], physSun[2]]
+        const cloudSunCol: [number, number, number] = [3.55 * sunAtten, 3.40 * sunAtten, 3.22 * sunAtten]
+        const cloudSilverG = (0.72 - 0.18 * shown.low) * (1.0 - 0.35 * fogLvl)
+        const fogAmbBoost = fogLvl > 0.05 || march.cloud > 0.1 ? Math.max(fogLvl, march.cloud) : 0
+        const ambSkyCol: [number, number, number] = fogAmbBoost > 0
+          ? [0.34 + 0.20 * fogAmbBoost, 0.42 + 0.18 * fogAmbBoost, 0.54 + 0.14 * fogAmbBoost]
+          : [0.30 + 0.08 * shown.low, 0.44 - 0.12 * shown.low, 0.68 - 0.26 * shown.low]
+        const ambGndCol: [number, number, number] = fogAmbBoost > 0
+          ? [0.22 + 0.14 * fogAmbBoost, 0.25 + 0.15 * fogAmbBoost, 0.30 + 0.16 * fogAmbBoost]
+          : [0.15 + 0.08 * shown.low, 0.17 - 0.02 * shown.low, 0.22 - 0.06 * shown.low]
         volClouds.update(encoder, {
           renderSize: to.size,
           cameraPosKm: [pose.x * 0.001, camAltKm, pose.z * 0.001],
@@ -1196,19 +1209,10 @@ async function main() {
           aspect,
           sunDir: cloudSunDir,
           sunColor: cloudSunCol,
-          applySunTransmittance: !isNightClouds,
-          ...(isNightClouds
-            ? {
-                ambientSky: [0.004, 0.006, 0.014] as const,
-                ambientGround: [0.002, 0.003, 0.006] as const,
-                silverLiningG: 0.42,
-              }
-            : fogAmbBoost > 0
-              ? {
-                  ambientSky: [0.28 + 0.26 * fogAmbBoost, 0.36 + 0.22 * fogAmbBoost, 0.50 + 0.14 * fogAmbBoost] as const,
-                  ambientGround: [0.16 + 0.18 * fogAmbBoost, 0.16 + 0.19 * fogAmbBoost, 0.18 + 0.20 * fogAmbBoost] as const,
-                }
-              : {}),
+          applySunTransmittance: true,
+          ambientSky: ambSkyCol,
+          ambientGround: ambGndCol,
+          silverLiningG: cloudSilverG,
           coverage: cov,
           densityScale: dens,
           cloudType: cType,
@@ -1228,7 +1232,7 @@ async function main() {
       }
 
       // 4. Prepare people before dynamic shadows & march so both dynamic shadows and overlay-tbdr share one pass.
-      const drawPeople = !off.has('people') && folk.prepare(to, v, seconds)
+      const drawPeople = !off.has('people') && folk.prepare(to, v, seconds, dynShadowActive)
 
       // 5. Dynamic-object 2-cascade directional shadow maps (cars/pieces + people -> sampled in march-shade.ts).
       if (dynShadowActive && dynShadows) {
@@ -1261,7 +1265,8 @@ async function main() {
           resetHistory: taaReset,
           gtaoFrame: taaActive ? taaFrame : 0,
           gtaoTiming: timed ? { prefilter0: { querySet: clock.set, beginningOfPassWriteIndex: 6 }, denoise: { querySet: clock.set, endOfPassWriteIndex: 7 } } : undefined,
-          skyLutBlend: skyLutActive ? 1.0 : 0.0,
+          // Blend physical sky LUT smoothly back to calibrated legacy navy night sky as dayFade -> 0.
+          skyLutBlend: skyLutActive ? dayFade : 0.0,
           skySunDir: physSun,
           skyExposure,
           skyOvercast: overcast,
@@ -1333,37 +1338,42 @@ async function main() {
       }
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
 
-      // 6. 3D Froxel Volumetric Fog (composited onto linear HDR BEFORE TAA & bloom).
+      // 6. 3D Froxel Volumetric Fog (active only during fog/rain/overcast; composited onto linear HDR BEFORE TAA & bloom).
       if (froxelFogActive && froxelFog) {
         march.localLights.feedFroxel(froxelFog, 64)
-        const baseDens = 0.00008 + fogLvl * 0.0014 + march.rain * 0.00095 + march.cloud * 0.00035
-        const heightDens = 0.00018 + fogLvl * 0.0070 + march.rain * 0.0016 + march.cloud * 0.0006
-        const nearDist = fogLvl > 0.05 ? 85 : 45
-        const wNoise = fogLvl > 0.05 ? 0.72 : (march.rain > 0.05 ? 0.55 : 0.35)
+        const cloudMist = Math.max(0, march.cloud - 0.15)
+        const baseDens = fogLvl * 0.00095 + march.rain * 0.00075 + cloudMist * 0.00025
+        const heightDens = fogLvl * 0.0049 + march.rain * 0.0014 + cloudMist * 0.00045
+        // Push fog onset past the immediate 19m foreground so nearby buildings keep crisp cool slate
+        // contrast and intersection traffic stays readable while distant skyscrapers dissolve into mist.
+        const nearDist = fogLvl > 0.05 ? 190 : 110
+        const wNoise = fogLvl > 0.05 ? 0.65 : (march.rain > 0.05 ? 0.52 : 0.32)
         // froxel-fog.ts multiplies ambientSky/ambientGround by INV_4PI (1 / 12.566), so scale by 4*PI
-        // for bright luminous daytime coastal Karl-the-Fog while keeping night fog moody & dark navy.
+        // for cool coastal Karl-the-Fog mist while keeping night fog moody & dark navy.
         const FOUR_PI = 12.5663706
-        const sunMul = march.day * (1.0 - march.rain * 0.48 - march.cloud * 0.32 - fogLvl * 0.15)
-        const lowMix = shown.low
+        const sunVis = Math.max(0, (1.0 - fogLvl * 0.85) * (1.0 - march.rain * 0.55) * (1.0 - march.cloud * 0.35))
+        const sunAniso = 0.65 * (1.0 - fogLvl) + 0.25 * fogLvl
+        const sunMul = march.day * (1.0 - fogLvl * 0.65) * (1.0 - march.rain * 0.45) * (1.0 - march.cloud * 0.30)
+        const lowMix = shown.low * (1.0 - fogLvl * 0.85)
         const fSunCol: [number, number, number] = march.day > 0.03
-          ? [(4.4 + 2.8 * lowMix) * sunMul, (4.2 - 0.8 * lowMix) * sunMul, (3.8 - 2.1 * lowMix) * sunMul]
-          : [0.055 * march.moon.light, 0.075 * march.moon.light, 0.13 * march.moon.light]
-        const dayLit = 0.15 + 0.85 * march.day
-        const mistWarm = lowMix * 0.35
-        const fAmbSky: [number, number, number] = march.day > 0.03
           ? [
-              (0.58 + 0.18 * fogLvl + 0.16 * mistWarm - 0.16 * march.rain) * dayLit * FOUR_PI,
-              (0.64 + 0.14 * fogLvl - 0.04 * mistWarm - 0.15 * march.rain) * dayLit * FOUR_PI,
-              (0.74 + 0.08 * fogLvl - 0.18 * mistWarm - 0.14 * march.rain) * dayLit * FOUR_PI,
+              ((3.4 + 1.4 * lowMix) * (1.0 - fogLvl) + 2.2 * 0.84 * fogLvl) * sunMul,
+              ((3.4 - 0.3 * lowMix) * (1.0 - fogLvl) + 2.2 * 0.88 * fogLvl) * sunMul,
+              ((3.4 - 1.1 * lowMix) * (1.0 - fogLvl) + 2.2 * 0.95 * fogLvl) * sunMul,
             ]
+          : [0.055 * march.moon.light, 0.075 * march.moon.light, 0.13 * march.moon.light]
+        const dayLit = 0.16 + 0.84 * march.day
+        const rainDim = 1.0 - 0.24 * march.rain
+        const coolSkyR = (0.66 * (1.0 - fogLvl) + 0.84 * fogLvl) * dayLit * rainDim * FOUR_PI
+        const coolSkyG = (0.72 * (1.0 - fogLvl) + 0.88 * fogLvl) * dayLit * rainDim * FOUR_PI
+        const coolSkyB = (0.80 * (1.0 - fogLvl) + 0.95 * fogLvl) * dayLit * rainDim * FOUR_PI
+        const fAmbSky: [number, number, number] = march.day > 0.03
+          ? [coolSkyR, coolSkyG, coolSkyB]
           : [0.09, 0.12, 0.21]
         const fAmbGnd: [number, number, number] = march.day > 0.03
-          ? [
-              (0.42 + 0.14 * fogLvl + 0.10 * mistWarm - 0.12 * march.rain) * dayLit * FOUR_PI,
-              (0.45 + 0.13 * fogLvl - 0.02 * mistWarm - 0.12 * march.rain) * dayLit * FOUR_PI,
-              (0.50 + 0.12 * fogLvl - 0.10 * mistWarm - 0.10 * march.rain) * dayLit * FOUR_PI,
-            ]
-          : [0.10, 0.08, 0.07]
+          ? [coolSkyR * 0.78, coolSkyG * 0.79, coolSkyB * 0.81]
+          : [0.08, 0.09, 0.13]
+        const fogSkyWeight = Math.min(1, Math.max(0, fogLvl * 1.15 + march.rain * 0.65 + cloudMist * 0.45))
         froxelFog.update(encoder, {
           view: v,
           aspect,
@@ -1379,8 +1389,8 @@ async function main() {
           extinctionScale: 1.0,
           sunDir: march.sun.s,
           sunColor: fSunCol,
-          sunAnisotropy: 0.72,
-          sunVisibility: 1.0 - march.rain * 0.45 - march.cloud * 0.30,
+          sunAnisotropy: sunAniso,
+          sunVisibility: sunVis,
           ambientSky: fAmbSky,
           ambientGround: fAmbGnd,
           temporalAlpha: 0.10,
@@ -1396,6 +1406,7 @@ async function main() {
           depth: to.depth,
           farDepth: farModel.depth,
           viewportSize: to.size,
+          skyWeight: fogSkyWeight,
         })
         froxelFogRan = true
       }

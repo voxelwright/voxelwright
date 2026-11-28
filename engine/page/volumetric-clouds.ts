@@ -40,12 +40,12 @@ export const DEFAULT_CLOUD_SHELL = {
   cloudMaxAltKm: 3.8,
   maxRayDistKm: 110.0,
   coverage: 0.55,
-  densityScale: 4.5,
-  cloudType: 0.65,
-  detailErosion: 0.22,
-  weatherTileKm: 48.0,
-  shapeTileKm: 12.0,
-  detailTileKm: 1.6,
+  densityScale: 4.8,
+  cloudType: 0.68,
+  detailErosion: 0.34,
+  weatherTileKm: 30.0,
+  shapeTileKm: 8.0,
+  detailTileKm: 0.95,
   silverLiningG: 0.80,
   backScatterG: -0.30,
 } as const
@@ -436,8 +436,8 @@ fn cs_gen_shape(@builtin(global_invocation_id) gid: vec3u) {
   let w0 = worleyFbm3(uvw, 4.0, 23u);
   let w1 = worleyFbm3(uvw, 8.0, 41u);
   let w2 = worleyFbm3(uvw, 16.0, 67u);
-  // Nubis-style Perlin-Worley billowy base shape in .r, 3 Worley octaves in .gba
-  let perlinWorley = clamp(remapVal(perlin, 0.0, 1.0, w0 * 0.55, 1.0), 0.0, 1.0);
+  // Nubis-style Perlin-Worley billowy base shape in .r with crisp Worley ridges, 3 Worley octaves in .gba
+  let perlinWorley = clamp(remapVal(perlin, 0.0, 1.0, w0 * 0.46, 1.0) * 1.08, 0.0, 1.0);
   textureStore(shapeOut, vec3i(gid), vec4f(perlinWorley, w0, w1, w2));
 }
 `
@@ -529,10 +529,10 @@ fn cs_gen_weather(@builtin(global_invocation_id) gid: vec3u) {
     return;
   }
   let uv = (vec2f(gid.xy) + 0.5) / f32(size);
-  // Macro coverage: multi-octave Perlin + Worley banks with clear sky gaps & dense cumulus clusters
+  // Macro coverage: multi-octave Perlin + Worley banks with crisp open blue sky gaps & dense cumulus clusters
   let pCov = perlin2(uv, 3.0, 211u) * 0.55 + perlin2(uv, 6.0, 227u) * 0.30 + perlin2(uv, 12.0, 241u) * 0.15;
   let wCov = worley2(uv, 4.0, 257u) * 0.65 + worley2(uv, 8.0, 271u) * 0.35;
-  let cov = clamp(mix(pCov, wCov, 0.38) * 1.15 - 0.04, 0.18, 0.98);
+  let cov = clamp((mix(pCov, wCov, 0.42) - 0.12) * 1.36, 0.08, 0.98);
 
   // Precipitation / optical density variation
   let prec = clamp(0.55 + 0.45 * (perlin2(uv, 4.0, 307u) * 0.65 + perlin2(uv, 8.0, 317u) * 0.35), 0.45, 1.0);
@@ -705,9 +705,9 @@ fn hgPhase(cosTheta: f32, g: f32) -> f32 {
 }
 
 fn heightGradient(h: f32, cloudType: f32) -> f32 {
-  let topStart = mix(0.24, 0.76, cloudType);
+  let topStart = mix(0.22, 0.72, cloudType);
   let topEnd = mix(0.44, 0.98, cloudType);
-  let bot = smoothstep(0.0, 0.12, h);
+  let bot = smoothstep(0.0, 0.10, h);
   let top = 1.0 - smoothstep(topStart, topEnd, h);
   return bot * top;
 }
@@ -722,8 +722,8 @@ fn sampleCloudDensity(posKm: vec3f, h: f32, useDetail: bool) -> f32 {
   let weather = textureSampleLevel(weatherTex, repeatSamp, weatherUv, 0.0);
 
   let cov = clamp(u.weather.x, 0.0, 1.0);
-  let localCov = clamp(mix(weather.r * cov * 1.45, 1.0, cov * cov * 0.45), 0.0, 1.0);
-  let cType = clamp(mix(weather.b, u.weather.z, 0.5), 0.0, 1.0);
+  let localCov = clamp(mix(weather.r * cov * 1.56, 1.0, cov * cov * 0.38), 0.0, 1.0);
+  let cType = clamp(mix(weather.b, u.weather.z, 0.55), 0.0, 1.0);
   let hGrad = heightGradient(h, cType);
   if (localCov * hGrad <= 0.01) {
     return 0.0;
@@ -732,11 +732,11 @@ fn sampleCloudDensity(posKm: vec3f, h: f32, useDetail: bool) -> f32 {
   let shapeUvw = (posKm + windShift + vec3f(0.0, h * 0.65, 0.0)) * u.scales.y;
   let shape = textureSampleLevel(shapeNoiseTex, repeatSamp, shapeUvw, 0.0);
   let lowFreqFbm = shape.g * 0.625 + shape.b * 0.25 + shape.a * 0.125;
-  var baseCloud = remapClamp(shape.r, (1.0 - lowFreqFbm) * 0.72, 1.0);
+  var baseCloud = remapClamp(shape.r, (1.0 - lowFreqFbm) * 0.70, 1.0);
   baseCloud *= hGrad;
 
   let baseWithCov = remapClamp(baseCloud, 1.0 - localCov, 1.0) * localCov;
-  if (baseWithCov <= 0.001) {
+  if (baseWithCov <= 0.002) {
     return 0.0;
   }
 
@@ -745,9 +745,11 @@ fn sampleCloudDensity(posKm: vec3f, h: f32, useDetail: bool) -> f32 {
     let detailUvw = (posKm + windShift * 1.35) * u.scales.z;
     let detail = textureSampleLevel(detailNoiseTex, repeatSamp, detailUvw, 0.0);
     let detailFbm = detail.r * 0.625 + detail.g * 0.25 + detail.b * 0.125;
-    let detailMod = mix(detailFbm, 1.0 - detailFbm, clamp(h * 5.0, 0.0, 1.0));
+    let detailContrast = clamp((detailFbm - 0.18) * 1.38, 0.0, 1.0);
+    let detailMod = mix(detailContrast, 1.0 - detailContrast, clamp(h * 3.8, 0.0, 1.0));
     dens = remapClamp(baseWithCov, detailMod * u.scales.w, 1.0);
   }
+  dens = smoothstep(0.03, 0.42, dens) * (0.60 + 0.40 * dens);
 
   return dens * u.weather.y * weather.g;
 }
@@ -797,7 +799,11 @@ fn evalSunEnergy(tau: f32, cosTheta: f32) -> f32 {
   var phaseAtten = 1.0;
   for (var oct = 0; oct < 3; oct++) {
     let beer = exp(-tau * atten);
-    let ph = mix(hgPhase(cosTheta, g2 * phaseAtten), hgPhase(cosTheta, g1 * phaseAtten), 0.72);
+    let rawFwd = hgPhase(cosTheta, g1 * phaseAtten);
+    // Soft-knee compress the extreme on-axis HG needle spike so backlit sunset clouds show a smooth
+    // golden silver lining without harsh concentric ring banding or highlight clipping.
+    let fwd = rawFwd / (1.0 + rawFwd * 0.35);
+    let ph = mix(hgPhase(cosTheta, g2 * phaseAtten), fwd, 0.72);
     scatter += contrib * beer * ph;
     atten *= 0.42;
     contrib *= 0.55;
@@ -895,13 +901,14 @@ fn cs_trace_clouds(@builtin(global_invocation_id) gid: vec3u) {
       let effSigma = sigmaT * distFade;
       if (effSigma > 0.0002) {
         var direct = vec3f(0.0);
+        var lightTau = 0.0;
         if (sunActive) {
-          let lightTau = marchLightCone(worldPosKm, pPlanet, sunDir);
+          lightTau = marchLightCone(worldPosKm, pPlanet, sunDir);
           direct = sunColor * evalSunEnergy(lightTau, cosTheta);
         }
-        // Ambient sky-top & ground-bounce gradient with soft self-occlusion from cloud height
+        // Ambient sky-top & ground-bounce gradient with sculpted cumulus underside shadowing
         let ambGrad = mix(ambGround, ambSky, clamp(h * 0.85 + 0.15, 0.0, 1.0));
-        let ambOcc = mix(0.48, 1.0, clamp(h * 1.15, 0.0, 1.0));
+        let ambOcc = mix(0.28, 1.0, clamp(h * 1.10, 0.0, 1.0)) * mix(0.55, 1.0, exp(-lightTau * 0.40));
         let luminance = (direct + ambGrad * ambOcc) * effSigma;
 
         // Analytical Beer-Lambert step integration (Hillaire 2016)

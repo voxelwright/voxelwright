@@ -793,7 +793,7 @@ export interface People {
   /** Who is drawn, until told otherwise. Asked afresh each frame, with the view, so that whoever gives them can leave out those out of sight. */
   from: ((view: View, seconds: number) => readonly Person[])[]
   /** Packs visible figures, shadows and speech boards and uploads buffers before a render pass begins; returns true when at least one person will draw. */
-  prepare(to: Target, view: View, seconds: number): boolean
+  prepare(to: Target, view: View, seconds: number, skipGroundDecal?: boolean): boolean
   /** Records the prepared shadows, bodies and speech boards into an active `(to.color, to.depth)` render pass. */
   record(pass: GPURenderPassEncoder): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View, seconds: number, sharedPass?: GPURenderPassEncoder): void
@@ -917,7 +917,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   const self: People = {
     from: [],
     drawn,
-    prepare(to, view, seconds) {
+    prepare(to, view, seconds, skipGroundDecal = false) {
       const began = performance.now()
       shadowPeopleCount = 0
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64) as unknown as V3
@@ -944,7 +944,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
           const sx = (w.slot % SLOTS[0]) * SLOT[0], sy = Math.floor(w.slot / SLOTS[0]) * SLOT[1], W = SLOT[0] * SLOTS[0], H = SLOT[1] * SLOTS[1]
           board[o + 8] = (sx + (SLOT[0] - w.wide) / 2) / W; board[o + 9] = (sy + SLOT[1] - w.tall) / H; board[o + 10] = (sx + (SLOT[0] + w.wide) / 2) / W; board[o + 11] = (sy + SLOT[1]) / H
         }
-        if (lies < 1024 && off < 1500) {
+        if (!skipGroundDecal && lies < 1024 && off < 1500) {
           const o = lies++ * 8, lying = p.down ?? 0
           shade[o] = p.at[0] - anchor[0]; shade[o + 1] = p.at[1] - anchor[1]; shade[o + 2] = p.at[2] - anchor[2]; shade[o + 3] = (p.umbrella ? 5 : 2.6) + lying * 2
           shade[o + 4] = -sun[0] / flat; shade[o + 5] = -sun[2] / flat; shade[o + 6] = reach * (1 - lying * 0.8); shade[o + 7] = 0

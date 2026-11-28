@@ -460,7 +460,7 @@ fn cs_integrate(@builtin(global_invocation_id) gid: vec3u) {
 
 const COMPOSITE_WGSL = /* wgsl */ `
 struct FroxelCompositeView {
-  // xy: active viewport size (0 => fall back to sceneDepth dimensions), z: hasFarDepth (0/1), w: pad
+  // xy: active viewport size (0 => fall back to sceneDepth dimensions), z: hasFarDepth (0/1), w: skyWeight (0..1)
   viewport: vec4f,
 }
 
@@ -488,7 +488,8 @@ ${FROXEL_FOG_WGSL}
   let nearD = froxelFogParams.flags.y;
   let farD = froxelFogParams.flags.z;
   var linearDepth = froxelFogParams.depth.y;
-  if (z < 1.0) {
+  var isSky = z >= 0.999999;
+  if (!isSky) {
     linearDepth = nearD / max(1.0 - z * (farD - nearD) / farD, 1e-6);
   }
   if (compView.viewport.z > 0.5) {
@@ -497,10 +498,18 @@ ${FROXEL_FOG_WGSL}
     let w = textureLoad(farDepth, fpx, 0);
     if (w > 0.0) {
       linearDepth = min(linearDepth, 1.0 / w);
+      isSky = false;
     }
   }
 
-  let fog = sampleFroxelFog(uv, linearDepth);
+  var fog = sampleFroxelFog(uv, linearDepth);
+  if (isSky) {
+    let sw = clamp(compView.viewport.w, 0.0, 1.0);
+    if (sw <= 0.001) {
+      return vec4f(0.0, 0.0, 0.0, 1.0);
+    }
+    fog = vec4f(fog.rgb * sw, mix(1.0, fog.a, sw));
+  }
   // Blended with srcFactor: 'one', dstFactor: 'src-alpha' -> dst = dst * fog.a + fog.rgb.
   return vec4f(fog.rgb, fog.a);
 }
@@ -602,6 +611,8 @@ export interface FroxelFogApplyParams {
   far?: number
   /** Composite strength multiplier `[0, 1]` (default `1.0`). */
   strength?: number
+  /** Open-sky composite weight `[0, 1]` for pixels with `z >= 0.999999` and no far geometry (default `1.0`). */
+  skyWeight?: number
   timestampWrites?: GPURenderPassTimestampWrites
 }
 
@@ -1239,11 +1250,12 @@ export async function createFroxelFog(
       const vw = params.viewportSize ? Math.max(1, params.viewportSize[0]) : 0
       const vh = params.viewportSize ? Math.max(1, params.viewportSize[1]) : 0
       const hasFar = params.farDepth ? 1 : 0
-      if (vw !== compViewF32[0] || vh !== compViewF32[1] || hasFar !== compViewF32[2]) {
+      const skyWeight = Math.max(0, Math.min(1, params.skyWeight ?? 1))
+      if (vw !== compViewF32[0] || vh !== compViewF32[1] || hasFar !== compViewF32[2] || skyWeight !== compViewF32[3]) {
         compViewF32[0] = vw
         compViewF32[1] = vh
         compViewF32[2] = hasFar
-        compViewF32[3] = 0
+        compViewF32[3] = skyWeight
         device.queue.writeBuffer(compViewUniforms, 0, compViewF32)
       }
       const farView = params.farDepth ?? dummyFarDepthView

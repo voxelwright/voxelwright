@@ -417,12 +417,15 @@ fn skyBasePhys(rd: vec3f) -> vec3f {
     let horiz = sampleSkyView(normalize(vec3f(rd.x, 0.015, rd.z)), physSun) * expo;
     phys = mix(phys, horiz * 0.72, clamp(-rd.y * 6.0, 0.0, 1.0));
   }
+  // Soft-rolloff only extreme >2.2 linear sun-core Mie spikes so golden-hour sky stays rich without clipping.
+  phys = phys / (vec3f(1.0) + max(phys - vec3f(2.2), vec3f(0.0)) * 0.38);
   let dayFade = shadeExtra.skyOvercast.w;
   let ov = shadeExtra.skyOvercast.x;
   if (ov > 0.001) {
     let lum = dot(phys, vec3f(0.2126, 0.7152, 0.0722));
-    let grey = mix(vec3f(0.022, 0.028, 0.044), vec3f(0.56, 0.60, 0.66), dayFade);
-    phys = mix(phys, mix(vec3f(lum), grey, 0.70), ov * 0.88);
+    // Cool coastal slate-blue mist sky so overcast/foggy glass reflections never read flat tan/beige.
+    let grey = mix(vec3f(0.022, 0.028, 0.044), vec3f(0.50, 0.57, 0.67), dayFade);
+    phys = mix(phys, mix(vec3f(lum), grey, 0.78), ov * 0.90);
   }
   let up = clamp(rd.y, 0.0, 1.0);
   let nightFloor = mix(vec3f(0.020, 0.030, 0.054), vec3f(0.004, 0.007, 0.020), pow(up, 0.55));
@@ -430,12 +433,13 @@ fn skyBasePhys(rd: vec3f) -> vec3f {
   return mix(analytic, phys, lutBlend);
 }
 
-fn sky(rd: vec3f, drawLegacyClouds: bool) -> vec3f {
+fn sky(rd: vec3f, cloudWeight: f32) -> vec3f {
   ${useF16 ? 'var col = vec3<f16>(min(max(skyBasePhys(rd), vec3f(0.0)), vec3f(60000.0)));' : 'var col = skyBasePhys(rd);'}
   let toward = max(dot(rd, g.sun), 0.0);
   if (g.day > 0.0) {
-    let haloScale = mix(1.0, 0.32, shadeExtra.atmoInfo.x);
-    let sunGlow = min(g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a + pow(toward, 60.0) * 0.35 * haloScale) * g.day, vec3f(60000.0));
+    let haloScale = mix(1.0, mix(0.26, 0.08, g.low), shadeExtra.atmoInfo.x);
+    let discScale = mix(1.0, mix(0.55, 0.18, g.low), shadeExtra.atmoInfo.x);
+    let sunGlow = min(g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a * discScale + pow(toward, 60.0) * 0.35 * haloScale) * g.day, vec3f(60000.0));
     ${useF16 ? 'col += vec3<f16>(sunGlow);' : 'col += sunGlow;'}
   }
   if (g.day < 1.0 && g.moon.w >= 0.0) {
@@ -459,16 +463,19 @@ fn sky(rd: vec3f, drawLegacyClouds: bool) -> vec3f {
     let starAdd = vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9 * clamp(1.0 - (g.skyZenith.g - 0.012) * 40.0, 0.0, 1.0);
     ${useF16 ? 'col += vec3<f16>(starAdd);' : 'col += starAdd;'}
   }
-  if (drawLegacyClouds && rd.y > 0.015) {
+  if (cloudWeight > 0.001 && rd.y > 0.015) {
     let far = (15000.0 - g.eye.y) / rd.y;
     let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
     let thick = cloud(at);
-    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
+    // Soften reflected legacy clouds when volumetric clouds drive the primary sky so glass reflections
+    // harmonize naturally without harsh 2D cloud band cutouts.
+    let softReflect = shadeExtra.atmoInfo.y > 0.5;
+    let cover = smoothstep(select(0.45, 0.40, softReflect), select(0.64, 0.74, softReflect), thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
     if (cover > 0.0) {
       var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
       if (g.low > 0.0 || g.day < 1.0) { body *= mix(g.cloudTint.rgb, g.cloudTintSun.rgb, toward); }
       let cloudCol = min(body * mix(1.25, 1.85, g.day), vec3f(60000.0));
-      ${useF16 ? 'col = mix(col, vec3<f16>(cloudCol), f16(cover * 0.92));' : 'col = mix(col, cloudCol, cover * 0.92);'}
+      ${useF16 ? 'col = mix(col, vec3<f16>(cloudCol), f16(cover * 0.92 * cloudWeight));' : 'col = mix(col, cloudCol, cover * 0.92 * cloudWeight);'}
     }
   }
   return vec3f(col);
@@ -1004,7 +1011,7 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, px: vec2i, screenUv: vec2f) -> Primar
     let waves = pow(clamp(1.0 - abs(wa - wb) * 2.6, 0.0, 1.0), 2.0) * (0.45 + 0.55 * noise2(at * 0.023 + vec2f(g.time * 0.05, 0.0)));
     let glint = sqrt(waves) * smoothstep(0.35, 0.7, noise2(at * 0.045 + vec2f(g.time * 0.11, g.time * 0.07)));
     let mirror = glow * 0.7 + vec3f(0.3, 0.85, 0.82) * strength * waves * 0.5 + vec3f(0.55, 0.95, 0.95) * strength * glint * 0.8;
-    col = mix(mirror, sky(bent, true) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * (net(at) * 0.4 + waves * 0.22), window);
+    col = mix(mirror, sky(bent, select(1.0, 0.38, shadeExtra.atmoInfo.y > 0.5)) * vec3f(0.5, 0.72, 0.78) + g.lightSun.rgb * (net(at) * 0.4 + waves * 0.22), window);
   }
   col = mix(col, glow, 1.0 - exp(-far * M * 0.021));
   col *= 0.8;
@@ -1098,7 +1105,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
 
   // Fast pure-sky early exit (zero material/lighting/reflection work).
   if (!hasPane && hit.t < 0.0) {
-    var col = sky(rd, shadeExtra.atmoInfo.y < 0.5);
+    var col = sky(rd, select(1.0, 0.0, shadeExtra.atmoInfo.y > 0.5));
     if (FOGGY) { col = inFog(col, rd, 1e7); }
     let vel = motionVector(rd, -1.0, jitUV);
     if ((g.flags & 4u) != 0u) {
@@ -1154,7 +1161,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
     if (mir1 > 0.0) {
       let back1 = reflect(rd, n1);
       let safe1 = select(back1, vec3f(0.00001), abs(back1) < vec3f(0.00001));
-      add1 += sky(safe1, true) * 0.8 * mir1;
+      add1 += sky(safe1, select(1.0, 0.38, shadeExtra.atmoInfo.y > 0.5)) * 0.8 * mir1;
     }
     var through1 = glassTint(pane1Kind, pThick + 0.5) * 0.94 * (1.0 - mir1) * (1.0 - lamp1);
     let across1 = 1.0 / (lv1.scale * max(pane1T, 1.0) * g.pixel);
@@ -1185,7 +1192,7 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
   // Primary opaque surface (or surface behind the first transparent glass pane).
   if (shadeBehind) {
     if (hit.t < 0.0) {
-      col += keep * sky(rd, true);
+      col += keep * sky(rd, select(1.0, 0.35, shadeExtra.atmoInfo.y > 0.5));
       visT = -1.0;
       outN = vec3f(0.0);
     } else {
@@ -1240,11 +1247,12 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
         if (stuff == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
         var safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
         if (stuff == 5u) { safe = vec3f(abs(safe.x) * select(-1.0, 1.0, rd.x > 0.0), safe.y, abs(safe.z) * select(-1.0, 1.0, rd.z > 0.0)); }
-        var seen = sky(safe, true) * 0.8;
+        let reflectCloud = select(1.0, 0.38, shadeExtra.atmoInfo.y > 0.5);
+        var seen = sky(safe, reflectCloud) * 0.8;
         if (ask) {
           let coarse = select(2.0, 6.0, stuff == 5u);
           let far = shadeTrace(p + n * (0.05 / scale), safe, 0.0, hit.level, 64u, hit.t * g.pixel * coarse, g.pixel * coarse, stuff == 5u, stuff == 5u);
-          seen = sky(safe, true);
+          seen = sky(safe, reflectCloud);
           if (far.t >= 0.0) { seen = air(litReflect(p, safe, far, shadows * 2u), safe, far.t); }
         }
         if (glass) { add += seen * mirror; } else { add = mix(own, seen, mirror); }
@@ -1274,7 +1282,10 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
     let apBlend = shadeExtra.atmoInfo.x * shadeExtra.skyOvercast.y;
     if (apBlend > 0.001) {
       let ap = sampleAerialPerspective(jitUV, first * 0.0001);
-      let apScatter = ap.rgb * shadeExtra.skySunDir.w * shadeExtra.skyOvercast.w;
+      var apScatter = ap.rgb * shadeExtra.skySunDir.w * shadeExtra.skyOvercast.w;
+      // Soft-compress extreme low-sun forward Mie glare in front of skyline silhouettes so distant
+      // towers keep warm golden rim light and lit-window contrast without washing out.
+      apScatter = apScatter / (vec3f(1.0) + apScatter * (0.40 + 1.15 * g.low));
       let phys = col * clamp(ap.a, 0.0, 1.0) + apScatter;
       col = mix(hazed, phys, apBlend);
     } else {
