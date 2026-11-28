@@ -149,10 +149,12 @@ struct Instance {
     sports: Option<Box<sports::SportsWorld>>,
     /// Destructible tiled navmesh, HPA* portals, panic flow fields and ORCA/RVO2 crowd avoidance (#164).
     nav: nav::NavWorld,
+    /// Optional override for how many 512 KB `Ground::kept` sectors this core holds (`world_memory_budget`).
+    keep_limit: Option<usize>,
 }
 
 thread_local! {
-    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new(), sports: None, nav: nav::NavWorld::new() });
+    static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None, fine_buf: fine::FineBuf::new(), sports: None, nav: nav::NavWorld::new(), keep_limit: None });
 }
 
 /// What a cell of a material weighs against water, set from outside while the core runs (#264: a kernel table as
@@ -416,12 +418,30 @@ pub const ROUNDS: u32 = 12;
 // ── Bodies: what has come loose and moves (bodies.rs). One instance, in a worker of its own or the world process. ──
 
 fn moving(i: &mut Instance) -> &mut bodies::Bodies {
-    // A solver made anew (after `world_forget`) is told what the last was: whether cells may hold finer cells.
+    // A solver made anew (after `world_forget`) is told what the last was: whether cells may hold finer cells,
+    // and any sector cache memory cap set by `world_memory_budget`.
     let finer = i.scratch.finer;
+    let keep_limit = i.keep_limit;
     i.bodies.get_or_insert_with(|| {
         let mut b = Box::new(bodies::Bodies::new());
         b.ground.scratch.finer = finer;
+        if let Some(limit) = keep_limit {
+            b.ground.set_keep_limit(limit);
+        }
         b
+    })
+}
+
+/// Bounds how many full 64³ sectors (`Kept::Cells`, 512 KB each) this core's solver keeps cached in WASM memory
+/// (clamped to `4..=256`), immediately evicting excess cached sectors and `Sector::Bits` slots.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_memory_budget(keeps: usize) {
+    INSTANCE.with_borrow_mut(|i| {
+        let clamped = keeps.clamp(4, 256);
+        i.keep_limit = Some(clamped);
+        if let Some(b) = i.bodies.as_mut() {
+            b.ground.set_keep_limit(clamped);
+        }
     })
 }
 
@@ -1320,9 +1340,13 @@ pub extern "C" fn nav_tile_portals(tx: i32, tz: i32) -> usize {
 pub extern "C" fn nav_rebake_budget(fx: f32, fz: f32, max_tiles: usize) -> usize {
     INSTANCE.with_borrow_mut(|i| {
         let finer = i.scratch.finer;
+        let keep_limit = i.keep_limit;
         let bodies = i.bodies.get_or_insert_with(|| {
             let mut b = Box::new(bodies::Bodies::new());
             b.ground.scratch.finer = finer;
+            if let Some(limit) = keep_limit {
+                b.ground.set_keep_limit(limit);
+            }
             b
         });
         i.nav.rebake_budget(&mut bodies.ground, fx, fz, max_tiles)
@@ -1334,9 +1358,13 @@ pub extern "C" fn nav_rebake_budget(fx: f32, fz: f32, max_tiles: usize) -> usize
 pub extern "C" fn nav_bake_area(fx: f32, fz: f32, radius_tiles: i32, max_tiles: usize) -> usize {
     INSTANCE.with_borrow_mut(|i| {
         let finer = i.scratch.finer;
+        let keep_limit = i.keep_limit;
         let bodies = i.bodies.get_or_insert_with(|| {
             let mut b = Box::new(bodies::Bodies::new());
             b.ground.scratch.finer = finer;
+            if let Some(limit) = keep_limit {
+                b.ground.set_keep_limit(limit);
+            }
             b
         });
         i.nav.bake_area(&mut bodies.ground, fx, fz, radius_tiles, max_tiles)
@@ -1359,9 +1387,13 @@ pub extern "C" fn nav_find_path(
 ) -> usize {
     INSTANCE.with_borrow_mut(|i| {
         let finer = i.scratch.finer;
+        let keep_limit = i.keep_limit;
         let bodies = i.bodies.get_or_insert_with(|| {
             let mut b = Box::new(bodies::Bodies::new());
             b.ground.scratch.finer = finer;
+            if let Some(limit) = keep_limit {
+                b.ground.set_keep_limit(limit);
+            }
             b
         });
         i.nav.find_path(&mut bodies.ground, sx, sy, sz, gx, gy, gz, flags)
@@ -1398,9 +1430,13 @@ pub extern "C" fn nav_flow_add_threat(x: f32, y: f32, z: f32, radius: f32) {
 pub extern "C" fn nav_flow_build() -> usize {
     INSTANCE.with_borrow_mut(|i| {
         let finer = i.scratch.finer;
+        let keep_limit = i.keep_limit;
         let bodies = i.bodies.get_or_insert_with(|| {
             let mut b = Box::new(bodies::Bodies::new());
             b.ground.scratch.finer = finer;
+            if let Some(limit) = keep_limit {
+                b.ground.set_keep_limit(limit);
+            }
             b
         });
         i.nav.flow_build(&mut bodies.ground)

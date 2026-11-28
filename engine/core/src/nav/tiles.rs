@@ -18,10 +18,14 @@ pub type NavSet<K> = HashSet<K, BuildHasherDefault<Mix>>;
 
 /// Maximum contiguous border columns merged into a single cross-tile portal (8 * 40 cm = 3.2 m).
 const MAX_PORTAL_WIDTH: usize = 8;
-/// Soft cap on cached nav tiles (4096 tiles = ~167,000 m² of detailed 40 cm navmesh).
-const MAX_CACHED_TILES: usize = 4096;
+/// Soft cap on cached nav tiles (512 tiles = ~21,000 m² of detailed 40 cm navmesh around the player).
+const MAX_CACHED_TILES: usize = 512;
 /// Maximum dirty box extent in tiles along one axis before restricting invalidation to cached tiles.
 const MAX_DIRTY_SPAN: i32 = 48;
+/// Maximum vertical height above a cached tile's highest walkable span where an edit can still affect navigation.
+const MAX_EDIT_ABOVE_SPAN: i32 = 96;
+/// Cap on remembered per-tile edit Y-bounds so long sessions never leak map entries.
+const MAX_EDIT_Y_ENTRIES: usize = 2048;
 
 /// Directed cross-tile portal endpoint stored on a tile's boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,6 +86,8 @@ pub struct NavTile {
     /// Direct border transition pairs cached per border edge for fast fine-level cross-tile stepping.
     /// Indexed by `dir` (`0..4`): entries are `(local_span, neighbor_span, move_out)`.
     pub border_links: [Vec<(u16, u16, u8)>; 4],
+    /// Highest walkable span elevation in this tile (`i32::MIN` when the tile has no walkable spans).
+    pub max_span_y: i32,
 }
 
 impl NavTile {
@@ -313,8 +319,10 @@ impl TileCache {
         self.edit_y_bounds.get(&key).copied()
     }
 
-    /// Marks all nav tiles intersecting world fine-cell box `[lo..hi)` dirty, including a 1-tile
-    /// border margin so cross-tile portals stay consistent.
+    /// Marks already-cached nav tiles intersecting world fine-cell box `[lo..hi)` dirty, including
+    /// a 1-tile border margin so cross-tile portals stay consistent. Unbaked cold tiles are never
+    /// queued (they bake fresh when first needed), and edits strictly far above a tile's highest
+    /// walkable span skip invalidation until falling debris actually reaches walkable elevation.
     pub fn mark_dirty_box(&mut self, lo: [i32; 3], hi: [i32; 3]) {
         if lo[0] >= hi[0] || lo[2] >= hi[2] {
             return;
@@ -331,13 +339,28 @@ impl TileCache {
 
         let record_y = lo[1] < hi[1] && lo[1] > i32::MIN / 4 && hi[1] < i32::MAX / 4;
 
-        // Guard against unbounded/corrupt edit boxes (e.g. fuzz inputs spanning i32::MIN..i32::MAX).
-        if tx1.saturating_sub(tx0) > MAX_DIRTY_SPAN || tz1.saturating_sub(tz0) > MAX_DIRTY_SPAN {
+        // Guard against unbounded/corrupt edit boxes (e.g. fuzz inputs spanning i32::MIN..i32::MAX)
+        // and iterate cached tiles directly when the dirty box is larger than the cache.
+        let box_w = tx1.saturating_sub(tx0);
+        let box_h = tz1.saturating_sub(tz0);
+        if box_w > MAX_DIRTY_SPAN || box_h > MAX_DIRTY_SPAN {
             let keys: Vec<TileKey> = self
                 .tiles
-                .keys()
-                .copied()
-                .filter(|&(tx, tz)| tx >= tx0 && tx <= tx1 && tz >= tz0 && tz <= tz1)
+                .iter()
+                .filter_map(|(&key, tile)| {
+                    if key.0 >= tx0
+                        && key.0 <= tx1
+                        && key.1 >= tz0
+                        && key.1 <= tz1
+                        && !(record_y
+                            && tile.max_span_y != i32::MIN
+                            && lo[1] > tile.max_span_y.saturating_add(MAX_EDIT_ABOVE_SPAN))
+                    {
+                        Some(key)
+                    } else {
+                        None
+                    }
+                })
                 .collect();
             for key in keys {
                 self.push_dirty(key);
@@ -351,8 +374,17 @@ impl TileCache {
         for tz in tz0..=tz1 {
             for tx in tx0..=tx1 {
                 let key = (tx, tz);
-                self.push_dirty(key);
-                if record_y && tx >= raw_tx0 && tx <= raw_tx1 && tz >= raw_tz0 && tz <= raw_tz1 {
+                let in_core = tx >= raw_tx0 && tx <= raw_tx1 && tz >= raw_tz0 && tz <= raw_tz1;
+                if let Some(tile) = self.tiles.get(&key) {
+                    if record_y
+                        && tile.max_span_y != i32::MIN
+                        && lo[1] > tile.max_span_y.saturating_add(MAX_EDIT_ABOVE_SPAN)
+                    {
+                        continue;
+                    }
+                    self.push_dirty(key);
+                }
+                if record_y && in_core && self.edit_y_bounds.len() < MAX_EDIT_Y_ENTRIES {
                     self.merge_edit_y(key, lo[1], hi[1]);
                 }
             }
@@ -388,6 +420,7 @@ impl TileCache {
         let edges = raw.edges;
         let region_count = segment_regions(&mut spans, &edges);
         let has_special_edges = edges.iter().any(|e| e.move_kind != MOVE_WALK);
+        let max_span_y = spans.iter().map(|s| s.y).max().unwrap_or(i32::MIN);
 
         self.generation = self.generation.wrapping_add(1).max(1);
         let mut tile = NavTile {
@@ -403,6 +436,7 @@ impl TileCache {
             abstract_dirty: true,
             has_special_edges,
             border_links: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            max_span_y,
         };
 
         // Link borders with each existing cardinal neighbor tile.

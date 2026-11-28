@@ -75,6 +75,8 @@ The letter keys the page owns are listed in `engine/page/keys.ts`, and `node tes
 | Type an egg's phrase | / (and Enter in the first view) | - | - |
 | End an egg | Esc | Tap the banner (first view) | - |
 | Open the billboard ahead | O | Tap the board | - |
+| Pull up or stow the smartphone (DoorSmash & apps) | Up Arrow, or P (solo) | Tap the Phone button | - |
+| Enter a store or restaurant, grab aisle item, or deliver | E, at the door, shelf, or drop-off | Tap its cue | - |
 | Back to the first view | Backquote (under Esc) | Back to the view, in settings | - |
 | Hour back or forward 30 minutes | [ and ] | Hour fader, in settings | - |
 | Rain on or off | R | Rain, in settings | - |
@@ -384,6 +386,18 @@ The tennis mini-game pairs Voxelwright's 480 Hz sports physics core (`engine/cor
 - **32-byte wire snapshots**: `encodeBallSnapshot` / `decodeBallSnapshot` match `sports.rs`'s little-endian wire layout byte-for-byte: `tick` (`u32`, 4 B), lossless `pos` (`3 × f32`, 12 B), and `vel` + `spin` packed as `3 × 21-bit` deterministic floats each (16 B).
 - **Late server reconciliation (`4–16` frames / `33–133 ms` RTT)**: `reconcile(snapshotBytes)` writes incoming 32-byte authoritative snapshots into `sports_snapshot_room` and invokes `sports_rollback` inside the core WebAssembly 16-slot rollback ring (`0–15` ticks native WASM rewind, with seamless deterministic input-history replay for `16+` tick RTT spikes), converging client trajectory to the server within `< 1e-2` cells (1 mm).
 
+## Smartphone OS & DoorSmash food delivery
+
+Press **Up Arrow** (or **P** in solo play, or tap the top-right Phone button) to pull up your handheld smartphone (`engine/page/phone.ts`). The phone uses an extensible app registry (`engine.phone.registerApp(app)`) with Dynamic Island notifications and ships with **DoorSmash** (`engine/page/delivery.ts`, `engine/page/delivery-ui.ts`), a San Francisco food and grocery delivery game.
+
+- **First-person view while driving**: opening the phone behind the wheel transitions smoothly into the first-person driver's seat (`alive.view(true)`) with the tilted phone docked in the lower-right cockpit hand while steering and throttle stay live. Stowing the phone (`Esc` or `Down Arrow`) restores your previous driving camera.
+- **Multi-order stacking & reorderable GPS**: offers stream from San Francisco's real businesses (`places.json`, including parody chains and independent restaurants, pizzerias, cafes and supermarkets). Stack up to four active orders simultaneously and reorder your multi-stop GPS queue (`↑` / `↓`) in either DoorSmash's **GPS** tab or the full-screen map (`M`), powered by `computeMultiStopRoute` in `engine/page/gps.ts` and `setWaypoints` / `reorderWaypoints` in `engine/page/minimap.ts`.
+- **Death Stranding–style cargo stacking & crash damage (`engine/page/delivery-cargo.ts`)**: pack picked-up items onto your vehicle's spatial cargo grid. Rotating a pizza vertical ruins it; soups and drinks arrive unsealed and must be sealed or they slosh on sharp turns and collisions, spilling into adjacent cells and ruining neighboring deliveries; heavy grocery bags crush fragile items stacked underneath. Collisions read impact force and local hit zone (`front`, `rear`, `left`, `right`, `bottom`) from `alive.struck` and `voxelwright:crash`.
+- **Obnoxious restaurants, live customer chat & chaos**: busy/obnoxious kitchens delay orders while lines of NPC couriers wait outside and inside. Customers text mid-delivery with follow-up asks — reply for a responsiveness bonus, ignore them, **Eat Food** out of your cargo bay, or send **`🖕`** in chat (nuking tip and star rating).
+- **Double-parking style, tips, Stars & Likes**: stopping in an active lane beside an open curb spot near a pickup or drop-off awards a double-parking style bonus and flashes 4-way amber hazards. Earnings combine flat rate, distance, speed bonus, food condition, responsiveness, style, and upfront or score-and-rating-based post-delivery tips, plus a rolling 5-star rating and Death Stranding–style **Likes (`👍`)**.
+- **Delivery fleet & upgrades (`engine/page/delivery-vehicles.ts`)**: buy, paint, light up (roof beacon toppers and neon street underglow), and equip practical upgrades (**Cargo Rack Expansion**, **Thermal Pizza Deck**, **Gimbal Liquid Mount**, **Fragile Shock Mounts**) across the **VoltZip E-Scooter**, **FogRunner 150 Moped**, **Pious Hybrid (Prius)**, and **Apex Courier RS**, then spawn your customized vehicle to the curb.
+- **Hangout spots & modular 3D interiors (`engine/page/interiors.ts`, `engine/page/interior-modules.ts`)**: courier hangout spots across San Francisco host clusters of NPC drivers in thermal backpacks beside parked mopeds (`E` to swap Likes and surge tips). Walk up to any food or grocery storefront and press **E** to enter a walkable 3D voxel interior synthesized from its real frontage, brand palette and category (never cookie-cutter) — complete with NPC workers, diners/shoppers, waiting courier lines, and **Supermarket Shop & Deliver** aisles where a rolling 3D cart fills as you auto-buy checklist items. Establishments can also register custom 1:1 or photo/video-derived layouts via `engine.interiors.registerOverride(key, blueprint)` and `importBlueprint(key, json)`.
+
 ## Query parameters
 
 Add these to the page's address. "Realm" means the San Francisco realm, as `./world` serves it. "Server" means `/city` from the engine's page server, `engine/serve.mjs`. A number outside its range is kept to the nearest end of it, and one that is not a number is ignored ([what the page refuses](/engine-page#what-the-page-refuses)).
@@ -456,6 +470,7 @@ Run one from `engine/` with `node test/<name>.mjs`.
 | Feedback, telemetry, replay & playtests | `engine/page/recorder.ts`, `engine/page/feedback.ts`, `engine/inbox.mjs`, `engine/scan.mjs`, `engine/replay.mjs`, `engine/playtest.mjs` | `engine/test/telemetry.mjs` |
 | Native T3 Studio & Game-Use MCP | `engine/studio/*`, `engine/page/studio/*` | `engine/test/studio.mjs` |
 | Tennis & rollback physics | `engine/page/sports-court.ts`, `engine/core/src/sports.rs`, `engine/page/sound/combat.ts` | `engine/test/sports-rollback.mjs` |
+| Smartphone OS, DoorSmash delivery & modular interiors | `engine/page/phone.ts`, `engine/page/delivery.ts`, `engine/page/delivery-ui.ts`, `engine/page/delivery-cargo.ts`, `engine/page/delivery-vehicles.ts`, `engine/page/delivery-sound.ts`, `engine/page/interiors.ts`, `engine/page/interior-modules.ts` | `engine/test/delivery.mjs` |
 
 One module owns every key, pointer and touch: `engine/page/input.ts`. It keeps a stack of **modes**. A key goes to the top mode first and on down until one takes it. A `solid` mode stops it there, which is how a car takes C, L, X, H and N from the page while it is driven. A `text` mode (the ask bar) swallows letters. The first view is a `still` mode that turns the page's keys and pointer lock off.
 

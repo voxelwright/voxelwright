@@ -44,6 +44,7 @@ interface Core {
   bodies_ignite(x: number, y: number, z: number, radius: number): number
   world_edit(after: number): void
   world_forget(): void
+  world_memory_budget?(keeps: number): void
   bodies_release(x: number, y: number, z: number, radius: number): number
   bodies_throw(x: number, y: number, z: number, vx: number, vy: number, vz: number, radius: number, kind: number): number
   bodies_burning(): number
@@ -107,6 +108,9 @@ const join = (core: Core, j: Joint): number => {
   }
 }
 let ready: Promise<Core> = open<Core>(new URL('./core.wasm', import.meta.url).href)
+/** Optional sector cache cap forwarded from main.ts by device tier so phones never blow Jetsam limits. */
+let keepBudget: number | null = null
+const applyBudget = (p: Promise<Core>): Promise<Core> => p.then((core) => { if (keepBudget !== null) core.world_memory_budget?.(keepBudget); return core })
 /** In the Bay that comes in tiles (#373): initial/teleport tile gate (bounded so a stalled tile never deadlocks physics). */
 let here: Promise<void> = Promise.resolve()
 /** Last tile center told to this mover; nearby streaming updates run in the background without blocking steps. */
@@ -115,10 +119,16 @@ const bounded = (p: Promise<void>, ms: number) => Promise.race([p, new Promise<v
 const post = (answer: Answer, age?: number) => (self as unknown as Worker).postMessage(age === undefined ? answer : { ...answer, age }, [answer.words.buffer])
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
+  const budget = (e.data as unknown as { budget?: number }).budget
+  if (typeof budget === 'number' && Number.isFinite(budget)) {
+    keepBudget = budget
+    ready = applyBudget(ready)
+    return
+  }
   // The core built again (#264, main.ts `recore`): what is asked from here on is done by the new one, which knows
   // nothing yet: whoever sent this tells it the world's edits again and makes its bodies again.
   const anew = (e.data as unknown as { core?: string }).core
-  if (anew) { ready = open<Core>(anew); bayAt = null; here = Promise.resolve(); return }
+  if (anew) { ready = applyBudget(open<Core>(anew)); bayAt = null; here = Promise.resolve(); return }
   const bay = (e.data as unknown as { bay?: [number, number] }).bay
   if (bay) {
     const p = ready.then((core) => near(core, bay[0], bay[1], 8000)).then(() => {}, () => {})

@@ -1,6 +1,6 @@
 // Time (#226, after Small Magic's time.js, MIT). The key pressed, everything stops where it is: pieces in the air,
 // fire, smoke. Whoever pressed it alone goes on walking, through it. Held, time is wound back: what fell flies up
-// and sets itself where it was, what was cut or built since is undone, smoke goes back down. Let go, it stands
+// and sets itself where it was, smoke goes back down. Let go, it stands
 // still again at that moment; pressed once more, time is let go from there.
 //
 // How: while time runs, what changes is written down thirty times a second, each entry holding what it changed
@@ -10,7 +10,8 @@
 // (`onResumePose`, for the mover's `pose` ask).
 //
 // What it cannot do: a piece that broke, or came to rest and is cells again, is not made again by winding back past
-// that. Each piece is wound back as far as it has been a piece; edits are the caller's to undo (`onUndoEdits`).
+// that. Each piece is wound back as far as it has been a piece. Cells cut or built since are the caller's to undo
+// (`onUndoEdits`); the page does not yet keep what an edit replaced, so it leaves that unset and they stay.
 //
 // Seen: the colour drains to a cold silver, out from the middle of the view as a wave (gold while it winds back),
 // fire keeps its own, and motes hang in the stopped air. The grading is the last pass's (`postFx`, glow.ts).

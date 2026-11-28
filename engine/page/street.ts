@@ -699,7 +699,7 @@ export function street(o: {
   interface ActiveThreat { x: number; y: number; z: number; radius: number; age: number; crash: boolean }
   const crowdAgents = new Map<number, CrowdAgentState>()
   const awningCache = new Map<number, { x: number; z: number; y: number } | null>()
-  let lastFlowSig = '', lastFlowRefresh = -99, flowSpansActive = 0, lastAwningShockLen = 0
+  let lastFlowSig = '', lastFlowRefresh = -99, flowSpansActive = 0, flowFrames = 0, lastAwningShockLen = 0
   const crowdStats: CrowdAiStats = {
     rvoAgents: 0,
     rvoStepMs: 0,
@@ -769,23 +769,29 @@ export function street(o: {
     }
     collect(o.shocks, false)
     collect(crashShocks, true)
+    // Only threats near walkable street elevation affect pedestrians (`Math.abs(st.y - th.y) < 80`); skip
+    // high-altitude skyscraper blasts when building the street panic flow field.
+    const flowThreats: ActiveThreat[] = []
     let sig = ''
     for (let i = 0; i < active.length; i++) {
       const a = active[i]
-      sig += `${Math.round(a.x)},${Math.round(a.z)},${Math.round(a.radius)},${a.crash ? 1 : 0};`
+      if (Math.abs(a.y - feetAt(Math.round(a.x), Math.round(a.z))) > 120) continue
+      flowThreats.push(a)
+      sig += `${Math.round(a.x / 32)},${Math.round(a.z / 32)},${Math.round(a.radius / 32)},${a.crash ? 1 : 0};`
     }
-    const needsRefresh = sig !== lastFlowSig || (active.length > 0 && (t - lastFlowRefresh >= 0.4 || t < lastFlowRefresh))
-    if (needsRefresh) {
+    flowFrames++
+    const clearing = flowThreats.length === 0 && lastFlowSig !== ''
+    const changed = sig !== lastFlowSig && (flowFrames >= 6 || !lastFlowSig)
+    const periodic = flowThreats.length > 0 && flowFrames >= 30 && (t - lastFlowRefresh >= 1.0 || t < lastFlowRefresh)
+    if (clearing || changed || periodic) {
       lastFlowSig = sig
       lastFlowRefresh = t
+      flowFrames = 0
       if (hasWasmFlow()) {
         o.land.nav_flow_clear!()
-        if (active.length) {
-          if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
-            o.land.nav_rebake_budget(active[0].x, active[0].z, 2)
-          }
-          for (let i = 0; i < active.length; i++) {
-            const a = active[i]
+        if (flowThreats.length) {
+          for (let i = 0; i < flowThreats.length; i++) {
+            const a = flowThreats[i]
             o.land.nav_flow_add_threat!(a.x, a.y, a.z, a.radius)
           }
           flowSpansActive = o.land.nav_flow_build!()
@@ -793,7 +799,7 @@ export function street(o: {
           flowSpansActive = 0
         }
       } else {
-        flowSpansActive = active.length ? 1 : 0
+        flowSpansActive = flowThreats.length ? 1 : 0
       }
     }
     return active
@@ -838,11 +844,13 @@ export function street(o: {
       awningCache.clear()
       lastAwningShockLen = o.shocks.length
     }
-    if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
-      o.land.nav_rebake_budget(eye[0], eye[2], 2)
-    } else if (o.land.nav_bake_area) {
-      // Incrementally pre-warm 1 cold nav tile per frame around the eye so crash/panic flow fields and wall avoidance are instant.
-      o.land.nav_bake_area(eye[0], eye[2], 4, 1)
+    if (dt <= 0.075) {
+      if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
+        o.land.nav_rebake_budget(eye[0], eye[2], 1)
+      } else if (o.land.nav_bake_area) {
+        // Incrementally pre-warm 1 cold nav tile per frame around the eye so crash/panic flow fields and wall avoidance are instant.
+        o.land.nav_bake_area(eye[0], eye[2], 4, 1)
+      }
     }
     const activeThreats = syncPanicFlow(eye, t)
     const nowPerf = performance.now() / 1000
