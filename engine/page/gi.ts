@@ -44,6 +44,9 @@ export const GI_NORMAL_SIGNED = 0
 /** Normal texture encoding: 1 = unorm-packed world normals in [0, 1] (n * 2 - 1). */
 export const GI_NORMAL_UNORM = 1
 
+/** Default per-frame budget of cascade voxels that may trace gather rays under demand activation. */
+export const GI_MAX_ACTIVE_CELLS = 16_384
+
 export type GiTraceMode = 0 | 1
 export type GiNormalEncoding = 0 | 1
 
@@ -91,6 +94,18 @@ export interface VoxelGISky {
   sunGlow?: number
 }
 
+/** This frame's scene depth, from which `inject()` finds the cascade voxels worth gather rays. */
+export interface VoxelGIDepthSource {
+  /** Scene depth (`depth24plus`, 0 = near, 1 = far; active `renderSize` sub-rect). */
+  depth: GPUTextureView
+  /** Active rendered pixels `[width, height]` inside `depth`. */
+  renderSize: readonly [number, number]
+  /** The camera that drew `depth`. */
+  camera: VoxelGICamera
+  /** Pixels between marked screen samples (`1..16`, default `8`; the sample moves inside its tile every frame). */
+  stride?: number
+}
+
 export interface VoxelGIInjectInput {
   /** Camera position in Voxelwright cells (anchors the 3 nested toroidal clipmaps). */
   cameraPosCells: Vec3
@@ -114,6 +129,11 @@ export interface VoxelGIInjectInput {
   gatherRays?: number
   /** Force full cascade refresh without reading previous radiance history. */
   reset?: boolean
+  /**
+   * This frame's depth for demand activation: only visible cascade voxels (and a slow background
+   * share of the rest) trace gather rays. Overrides `setDepthSource()`; `null` forces a full update.
+   */
+  demand?: VoxelGIDepthSource | null
 }
 
 export interface VoxelGITraceInput {
@@ -170,8 +190,45 @@ export interface VoxelGIOptions {
   normalPower?: number
   /** Maximum SVGF temporal history length in frames (default `32.0`). */
   maxHistory?: number
+  /** Allow demand activation when a depth source is given (default `true`; `?gi_demand=0` forces it off). */
+  demand?: boolean
+  /** Per-frame budget of voxels that trace gather rays under demand (default `GI_MAX_ACTIVE_CELLS`). */
+  maxActiveCells?: number
+  /** Share of unseen exposed voxels refreshed each time their slice comes up (`0..1`, default `0.125`). */
+  demandBackgroundRate?: number
 }
 
+/** Counters from the most recent demand-activated `inject()`, read back from the GPU. */
+export interface VoxelGIDemandStats {
+  /** Whether demand activation is allowed on this pass at all. */
+  readonly enabled: boolean
+  /** Whether the most recent `inject()` ran demand-activated (false = full update). */
+  readonly lastInjectDemand: boolean
+  /** `inject()` calls that ran demand-activated. */
+  readonly demandInjects: number
+  /** Per-frame budget of voxels that may trace gather rays. */
+  readonly budget: number
+  /** All voxels in the three cascades. */
+  readonly totalCells: number
+  /** Voxels that traced gather rays. */
+  readonly activeCells: number
+  /** `activeCells` per cascade. */
+  readonly activeCellsPerCascade: readonly [number, number, number]
+  /** Solid exposed voxels the depth buffer marked. */
+  readonly visibleCells: number
+  /** Unseen voxels that got the background refresh. */
+  readonly backgroundCells: number
+  /** Voxels wanting rays before the budget (above `budget` means the frame was thinned). */
+  readonly wantedCells: number
+  /** Voxels a full update would have gathered for on the same frame (solid, exposed, slice due). */
+  readonly fullUpdateCells: number
+}
+
+/**
+ * GPU timestamps for `inject()`. On a demand-activated frame the `inject` and `all` end writes are
+ * skipped (their begin still lands), because a range that holds the demand passes lost the device on
+ * Chrome's Metal backend; time `mip` on those frames.
+ */
 export interface VoxelGIInjectTiming {
   /** Timestamp writes spanning Pass 1 (`cs_inject_radiance`) across all 3 cascades. */
   inject?: GPUComputePassTimestampWrites
@@ -213,6 +270,8 @@ export interface VoxelGIStats {
   readonly cascadeOrigins: readonly [Vec3, Vec3, Vec3]
   /** Most recent trace mode (`0` = stochastic, `1` = 5-cone VCT). */
   readonly mode: GiTraceMode
+  /** Demand activation counters as of the last `readDemandStats()`. */
+  readonly demand: VoxelGIDemandStats
 }
 
 export interface VoxelGIPass {
@@ -220,6 +279,14 @@ export interface VoxelGIPass {
   inject(encoder: GPUCommandEncoder, input: VoxelGIInjectInput, timing?: VoxelGIInjectTiming): void
   /** Runs Pass 3 (`cs_trace_gi`) and Pass 4 (`cs_svgf_temporal` + `cs_svgf_atrous`), returning `giView`. */
   traceAndDenoise(encoder: GPUCommandEncoder, input: VoxelGITraceInput, timing?: VoxelGITraceTiming): GPUTextureView
+  /**
+   * Sets (or clears with `null`) the depth source `inject()` uses for demand activation. The object is
+   * read on every `inject()`, so the caller may keep one and update its fields. With none set, and no
+   * `demand` on the inject input, every `inject()` is the full update.
+   */
+  setDepthSource(source: VoxelGIDepthSource | null): void
+  /** Reads the demand counters of the most recent demand-activated `inject()` back from the GPU. */
+  readDemandStats(): Promise<VoxelGIDemandStats>
   /** Invalidates both clipmap multi-bounce history and SVGF temporal history. */
   reset(): void
   /** Returns allocation, frame, and cascade anchor diagnostics. */
@@ -240,6 +307,10 @@ export interface VoxelGIPass {
   readonly cascadeTextures: readonly [GPUTexture, GPUTexture, GPUTexture]
   /** Linear clamp-to-edge sampler paired with `GI_WGSL`. */
   readonly linearSampler: GPUSampler
+  /** Linear repeat sampler for `cascadeViews`, paired with `GI_SPECULAR_WGSL` (`giSpecSampler`). */
+  readonly cascadeSampler: GPUSampler
+  /** Uniform buffer for `GI_SPECULAR_WGSL` (`giSpec`), rewritten by every `inject()`. */
+  readonly specularParams: GPUBuffer
 }
 
 /**
@@ -283,6 +354,168 @@ fn applyVoxelGI(
   indirectStrength: f32,
 ) -> vec3f {
   return max(directColor, vec3f(0.0)) + combineIndirectGI(albedo, giSample.rgb, indirectStrength) + max(emissive, vec3f(0.0));
+}
+`
+
+/**
+ * WGSL resource bindings for `GI_SPECULAR_WGSL`: the three cascade radiance pyramids
+ * (`VoxelGIPass.cascadeViews`), their repeat sampler (`cascadeSampler`) and `specularParams`.
+ * `cascadeViews` swaps between two sets on every `inject()`, so a consumer keeps one bind group
+ * per set and picks by the views' identity.
+ */
+export function giSpecularBindings(group = 2, baseBinding = 0): string {
+  return /* wgsl */ `
+struct GiSpecularParams {
+  // xyz: cascade origin (voxels), w: valid
+  cascadeOrigins: array<vec4i, 3>,
+  // x: vox0, y: vox1, z: vox2 (cells)
+  cascadeVoxels: vec4f,
+  // xyz: cascade dimensions
+  cascadeDim: vec4f,
+  // xyz: sky zenith, w: sunGlow
+  skyZenithGlow: vec4f,
+  skyHorizon: vec4f,
+  skyGround: vec4f,
+  sunDir: vec4f,
+}
+@group(${group}) @binding(${baseBinding}) var giSpecCas0: texture_3d<f32>;
+@group(${group}) @binding(${baseBinding + 1}) var giSpecCas1: texture_3d<f32>;
+@group(${group}) @binding(${baseBinding + 2}) var giSpecCas2: texture_3d<f32>;
+@group(${group}) @binding(${baseBinding + 3}) var giSpecSampler: sampler;
+@group(${group}) @binding(${baseBinding + 4}) var<uniform> giSpec: GiSpecularParams;
+`
+}
+
+/**
+ * Glossy reflections from the same radiance cache the diffuse bounce uses. Expects
+ * `giSpecularBindings()`. Reads only the cascade textures (no storage buffer), so a fragment
+ * shader can use it. Mip 0 holds a voxel's radiance averaged over its exposed faces, so a wall one
+ * voxel thick reflects the mean of its two sides.
+ */
+export const GI_SPECULAR_WGSL = /* wgsl */ `
+fn giSpecTap(c: u32, uvw: vec3f, lod: f32) -> vec4f {
+  if (c == 0u) {
+    return textureSampleLevel(giSpecCas0, giSpecSampler, uvw, lod);
+  }
+  if (c == 1u) {
+    return textureSampleLevel(giSpecCas1, giSpecSampler, uvw, lod);
+  }
+  return textureSampleLevel(giSpecCas2, giSpecSampler, uvw, lod);
+}
+
+fn giSpecSky(rd: vec3f) -> vec3f {
+  let up = clamp(rd.y, 0.0, 1.0);
+  let down = clamp(-rd.y, 0.0, 1.0);
+  var col = mix(giSpec.skyHorizon.xyz, giSpec.skyZenithGlow.xyz, pow(up, 0.55));
+  col = mix(col, giSpec.skyGround.xyz, smoothstep(0.0, 0.35, down));
+  let glow = giSpec.skyZenithGlow.w;
+  if (glow > 0.0) {
+    col += vec3f(1.0, 0.92, 0.80) * (pow(max(dot(rd, giSpec.sunDir.xyz), 0.0), 48.0) * glow);
+  }
+  return max(col, vec3f(0.0));
+}
+
+// One cone through the cascades, front to back. The cone's width picks the cascade and its mip.
+// Returns .rgb = radiance, .a = how much of the cone reached the sky.
+fn giSpecCone(ro: vec3f, dir: vec3f, tanHalfAngle: f32, startJitter: f32) -> vec4f {
+  let dimF = giSpec.cascadeDim.xyz;
+  let voxSizes = array<f32, 3>(giSpec.cascadeVoxels.x, giSpec.cascadeVoxels.y, giSpec.cascadeVoxels.z);
+  let s0 = voxSizes[0];
+  var t = s0 * (0.35 + 0.5 * startJitter);
+  var accRgb = vec3f(0.0);
+  var accA = 0.0;
+
+  for (var stepIdx = 0u; stepIdx < 28u; stepIdx++) {
+    if (accA >= 0.97) {
+      break;
+    }
+    let p = ro + dir * t;
+    let diam = max(s0, 2.0 * t * tanHalfAngle);
+    var chosen = 3u;
+    for (var c = 0u; c < 3u; c++) {
+      let orig = giSpec.cascadeOrigins[c];
+      if (orig.w == 0) { continue; }
+      let s = voxSizes[c];
+      if (diam > s * 5.0 && c < 2u) { continue; }
+      let rel = p / s - vec3f(orig.xyz);
+      if (all(rel >= vec3f(1.5)) && all(rel <= dimF - vec3f(1.5))) {
+        chosen = c;
+        break;
+      }
+    }
+    if (chosen >= 3u) {
+      break;
+    }
+    let s = voxSizes[chosen];
+    let lod = clamp(log2(max(1.0, diam / s)), 0.0, 2.0);
+    let stepLen = max(diam * 0.5, s * 0.5);
+    // World voxel -> texel is a plain wrap (the clipmap is toroidal), so no origin offset is needed.
+    let tap = giSpecTap(chosen, p / (s * dimF), lod);
+    let tapA = clamp(tap.a, 0.0, 1.0);
+    if (tapA > 1e-4) {
+      let tapRgb = min(max(tap.rgb, vec3f(0.0)), vec3f(65000.0));
+      let weight = clamp(stepLen / max(diam, s), 0.35, 1.0);
+      let corrA = 1.0 - pow(max(0.0, 1.0 - tapA), weight);
+      accRgb += (1.0 - accA) * tapRgb * (corrA / tapA);
+      accA += (1.0 - accA) * corrA;
+    }
+    t += stepLen;
+  }
+
+  let skyVis = clamp(1.0 - accA, 0.0, 1.0);
+  if (skyVis > 1e-4) {
+    accRgb += skyVis * giSpecSky(dir);
+  }
+  return vec4f(min(accRgb, vec3f(65000.0)), skyVis);
+}
+
+// Environment BRDF for GGX (Karis 2014, the analytic fit): Fresnel and the lobe's energy for a
+// pre-integrated reflection, so rough dielectrics reflect less than smooth ones.
+fn giSpecEnvBrdf(f0: vec3f, roughness: f32, nDotV: f32) -> vec3f {
+  let c0 = vec4f(-1.0, -0.0275, -0.572, 0.022);
+  let c1 = vec4f(1.0, 0.0425, 1.04, -0.04);
+  let r = roughness * c0 + c1;
+  let a004 = min(r.x * r.x, exp2(-9.28 * nDotV)) * r.x + r.y;
+  let ab = vec2f(-1.04, 1.04) * a004 + r.zw;
+  return clamp(f0 * ab.x + ab.y, vec3f(0.0), vec3f(1.0));
+}
+
+// Reflected radiance at a surface point, already multiplied by Fresnel: add it to the lit colour.
+//   worldPos, normal: the surface, in cells and world space; viewDir: unit, surface -> eye.
+//   roughness: perceptual [0, 1]; f0: reflectance at normal incidence (0.04 for most dielectrics).
+//   noise: two numbers in [0, 1) per pixel and frame (blue noise) that jitter the cone; (0.5, 0.5) for none.
+// Returns .rgb = reflected light, .a = how much of the cone reached the sky.
+fn sampleSpecularGI(worldPos: vec3f, normal: vec3f, viewDir: vec3f, roughness: f32, f0: vec3f, noise: vec2f) -> vec4f {
+  let rough = clamp(roughness, 0.0, 1.0);
+  let alpha = rough * rough;
+  let nLen2 = dot(normal, normal);
+  let n = select(vec3f(0.0, 1.0, 0.0), normal * inverseSqrt(max(nLen2, 1e-8)), nLen2 > 1e-8);
+  let vLen2 = dot(viewDir, viewDir);
+  let v = select(n, viewDir * inverseSqrt(max(vLen2, 1e-8)), vLen2 > 1e-8);
+  let nDotV = clamp(dot(n, v), 1e-3, 1.0);
+
+  // The mirror direction, bent toward the normal as the GGX lobe widens (its dominant direction).
+  var refl = reflect(-v, n);
+  refl = mix(n, refl, (1.0 - alpha) * (sqrt(1.0 - alpha) + alpha));
+  // Half-angle of the cone that holds most of the lobe: tan = 3 alpha (Uludag 2014).
+  let tanCone = clamp(3.0 * alpha, 0.01, 1.6);
+  // Stochastic lookup: turn the axis inside the cone, so frames average to the full lobe.
+  let phi = 6.28318530718 * noise.x;
+  let spread = (noise.y - 0.5) * tanCone;
+  let side = normalize(cross(select(vec3f(0.0, 1.0, 0.0), vec3f(1.0, 0.0, 0.0), abs(refl.y) > 0.9), refl));
+  let side2 = cross(refl, side);
+  var dir = refl + (side * cos(phi) + side2 * sin(phi)) * spread;
+  // Never below the surface.
+  dir -= n * min(dot(dir, n) - 0.04, 0.0);
+  dir = normalize(dir);
+
+  // Start half a fine voxel off the surface, so its own (linearly filtered) voxel is not the first hit.
+  let ro = worldPos + n * (giSpec.cascadeVoxels.x * 0.6);
+  let cone = giSpecCone(ro, dir, max(tanCone * 0.5, 0.01), noise.y);
+  let rgb = cone.rgb * giSpecEnvBrdf(clamp(f0, vec3f(0.0), vec3f(1.0)), rough, nDotV);
+  // NaN fails both comparisons, so it becomes 0; +Inf fails the second.
+  let ok = (rgb >= vec3f(0.0)) & (rgb <= vec3f(65000.0));
+  return vec4f(select(vec3f(0.0), rgb, ok), clamp(cone.a, 0.0, 1.0));
 }
 `
 
@@ -666,6 +899,8 @@ struct InjectParams {
 @group(0) @binding(7) var<storage, read_write> facesOut: array<u32>;
 @group(0) @binding(8) var repeatSamp: sampler;
 @group(0) @binding(9) var<uniform> params: InjectParams;
+// Demand worklist: GI_DEMAND_CAP packed toroidal cells per cascade, then one cell count per cascade.
+@group(0) @binding(10) var<storage, read> demandList: array<u32>;
 
 ${CLIPMAP_TRACE_WGSL}
 
@@ -805,39 +1040,14 @@ fn traceSourceSunVis(startWorld: vec3f, sunDir: vec3f) -> f32 {
   return 1.0;
 }
 
-@compute @workgroup_size(4, 4, 4)
-fn cs_inject_radiance(@builtin(global_invocation_id) gid: vec3u) {
+// Writes one cascade voxel: occupancy, direct sun, emissive and multi-bounce indirect.
+// doGather = true traces the hemisphere gather rays; false carries last frame's indirect forward
+// with no rays (the demand grid pass: the worklist pass re-runs the cells that earned rays).
+fn injectCell(w: vec3i, tc: vec3u, isNewSlab: bool, doGather: bool) {
   let cascadeIdx = params.cascadeDims.x;
   let dimU = params.cascadeDims.yzw;
-  if (any(gid >= dimU)) {
-    return;
-  }
-
-  let curOrigin = params.curOriginFrame.xyz;
   let frameIdx = u32(max(params.curOriginFrame.w, 0));
-  let prevOrigin = params.prevOriginFlags.xyz;
-  let flags = u32(params.prevOriginFlags.w);
-  let prevValid = (flags & 1u) != 0u;
-  let forceFull = (flags & 2u) != 0u;
-  let amortizeStride = max((flags >> 8u) & 0xffu, 1u);
-
-  let w = curOrigin + vec3i(gid);
-  let tc = toroidalCoord(w, dimU);
-  let dimI = vec3i(dimU);
-
-  // Detect whether this world voxel just entered the toroidal clipmap window on camera movement.
-  let isNewSlab = !prevValid || any(w < prevOrigin) || any(w >= prevOrigin + dimI);
-
-  // Incremental amortization: existing slabs not selected this frame preserve previous radiance.
-  if (!forceFull && !isNewSlab && amortizeStride > 1u) {
-    let sliceIdx = u32(bitcast<u32>(w.z) + frameIdx) % amortizeStride;
-    if (sliceIdx != 0u) {
-      let prevIso = loadCascadeMip(cascadeIdx, vec3i(tc), 0);
-      textureStore(cascadeOut, vec3i(tc), prevIso);
-      copySixFaces(cascadeIdx, tc, dimU);
-      return;
-    }
-  }
+  let prevValid = (u32(params.prevOriginFlags.w) & 1u) != 0u;
 
   let casVoxel = params.srcSizeCasVoxel.w;
   let worldCenter = (vec3f(w) + 0.5) * casVoxel;
@@ -902,7 +1112,12 @@ fn cs_inject_radiance(@builtin(global_invocation_id) gid: vec3u) {
 
     // 2. Multi-bounce indirect radiance gathered from previous frame's 3D clipmap.
     var indirectRad = vec3f(0.0);
-    if (prevValid && !isNewSlab && feedback > 1e-4) {
+    if (!doGather) {
+      // Carry only where last frame's voxel was solid, so its stored faces are this voxel's own.
+      if (prevValid && !isNewSlab && feedback > 1e-4 && loadCascadeMip(cascadeIdx, vec3i(tc), 0).a > 0.001) {
+        indirectRad = max(readFaceRad(cascadeIdx, tc, f, dimU) - directPlusEmissive, vec3f(0.0));
+      }
+    } else if (prevValid && !isNewSlab && feedback > 1e-4) {
       let basis = makeBasis(fNorm);
       var skyGather = vec3f(0.0);
       var bounceGather = vec3f(0.0);
@@ -963,6 +1178,290 @@ fn cs_inject_radiance(@builtin(global_invocation_id) gid: vec3u) {
   // Store premultiplied radiance (.rgb = L * opacity) and opacity (.a) in mip 0.
   textureStore(cascadeOut, vec3i(tc), vec4f(min(avgRad, vec3f(maxRad)) * src.opacity, src.opacity));
   writeSixFaces(cascadeIdx, tc, dimU, faceRad);
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn cs_inject_radiance(@builtin(global_invocation_id) gid: vec3u) {
+  let cascadeIdx = params.cascadeDims.x;
+  let dimU = params.cascadeDims.yzw;
+  if (any(gid >= dimU)) {
+    return;
+  }
+
+  let curOrigin = params.curOriginFrame.xyz;
+  let frameIdx = u32(max(params.curOriginFrame.w, 0));
+  let prevOrigin = params.prevOriginFlags.xyz;
+  let flags = u32(params.prevOriginFlags.w);
+  let prevValid = (flags & 1u) != 0u;
+  let forceFull = (flags & 2u) != 0u;
+  let demandOn = (flags & 4u) != 0u;
+  let amortizeStride = max((flags >> 8u) & 0xffu, 1u);
+
+  let w = curOrigin + vec3i(gid);
+  let tc = toroidalCoord(w, dimU);
+  let dimI = vec3i(dimU);
+
+  // Detect whether this world voxel just entered the toroidal clipmap window on camera movement.
+  let isNewSlab = !prevValid || any(w < prevOrigin) || any(w >= prevOrigin + dimI);
+
+  // Incremental amortization: existing slabs not selected this frame preserve previous radiance.
+  if (!forceFull && !isNewSlab && amortizeStride > 1u) {
+    let sliceIdx = u32(bitcast<u32>(w.z) + frameIdx) % amortizeStride;
+    if (sliceIdx != 0u) {
+      let prevIso = loadCascadeMip(cascadeIdx, vec3i(tc), 0);
+      textureStore(cascadeOut, vec3i(tc), prevIso);
+      copySixFaces(cascadeIdx, tc, dimU);
+      return;
+    }
+  }
+
+  injectCell(w, tc, isNewSlab, !demandOn);
+}
+
+// Demand worklist pass: a fixed GI_DEMAND_CAP / 64 workgroups per cascade (no indirect dispatch);
+// lanes past this frame's cell count return at once.
+@compute @workgroup_size(64)
+fn cs_inject_worklist(@builtin(global_invocation_id) gid: vec3u) {
+  let cascadeIdx = params.cascadeDims.x;
+  let dimU = params.cascadeDims.yzw;
+  if (gid.x >= demandList[3u * GI_DEMAND_CAP + cascadeIdx]) {
+    return;
+  }
+  let cellBits = demandList[cascadeIdx * GI_DEMAND_CAP + gid.x];
+  let tc = vec3u(cellBits & 1023u, (cellBits >> 10u) & 1023u, (cellBits >> 20u) & 1023u);
+  let curOrigin = params.curOriginFrame.xyz;
+  let wrapMask = dimU - vec3u(1u);
+  let w = curOrigin + vec3i((tc - toroidalCoord(curOrigin, dimU)) & wrapMask);
+  injectCell(w, tc, false, true);
+}
+`
+
+// ── Demand activation: cs_demand_mark, cs_demand_compact, cs_demand_finalize ─
+
+// Screen tiles -> a bit per visible cascade voxel (and its 26 neighbours).
+const DEMAND_MARK_WGSL = /* wgsl */ `
+${COMMON_GI_WGSL}
+
+struct MarkParams {
+  // xy: active renderSize, z: pixel stride between tiles, w: frameIndex
+  renderInfo: vec4f,
+  // xyz: camera eye (cells), w: nearDist (cells)
+  camEyeNear: vec4f,
+  // xyz: camera forward, w: farDist (cells)
+  camFwdFar: vec4f,
+  // xyz: camera right, w: tanHalf
+  camRightTan: vec4f,
+  // xyz: camera up, w: aspect
+  camUpAspect: vec4f,
+  // xyz: cascadeDim
+  cascadeDim: vec4u,
+  // xyz: cascade origin
+  cascadeOrigins: array<vec4i, 3>,
+  // x: vox0, y: vox1, z: vox2
+  cascadeVoxels: vec4f,
+}
+
+@group(0) @binding(0) var depthTex: texture_depth_2d;
+@group(0) @binding(1) var<storage, read_write> demandMarks: array<atomic<u32>>;
+@group(0) @binding(2) var<uniform> params: MarkParams;
+
+@compute @workgroup_size(8, 8)
+fn cs_demand_mark(@builtin(global_invocation_id) gid: vec3u) {
+  let renderSizeI = vec2i(params.renderInfo.xy);
+  let tileStride = max(u32(params.renderInfo.z), 1u);
+  let frameIdx = u32(params.renderInfo.w);
+  // One pixel per tile, moved inside the tile every frame so all of it is seen over time.
+  let jit = vec2u(vec2f(
+    hash31(vec3u(gid.xy, frameIdx)),
+    hash31(vec3u(gid.yx, frameIdx + 977u)),
+  ) * f32(tileStride));
+  let px = vec2i(gid.xy * tileStride + min(jit, vec2u(tileStride - 1u)));
+  if (px.x >= renderSizeI.x || px.y >= renderSizeI.y) {
+    return;
+  }
+  let depth = textureLoad(depthTex, px, 0);
+  if (depth >= 0.99995) {
+    return;
+  }
+
+  // Same unprojection as cs_trace_gi.
+  let uv = (vec2f(px) + 0.5) / params.renderInfo.xy;
+  let sx = (uv.x * 2.0 - 1.0) * params.camRightTan.w * params.camUpAspect.w;
+  let sy = (1.0 - uv.y * 2.0) * params.camRightTan.w;
+  let rayStep = params.camFwdFar.xyz + params.camRightTan.xyz * sx + params.camUpAspect.xyz * sy;
+  let linZ = linearDepth(depth, params.camEyeNear.w, params.camFwdFar.w);
+  let worldPos = params.camEyeNear.xyz + rayStep * linZ;
+
+  let dimU = params.cascadeDim.xyz;
+  let dimI = vec3i(dimU);
+  let voxSizes = array<f32, 3>(params.cascadeVoxels.x, params.cascadeVoxels.y, params.cascadeVoxels.z);
+  for (var c = 0u; c < 3u; c++) {
+    let origin = params.cascadeOrigins[c].xyz;
+    let v = vec3i(floor(worldPos / voxSizes[c]));
+    let rel = v - origin;
+    if (any(rel < vec3i(-1)) || any(rel > dimI)) {
+      continue;
+    }
+    for (var dz = -1; dz <= 1; dz++) {
+      for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+          let nRel = rel + vec3i(dx, dy, dz);
+          if (any(nRel < vec3i(0)) || any(nRel >= dimI)) {
+            continue;
+          }
+          let idx = voxelLinearIndex(c, toroidalCoord(origin + nRel, dimU), dimU);
+          let bit = 1u << (idx & 31u);
+          if ((atomicLoad(&demandMarks[idx >> 5u]) & bit) == 0u) {
+            atomicOr(&demandMarks[idx >> 5u], bit);
+          }
+        }
+      }
+    }
+  }
+}
+`
+
+// Counter slots of the demand state buffer.
+const DEMAND_STATE_WORDS = 16
+const DEMAND_STATE_WGSL = /* wgsl */ `
+// 0..2: granted per cascade, 3: grant slots asked for, 4: visible cells, 5: cells a full update
+// would gather, 6: background cells granted, 7: cells wanting rays, 8: last frame's 7.
+const DS_SLOTS: u32 = 3u;
+const DS_VISIBLE: u32 = 4u;
+const DS_FULL: u32 = 5u;
+const DS_BACKGROUND: u32 = 6u;
+const DS_WANTED: u32 = 7u;
+const DS_PREV_WANTED: u32 = 8u;
+`
+
+// Marked + exposed + solid voxels -> a compact per-cascade worklist, under the per-frame budget.
+const DEMAND_COMPACT_WGSL = /* wgsl */ `
+${COMMON_GI_WGSL}
+${DEMAND_STATE_WGSL}
+
+// Only the head of InjectParams (the same uniform buffer cs_inject_radiance reads).
+struct CompactParams {
+  cascadeDims: vec4u,
+  curOriginFrame: vec4i,
+  prevOriginFlags: vec4i,
+}
+
+@group(0) @binding(0) var curCascade: texture_3d<f32>;
+@group(0) @binding(1) var<storage, read> demandMarks: array<u32>;
+@group(0) @binding(2) var<storage, read_write> demandState: array<atomic<u32>, ${DEMAND_STATE_WORDS}>;
+@group(0) @binding(3) var<storage, read_write> demandList: array<u32>;
+@group(0) @binding(4) var<uniform> params: CompactParams;
+
+@compute @workgroup_size(4, 4, 4)
+fn cs_demand_compact(@builtin(global_invocation_id) gid: vec3u) {
+  let cascadeIdx = params.cascadeDims.x;
+  let dimU = params.cascadeDims.yzw;
+  if (any(gid >= dimU)) {
+    return;
+  }
+  let dimI = vec3i(dimU);
+  let curOrigin = params.curOriginFrame.xyz;
+  let frameIdx = u32(max(params.curOriginFrame.w, 0));
+  let prevOrigin = params.prevOriginFlags.xyz;
+  let amortizeStride = max((u32(params.prevOriginFlags.w) >> 8u) & 0xffu, 1u);
+
+  let w = curOrigin + vec3i(gid);
+  // A voxel that just entered the window has no history to gather against.
+  if (any(w < prevOrigin) || any(w >= prevOrigin + dimI)) {
+    return;
+  }
+  // The same slice rule as cs_inject_radiance, so demand never gathers a cell the full update would not.
+  if (amortizeStride > 1u && (u32(bitcast<u32>(w.z) + frameIdx) % amortizeStride) != 0u) {
+    return;
+  }
+  let tc = toroidalCoord(w, dimU);
+  if (textureLoad(curCascade, vec3i(tc), 0).a <= 0.001) {
+    return;
+  }
+  var exposed = false;
+  for (var f = 0u; f < 6u; f++) {
+    let nw = w + faceDir(f);
+    let nRel = nw - curOrigin;
+    if (any(nRel < vec3i(0)) || any(nRel >= dimI)) {
+      exposed = true;
+    } else if (textureLoad(curCascade, vec3i(toroidalCoord(nw, dimU)), 0).a < 0.5) {
+      exposed = true;
+    }
+  }
+  if (!exposed) {
+    return;
+  }
+  atomicAdd(&demandState[DS_FULL], 1u);
+
+  let idx = voxelLinearIndex(cascadeIdx, tc, dimU);
+  let visible = ((demandMarks[idx >> 5u] >> (idx & 31u)) & 1u) != 0u;
+  let wU = bitcast<vec3u>(w);
+  if (visible) {
+    atomicAdd(&demandState[DS_VISIBLE], 1u);
+  } else if (hash31(wU ^ vec3u(frameIdx * 2246822519u + cascadeIdx)) >= GI_DEMAND_BACKGROUND) {
+    // Unseen cells get a slow refresh, so what a visible ray lands on behind the camera is not stale for ever.
+    return;
+  }
+  atomicAdd(&demandState[DS_WANTED], 1u);
+
+  // Over budget last frame: thin every cell alike, a different set each frame, so none starves.
+  let prevWanted = atomicLoad(&demandState[DS_PREV_WANTED]);
+  if (prevWanted > GI_DEMAND_BUDGET) {
+    let keep = f32(GI_DEMAND_BUDGET) / f32(prevWanted);
+    if (hash31(wU ^ vec3u(frameIdx * 3266489917u + 7u + cascadeIdx)) >= keep) {
+      return;
+    }
+  }
+  if (atomicAdd(&demandState[DS_SLOTS], 1u) >= GI_DEMAND_BUDGET) {
+    return;
+  }
+  let at = atomicAdd(&demandState[cascadeIdx], 1u);
+  demandList[cascadeIdx * GI_DEMAND_CAP + at] = tc.x | (tc.y << 10u) | (tc.z << 20u);
+  if (!visible) {
+    atomicAdd(&demandState[DS_BACKGROUND], 1u);
+  }
+}
+`
+
+// Turns the counters into per-cascade worklist counts (at the list's tail) and keeps the stats.
+const DEMAND_FINALIZE_WGSL = /* wgsl */ `
+${DEMAND_STATE_WGSL}
+
+@group(0) @binding(0) var<storage, read_write> demandState: array<atomic<u32>, ${DEMAND_STATE_WORDS}>;
+@group(0) @binding(1) var<storage, read_write> demandList: array<u32>;
+// 0..2: active per cascade, 3: active, 4: visible, 5: full-update cells, 6: background, 7: wanted.
+@group(0) @binding(2) var<storage, read_write> demandStats: array<u32, 8>;
+
+@compute @workgroup_size(1)
+fn cs_demand_finalize() {
+  var total = 0u;
+  for (var c = 0u; c < 3u; c++) {
+    let n = min(atomicExchange(&demandState[c], 0u), GI_DEMAND_CAP);
+    demandList[3u * GI_DEMAND_CAP + c] = n;
+    demandStats[c] = n;
+    total += n;
+  }
+  atomicStore(&demandState[DS_SLOTS], 0u);
+  demandStats[3] = total;
+  demandStats[4] = atomicExchange(&demandState[DS_VISIBLE], 0u);
+  demandStats[5] = atomicExchange(&demandState[DS_FULL], 0u);
+  demandStats[6] = atomicExchange(&demandState[DS_BACKGROUND], 0u);
+  let wanted = atomicExchange(&demandState[DS_WANTED], 0u);
+  demandStats[7] = wanted;
+  atomicStore(&demandState[DS_PREV_WANTED], wanted);
+}
+`
+
+// Wipes the visibility bits before each mark: one word per thread, in its own pass.
+const DEMAND_CLEAR_WGSL = /* wgsl */ `
+@group(0) @binding(0) var<storage, read_write> demandMarks: array<u32>;
+
+@compute @workgroup_size(64)
+fn cs_demand_clear(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) groups: vec3u) {
+  let i = gid.y * groups.x * 64u + gid.x;
+  if (i < arrayLength(&demandMarks)) {
+    demandMarks[i] = 0u;
+  }
 }
 `
 
@@ -1692,6 +2191,10 @@ const TRACE_UBO_BYTES = 256
 const TEMPORAL_UBO_BYTES = 64
 const ATROUS_UBO_BYTES = 48
 const FACE_WORDS_PER_VOXEL = 9
+const MARK_UBO_BYTES = 160
+const SPECULAR_UBO_BYTES = 144
+const DEMAND_STATS_WORDS = 8
+const DEMAND_URL_OFF = new URLSearchParams(globalThis.location?.search ?? '').get('gi_demand') === '0'
 const ATROUS_STEPS = [1, 2, 4] as const
 
 function isPow2(n: number): boolean {
@@ -1746,12 +2249,28 @@ export async function createVoxelGI(
   const normalPower = Math.max(1, options.normalPower ?? 64.0)
   const maxHistory = Math.max(1, Math.min(64, options.maxHistory ?? 32.0))
 
-  const [injectMod, mipMod, traceMod, temporalMod, atrousMod] = await Promise.all([
-    shader(device, 'gi-inject', INJECT_WGSL),
+  // Demand activation: a per-frame budget of voxels that trace gather rays, found from the depth buffer.
+  // The worklist packs a toroidal voxel into 10 bits an axis.
+  const demandEnabled = options.demand !== false && !DEMAND_URL_OFF && Math.max(dimX, dimY, dimZ) <= 1024
+  const demandBudget = Math.max(64, Math.min(65_536, Math.round(options.maxActiveCells ?? GI_MAX_ACTIVE_CELLS)))
+  const demandCap = Math.ceil(demandBudget / 64) * 64
+  const demandBackground = Math.max(0, Math.min(1, options.demandBackgroundRate ?? 0.125))
+  const demandConsts = /* wgsl */ `
+const GI_DEMAND_CAP: u32 = ${demandCap}u;
+const GI_DEMAND_BUDGET: u32 = ${demandBudget}u;
+const GI_DEMAND_BACKGROUND: f32 = ${demandBackground.toFixed(6)};
+`
+
+  const [injectMod, mipMod, traceMod, temporalMod, atrousMod, markMod, compactMod, finalizeMod, clearMod] = await Promise.all([
+    shader(device, 'gi-inject', demandConsts + INJECT_WGSL),
     shader(device, 'gi-mip', MIP_WGSL),
     shader(device, 'gi-trace', TRACE_WGSL),
     shader(device, 'gi-svgf-temporal', TEMPORAL_WGSL),
     shader(device, 'gi-svgf-atrous', ATROUS_WGSL),
+    shader(device, 'gi-demand-mark', DEMAND_MARK_WGSL),
+    shader(device, 'gi-demand-compact', demandConsts + DEMAND_COMPACT_WGSL),
+    shader(device, 'gi-demand-finalize', demandConsts + DEMAND_FINALIZE_WGSL),
+    shader(device, 'gi-demand-clear', DEMAND_CLEAR_WGSL),
   ])
 
   // ── Explicit BindGroupLayouts ─────────────────────────────────────────────
@@ -1769,7 +2288,42 @@ export async function createVoxelGI(
       { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
       { binding: 8, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
       { binding: 9, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      { binding: 10, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
     ],
+  })
+
+  const markLayout = device.createBindGroupLayout({
+    label: 'gi-demand-mark-layout',
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'depth' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+    ],
+  })
+
+  const compactLayout = device.createBindGroupLayout({
+    label: 'gi-demand-compact-layout',
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float', viewDimension: '3d' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+    ],
+  })
+
+  const finalizeLayout = device.createBindGroupLayout({
+    label: 'gi-demand-finalize-layout',
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ],
+  })
+
+  const clearLayout = device.createBindGroupLayout({
+    label: 'gi-demand-clear-layout',
+    entries: [{ binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } }],
   })
 
   const mipLayout = device.createBindGroupLayout({
@@ -1823,7 +2377,7 @@ export async function createVoxelGI(
     ],
   })
 
-  const [injectPipe, mipPipe, tracePipe, temporalPipe, atrousPipe] = await Promise.all([
+  const [injectPipe, mipPipe, tracePipe, temporalPipe, atrousPipe, worklistPipe, markPipe, compactPipe, finalizePipe, clearPipe] = await Promise.all([
     device.createComputePipelineAsync({
       label: 'gi-inject',
       layout: device.createPipelineLayout({ bindGroupLayouts: [injectLayout] }),
@@ -1848,6 +2402,31 @@ export async function createVoxelGI(
       label: 'gi-svgf-atrous',
       layout: device.createPipelineLayout({ bindGroupLayouts: [atrousLayout] }),
       compute: { module: atrousMod, entryPoint: 'cs_svgf_atrous' },
+    }),
+    device.createComputePipelineAsync({
+      label: 'gi-inject-worklist',
+      layout: device.createPipelineLayout({ bindGroupLayouts: [injectLayout] }),
+      compute: { module: injectMod, entryPoint: 'cs_inject_worklist' },
+    }),
+    device.createComputePipelineAsync({
+      label: 'gi-demand-mark',
+      layout: device.createPipelineLayout({ bindGroupLayouts: [markLayout] }),
+      compute: { module: markMod, entryPoint: 'cs_demand_mark' },
+    }),
+    device.createComputePipelineAsync({
+      label: 'gi-demand-compact',
+      layout: device.createPipelineLayout({ bindGroupLayouts: [compactLayout] }),
+      compute: { module: compactMod, entryPoint: 'cs_demand_compact' },
+    }),
+    device.createComputePipelineAsync({
+      label: 'gi-demand-finalize',
+      layout: device.createPipelineLayout({ bindGroupLayouts: [finalizeLayout] }),
+      compute: { module: finalizeMod, entryPoint: 'cs_demand_finalize' },
+    }),
+    device.createComputePipelineAsync({
+      label: 'gi-demand-clear',
+      layout: device.createPipelineLayout({ bindGroupLayouts: [clearLayout] }),
+      compute: { module: clearMod, entryPoint: 'cs_demand_clear' },
     }),
   ])
 
@@ -1912,6 +2491,64 @@ export async function createVoxelGI(
   const injectU32 = new Uint32Array(injectRaw)
   const injectI32 = new Int32Array(injectRaw)
   const injectF32 = new Float32Array(injectRaw)
+
+  // ── Demand activation buffers ─────────────────────────────────────────────
+
+  const totalCells = GI_CASCADE_COUNT * voxelsPerCascade
+  const markWords = Math.ceil(totalCells / 32)
+  const demandMarks = device.createBuffer({ label: 'gi-demand-marks', size: markWords * 4, usage: GPUBufferUsage.STORAGE })
+  // cs_demand_clear: one word per thread, in a 2D grid so no dimension passes the 65,535-group limit.
+  const clearGroups = Math.ceil(markWords / 64)
+  const clearGroupsX = Math.min(clearGroups, 65_535)
+  const clearGroupsY = Math.ceil(clearGroups / clearGroupsX)
+  const demandState = device.createBuffer({ label: 'gi-demand-state', size: DEMAND_STATE_WORDS * 4, usage: GPUBufferUsage.STORAGE })
+  // Three worklists of demandCap packed cells, then the three cell counts (padded to 16 bytes).
+  const demandList = device.createBuffer({ label: 'gi-demand-list', size: (GI_CASCADE_COUNT * demandCap + 4) * 4, usage: GPUBufferUsage.STORAGE })
+  const demandStatsBuf = device.createBuffer({ label: 'gi-demand-stats', size: DEMAND_STATS_WORDS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC })
+  const demandStatsRead = device.createBuffer({ label: 'gi-demand-stats-read', size: DEMAND_STATS_WORDS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
+  const markUbo = device.createBuffer({ label: 'gi-demand-mark-ubo', size: MARK_UBO_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const markRaw = new ArrayBuffer(MARK_UBO_BYTES)
+  const markF32 = new Float32Array(markRaw)
+  const markU32 = new Uint32Array(markRaw)
+  const markI32 = new Int32Array(markRaw)
+
+  // compactBinds[writeSetIdx][cascadeIdx]: reads the mip 0 the grid pass just wrote.
+  const compactBinds: GPUBindGroup[][] = [0, 1].map((s) =>
+    [0, 1, 2].map((c) =>
+      device.createBindGroup({
+        label: `gi-demand-compact-bg-${s}-${c}`,
+        layout: compactLayout,
+        entries: [
+          { binding: 0, resource: casMipViews[s][c][0] },
+          { binding: 1, resource: { buffer: demandMarks } },
+          { binding: 2, resource: { buffer: demandState } },
+          { binding: 3, resource: { buffer: demandList } },
+          { binding: 4, resource: { buffer: injectUbos[c] } },
+        ],
+      }),
+    ),
+  )
+  const finalizeBind = device.createBindGroup({
+    label: 'gi-demand-finalize-bg',
+    layout: finalizeLayout,
+    entries: [
+      { binding: 0, resource: { buffer: demandState } },
+      { binding: 1, resource: { buffer: demandList } },
+      { binding: 2, resource: { buffer: demandStatsBuf } },
+    ],
+  })
+  const clearBind = device.createBindGroup({
+    label: 'gi-demand-clear-bg',
+    layout: clearLayout,
+    entries: [{ binding: 0, resource: { buffer: demandMarks } }],
+  })
+  let markBind: GPUBindGroup | null = null
+  let markDepth: GPUTextureView | null = null
+
+  const specularUbo = device.createBuffer({ label: 'gi-specular-ubo', size: SPECULAR_UBO_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const specRaw = new ArrayBuffer(SPECULAR_UBO_BYTES)
+  const specF32 = new Float32Array(specRaw)
+  const specI32 = new Int32Array(specRaw)
 
   // Constant mip uniforms for mip 0->1 and mip 1->2 (same dims across all 3 cascades).
   const mipUbos: [GPUBuffer, GPUBuffer] = [0, 1].map((m) => {
@@ -2046,6 +2683,7 @@ export async function createVoxelGI(
           { binding: 7, resource: { buffer: facesBuf[w] } },
           { binding: 8, resource: repeatSampler },
           { binding: 9, resource: { buffer: injectUbos[cascadeIdx] } },
+          { binding: 10, resource: { buffer: demandList } },
         ],
       })
     }
@@ -2179,6 +2817,25 @@ export async function createVoxelGI(
   let lastOutView: GPUTextureView = atrousView[0]
   let destroyed = false
 
+  let depthSource: VoxelGIDepthSource | null = null
+  let demandInjects = 0
+  let lastInjectDemand = false
+  let demandCounts: readonly number[] = new Array<number>(DEMAND_STATS_WORDS).fill(0)
+  let demandReading: Promise<VoxelGIDemandStats> | null = null
+  const demandStatsNow = (): VoxelGIDemandStats => ({
+    enabled: demandEnabled,
+    lastInjectDemand,
+    demandInjects,
+    budget: demandBudget,
+    totalCells,
+    activeCells: demandCounts[3],
+    activeCellsPerCascade: [demandCounts[0], demandCounts[1], demandCounts[2]],
+    visibleCells: demandCounts[4],
+    fullUpdateCells: demandCounts[5],
+    backgroundCells: demandCounts[6],
+    wantedCells: demandCounts[7],
+  })
+
   const ensureCapacity = (w: number, h: number) => {
     if (w <= capW && h <= capH) return
     capW = Math.max(capW, w)
@@ -2229,6 +2886,35 @@ export async function createVoxelGI(
     get linearSampler() {
       return linearSampler
     },
+    get cascadeSampler() {
+      return repeatSampler
+    },
+    get specularParams() {
+      return specularUbo
+    },
+
+    setDepthSource(source) {
+      depthSource = source
+    },
+
+    readDemandStats() {
+      if (destroyed) throw new Error('VoxelGIPass was destroyed')
+      // One read at a time: the staging buffer is mapped until it resolves.
+      demandReading ??= (async () => {
+        const enc = device.createCommandEncoder({ label: 'gi-demand-stats' })
+        enc.copyBufferToBuffer(demandStatsBuf, 0, demandStatsRead, 0, DEMAND_STATS_WORDS * 4)
+        device.queue.submit([enc.finish()])
+        try {
+          await demandStatsRead.mapAsync(GPUMapMode.READ)
+          demandCounts = Array.from(new Uint32Array(demandStatsRead.getMappedRange()))
+          demandStatsRead.unmap()
+        } finally {
+          demandReading = null
+        }
+        return demandStatsNow()
+      })()
+      return demandReading
+    },
 
     inject(encoder, input, timing) {
       if (destroyed) throw new Error('VoxelGIPass was destroyed')
@@ -2250,6 +2936,9 @@ export async function createVoxelGI(
         input.sky.horizon[2] * 0.22,
       ]
       const sunGlow = Math.max(0, input.sky.sunGlow ?? 0)
+      // Demand needs history to gather against, so a reset or first frame is the full update.
+      const demandSrc = input.demand !== undefined ? input.demand : depthSource
+      const demandOn = demandEnabled && !doReset && !!demandSrc
 
       // Compute updated snapped toroidal anchors for all 3 cascades.
       const nextOrigins: [[number, number, number], [number, number, number], [number, number, number]] = [
@@ -2275,7 +2964,7 @@ export async function createVoxelGI(
         const src = sources[c]
         const prevValidBit = doReset ? 0 : 1
         const forceFullBit = doReset ? 2 : 0
-        const flags = prevValidBit | forceFullBit | ((amortizeStride & 0xff) << 8)
+        const flags = prevValidBit | forceFullBit | (demandOn ? 4 : 0) | ((amortizeStride & 0xff) << 8)
 
         injectU32[0] = c
         injectU32[1] = dimX
@@ -2344,6 +3033,70 @@ export async function createVoxelGI(
         device.queue.writeBuffer(injectUbos[c], 0, injectRaw)
       }
 
+      // The reflection-cone lookup (GI_SPECULAR_WGSL) reads the cascades this call writes.
+      for (let c = 0; c < GI_CASCADE_COUNT; c++) {
+        specI32[c * 4] = nextOrigins[c][0]
+        specI32[c * 4 + 1] = nextOrigins[c][1]
+        specI32[c * 4 + 2] = nextOrigins[c][2]
+        specI32[c * 4 + 3] = 1
+      }
+      specF32.set(cascadeVoxelCells, 12)
+      specF32[15] = 0
+      specF32.set(cascadeSize, 16)
+      specF32[19] = 0
+      specF32.set(input.sky.zenith, 20)
+      specF32[23] = sunGlow
+      specF32.set(input.sky.horizon, 24)
+      specF32[27] = 0
+      specF32.set(skyGround, 28)
+      specF32[31] = 0
+      specF32.set(sunDir, 32)
+      specF32[35] = 0
+      device.queue.writeBuffer(specularUbo, 0, specRaw)
+
+      if (demandOn && demandSrc) {
+        const cam = demandSrc.camera
+        const markW = Math.max(1, Math.round(demandSrc.renderSize[0]))
+        const markH = Math.max(1, Math.round(demandSrc.renderSize[1]))
+        markF32[0] = markW
+        markF32[1] = markH
+        markF32[2] = Math.max(1, Math.min(16, Math.round(demandSrc.stride ?? 8)))
+        markF32[3] = injectCalls & 0xffff
+        markF32.set(cam.eye, 4)
+        markF32[7] = cam.near ?? NEAR
+        markF32.set(cam.forward, 8)
+        markF32[11] = cam.far ?? FAR
+        markF32.set(cam.right, 12)
+        markF32[15] = cam.tanHalf
+        markF32.set(cam.up, 16)
+        markF32[19] = cam.aspect
+        markU32[20] = dimX
+        markU32[21] = dimY
+        markU32[22] = dimZ
+        markU32[23] = 0
+        for (let c = 0; c < GI_CASCADE_COUNT; c++) {
+          markI32[24 + c * 4] = nextOrigins[c][0]
+          markI32[25 + c * 4] = nextOrigins[c][1]
+          markI32[26 + c * 4] = nextOrigins[c][2]
+          markI32[27 + c * 4] = 1
+        }
+        markF32.set(cascadeVoxelCells, 36)
+        markF32[39] = 0
+        device.queue.writeBuffer(markUbo, 0, markRaw)
+        if (!markBind || markDepth !== demandSrc.depth) {
+          markDepth = demandSrc.depth
+          markBind = device.createBindGroup({
+            label: 'gi-demand-mark-bg',
+            layout: markLayout,
+            entries: [
+              { binding: 0, resource: demandSrc.depth },
+              { binding: 1, resource: { buffer: demandMarks } },
+              { binding: 2, resource: { buffer: markUbo } },
+            ],
+          })
+        }
+      }
+
       // Pass 1: cs_inject_radiance across all 3 cascades.
       const gx0 = (dimX + 3) >> 2
       const gy0 = (dimY + 3) >> 2
@@ -2354,14 +3107,19 @@ export async function createVoxelGI(
         : timing?.inject?.beginningOfPassWriteIndex !== undefined
           ? { querySet: timing.inject.querySet, beginningOfPassWriteIndex: timing.inject.beginningOfPassWriteIndex }
           : undefined
-      const injectEndTs = timing?.inject?.endOfPassWriteIndex !== undefined
+      // On a demand frame, no end-of-range timestamp goes after the demand passes when its range began
+      // before them (`inject` and `all` ends). Chrome's Metal backend lost the device ("Insufficient
+      // Memory") on that shape, even with a single 1-workgroup demand dispatch inside the range, while
+      // the same passes ran clean untimed, with a begin alone, or with a `mip` range wholly after them
+      // (M1 Pro, Chrome 158, November 28, 2026). `mip` timing still works on demand frames.
+      const injectEndTs = !demandOn && timing?.inject?.endOfPassWriteIndex !== undefined
         ? { querySet: timing.inject.querySet, endOfPassWriteIndex: timing.inject.endOfPassWriteIndex }
         : undefined
 
       for (let c = 0; c < GI_CASCADE_COUNT; c++) {
         let ts: GPUComputePassTimestampWrites | undefined
         if (c === 0 && injectStartTs) ts = injectStartTs
-        if (c === GI_CASCADE_COUNT - 1 && injectEndTs) {
+        if (c === GI_CASCADE_COUNT - 1 && injectEndTs && !demandOn) {
           ts = ts ? { ...ts, endOfPassWriteIndex: injectEndTs.endOfPassWriteIndex } : injectEndTs
         }
         const pass = encoder.beginComputePass(ts ? { label: `gi-inject-c${c}`, timestampWrites: ts } : { label: `gi-inject-c${c}` })
@@ -2371,11 +3129,55 @@ export async function createVoxelGI(
         pass.end()
       }
 
+      // Pass 1b (demand): the grid pass above traced no gather rays. Clear and mark the voxels this
+      // frame's depth shows, compact them (with a slow share of the unseen ones) into per-cascade
+      // worklists under the budget, and trace gather rays for those voxels only. Each step is its own
+      // pass, so no buffer is bound read-only and read-write in one pass.
+      if (demandOn && demandSrc && markBind) {
+        const clear = encoder.beginComputePass({ label: 'gi-demand-clear' })
+        clear.setPipeline(clearPipe)
+        clear.setBindGroup(0, clearBind)
+        clear.dispatchWorkgroups(clearGroupsX, clearGroupsY)
+        clear.end()
+
+        const stride = markF32[2]
+        const pick = encoder.beginComputePass({ label: 'gi-demand-pick' })
+        pick.setPipeline(markPipe)
+        pick.setBindGroup(0, markBind)
+        pick.dispatchWorkgroups(Math.ceil(markF32[0] / stride / 8), Math.ceil(markF32[1] / stride / 8))
+        pick.end()
+
+        const compact = encoder.beginComputePass({ label: 'gi-demand-compact' })
+        compact.setPipeline(compactPipe)
+        for (let c = 0; c < GI_CASCADE_COUNT; c++) {
+          compact.setBindGroup(0, compactBinds[writeSet][c])
+          compact.dispatchWorkgroups(gx0, gy0, gz0)
+        }
+        compact.end()
+
+        const finalize = encoder.beginComputePass({ label: 'gi-demand-finalize' })
+        finalize.setPipeline(finalizePipe)
+        finalize.setBindGroup(0, finalizeBind)
+        finalize.dispatchWorkgroups(1)
+        finalize.end()
+
+        // A fixed dispatch per cascade, not dispatchWorkgroupsIndirect: lanes past the count exit at once.
+        const work = encoder.beginComputePass({ label: 'gi-inject-worklist' })
+        work.setPipeline(worklistPipe)
+        for (let c = 0; c < GI_CASCADE_COUNT; c++) {
+          work.setBindGroup(0, getInjectBind(c as 0 | 1 | 2, sources[c], readSet))
+          work.dispatchWorkgroups(demandCap / 64)
+        }
+        work.end()
+        demandInjects++
+      }
+      lastInjectDemand = demandOn
+
       // Pass 2: cs_mip_radiance (mip 0->1 and mip 1->2 for all 3 cascades).
       const mipStartTs = timing?.mip?.beginningOfPassWriteIndex !== undefined
         ? { querySet: timing.mip.querySet, beginningOfPassWriteIndex: timing.mip.beginningOfPassWriteIndex }
         : undefined
-      const mipEndTs = timing?.all?.endOfPassWriteIndex !== undefined
+      const mipEndTs = !demandOn && timing?.all?.endOfPassWriteIndex !== undefined
         ? { querySet: timing.all.querySet, endOfPassWriteIndex: timing.all.endOfPassWriteIndex }
         : timing?.mip?.endOfPassWriteIndex !== undefined
           ? { querySet: timing.mip.querySet, endOfPassWriteIndex: timing.mip.endOfPassWriteIndex }
@@ -2644,6 +3446,7 @@ export async function createVoxelGI(
         renderSize: [lastRenderW, lastRenderH],
         cascadeSize,
         cascadeVoxelCells,
+        demand: demandStatsNow(),
         cascadeOrigins: [
           [curOrigins[0][0], curOrigins[0][1], curOrigins[0][2]],
           [curOrigins[1][0], curOrigins[1][1], curOrigins[1][2]],
@@ -2663,6 +3466,9 @@ export async function createVoxelGI(
         facesBuf[s].destroy()
       }
       for (const b of injectUbos) b.destroy()
+      for (const b of [demandMarks, demandState, demandList, demandStatsBuf, demandStatsRead, markUbo, specularUbo]) b.destroy()
+      markBind = null
+      markDepth = null
       for (const b of mipUbos) b.destroy()
       traceUbo.destroy()
       temporalUbo.destroy()
