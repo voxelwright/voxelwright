@@ -36,7 +36,7 @@ ${AIR}
 ${localLightsEval()}
 
 struct Out {
-  @builtin(position) pos: vec4f,
+  @invariant @builtin(position) pos: vec4f,
   @location(0) seen: vec3f,
   @location(1) plan: vec2f,
   // x: smooth heightfield column depth h (cells), y: flow speed, z: boundary edge (0 outer, 1 interior), w: radial wet coverage (0..1).
@@ -84,12 +84,12 @@ fn linearDepth(d: f32) -> f32 {
   // - minFallDist / minLocalTop detect where falling waterfall sheets plunge into the pool.
   var wetSum = 0.0;
   var wtSum = 0.0;
-  var minFallDist = 4.6;
+  var minFallDist = 6.5;
   var minLocalTop = top;
-  for (var oz = -4; oz <= 3; oz++) {
-    for (var ox = -4; ox <= 3; ox++) {
+  for (var oz = -6; oz <= 5; oz++) {
+    for (var ox = -6; ox <= 5; ox++) {
       let dist = length(vec2f(f32(ox) + 0.5, f32(oz) + 0.5));
-      if (dist > 4.3) { continue; }
+      if (dist > 6.2) { continue; }
       let nw = word(vtx + vec2i(ox, oz));
       let isWet = (nw >> 18u) != 0u;
       if (dist <= 3.5) {
@@ -109,7 +109,7 @@ fn linearDepth(d: f32) -> f32 {
     }
   }
   let wetCov = wetSum / max(wtSum, 1e-4);
-  let plunge = smoothstep(4.2, 0.7, minFallDist);
+  let plunge = smoothstep(6.0, 0.9, minFallDist);
   let heightAbovePool = max(top - minLocalTop, 0.0);
 
   let at = vec2f(vtx) * u.col;
@@ -134,31 +134,22 @@ fn noise1(p: vec2f) -> f32 {
   let e = f * f * (3.0 - 2.0 * f);
   return mix(mix(lump(c), lump(c + vec2i(1, 0)), e.x), mix(lump(c + vec2i(0, 1)), lump(c + vec2i(1, 1)), e.x), e.y);
 }
-// Dual-layer animated wave heightfield (broad directional swells + rotated cross ripples + capillary detail).
-fn waveHeight(p: vec2f, run: f32, fineFade: f32) -> f32 {
-  let a = noise1(p * 0.44 + vec2f(run * 0.90, run * 0.56));
+// Smooth, coherent, Nyquist-filtered liquid wave heightfield (broad directional swells + cross waves + gentle wavelets).
+fn waveHeight(p: vec2f, run: f32, midFade: f32, detailFade: f32) -> f32 {
+  let a = noise1(p * 0.34 + vec2f(run * 0.72, run * 0.44));
   let rot = vec2f(p.x * 0.80 - p.y * 0.60, p.x * 0.60 + p.y * 0.80);
-  let b = noise1(rot * 0.96 + vec2f(-run * 1.25, run * 0.96) + vec2f(a * 0.54, -a * 0.44));
-  let rot2 = vec2f(p.x * 0.35 + p.y * 0.93, -p.x * 0.93 + p.y * 0.35);
-  let cRaw = noise1(rot2 * 2.15 - vec2f(run * 2.1, -run * 1.65));
-  let c = 1.0 - abs(cRaw * 2.0 - 1.0);
-  return a * 0.46 + b * 0.34 + c * 0.20 * fineFade;
+  let b = noise1(rot * 0.62 + vec2f(-run * 0.92, run * 0.70) + vec2f(a * 0.36, -a * 0.28));
+  let rot2 = vec2f(p.x * 0.42 + p.y * 0.91, -p.x * 0.91 + p.y * 0.42);
+  let c = noise1(rot2 * 0.92 - vec2f(run * 1.10, -run * 0.84));
+  return a * 0.68 + b * 0.42 * midFade + c * 0.22 * detailFade;
 }
-// Crisp capillary wavelet field for sunlit microfacet GGX sparkle facets.
-fn glintHeight(p: vec2f, run: f32) -> f32 {
-  let r1 = vec2f(p.x * 0.86 - p.y * 0.51, p.x * 0.51 + p.y * 0.86);
-  let g1 = noise1(r1 * 2.6 + vec2f(run * 2.4, -run * 1.8));
-  let r2 = vec2f(p.x * 0.28 + p.y * 0.96, -p.x * 0.96 + p.y * 0.28);
-  let g2 = noise1(r2 * 4.2 - vec2f(run * 3.1, run * 2.5));
-  return (1.0 - abs(g1 * 2.0 - 1.0)) * 0.58 + (1.0 - abs(g2 * 2.0 - 1.0)) * 0.42;
-}
-// Multi-scale cellular/FBM lacy foam field animated with surface flow.
-fn foamField(p: vec2f, run: f32) -> f32 {
-  let n1 = noise1(p * 0.82 - vec2f(run * 1.55, run * 1.05));
-  let warp = vec2f(n1 - 0.5, noise1(p.yx * 0.92 + vec2f(run * 1.15, -run * 0.85)) - 0.5);
-  let n2 = noise1(p * 2.10 + warp * 1.35 + vec2f(run * 1.35, -run * 0.78));
-  let n3 = noise1(p * 4.55 - warp * 1.10 + vec2f(-run * 2.05, run * 1.45));
-  return n1 * 0.40 + n2 * 0.38 + n3 * 0.22;
+// Multi-scale cellular/FBM lacy foam field animated with surface flow and footprint-filtered fine detail.
+fn foamField(p: vec2f, run: f32, detailFade: f32) -> f32 {
+  let n1 = noise1(p * 0.78 - vec2f(run * 1.35, run * 0.92));
+  let warp = vec2f(n1 - 0.5, noise1(p.yx * 0.88 + vec2f(run * 1.05, -run * 0.78)) - 0.5);
+  let n2 = noise1(p * 1.75 + warp * 1.15 + vec2f(run * 1.15, -run * 0.68));
+  let n3 = mix(0.5, noise1(p * 3.10 - warp * 0.95 + vec2f(-run * 1.65, run * 1.20)), detailFade);
+  return n1 * 0.44 + n2 * 0.38 + n3 * 0.18;
 }
 fn ggxLobe(NdotH: f32, NdotV: f32, NdotL: f32, VdotH: f32, rough: f32) -> f32 {
   let a = rough * rough;
@@ -172,26 +163,25 @@ fn ggxLobe(NdotH: f32, NdotV: f32, NdotL: f32, VdotH: f32, rough: f32) -> f32 {
 }
 
 // Pass 1 (depth-only pre-pass): discards water fragments occluded by opaque world geometry (to.depth)
-// and writes the front-most visible water surface depth into the separate waterDepth buffer so
-// water-vs-water self-overlap (waterfall sheets vs pool surface) is resolved cleanly before shading.
+// via direct raw-Z comparison and writes the front-most visible water surface depth into waterDepth
+// so water-vs-water self-overlap (waterfall sheets vs pool surface) is resolved cleanly before shading.
 @fragment fn fsDepth(in: Out) {
   let maxCoord = vec2i(max(i32(u.resX) - 1, 0), max(i32(u.resY) - 1, 0));
   let px = clamp(vec2i(in.pos.xy), vec2i(0), maxCoord);
   let sceneD = textureLoad(depthTex, px, 0);
-  let sceneLinearZ = linearDepth(sceneD);
-  let waterLinearZ = dot(in.seen, u.forward);
-  if (waterLinearZ <= NEAR || waterLinearZ >= sceneLinearZ) { discard; }
+  if (in.pos.z >= sceneD) { discard; }
 }
 
-// Pass 2 (front-most water shade pass): depthCompare == 'equal' against waterDepth guarantees each
-// pixel shades only the single front-most water surface while reading to.depth for smoothed absorption.
+// Pass 2 (front-most water shade pass): @invariant position + depthCompare == 'less-equal' against
+// waterDepth guarantees each pixel shades only the single front-most water surface with zero zipper
+// holes while reading to.depth for smoothed Beer-Lambert depth absorption.
 @fragment fn fs(in: Out) -> @location(0) vec4f {
   let maxCoord = vec2i(max(i32(u.resX) - 1, 0), max(i32(u.resY) - 1, 0));
   let px = clamp(vec2i(in.pos.xy), vec2i(0), maxCoord);
   let sceneD = textureLoad(depthTex, px, 0);
+  if (in.pos.z >= sceneD) { discard; }
   let sceneLinearZ = linearDepth(sceneD);
   let waterLinearZ = dot(in.seen, u.forward);
-  if (waterLinearZ <= NEAR || waterLinearZ >= sceneLinearZ) { discard; }
 
   let h = in.more.x;
   let fast = in.more.y;
@@ -243,28 +233,23 @@ fn ggxLobe(NdotH: f32, NdotV: f32, NdotL: f32, VdotH: f32, rough: f32) -> f32 {
   let smoothVert = mix(h, clamp(sceneVert, max(h - 0.4, 0.0), h + 3.5), 0.16);
   let waterDepth = smoothVert / max(absRdY, 0.36);
 
-  // Geometric surface normal from screen derivatives, perturbed by animated dual-layer normal ripples.
+  // Geometric surface normal from screen derivatives, perturbed by smooth Nyquist-filtered liquid waves.
   var geomN = normalize(cross(dpdx(in.seen), dpdy(in.seen)));
   if (geomN.y < 0.0) { geomN = -geomN; }
   let steep = 1.0 - geomN.y;
   let fall = clamp(steep * 2.4 - 0.3, 0.0, 1.0);
   let run = u.time * (1.1 + fast * 0.16);
-  let fineFade = 1.0 / (1.0 + dist * 0.0040);
-  let eps = 0.20;
-  let h0 = waveHeight(in.plan, run, fineFade);
-  let hx = waveHeight(in.plan + vec2f(eps, 0.0), run, fineFade);
-  let hz = waveHeight(in.plan + vec2f(0.0, eps), run, fineFade);
-  let rippleAmp = mix(0.72, 1.08, clamp(fast * 0.10 + plunge * 0.45, 0.0, 1.0)) * (0.48 + 0.52 * fineFade);
+  let fw = max(length(fwidth(in.plan)), 1e-4);
+  let detailFade = 1.0 - smoothstep(0.18, 0.75, fw);
+  let midFade = 1.0 - smoothstep(0.35, 1.15, fw);
+  let swellFade = 1.0 - smoothstep(0.75, 2.40, fw);
+  let eps = clamp(0.28 + fw * 0.32, 0.28, 0.85);
+  let h0 = waveHeight(in.plan, run, midFade, detailFade);
+  let hx = waveHeight(in.plan + vec2f(eps, 0.0), run, midFade, detailFade);
+  let hz = waveHeight(in.plan + vec2f(0.0, eps), run, midFade, detailFade);
+  let rippleAmp = mix(0.36, 0.46, clamp(fast * 0.08 + plunge * 0.40, 0.0, 1.0)) * (0.40 + 0.60 * swellFade);
   let waveGrad = vec3f((h0 - hx) / eps, 0.0, (h0 - hz) / eps);
   let n = normalize(geomN + waveGrad * rippleAmp);
-
-  // Higher-slope capillary micro-ripple normal for crisp GGX sun glints across sunlit wavelets.
-  let epsG = 0.11;
-  let g0 = glintHeight(in.plan, run);
-  let gx = glintHeight(in.plan + vec2f(epsG, 0.0), run);
-  let gz = glintHeight(in.plan + vec2f(0.0, epsG), run);
-  let glintGrad = vec3f((g0 - gx) / epsG, 0.0, (g0 - gz) / epsG);
-  let nGlint = normalize(geomN + waveGrad * (rippleAmp * 1.15) + glintGrad * (0.28 * fineFade));
 
   let NdotV = max(dot(n, look), 0.001);
   // Schlick Fresnel with physical water F0 = 0.02.
@@ -300,28 +285,28 @@ fn ggxLobe(NdotH: f32, NdotV: f32, NdotL: f32, VdotH: f32, rough: f32) -> f32 {
   let bodyTint = mix(deepCol, shallowCol, absorb);
   let waterBody = bodyTint * waterLight;
 
-  // Crisp dual-lobe GGX microfacet sun specular glint on perturbed ripples (modulated by sun visibility).
+  // Smooth, footprint-filtered dual-lobe GGX sun specular highlights on coherent liquid waves.
   let H = normalize(u.sun + look);
-  let NdotH = max(dot(nGlint, H), 0.0);
-  let NdotVGlint = max(dot(nGlint, look), 0.001);
-  let NdotLGlint = max(dot(nGlint, u.sun), 0.001);
+  let NdotH = max(dot(n, H), 0.0);
   let VdotH = max(dot(look, H), 0.0);
-  let roughTight = mix(0.045, 0.080, clamp(fast * 0.06, 0.0, 1.0));
-  let roughSheen = mix(0.15, 0.23, clamp(fast * 0.08, 0.0, 1.0));
-  let ggxTight = min(ggxLobe(NdotH, NdotVGlint, NdotLGlint, VdotH, roughTight), 22.0);
-  let ggxSheen = min(ggxLobe(max(dot(n, H), 0.0), NdotV, NdotL, VdotH, roughSheen), 5.0);
-  var specCol = sunCol * ((ggxTight * 4.2 + ggxSheen * 1.85) * worldSun);
+  let roughTightBase = mix(0.11, 0.15, clamp(fast * 0.06, 0.0, 1.0));
+  let roughSheenBase = mix(0.22, 0.30, clamp(fast * 0.08, 0.0, 1.0));
+  let roughTight = min(sqrt(roughTightBase * roughTightBase + fw * 0.12), 0.50);
+  let roughSheen = min(sqrt(roughSheenBase * roughSheenBase + fw * 0.12), 0.62);
+  let ggxTight = min(ggxLobe(NdotH, NdotV, NdotL, VdotH, roughTight), 6.0);
+  let ggxSheen = min(ggxLobe(NdotH, NdotV, NdotL, VdotH, roughSheen), 2.5);
+  var specCol = sunCol * ((ggxTight * 1.75 + ggxSheen * 1.25) * worldSun);
 
   if (u.hasWorld != 0u && localLights.info.x > 0u) {
-    specCol += evalLocalLights(worldP, n, rd, bodyTint * 0.8, 0.10, 0.0, 0.0);
+    specCol += evalLocalLights(worldP, n, rd, bodyTint * 0.8, 0.14, 0.0, 0.0);
   }
 
-  // Premultiplied liquid layer: energy-conserving refracted body + Fresnel sky reflection + GGX sun glint.
+  // Premultiplied liquid layer: energy-conserving refracted body + Fresnel sky reflection + GGX sun highlight.
   var premulRgb = waterBody * (bodyAlpha * (1.0 - fresnel)) + envRefl * fresnel + specCol;
   var outAlpha = clamp(1.0 - bgKeep * (1.0 - fresnel), 0.0, 0.96);
 
-  // Clean shoreline fade, vertical obstacle collars, and plunge-pool splash foam (no interior road-step bands).
-  let foamTex = foamField(in.plan, run);
+  // Clean shoreline fade, vertical obstacle collars, and turbulent plunge-pool splash foam.
+  let foamTex = foamField(in.plan, run, detailFade);
   let shoreMask = wetCov + (foamTex - 0.5) * 0.24;
   // Outer rim ramps smoothly to 0.0 at h -> 0 and outer wet boundary BEFORE the shoreline foam ring peaks.
   let shoreAlpha = smoothstep(0.40, 0.80, shoreMask) * smoothstep(0.0, 0.24, edge) * smoothstep(0.0, 0.14, h);
@@ -334,26 +319,29 @@ fn ggxLobe(NdotH: f32, NdotV: f32, NdotL: f32, VdotH: f32, rough: f32) -> f32 {
   let obsBand = clamp(obsHit, 0.0, 1.0) * smoothstep(0.60, 0.86, wetCov) * smoothstep(0.28, 0.65, h) * (1.0 - fall);
   let obsFoam = obsBand * smoothstep(0.40, 0.76, foamTex + obsBand * 0.28) * 0.82;
 
-  // Frothy plunge-pool splash foam where vertical falling waterfall sheets meet the horizontal pool.
-  let plungeTex = foamField(in.plan * 1.35, run * 1.45);
-  let plungePoolFoam = plunge * (1.0 - fall) * smoothstep(0.18, 0.64, plungeTex + plunge * 0.50) * 0.98;
+  // Irregular frothy plunge-pool splash breakup where vertical falling waterfall sheets meet the horizontal pool.
+  let splashLobe = noise1(in.plan * 0.36 - vec2f(run * 0.72, run * 0.52)) * 0.62 + noise1(in.plan * 0.80 + vec2f(run * 1.10, -run * 0.82)) * 0.38;
+  let plungeTex = foamField(in.plan * 1.28, run * 1.50, detailFade);
+  let plungeWarp = clamp(plunge * 1.15 + (splashLobe - 0.45) * 0.88 * smoothstep(0.02, 0.38, plunge), 0.0, 1.0);
+  let plungePoolFoam = (1.0 - fall) * smoothstep(0.16, 0.68, plungeWarp) * smoothstep(0.16, 0.64, plungeTex + plungeWarp * 0.56);
   let churn = clamp((fast - 4.4) / 7.5, 0.0, 1.0) * (1.0 - fall);
   let churnFoam = churn * smoothstep(0.62 - 0.26 * churn, 0.86, foamTex) * 0.52;
 
   let foam = clamp(max(max(shoreFoam, obsFoam), max(plungePoolFoam, churnFoam)), 0.0, 1.0);
   let foamLight = skyFill * 1.15 + vec3f(0.18, 0.20, 0.22) * mix(0.04, 1.0, u.day) + sunCol * (0.14 + 0.52 * NdotL) * worldSun;
   let foamCol = vec3f(0.90, 0.96, 1.02) * foamLight;
-  let foamAlpha = foam * 0.78;
+  let foamAlpha = clamp(foam * 0.82 + plungePoolFoam * 0.14, 0.0, 0.95);
   premulRgb = foamCol * foamAlpha + premulRgb * (1.0 - foamAlpha);
   outAlpha = foamAlpha + outAlpha * (1.0 - foamAlpha);
 
-  // Waterfall sheet: steep drops break into aerated whitewater streaks with frothy plunge-base transition.
+  // Waterfall sheet: steep drops break into aerated whitewater streaks with irregular frothy plunge-base breakup.
   if (fall > 0.001) {
-    let streak = noise1(vec2f((in.plan.x + in.plan.y) * 1.1, surfHigh * 0.16 + u.time * 9.0)) * 0.6 + noise1(vec2f((in.plan.x - in.plan.y) * 2.7, surfHigh * 0.45 + u.time * 15.0)) * 0.4;
-    let baseSplash = smoothstep(15.0, 0.0, heightAbovePool) * smoothstep(0.18, 0.64, plungeTex + 0.30);
-    let white = clamp(smoothstep(0.28, 0.68, streak) + baseSplash * 0.70, 0.0, 1.0);
-    let fallCol = mix(vec3f(0.12, 0.42, 0.52), vec3f(0.94, 0.99, 1.05), white) * foamLight;
-    let fallAlpha = clamp(0.32 + 0.62 * white + baseSplash * 0.14, 0.0, 0.96);
+    let streak = noise1(vec2f((in.plan.x + in.plan.y) * 1.1, surfHigh * 0.16 + u.time * 9.0)) * 0.6 + noise1(vec2f((in.plan.x - in.plan.y) * 2.4, surfHigh * 0.42 + u.time * 14.0)) * 0.4;
+    let splashReach = 6.0 + splashLobe * 22.0;
+    let baseSplash = smoothstep(splashReach, 0.0, heightAbovePool) * smoothstep(0.18, 0.66, plungeTex + smoothstep(7.0, 0.0, heightAbovePool) * 0.52);
+    let white = clamp(smoothstep(0.28, 0.68, streak) + baseSplash * 0.78, 0.0, 1.0);
+    let fallCol = mix(vec3f(0.12, 0.42, 0.52), vec3f(0.92, 0.98, 1.04), white) * foamLight;
+    let fallAlpha = clamp(0.32 + 0.62 * white + baseSplash * 0.16, 0.0, 0.96);
     premulRgb = mix(premulRgb, fallCol * fallAlpha, fall);
     outAlpha = mix(outAlpha, fallAlpha, fall);
   }
@@ -409,7 +397,7 @@ export async function flowing(device: GPUDevice, format: GPUTextureFormat, march
       label: 'water-shade', layout: shadeLayout,
       vertex: { module, entryPoint: 'vs' },
       fragment: { module, entryPoint: 'fs', targets: [{ format, blend: { color: blend, alpha: blend } }] },
-      depthStencil: { format: DEPTH, depthWriteEnabled: false, depthCompare: 'equal' },
+      depthStencil: { format: DEPTH, depthWriteEnabled: false, depthCompare: 'less-equal' },
       primitive: { topology: 'triangle-strip', cullMode: 'none' },
     }),
   ])
@@ -557,7 +545,7 @@ export async function flowing(device: GPUDevice, format: GPUTextureFormat, march
       prepass.setBindGroup(0, oGroup)
       prepass.draw(4, count)
       prepass.end()
-      // Pass 2: shade only the single front-most water surface per pixel (depthCompare: 'equal'),
+      // Pass 2: shade only the single front-most water surface per pixel (depthCompare: 'less-equal'),
       // keeping `to.depth` bound as texture_depth_2d for smoothed Beer-Lambert depth absorption.
       const shadePass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
