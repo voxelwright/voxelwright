@@ -1745,7 +1745,9 @@ full speed: say it again four times a second.
   cells hovers 1 m up, flies, rolls and sleeps where it hangs; a frog of 24 cells hops 1.5 m a hop.
 - **Living things meet every body**, however small either is, lumps too: bricks ride on a bonnet.
 - **Records**: `STRUCK` (10) what struck what, from the closing speed before anything was pushed (8 cells a second
-  or more, the hardest eight a call, kinds looked up only for those: `ground.kind` keeps whole sectors); `LIVE` (11)
+  or more, the hardest eight a call, kinds looked up only for those: `ground.kind` keeps whole sectors; flags hold
+  living bits 1/2, broke bit 4, and person-figure bits 8/16 so `living.ts` and `sound/world.ts` never treat an
+  on-foot body bump as a vehicle crash); `LIVE` (11)
   each waking thing's speed, feet down, touches and what it is told. Both are state in a shared world (`world.mjs`
   `STATE`): never kept in the file.
 - **Cost** (native, M1 Pro): one car driven 20 µs a step, eight 96 µs: 0.04 and 0.19 ms a frame of two steps.

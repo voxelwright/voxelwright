@@ -1970,6 +1970,7 @@ async function main() {
   const smoothKeys = new Map<number, Born>()
   const alive = living({
     body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null },
+    person: (id) => id !== 0 && id === me.id,
     kind: (x, y, z) => core.world_kind(x, y, z),
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },

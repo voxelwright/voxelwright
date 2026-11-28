@@ -378,7 +378,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }:
       // Real impacts reported by the core for living things (people bumping into cars/walls, or cars hitting walls, kerbs, props, or each other).
       for (const s of told.struck) {
         if ((s.flags & 3) === 0) continue
-        const isPerson = !!(scene.person?.(s.a) || (s.b !== 0 && scene.person?.(s.b)))
+        const isPerson = (s.flags & 24) !== 0 || !!(scene.person?.(s.a) || (s.b !== 0 && scene.person?.(s.b)))
         const minSpeed = isPerson ? 22 : 16
         if (s.speed < minSpeed) continue
         const lastAt = struckQuiet.get(s.a) ?? 0
