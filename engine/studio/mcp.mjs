@@ -407,16 +407,19 @@ export function createMcpHandler(hub, { agentId = 'mcp' } = {}) {
       return { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } }
     }
     const { id, method, params } = msg
-    if (method === 'notifications/initialized' || method === 'notifications/cancelled') {
+    if (id === undefined || method?.startsWith('notifications/')) {
       return null
     }
     try {
       if (method === 'initialize') {
+        const protocolVersion = typeof params?.protocolVersion === 'string' && params.protocolVersion.length > 0
+          ? params.protocolVersion
+          : MCP_PROTOCOL_VERSION
         return {
           jsonrpc: '2.0',
           id,
           result: {
-            protocolVersion: MCP_PROTOCOL_VERSION,
+            protocolVersion,
             capabilities: { tools: { listChanged: true } },
             serverInfo: MCP_SERVER_INFO,
           },
@@ -427,6 +430,15 @@ export function createMcpHandler(hub, { agentId = 'mcp' } = {}) {
       }
       if (method === 'tools/list') {
         return { jsonrpc: '2.0', id, result: { tools: await listTools() } }
+      }
+      if (method === 'resources/list') {
+        return { jsonrpc: '2.0', id, result: { resources: [] } }
+      }
+      if (method === 'resources/templates/list') {
+        return { jsonrpc: '2.0', id, result: { resourceTemplates: [] } }
+      }
+      if (method === 'prompts/list') {
+        return { jsonrpc: '2.0', id, result: { prompts: [] } }
       }
       if (method === 'tools/call') {
         const res = await callTool(params?.name, params?.arguments ?? {})
@@ -466,16 +478,21 @@ async function runStdio() {
   let bridgeUrl = flag('bridge')
   let bridgeSecret = flag('secret')
   let embeddedBridge = null
+  let embeddedBridgePromise = null
 
   const resolveBridge = async () => {
     if (bridgeUrl && bridgeSecret) return { url: bridgeUrl, secret: bridgeSecret }
     const running = discoverRunningBridge()
     if (running) return running
-    if (!embeddedBridge) {
-      const { createStudioBridge } = await import('./bridge.mjs')
-      embeddedBridge = await createStudioBridge({ port: 0, writeRuntimeState: false, autoConnectT3: false })
+    if (!embeddedBridgePromise) {
+      embeddedBridgePromise = (async () => {
+        const { createStudioBridge } = await import('./bridge.mjs')
+        embeddedBridge = await createStudioBridge({ port: 0, writeRuntimeState: false, autoConnectT3: false })
+        return embeddedBridge
+      })()
     }
-    return { url: embeddedBridge.url, secret: embeddedBridge.secret }
+    const b = await embeddedBridgePromise
+    return { url: b.url, secret: b.secret }
   }
 
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity })
@@ -496,8 +513,14 @@ async function runStdio() {
         signal: AbortSignal.timeout(120_000),
       })
       if (res.status === 204) return
-      const body = await res.text()
-      if (body.trim()) process.stdout.write(body.trim() + '\n')
+      const body = (await res.text()).trim()
+      if (body) {
+        try {
+          process.stdout.write(JSON.stringify(JSON.parse(body)) + '\n')
+        } catch {
+          process.stdout.write(body.replace(/\r?\n/g, ' ') + '\n')
+        }
+      }
     } catch (err) {
       if (msg?.id !== undefined) {
         process.stdout.write(JSON.stringify({
