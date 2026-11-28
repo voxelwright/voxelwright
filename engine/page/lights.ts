@@ -764,17 +764,21 @@ export function createLocalLights(device: GPUDevice): LocalLights {
         const stop = Math.min(brake, 1.35)
         const tail = Math.min(head, 1.0)
         const braking = stop > 0.05
-        const power = Math.max(tail * 2.2, stop * 4.6 * frameDayScale)
+        const nightFade = Math.min(1, frameDark * 1.4)
+        const brakeDayScale = 0.15 + 0.85 * nightFade
+        const power = Math.max(tail * 2.2, stop * 4.6 * brakeDayScale)
         if (power > 0.12) {
           const backOff = halfLen + 1.4
           const d0x = -fx - ux * 0.20, d0y = -fy - uy * 0.20, d0z = -fz - uz * 0.20
           const inv0 = 1 / (Math.hypot(d0x, d0y, d0z) || 1)
+          const brakeRange = braking ? Math.round(70 + 95 * nightFade) : 120
+          const brakeHalf = braking ? Math.round(22 + 22 * nightFade) : 34
           pushEmit(
             tailUniform, tailCluster,
             bx - fx * backOff + ux * tailY, by - fy * backOff + uy * tailY, bz - fz * backOff + uz * tailY,
             d0x * inv0, d0y * inv0, d0z * inv0,
             1.0 * power, (braking ? 0.045 : 0.035) * power, 0.012 * power,
-            braking ? 165 : 120, braking ? 44 : 34, 0.0, 0.68,
+            brakeRange, brakeHalf, 0.0, 0.68,
             0.0, 0.0, braking ? 1.25 : 1.0, baseScore * (braking ? 1.15 : 0.85), LIGHT_CAR,
           )
         }

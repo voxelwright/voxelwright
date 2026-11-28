@@ -22,6 +22,8 @@ import { createDynamicShadows, type DynamicShadows } from './dynamic-shadows.ts'
 import { createSkyLut, type SkyLut } from './sky-lut.ts'
 import { createVolumetricClouds, type VolumetricClouds } from './volumetric-clouds.ts'
 import { createFroxelFog, type FroxelFogPass } from './froxel-fog.ts'
+import { createVoxelGI, type VoxelGIPass } from './gi.ts'
+import { createRestirDI, type RestirDIPass } from './restir.ts'
 import { fill } from '../probe/fill.ts'
 import { COUNT, FINE_ASKED, FLAT, HEAT, MAX_LEVELS, MIRRORS, PICK, PLAIN, SHADOWS, SUN_TILES_A_FRAME, WHOLE_MOON, bounded, marcher, materials, palette, type Moon, type View } from './march.ts'
 import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
@@ -295,12 +297,17 @@ async function main() {
   const skyLutAsked = query.get('sky_lut') !== '0'
   const volCloudsAsked = query.get('vol_clouds') !== '0'
   const froxelFogAsked = query.get('froxel_fog') !== '0'
+  const giParam = query.get('gi')
+  const restirParam = query.get('restir')
+  let giOverride: boolean | null = giParam === '1' ? true : giParam === '0' ? false : null
+  let restirOverride: boolean | null = restirParam === '1' ? true : restirParam === '0' ? false : null
+  const halfInitMax: [number, number] = [Math.max(1, (initMax[0] + 1) >> 1), Math.max(1, (initMax[1] + 1) >> 1)]
   let clusterLightsEnabled = clusterLightsAsked && hasCompute
   let dynShadowsEnabled = dynShadowsAsked
   let skyLutEnabled = skyLutAsked && hasCompute
   let volCloudsEnabled = volCloudsAsked && hasCompute
   let froxelFogEnabled = froxelFogAsked && hasCompute
-  const [march, blit, taaPass, dynShadows, skyLut, initVolClouds, froxelFog, debris, smoke, water, planet, shade, roadTracks, released] = await Promise.all([
+  const [march, blit, taaPass, dynShadows, skyLut, initVolClouds, froxelFog, giPass, debris, smoke, water, planet, shade, roadTracks, released] = await Promise.all([
     marcher(device, gpu.sceneFormat, world, false, !!LOCAL?.release, initMax),
     glow(gpu),
     taaAsked && hasCompute ? createTaa(device, initMax) : Promise.resolve<TaaPass | null>(null),
@@ -308,6 +315,7 @@ async function main() {
     skyLutAsked && hasCompute ? createSkyLut(device).catch((e) => { console.warn('skyLut init failed:', e); return null }) : Promise.resolve<SkyLut | null>(null),
     volCloudsAsked && hasCompute ? createVolumetricClouds(device, initMax).catch((e) => { console.warn('volClouds init failed:', e); return null }) : Promise.resolve<VolumetricClouds | null>(null),
     froxelFogAsked && hasCompute ? createFroxelFog(device).catch((e) => { console.warn('froxelFog init failed:', e); return null }) : Promise.resolve<FroxelFogPass | null>(null),
+    giParam !== '0' && hasCompute ? createVoxelGI(device, { maxSize: halfInitMax }).catch((e) => { console.warn('gi init failed:', e); return null }) : Promise.resolve<VoxelGIPass | null>(null),
     crumbs(device, gpu.sceneFormat),
     puffs(device, gpu.sceneFormat),
     flowing(device, gpu.sceneFormat),
@@ -316,7 +324,7 @@ async function main() {
     tracks(device, gpu.sceneFormat),
     releasedPromise,
   ])
-  march.setExternalPasses({ dynShadows, skyLut })
+  march.setExternalPasses({ dynShadows, skyLut, gi: giPass })
   let volClouds: VolumetricClouds | null = initVolClouds
   let volCloudsMax: [number, number] = [initMax[0], initMax[1]]
   let volCloudsGrowing: Promise<void> | null = null
@@ -332,20 +340,29 @@ async function main() {
       (e: unknown) => { console.warn('volClouds resize failed:', e) },
     ).finally(() => { volCloudsGrowing = null })
   }
-  // TAA / TSR-lite & Wave 3D-1 temporal/timing state (declared before hour/realm hooks and rAF loop to avoid TDZ).
+  // TAA / TSR-lite & Wave 3D-1/3D-2 temporal/timing state (declared before hour/realm hooks and rAF loop to avoid TDZ).
   let taaFrame = 0, taaNeedsReset = true, taaWasActive = false, taaMs = 0, gtaoMs = 0
   let clusterLightsMs = 0, dynShadowsMs = 0, volCloudsMs = 0, froxelFogMs = 0
+  let giMs = 0, giCascadeMs = 0, giTraceMs = 0, giSvgfMs = 0, restirMs = 0
   let lastClusterActive = false, lastDynShadowActive = false, lastSkyLutActive = false, lastVolCloudsActive = false, lastFroxelFogActive = false
+  let lastGiActive = false, lastRestirActive = false
   let clusterHadLights = false, volCloudsNeedsReset = true, froxelFogNeedsReset = true
+  let giNeedsReset = true, giSvgfReset = false, giForceFullFrames = 8, giEditPending = false, giSunPending = false, restirNeedsReset = true, restirFrame = 0
   let taaPrevEye: readonly [number, number, number] | null = null
   let taaPrevFwd: readonly [number, number, number] | null = null
   let taaPrevTanHalf: number | null = null
   let taaPrevFlags = -1, taaPrevMaps = true, taaPrevUnder = false
+  let moonshotPrevHalfW = 0, moonshotPrevHalfH = 0
+  let restirPass: RestirDIPass | null = null
+  const resetGi = () => { giNeedsReset = true; giForceFullFrames = 2; giPass?.reset() }
+  const resetRestir = () => { restirNeedsReset = true; restirPass?.reset() }
   const resetVolumetrics = () => {
     volCloudsNeedsReset = true
     froxelFogNeedsReset = true
     volClouds?.reset()
     froxelFog?.reset()
+    resetGi()
+    resetRestir()
   }
   const resetTaa = () => { taaNeedsReset = true; taaPass?.reset(); resetVolumetrics() }
   const taaGlowSrc: { texture: GPUTexture; color: GPUTextureView; size: [number, number]; allocSize: [number, number] } = {
@@ -368,7 +385,7 @@ async function main() {
   // (A path the address names is this site's own or nothing, #81: `samePath`. The realm's own and its release's are as they say.)
   const farAsked = query.get('far') === '' ? '' : query.has('far') ? samePath(query.get('far')) : null
   if (query.has('far') && farAsked === null) console.warn('?far= names no path of this site: the realm\'s own far model is drawn')
-  const [falling, farModel, marine, skyEggs, folk, staff, carWheels] = await Promise.all([
+  const [falling, farModel, marine, skyEggs, folk, staff, carWheels, initRestir] = await Promise.all([
     pieces(device, gpu.sceneFormat, march),
     farOf(device, gpu.sceneFormat, march, farAsked ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null)),
     fog(device, gpu.sceneFormat, march),
@@ -376,8 +393,18 @@ async function main() {
     people(device, gpu.sceneFormat, march),
     wand(device, gpu.sceneFormat, march, core, controls, over),
     wheels(device, gpu.sceneFormat, march.localLights.buffer),
+    restirParam !== '0' && hasCompute
+      ? createRestirDI(device, {
+          maxSize: halfInitMax,
+          evalMode: 'scene',
+          occlusionWgsl: march.restirOcclusionWgsl,
+          occlusionBindGroupLayout: march.worldBindGroupLayout,
+        }).catch((e) => { console.warn('restir init failed:', e); return null })
+      : Promise.resolve<RestirDIPass | null>(null),
     clusterLightsEnabled ? march.localLights.initClustered().catch((e) => { console.warn('clusterLights init failed:', e); clusterLightsEnabled = false; return null }) : Promise.resolve(null),
   ])
+  restirPass = initRestir
+  if (restirPass) march.setExternalPasses({ restir: restirPass })
   // Small Magic (#226) and the live tools (#166): made off the first frame (`spellsReady`), null until they are there.
   let cleave: Cleave | null = null, rewind: Rewind | null = null, grass: Grass | null = null, rubble: AvbdRubble | null = null, combat: CombatTools | null = null
   // The spells' pass is built ahead of its first use, off the frame.
@@ -829,6 +856,7 @@ async function main() {
     resolved: device.createBuffer({ size: 144, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
     read: device.createBuffer({ size: 144, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
     busy: false,
+    phase: 0,
   } : null
   // ── The sun's maps and the frame (#73) ──
   // A tile of the sun's maps is 4,096 rays through everything up-sun of them (sun.ts). Eight were drawn in any frame
@@ -1113,14 +1141,20 @@ async function main() {
     lap('street')
     world.update(interiorSys?.streetAnchor ?? ahead ?? v.eye)
     lap('update')
-    if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
+    if (giEditPending && world.stats.stale === 0) { giEditPending = false; giForceFullFrames = Math.max(giForceFullFrames, 8); giSvgfReset = true }
+    if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0; giSunPending = true; giForceFullFrames = Math.max(giForceFullFrames, 8) }
     lap('spoil')
     const encoder = device.createCommandEncoder()
     const timed = clock && !clock.busy
+    // Round-robin strictly matched (begin, end) timestamp pairs across 4 phases on the 18-slot query set
+    // so every Metal command buffer stays strictly non-nested and well under Apple Silicon's attachment cap.
+    const timedPhase = timed ? clock.phase : -1
+    const timedBase = timed && timedPhase === 0
     // Whether a window's world was marched this frame: a query nothing wrote keeps what it last read, so the window's
     // time is counted only then (counted always, a window long closed went on costing the picture its size).
     let windowed = false, gtaoRan = false, taaRan = false
     let clusterRan = false, dynShadowRan = false, volCloudsRan = false, froxelFogRan = false
+    let giRan = false, restirRan = false
     if (!indoors) {
       debris.step(dt * worldRate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
       gathering.step(dt)
@@ -1137,17 +1171,21 @@ async function main() {
     sunRoom.moving = moving
     sunRoom.most = sunMost(budget, moving)
     const sunDrew = sunRoom.drew = indoors ? 0 : march.tend(encoder, v, world.wholeFrom(), sunRoom.most, timed ? { querySet: clock.set, begin: 4, end: 5 } : undefined)
+    if (!indoors && giSunPending && sunDrew === 0) { giSunPending = false; giForceFullFrames = Math.max(giForceFullFrames, 8); giSvgfReset = true }
     if (moving) sunRoom.owed -= sunDrew * sunRoom.tileMs
     lap('tend')
+    const eyeJumpM = taaPrevEye ? Math.hypot(v.eye[0] - taaPrevEye[0], v.eye[1] - taaPrevEye[1], v.eye[2] - taaPrevEye[2]) / (M * FINE) : 0
+    const fwdDot = taaPrevFwd ? v.forward[0] * taaPrevFwd[0] + v.forward[1] * taaPrevFwd[1] + v.forward[2] * taaPrevFwd[2] : 1
+    const fovJump = taaPrevTanHalf !== null ? Math.abs(v.tanHalf - taaPrevTanHalf) : 0
+    const stateChanged = flags !== taaPrevFlags || march.maps !== taaPrevMaps || march.under !== taaPrevUnder
+    const halfNowW = Math.max(1, (to.size[0] + 1) >> 1), halfNowH = Math.max(1, (to.size[1] + 1) >> 1)
+    const halfResized = halfNowW !== moonshotPrevHalfW || halfNowH !== moonshotPrevHalfH
+    const cameraCut = eyeJumpM > 5 || fwdDot < 0.7 || fovJump > 0.15 || stateChanged
     const taaActive = Boolean(taaPass && taaEnabled && !off.has('taa') && pose.y <= SPACE && (flags & (PICK | COUNT | HEAT | PLAIN)) === 0)
     let taaReset = false
     let jitter: readonly [number, number] = [0, 0]
     if (taaActive) {
-      const eyeJumpM = taaPrevEye ? Math.hypot(v.eye[0] - taaPrevEye[0], v.eye[1] - taaPrevEye[1], v.eye[2] - taaPrevEye[2]) / (M * FINE) : 0
-      const fwdDot = taaPrevFwd ? v.forward[0] * taaPrevFwd[0] + v.forward[1] * taaPrevFwd[1] + v.forward[2] * taaPrevFwd[2] : 1
-      const fovJump = taaPrevTanHalf !== null ? Math.abs(v.tanHalf - taaPrevTanHalf) : 0
-      const stateChanged = flags !== taaPrevFlags || march.maps !== taaPrevMaps || march.under !== taaPrevUnder
-      taaReset = taaNeedsReset || !taaWasActive || eyeJumpM > 5 || fwdDot < 0.7 || fovJump > 0.15 || stateChanged
+      taaReset = taaNeedsReset || !taaWasActive || cameraCut
       jitter = haltonJitter(taaFrame, to.size[0], to.size[1])
     } else if (taaWasActive) {
       resetTaa()
@@ -1155,6 +1193,8 @@ async function main() {
     if (pose.y > SPACE) {
       march.localLights.clear()
       lastClusterActive = false; lastDynShadowActive = false; lastSkyLutActive = false; lastVolCloudsActive = false; lastFroxelFogActive = false
+      lastGiActive = false; lastRestirActive = false
+      giMs = 0; giCascadeMs = 0; giTraceMs = 0; giSvgfMs = 0; restirMs = 0
       overlayPasses.passes = 0; overlayPasses.merged = 0; overlayPasses.mask = 0
       // Where the page starts is the land's middle (land.rs HOME), 70 m east and 407 m south of the world's corner.
       planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
@@ -1175,8 +1215,11 @@ async function main() {
       const skyLutActive = Boolean(skyLutEnabled && skyLut && !isDebugOrPlain && !off.has('skyLut'))
       const volCloudsActive = Boolean(!indoors && volCloudsEnabled && volClouds && preset !== 'low' && !isDebugOrPlain && !off.has('volClouds') && march.air.clouds > 0.01 && dayFade >= 0.12)
       const froxelFogActive = Boolean(!indoors && froxelFogEnabled && froxelFog && preset !== 'low' && !isDebugOrPlain && !off.has('froxelFog') && pose.y <= 2500 && weatherFogActive)
+      const giWanted = giOverride !== null ? giOverride : preset === 'high'
+      const giActive = Boolean(giPass && giWanted && !off.has('gi') && !isDebugOrPlain && (flags & (SHADOWS | FLAT)) === SHADOWS)
       if (!volCloudsActive) volCloudsNeedsReset = true
       if (!froxelFogActive) froxelFogNeedsReset = true
+      if (!giActive) { giNeedsReset = true; giMs = 0; giCascadeMs = 0; giTraceMs = 0; giSvgfMs = 0 }
       lastClusterActive = clusterActive
       lastDynShadowActive = dynShadowActive
       lastSkyLutActive = skyLutActive
@@ -1185,6 +1228,9 @@ async function main() {
 
       // 1. Unified local lights + 512-light GPU compute 3D frustum clustering.
       updateLocalLights(v)
+      const restirWanted = restirOverride !== null ? restirOverride : preset === 'high'
+      const restirActive = Boolean(restirPass && restirWanted && clusterActive && march.localLights.clusterCount > 0 && !off.has('restir') && !isDebugOrPlain)
+      if (!restirActive) { restirNeedsReset = true; restirMs = 0 }
       if (clusterActive && (march.localLights.clusterCount > 0 || clusterHadLights)) {
         march.localLights.dispatchCluster(
           encoder,
@@ -1192,7 +1238,7 @@ async function main() {
           aspect,
           undefined,
           undefined,
-          timed ? {
+          timedBase ? {
             cull: { querySet: clock.set, beginningOfPassWriteIndex: 10, endOfPassWriteIndex: 11 },
           } : undefined,
         )
@@ -1286,7 +1332,7 @@ async function main() {
           time: seconds,
           strength: cloudStrength,
           reset: taaReset || volCloudsNeedsReset,
-          timestampWrites: timed
+          timestampWrites: timedBase
             ? {
                 trace: { querySet: clock.set, beginningOfPassWriteIndex: 14 },
                 reproject: { querySet: clock.set, endOfPassWriteIndex: 15 },
@@ -1307,7 +1353,7 @@ async function main() {
         dynShadows.updateView(v.eye, march.sun.s)
         const hasShadowMeshes = !off.has('pieces') && falling.castShadows(dynShadows, v)
         if (drawPeople) folk.castShadows(dynShadows)
-        const dynTiming: readonly (GPURenderPassTimestampWrites | undefined)[] | undefined = timed
+        const dynTiming: readonly (GPURenderPassTimestampWrites | undefined)[] | undefined = timedBase
           ? [{ querySet: clock.set, beginningOfPassWriteIndex: 12 }, { querySet: clock.set, endOfPassWriteIndex: 13 }]
           : undefined
         dynShadows.render(
@@ -1318,6 +1364,9 @@ async function main() {
         if (dynShadows.stats().active) dynShadowRan = true
       }
 
+      const giDoReset = giNeedsReset || cameraCut || halfResized
+      const giDoForceFull = giForceFullFrames > 0 || giDoReset
+      const restirDoReset = restirNeedsReset || cameraCut || halfResized
       march.draw(
         encoder,
         to,
@@ -1329,9 +1378,9 @@ async function main() {
         undefined,
         {
           jitter,
-          resetHistory: taaReset,
+          resetHistory: taaReset || cameraCut,
           gtaoFrame: taaActive ? taaFrame : 0,
-          gtaoTiming: timed ? { prefilter0: { querySet: clock.set, beginningOfPassWriteIndex: 6 }, denoise: { querySet: clock.set, endOfPassWriteIndex: 7 } } : undefined,
+          gtaoTiming: timedBase ? { prefilter0: { querySet: clock.set, beginningOfPassWriteIndex: 6 }, denoise: { querySet: clock.set, endOfPassWriteIndex: 7 } } : undefined,
           // Blend physical sky LUT smoothly back to calibrated legacy navy night sky as dayFade -> 0.
           skyLutBlend: skyLutActive ? dayFade : 0.0,
           skySunDir: physSun,
@@ -1344,9 +1393,56 @@ async function main() {
           dynShadowActive: dynShadowActive && (dynShadows?.stats().active ?? false),
           clusterActive,
           froxelFogActive,
+          giActive,
+          giReset: giDoReset,
+          giSvgfReset,
+          giForceFull: giDoForceFull,
+          giAmortizeStride: 8,
+          giFlames: flames,
+          giTiming: timedPhase === 1
+            ? {
+                cascadeBegin: { querySet: clock!.set, beginningOfPassWriteIndex: 6 },
+                svgfEnd: { querySet: clock!.set, endOfPassWriteIndex: 7 },
+              }
+            : timedPhase === 2
+              ? {
+                  cascadeBegin: { querySet: clock!.set, beginningOfPassWriteIndex: 6 },
+                  cascadeEnd: { querySet: clock!.set, endOfPassWriteIndex: 7 },
+                }
+              : timedPhase === 3
+                ? {
+                    trace: { querySet: clock!.set, beginningOfPassWriteIndex: 6, endOfPassWriteIndex: 7 },
+                    svgfBegin: { querySet: clock!.set, beginningOfPassWriteIndex: 8 },
+                    svgfEnd: { querySet: clock!.set, endOfPassWriteIndex: 9 },
+                  }
+                : undefined,
+          restirActive,
+          restirReset: restirDoReset,
+          restirFrame,
+          restirTiming: timedPhase === 1
+            ? {
+                begin: { querySet: clock!.set, beginningOfPassWriteIndex: 8 },
+                end: { querySet: clock!.set, endOfPassWriteIndex: 9 },
+              }
+            : undefined,
         },
       )
       gtaoRan = march.gtaoRan
+      giRan = march.giRan
+      restirRan = march.restirRan
+      lastGiActive = giRan
+      lastRestirActive = restirRan
+      if (giRan) {
+        giNeedsReset = false
+        giSvgfReset = false
+        if (giForceFullFrames > 0) giForceFullFrames--
+      }
+      if (restirRan) {
+        restirNeedsReset = false
+        restirFrame++
+      }
+      moonshotPrevHalfW = halfNowW
+      moonshotPrevHalfH = halfNowH
       windowed = portalDraw?.(encoder, to, v, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       if (!march.under && !indoors) {
         farModel.draw(encoder, to, v)
@@ -1474,8 +1570,8 @@ async function main() {
           temporalAlpha: 0.10,
           temporalJitter: true,
           reset: taaReset || froxelFogNeedsReset,
-          injectTimestampWrites: timed ? { querySet: clock.set, beginningOfPassWriteIndex: 16 } : undefined,
-          integrateTimestampWrites: timed ? { querySet: clock.set, endOfPassWriteIndex: 17 } : undefined,
+          injectTimestampWrites: timedBase ? { querySet: clock.set, beginningOfPassWriteIndex: 16 } : undefined,
+          integrateTimestampWrites: timedBase ? { querySet: clock.set, endOfPassWriteIndex: 17 } : undefined,
         })
         froxelFogNeedsReset = false
         froxelFog.apply(encoder, {
@@ -1511,7 +1607,7 @@ async function main() {
           reset: taaReset,
           sharpness: taaSharpness,
         },
-        timed ? { querySet: clock.set, beginningOfPassWriteIndex: 8, endOfPassWriteIndex: 9 } : undefined,
+        timedBase ? { querySet: clock.set, beginningOfPassWriteIndex: 8, endOfPassWriteIndex: 9 } : undefined,
       )
       const cap = taaPass.stats().capacity
       taaGlowSrc.texture = taaPass.texture
@@ -1543,6 +1639,8 @@ async function main() {
     social?.frame()
     if (timed) {
       clock.busy = true
+      const sampledPhase = timedPhase
+      clock.phase = giRan ? ((clock.phase + 1) & 3) : restirRan ? (clock.phase === 0 ? 1 : 0) : 0
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
         const [a, b, c, d, e, f, g0, g1, t0, t1, cl0, cl1, ds0, ds1, vc0, vc1, ff0, ff1] = new BigUint64Array(clock.read.getMappedRange().slice(0))
         clock.read.unmap()
@@ -1551,12 +1649,24 @@ async function main() {
         // nothing wrote keeps what it last read: counted only where tiles were drawn). Held to what a tile can be, so
         // one wild reading (a phone's clock gives them, raw-webgpu) neither stops the maps nor floods the frame.
         if (sunDrew > 0 && f > e) sunRoom.tileMs += (Math.max(0.05, Math.min(8, Number(f - e) / 1e6 / sunDrew)) - sunRoom.tileMs) * 0.2
-        if (gtaoRan && g1 > g0) { const ms = Number(g1 - g0) / 1e6; gtaoMs = gtaoMs ? gtaoMs + (ms - gtaoMs) * 0.2 : ms }
-        if (taaRan && t1 > t0) { const ms = Number(t1 - t0) / 1e6; taaMs = taaMs ? taaMs + (ms - taaMs) * 0.2 : ms }
-        if (clusterRan && cl1 > cl0) { const ms = Number(cl1 - cl0) / 1e6; clusterLightsMs = clusterLightsMs ? clusterLightsMs + (ms - clusterLightsMs) * 0.2 : ms }
-        if (dynShadowRan && ds1 > ds0) { const ms = Number(ds1 - ds0) / 1e6; dynShadowsMs = dynShadowsMs ? dynShadowsMs + (ms - dynShadowsMs) * 0.2 : ms }
-        if (volCloudsRan && vc1 > vc0) { const ms = Number(vc1 - vc0) / 1e6; volCloudsMs = volCloudsMs ? volCloudsMs + (ms - volCloudsMs) * 0.2 : ms }
-        if (froxelFogRan && ff1 > ff0) { const ms = Number(ff1 - ff0) / 1e6; froxelFogMs = froxelFogMs ? froxelFogMs + (ms - froxelFogMs) * 0.2 : ms }
+        if (sampledPhase === 0) {
+          if (gtaoRan && g1 > g0) { const ms = Number(g1 - g0) / 1e6; gtaoMs = gtaoMs ? gtaoMs + (ms - gtaoMs) * 0.2 : ms }
+          if (taaRan && t1 > t0) { const ms = Number(t1 - t0) / 1e6; taaMs = taaMs ? taaMs + (ms - taaMs) * 0.2 : ms }
+          if (clusterRan && cl1 > cl0) { const ms = Number(cl1 - cl0) / 1e6; clusterLightsMs = clusterLightsMs ? clusterLightsMs + (ms - clusterLightsMs) * 0.2 : ms }
+          if (dynShadowRan && ds1 > ds0) { const ms = Number(ds1 - ds0) / 1e6; dynShadowsMs = dynShadowsMs ? dynShadowsMs + (ms - dynShadowsMs) * 0.2 : ms }
+          if (volCloudsRan && vc1 > vc0) { const ms = Number(vc1 - vc0) / 1e6; volCloudsMs = volCloudsMs ? volCloudsMs + (ms - volCloudsMs) * 0.2 : ms }
+          if (froxelFogRan && ff1 > ff0) { const ms = Number(ff1 - ff0) / 1e6; froxelFogMs = froxelFogMs ? froxelFogMs + (ms - froxelFogMs) * 0.2 : ms }
+        } else if (sampledPhase === 1) {
+          if (giRan && g1 > g0) { const ms = Number(g1 - g0) / 1e6; giMs = giMs ? giMs + (ms - giMs) * 0.2 : ms }
+          if (restirRan && t1 > t0) { const ms = Number(t1 - t0) / 1e6; restirMs = restirMs ? restirMs + (ms - restirMs) * 0.2 : ms }
+        } else if (sampledPhase === 2) {
+          if (giRan && g1 > g0) { const ms = Number(g1 - g0) / 1e6; giCascadeMs = giCascadeMs ? giCascadeMs + (ms - giCascadeMs) * 0.2 : ms }
+        } else if (sampledPhase === 3) {
+          if (giRan) {
+            if (g1 > g0) { const ms = Number(g1 - g0) / 1e6; giTraceMs = giTraceMs ? giTraceMs + (ms - giTraceMs) * 0.2 : ms }
+            if (t1 > t0) { const ms = Number(t1 - t0) / 1e6; giSvgfMs = giSvgfMs ? giSvgfMs + (ms - giSvgfMs) * 0.2 : ms }
+          }
+        }
         const through = windowed && d > c ? Number(d - c) / 1e6 : 0
         windowMs += (through - windowMs) * 0.1
         // (The last one as it was is kept beside the smoothed: late frames are answered by what the march took just now.)
@@ -1690,7 +1800,7 @@ async function main() {
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
   /** `farToo` false: the far model keeps the tile (#450, the billboards: laid in every world, they are no reason to draw their whole tiles as cells from far off). */
-  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); trackLampEdit(edit); spoiled.push(edit); if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); trackLampEdit(edit); spoiled.push(edit); giEditPending = true; if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -2809,7 +2919,7 @@ async function main() {
   }, 'Cast')
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, overlayPasses, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v }, taa: { get enabled() { return taaEnabled }, set enabled(v: boolean) { taaEnabled = !!v && !!taaPass; resetTaa() }, get sharpness() { return taaSharpness }, set sharpness(v: number) { taaSharpness = Math.max(0, Math.min(1, Number(v) || 0)) }, reset: resetTaa, stats: () => taaPass?.stats() ?? null, get ms() { return taaMs } }, gtao: { stats: () => march.gtaoStats, get ms() { return gtaoMs } }, sunCompute: { stats: () => march.sunComputeStats }, clusterLights: { get enabled() { return clusterLightsEnabled }, set enabled(v: boolean) { clusterLightsEnabled = !!v && !!march.localLights.clustered }, get active() { return lastClusterActive }, get count() { return march.localLights.clusterCount }, stats: () => march.localLights.clustered?.stats() ?? null, get ms() { return clusterLightsMs } }, dynShadows: { get enabled() { return dynShadowsEnabled }, set enabled(v: boolean) { dynShadowsEnabled = !!v && !!dynShadows }, get active() { return lastDynShadowActive }, stats: () => dynShadows?.stats() ?? null, get ms() { return dynShadowsMs } }, skyLut: { get enabled() { return skyLutEnabled }, set enabled(v: boolean) { skyLutEnabled = !!v && !!skyLut }, get active() { return lastSkyLutActive }, invalidate: () => skyLut?.invalidate(), stats: () => skyLut?.stats() ?? null }, volClouds: { get enabled() { return volCloudsEnabled }, set enabled(v: boolean) { volCloudsEnabled = !!v && !!volClouds; resetVolumetrics() }, get active() { return lastVolCloudsActive }, reset: () => { volCloudsNeedsReset = true; volClouds?.reset() }, stats: () => volClouds?.stats() ?? null, get ms() { return volCloudsMs } }, froxelFog: { get enabled() { return froxelFogEnabled }, set enabled(v: boolean) { froxelFogEnabled = !!v && !!froxelFog; resetVolumetrics() }, get active() { return lastFroxelFogActive }, reset: () => { froxelFogNeedsReset = true; froxelFog?.reset() }, stats: () => froxelFog?.stats() ?? null, get ms() { return froxelFogMs } } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, overlayPasses, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v }, taa: { get enabled() { return taaEnabled }, set enabled(v: boolean) { taaEnabled = !!v && !!taaPass; resetTaa() }, get sharpness() { return taaSharpness }, set sharpness(v: number) { taaSharpness = Math.max(0, Math.min(1, Number(v) || 0)) }, reset: resetTaa, stats: () => taaPass?.stats() ?? null, get ms() { return taaMs } }, gtao: { stats: () => march.gtaoStats, get ms() { return gtaoMs } }, sunCompute: { stats: () => march.sunComputeStats }, clusterLights: { get enabled() { return clusterLightsEnabled }, set enabled(v: boolean) { clusterLightsEnabled = !!v && !!march.localLights.clustered }, get active() { return lastClusterActive }, get count() { return march.localLights.clusterCount }, stats: () => march.localLights.clustered?.stats() ?? null, get ms() { return clusterLightsMs } }, dynShadows: { get enabled() { return dynShadowsEnabled }, set enabled(v: boolean) { dynShadowsEnabled = !!v && !!dynShadows }, get active() { return lastDynShadowActive }, stats: () => dynShadows?.stats() ?? null, get ms() { return dynShadowsMs } }, skyLut: { get enabled() { return skyLutEnabled }, set enabled(v: boolean) { skyLutEnabled = !!v && !!skyLut }, get active() { return lastSkyLutActive }, invalidate: () => skyLut?.invalidate(), stats: () => skyLut?.stats() ?? null }, volClouds: { get enabled() { return volCloudsEnabled }, set enabled(v: boolean) { volCloudsEnabled = !!v && !!volClouds; resetVolumetrics() }, get active() { return lastVolCloudsActive }, reset: () => { volCloudsNeedsReset = true; volClouds?.reset() }, stats: () => volClouds?.stats() ?? null, get ms() { return volCloudsMs } }, froxelFog: { get enabled() { return froxelFogEnabled }, set enabled(v: boolean) { froxelFogEnabled = !!v && !!froxelFog; resetVolumetrics() }, get active() { return lastFroxelFogActive }, reset: () => { froxelFogNeedsReset = true; froxelFog?.reset() }, stats: () => froxelFog?.stats() ?? null, get ms() { return froxelFogMs } }, gi: { get enabled() { return giOverride !== null ? giOverride : preset === 'high' }, set enabled(v: boolean) { giOverride = !!v && !!giPass; resetGi() }, get active() { return lastGiActive }, get ms() { return giMs }, get cascadeMs() { return giCascadeMs }, get traceMs() { return giTraceMs }, get svgfMs() { return giSvgfMs }, get resets() { return giPass?.stats().resets ?? 0 }, reset: resetGi, stats: () => giPass?.stats() ?? null }, restir: { get enabled() { return restirOverride !== null ? restirOverride : preset === 'high' }, set enabled(v: boolean) { restirOverride = !!v && !!restirPass; resetRestir() }, get active() { return lastRestirActive }, get lights() { return lastRestirActive ? march.localLights.clusterCount : 0 }, get ms() { return restirMs }, get resets() { return restirPass?.stats().resets ?? 0 }, reset: resetRestir, stats: () => restirPass?.stats() ?? null } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby, arrival })
   // In a lobby: whose server this is in the corner, who is here, what it says, the way out (lobbies.ts).

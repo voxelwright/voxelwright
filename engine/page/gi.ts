@@ -904,7 +904,8 @@ fn cs_inject_radiance(@builtin(global_invocation_id) gid: vec3u) {
     var indirectRad = vec3f(0.0);
     if (prevValid && !isNewSlab && feedback > 1e-4) {
       let basis = makeBasis(fNorm);
-      var gatherSum = vec3f(0.0);
+      var skyGather = vec3f(0.0);
+      var bounceGather = vec3f(0.0);
       let invCount = 1.0 / f32(gatherCount);
       for (var r = 0u; r < 16u; r++) {
         if (r >= gatherCount) { break; }
@@ -927,9 +928,26 @@ fn cs_inject_radiance(@builtin(global_invocation_id) gid: vec3u) {
           skyGround,
           sunGlow,
         );
-        gatherSum += hit.rgb;
+        if (hit.a < 0.0) {
+          skyGather += hit.rgb;
+        } else {
+          bounceGather += hit.rgb;
+        }
       }
-      let newIndirect = albedo * (feedback * (gatherSum * invCount));
+      // Keep direct-sunlit faces and outdoor sky-bounce physically conservative (raw albedo) so
+      // bright outdoor facades and street-facing recesses do not glow; apply smooth hue-preserving
+      // multi-bounce compensation only to shadowed surface-to-surface bounce so 2nd/3rd indoor sun
+      // bounce survives AgX's shadow toe (strictly <= maxAlb; sealed rooms stay exact 0.00000).
+      let isShadowed = max(directRad.r, max(directRad.g, directRad.b)) < 1e-4;
+      var bounceAlb = albedo;
+      if (isShadowed) {
+        let peak = max(albedo.r, max(albedo.g, albedo.b));
+        if (peak > 1e-4) {
+          let liftedPeak = min(min(mix(peak, pow(peak, 0.35), 0.72), peak * 1.8), maxAlb);
+          bounceAlb = albedo * (liftedPeak / peak);
+        }
+      }
+      let newIndirect = (albedo * skyGather + bounceAlb * bounceGather) * (feedback * invCount);
       let prevTotal = readFaceRad(cascadeIdx, tc, f, dimU);
       let prevIndirect = max(prevTotal - directPlusEmissive, vec3f(0.0));
       indirectRad = mix(prevIndirect, newIndirect, tempAlpha);
@@ -1115,7 +1133,141 @@ fn cs_trace_gi(@builtin(global_invocation_id) gid: vec3u) {
   let skyGround = params.skyGroundPad.xyz;
 
   // Offset cleanly into the adjacent air voxel along the surface normal to avoid self-intersection.
-  let startPos = worldPos + n * (vox0 * 0.52);
+  // Pick the active cascade (0, 1, or 2) whose safe interior holds worldPos + n * 0.52 * s so both
+  // near-field (Cascade 0) and mid-field recesses (~35 m, Cascade 1) escape their own coarse voxel:
+  //   - If c0 = worldPos + n * 0.52 * activeVox is STILL inside the surface's own voxel
+  //     (sameCell == true — e.g. grazing interior walls, far ceiling corners, or recessed alcoves),
+  //     try normal-clearing candidates past our own voxel's front face before nearest-face / view escape.
+  //   - If c0 already stepped across a narrow gap into a DIFFERENT opposing wall voxel (!sameCell —
+  //     e.g. a narrow bay-window reveal facing an adjacent building, or a back-wall corner inside a
+  //     perpendicular wall's dilated voxel), never step further along +n; use view-biased escape
+  //     first, then nearest-tangent-face escape (<= 0.56 * activeVox, strictly exiting the half-voxel
+  //     c0 is already in so it can never punch through a 1-voxel wall).
+  // Sealed interior rooms (whose c0 is already interior air) keep 0.00000 light leak.
+  let toEye = params.camEyeNear.xyz - worldPos;
+  let toEyeLen = length(toEye);
+  let V = select(n, toEye / max(toEyeLen, 1e-4), toEyeLen > 1e-4);
+  let maxDistV = max(toEyeLen - 0.5, 0.0);
+  let voxSizes = array<f32, 3>(params.cascadeVoxels.x, params.cascadeVoxels.y, params.cascadeVoxels.z);
+  let dimI = vec3i(dimU);
+  // Start with a tight fine-cascade normal offset (0.52 * vox0 = 42 cm) so mid-field Cascade-1
+  // alcoves do not overshoot 1.7 m out into sunlit streets when already in Cascade-1 air.
+  var startPos = worldPos + n * (vox0 * 0.52);
+  var startC = 3u;
+  for (var ciC = 0u; ciC < 3u; ciC++) {
+    let origC = params.cascadeOrigins[ciC];
+    if (origC.w == 0) { continue; }
+    let sC = voxSizes[ciC];
+    let relTest = vec3i(floor(startPos / sC)) - origC.xyz;
+    if (all(relTest >= vec3i(1)) && all(relTest < dimI - vec3i(1))) {
+      startC = ciC;
+      break;
+    }
+  }
+  if (startC < 3u) {
+    let activeVox = voxSizes[startC];
+    let origA = params.cascadeOrigins[startC];
+    let activeOrigin = vec3f(origA.xyz) * activeVox;
+    let surfCell = vec3i(floor((worldPos - n * (vox0 * 0.05) - activeOrigin) / activeVox));
+    let c0Cell = vec3i(floor((startPos - activeOrigin) / activeVox));
+    let v0 = origA.xyz + c0Cell;
+    if (loadCascadeMip(startC, vec3i(toroidalCoord(v0, dimU)), 0).a >= 0.5) {
+      let sameCell = all(c0Cell == surfCell);
+      let blendSum = n + V * 1.2;
+      let dBlend = select(V, normalize(blendSum), dot(blendSum, blendSum) > 1e-4);
+      let an = abs(n);
+      // Exact face-clearing step along +n past our own solid voxel's front face (avoids overshooting
+      // 3.3 m in Cascade 1 while clearing grazing 80 cm Cascade-0 walls cleanly).
+      let fC0 = (startPos - activeOrigin) / activeVox - vec3f(c0Cell);
+      var fN = fC0.z;
+      var nDom = n.z;
+      if (an.x >= an.y && an.x >= an.z) {
+        fN = fC0.x; nDom = n.x;
+      } else if (an.y >= an.z) {
+        fN = fC0.y; nDom = n.y;
+      }
+      let distN = select(fN + 0.06, 1.06 - fN, nDom > 0.0) * activeVox;
+      let nClearPos = startPos + n * distN;
+      let basePos = select(startPos, nClearPos, sameCell);
+      let baseCell = vec3i(floor((basePos - activeOrigin) / activeVox));
+      let fBase = (basePos - activeOrigin) / activeVox - vec3f(baseCell);
+      var axA = vec3f(1.0, 0.0, 0.0);
+      var axB = vec3f(0.0, 1.0, 0.0);
+      var fA = fBase.x;
+      var fB = fBase.y;
+      if (an.x >= an.y && an.x >= an.z) {
+        axA = vec3f(0.0, 1.0, 0.0); fA = fBase.y;
+        axB = vec3f(0.0, 0.0, 1.0); fB = fBase.z;
+      } else if (an.y >= an.z) {
+        axA = vec3f(1.0, 0.0, 0.0); fA = fBase.x;
+        axB = vec3f(0.0, 0.0, 1.0); fB = fBase.z;
+      }
+      // On axes where the camera strongly sees one side (|dot(V, ax)| > 0.35, e.g. back wall seen from +Z),
+      // step strictly toward the camera side (never behind a wall). On grazing axes (<= 0.35, e.g. X at a
+      // side-wall corner), step across the nearest voxel face (<= 0.56 * activeVox, never crossing a wall).
+      let vA = dot(V, axA);
+      let dirA = select(select(1.0, -1.0, fA < 0.5), select(-1.0, 1.0, vA > 0.0), abs(vA) > 0.35);
+      let distA = select(fA + 0.06, 1.06 - fA, dirA > 0.0) * activeVox;
+      let vB = dot(V, axB);
+      let dirB = select(select(1.0, -1.0, fB < 0.5), select(-1.0, 1.0, vB > 0.0), abs(vB) > 0.35);
+      let distB = select(fB + 0.06, 1.06 - fB, dirB > 0.0) * activeVox;
+      let stepNear = select(axB * (dirB * distB), axA * (dirA * distA), distA <= distB);
+      let stepFar = select(axA * (dirA * distA), axB * (dirB * distB), distA <= distB);
+      let stepBoth = stepNear + stepFar;
+      var escaped = false;
+      if (sameCell) {
+        let sameCands = array<vec3f, 9>(
+          nClearPos,
+          nClearPos + V * min(activeVox * 0.30, maxDistV),
+          nClearPos + stepNear,
+          nClearPos + stepFar,
+          nClearPos + stepBoth,
+          worldPos + dBlend * min(activeVox * 0.65, maxDistV),
+          worldPos + V * min(activeVox * 0.75, maxDistV),
+          worldPos + V * min(activeVox * 1.35, maxDistV),
+          worldPos + V * min(activeVox * 1.95, maxDistV),
+        );
+        for (var ci = 0u; ci < 9u; ci++) {
+          let candPos = sameCands[ci];
+          let relCand = vec3i(floor((candPos - activeOrigin) / activeVox));
+          if (any(relCand < vec3i(1)) || any(relCand >= dimI - vec3i(1))) { continue; }
+          let vCand = origA.xyz + relCand;
+          if (loadCascadeMip(startC, vec3i(toroidalCoord(vCand, dimU)), 0).a < 0.5) {
+            startPos = candPos;
+            escaped = true;
+            break;
+          }
+        }
+        if (!escaped) {
+          startPos = sameCands[6];
+        }
+      } else {
+        let diffCands = array<vec3f, 7>(
+          worldPos + dBlend * min(activeVox * 0.55, maxDistV),
+          worldPos + V * min(activeVox * 0.75, maxDistV),
+          startPos + stepNear,
+          startPos + stepFar,
+          startPos + stepBoth,
+          worldPos + V * min(activeVox * 1.35, maxDistV),
+          worldPos + V * min(activeVox * 1.95, maxDistV),
+        );
+        for (var ci = 0u; ci < 7u; ci++) {
+          let candPos = diffCands[ci];
+          let relCand = vec3i(floor((candPos - activeOrigin) / activeVox));
+          if (any(relCand < vec3i(1)) || any(relCand >= dimI - vec3i(1))) { continue; }
+          let vCand = origA.xyz + relCand;
+          if (loadCascadeMip(startC, vec3i(toroidalCoord(vCand, dimU)), 0).a < 0.5) {
+            startPos = candPos;
+            escaped = true;
+            break;
+          }
+        }
+        if (!escaped) {
+          startPos = diffCands[1];
+        }
+      }
+    }
+  }
   let basis = makeBasis(n);
 
   if (mode == 1u) {
@@ -1542,17 +1694,6 @@ const ATROUS_UBO_BYTES = 48
 const FACE_WORDS_PER_VOXEL = 9
 const ATROUS_STEPS = [1, 2, 4] as const
 
-const SCREEN_TEX_USAGE =
-  GPUTextureUsage.TEXTURE_BINDING |
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.COPY_SRC
-
-const CASCADE_TEX_USAGE =
-  GPUTextureUsage.TEXTURE_BINDING |
-  GPUTextureUsage.STORAGE_BINDING |
-  GPUTextureUsage.COPY_SRC |
-  GPUTextureUsage.COPY_DST
-
 function isPow2(n: number): boolean {
   return Number.isInteger(n) && n >= 8 && (n & (n - 1)) === 0
 }
@@ -1581,6 +1722,15 @@ export async function createVoxelGI(
   device: GPUDevice,
   options: VoxelGIOptions = {},
 ): Promise<VoxelGIPass> {
+  const SCREEN_TEX_USAGE =
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.COPY_SRC
+  const CASCADE_TEX_USAGE =
+    GPUTextureUsage.TEXTURE_BINDING |
+    GPUTextureUsage.STORAGE_BINDING |
+    GPUTextureUsage.COPY_SRC |
+    GPUTextureUsage.COPY_DST
   const cascadeSize: readonly [number, number, number] = options.cascadeSize ?? GI_DEFAULT_CASCADE_SIZE
   const cascadeVoxelCells: readonly [number, number, number] = options.cascadeVoxelCells ?? GI_DEFAULT_VOXEL_CELLS
   if (!isPow2(cascadeSize[0]) || !isPow2(cascadeSize[1]) || !isPow2(cascadeSize[2])) {
@@ -2199,12 +2349,12 @@ export async function createVoxelGI(
       const gy0 = (dimY + 3) >> 2
       const gz0 = (dimZ + 3) >> 2
 
-      const injectStartTs = timing?.all
+      const injectStartTs = timing?.all?.beginningOfPassWriteIndex !== undefined
         ? { querySet: timing.all.querySet, beginningOfPassWriteIndex: timing.all.beginningOfPassWriteIndex }
-        : timing?.inject
+        : timing?.inject?.beginningOfPassWriteIndex !== undefined
           ? { querySet: timing.inject.querySet, beginningOfPassWriteIndex: timing.inject.beginningOfPassWriteIndex }
           : undefined
-      const injectEndTs = timing?.inject
+      const injectEndTs = timing?.inject?.endOfPassWriteIndex !== undefined
         ? { querySet: timing.inject.querySet, endOfPassWriteIndex: timing.inject.endOfPassWriteIndex }
         : undefined
 
@@ -2222,12 +2372,12 @@ export async function createVoxelGI(
       }
 
       // Pass 2: cs_mip_radiance (mip 0->1 and mip 1->2 for all 3 cascades).
-      const mipStartTs = timing?.mip
+      const mipStartTs = timing?.mip?.beginningOfPassWriteIndex !== undefined
         ? { querySet: timing.mip.querySet, beginningOfPassWriteIndex: timing.mip.beginningOfPassWriteIndex }
         : undefined
-      const mipEndTs = timing?.all
+      const mipEndTs = timing?.all?.endOfPassWriteIndex !== undefined
         ? { querySet: timing.all.querySet, endOfPassWriteIndex: timing.all.endOfPassWriteIndex }
-        : timing?.mip
+        : timing?.mip?.endOfPassWriteIndex !== undefined
           ? { querySet: timing.mip.querySet, endOfPassWriteIndex: timing.mip.endOfPassWriteIndex }
           : undefined
 
@@ -2444,9 +2594,9 @@ export async function createVoxelGI(
           if (timing?.atrous) {
             if (atrousCount === 1) {
               ts = timing.atrous
-            } else if (i === 0) {
+            } else if (i === 0 && timing.atrous.beginningOfPassWriteIndex !== undefined) {
               ts = { querySet: timing.atrous.querySet, beginningOfPassWriteIndex: timing.atrous.beginningOfPassWriteIndex }
-            } else if (i === atrousCount - 1) {
+            } else if (i === atrousCount - 1 && timing.atrous.endOfPassWriteIndex !== undefined) {
               ts = { querySet: timing.atrous.querySet, endOfPassWriteIndex: timing.atrous.endOfPassWriteIndex }
             }
           }
