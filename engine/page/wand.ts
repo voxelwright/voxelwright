@@ -69,6 +69,11 @@ export interface Wand {
   flash(): void
   /** Casts at what is aimed at: a flash on the aim, and `oncast`. */
   cast(): void
+  /**
+   * A shape about to be built or carved (#226, build-tools.ts), drawn while the wand is in hand in place of the aim:
+   * its box in lines and what lies in it lit, warm gold when it adds, crimson when it carves or rakes. Null for none.
+   */
+  buildPreview?: { box: Box; subtractive: boolean } | null
 }
 
 const CODE = /* wgsl */ `
@@ -83,7 +88,8 @@ struct U {
   hi: vec3f, ready: f32,
   // For a side: which way the chosen faces look, and whether only they are lit.
   normal: vec3f, side: f32,
-  res: vec2f, pad1: vec2f,
+  // A shape about to be built (#226): 0 none, 1 adding, 2 carving.
+  res: vec2f, build: f32, pad1: f32,
 }
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var depths: texture_depth_2d;
@@ -100,6 +106,9 @@ const FAR = 100000.0;
 // The wand's light (linear HDR): cool cyan where it only shows, warm gold where it strikes.
 const SHOW = vec3f(0.45, 1.05, 1.35);
 const STRIKE = vec3f(1.6, 0.92, 0.25);
+// A shape about to be built: gold where it adds, crimson where it carves.
+const BUILD_ADD = vec3f(1.55, 1.05, 0.32);
+const BUILD_CUT = vec3f(1.7, 0.26, 0.12);
 
 fn chosen(c: vec3i) -> bool {
   let size = vec3i(textureDimensions(cells));
@@ -129,7 +138,8 @@ fn onEdge(p: vec3f, lo: vec3f, hi: vec3f, wide: f32) -> f32 {
   let pos = u.eye + rd * t;
   // How wide a pixel is where the picture is, in cells: lines are kept a pixel or two wide however far off.
   let px = t * u.tanHalf * 2.0 / u.res.y;
-  let tint = mix(SHOW, STRIKE, u.struck);
+  var tint = mix(SHOW, STRIKE, u.struck);
+  if (u.mode == 4.0) { tint = select(BUILD_ADD, BUILD_CUT, u.build > 1.5) * (1.0 + u.struck * 0.6); }
   var light = 0.0;
   var cover = 0.0;
 
@@ -154,6 +164,15 @@ fn onEdge(p: vec3f, lo: vec3f, hi: vec3f, wide: f32) -> f32 {
       light = max(line, grid * low) ;
       cover = 0.16 * low + light * 0.5;
     }
+  }
+  if (u.mode == 4.0 && !sky && all(pos > u.lo - vec3f(0.05)) && all(pos < u.hi + vec3f(0.05))) {
+    // A shape about to be built: what lies in its box lit, more strongly where it carves (that is what goes).
+    let cut = select(0.0, 1.0, u.build > 1.5);
+    let beat = 0.5 + 0.5 * sin(u.time * 4.0);
+    light = 0.18 + 0.12 * beat;
+    cover = 0.12 + 0.14 * cut + 0.04 * beat;
+  }
+  if (u.mode == 2.0 || u.mode == 4.0) {
     // Its box in lines: how big a thing made here will be.
     let inv = 1.0 / rd;
     let a = (u.lo - u.eye) * inv;
@@ -403,6 +422,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
     get target() { return target() },
     get says() { return says() },
     oncast: null,
+    buildPreview: null,
     get powers() { return powers },
     set powers(v: readonly { name: string }[]) { const was = powers[power]?.name; powers = v; power = Math.max(0, v.findIndex((p) => p.name === was)) },
     get power() { return power },
@@ -437,13 +457,14 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
       self.oncast?.(target())
     },
     draw(encoder, to, view, time) {
-      const aimed = held && met ? target() : null, showing = held && met && (aimed || (mode === 'thing' && mask !== none))
+      const building = held && self.buildPreview ? self.buildPreview : null
+      const aimed = held && met ? target() : null, showing = building || (held && met && (aimed || (mode === 'thing' && mask !== none)))
       if (!showing && flash <= 0) return
       const anchor = view.eye.map(Math.floor), rel = (p: readonly number[]) => [p[0] - anchor[0], p[1] - anchor[1], p[2] - anchor[2]]
-      const box = mode === 'area' ? areaBox() : mode === 'thing' && thing ? thing.box : null
-      floats.set([...rel(view.eye), view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, time % 1000, ...view.forward, showing ? MODES.indexOf(mode) + 1 : 0])
+      const box = building ? building.box : mode === 'area' ? areaBox() : mode === 'thing' && thing ? thing.box : null
+      floats.set([...rel(view.eye), view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, time % 1000, ...view.forward, building ? 4 : showing ? MODES.indexOf(mode) + 1 : 0])
       // A ring big enough to be seen from where the eye is, and never smaller than a hand.
-      floats.set([...rel(met?.at ?? view.eye), Math.max(2.5, (met?.t ?? 0) * 0.03), ...(box ? rel(box) : [0, 0, 0]), flash, ...(box ? rel(box.slice(3)) : [0, 0, 0]), going ? 0 : 1, ...(thing?.normal ?? [0, 1, 0]), mode === 'thing' && thing?.share === 'side' ? 1 : 0, to.size[0], to.size[1]], 16)
+      floats.set([...rel(met?.at ?? view.eye), Math.max(2.5, (met?.t ?? 0) * 0.03), ...(box ? rel(box) : [0, 0, 0]), flash, ...(box ? rel(box.slice(3)) : [0, 0, 0]), going ? 0 : 1, ...(thing?.normal ?? [0, 1, 0]), mode === 'thing' && thing?.share === 'side' ? 1 : 0, to.size[0], to.size[1], building ? (building.subtractive ? 2 : 1) : 0], 16)
       device.queue.writeBuffer(uniforms, 0, block)
       const panes = march.panes(to.allocSize ?? to.size)
       if (!bound || bound.depth !== to.depth || bound.mask !== mask || bound.panes !== panes) bound = { depth: to.depth, mask, panes, group: device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: to.depth }, { binding: 2, resource: mask.createView() }, { binding: 3, resource: panes }] }) }

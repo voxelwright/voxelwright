@@ -494,7 +494,12 @@
     "engine/page/plugins.ts": "types:Pass",
     "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed",
     "engine/page/deform.ts": "lines:^export const (MAX_DENTS|DEFORM_BYTES)|^export class VehicleDeformation|^recordImpact\\(|^repairVehicle\\(",
-    "engine/page/living.ts": "lines:^const (DENTS_FROM|CRASH_FROM|HEAD_ROOM|ENGINE_SEEN) =|^repair\\(thing\\)"
+    "engine/page/living.ts": "lines:^const (DENTS_FROM|CRASH_FROM|HEAD_ROOM|ENGINE_SEEN) =|^repair\\(thing\\)",
+    "engine/page/build-tools.ts": "lines:^export (const (SHAPES|SIZES)|function (stampRuns|rakeRuns|snapPlacement)|class EditUndoStack|type SnapMode)|^constructor\\(depth",
+    "engine/page/wand.ts": "lines:^buildPreview\\?:",
+    "engine/page/smoke-grid.ts": "lines:^(exportBitmask|rayInterval)\\(",
+    "engine/page/froxel-fog.ts": "lines:^fn cs_discontinuity|^let silhouette",
+    "engine/page/volumetric-clouds.ts": "lines:^fn (cs_cloud_occupancy|cloudOccupiedInterval)"
   },
   "guide/engine-plugins.md": {
     "engine/rules/run.mjs": "lines:^export const (RULES_MOST|SOURCE_MOST)|^const (START_MOST|STRIKES|WAITING_MOST)",
@@ -514,12 +519,13 @@
     "engine/page/main.ts": "lines:^(march|farModel|marine|pluginDraws|staff)\\.draw\\(encoder, to, v|^if \\(!off\\.has\\('|off\\.has\\('spoil'\\)|^world\\.update\\(|^const off = new Set|^const frame = |^if \\(paused \\|\\| mapSys\\?\\.opaque\\)|portalDraw\\?\\.\\(encoder",
     "engine/page/bay.ts": "lines:^export async function open|instantiateStreaming",
     "engine/page/frames.ts": "lines:^export const LOG",
-    "engine/serve.mjs": "lines:^// With --world it also keeps one shared world \\(world.mjs\\)",
+    "engine/serve.mjs": "lines:^// With --world it also keeps one shared world \\(world.mjs\\)|^const regenTtl|^const ANCHORS|'/world/anchors'|^const anchor = ",
     "engine/package.json": [
       "scripts.core",
       "scripts.check"
     ],
-    "engine/page/march.ts": "lines:^const (PANES|THROUGH) =|^fn litWindow"
+    "engine/page/march.ts": "lines:^const (PANES|THROUGH) =|^fn litWindow",
+    "engine/anchor-zones.mjs": "lines:^export const (POLICY|ZONES_MOST)"
   },
   "guide/gameplay.md": {
     "engine/page/keys.ts": "lines:^Key[A-Z]: '|^export const (OWN|YIELDED|FREE)",
@@ -643,7 +649,8 @@
     "engine/make/drawn.mjs": "lines:^export const ENDPOINT|^const (cmFor|UNLIKE)|'X-Fal-Store-IO'|^if \\(process\\.env\\.FAL_KEY\\)",
     "engine/make/library.mjs": "lines:^export const (LIBRARY|SHIPPED)",
     "engine/make/fine.mjs": "lines:^export const grained",
-    "engine/make/best.mjs": "lines:^export async function wished"
+    "engine/make/best.mjs": "lines:^export async function wished",
+    "engine/make/qa-probes.mjs": "lines:^export function|^const feet ="
   },
   "guide/master.md": {
     "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
@@ -750,7 +757,8 @@
     "engine/studio/mcp.mjs": "lines:name: 'game_",
     "engine/studio/session-control.mjs": "lines:^export class SessionControl",
     "engine/page/studio/index.ts": "lines:^export async function bootStudio",
-    "engine/page/studio/ext.ts": "lines:^export class StudioExtensionRegistry"
+    "engine/page/studio/ext.ts": "lines:^export class StudioExtensionRegistry",
+    "engine/page/studio/cutaway.ts": "lines:^export (function|const)|^return box\\[1\\] \\+"
   },
   "guide/village.md": {
     "scripts/checks.mjs": "lines:cwd: '(home|host|street)'",
