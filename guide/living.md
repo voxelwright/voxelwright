@@ -126,6 +126,15 @@ San Francisco's pedestrians are evaluated from the same shared module (`engine/s
 - **Three-ring AI LOD.** Pedestrians are classified by distance (`classifyLod`): **Ring 1** (`<= 35 m`) runs full gaze, avoidance, horn and stuck-robotaxi micro-reactions; **Ring 2** (`35–110 m`) uses simplified kinematics with posture and umbrellas; **Ring 3** (`110–300 m`) tracks lightweight macro route progression with zero animation or collision work and materialises cleanly into Ring 2 when approached.
 - **Zero-teleport promotion.** On released San Francisco worlds, `world.residents` lists nearby SF pedestrians with their `seed`, `home`, `archetype`, `activity`, and `lod`. Taking one (`world.actor(id, { take })`) promotes them from their live `sf-walks.mjs` whereabouts with zero jump, broadcasts their `was` seed so connected pages suppress the analytic duplicate (`taken`), and lets `release()` walk them back to their live route before handing them back to the street crowd.
 
+### San Francisco traffic AI
+
+San Francisco's ambient street vehicles (`engine/page/street.ts`) use the modular traffic AI in `engine/page/traffic-ai.ts` so queues keep flowing around craters and stalled robotaxis without overlapping or snapping.
+
+- **Per-driver profiles and wet roads.** Every vehicle gets a deterministic `driverProfile(seed, kind, emergency)` across six archetypes (`cautious`, `commuter`, `assertive`, `hurried`, `delivery`, `emergency`) setting its speed bias, caution, aggression, following gap, lane-change willingness, horn patience, and rain braking scale. When `rain > 0.2`, `rainDrivingFactors` elongates braking and following distances and trims cornering speed.
+- **Dynamic lane-changing and local junction detours.** When a lane ahead is obstructed by a blast crater (`r.blocked`), a stalled robotaxi (`rtStuck`), or a stopped car, trailing vehicles verify clearance with `isLaneClear` and smoothly interpolate lateral shifts (`laneShift` on multi-lane roads, `overtakeShift` on narrow streets) with zero snapping and OBB overlap guards. Approaching a junction whose outgoing road is blocked or congested triggers `planLocalDetour` (budgeted to 16–24 graph expansions and cached per road and blocked set) to choose a clear alternate road.
+- **Emergency vehicles and acoustic sirens.** Police cruisers and ambulances spawn at a low ambient share (~4%) or on demand via `street.spawnEmergency(...)`. While their siren is active, they pulse alternating red/blue roof flashers through `LocalLightSink`, clear red lights after a brief caution slowdown, and project an acoustic siren cone (45 m / 50° forward plus 18 m omnidirectional). Regular traffic inside the cone (`evaluateSirenYield`) slows and pulls smoothly toward the right kerb (`sirenYieldShift`), then merges back once passed.
+- **Pedestrian-vehicle coupling and telemetry.** Crosswalk yielding scales with driver caution and rain (`crosswalkYieldBuffer`), hurried drivers honk sooner when blocked, and close fast passes emit structured `PedestrianNearMissCue` records (`street.nearMissCues`) that make nearby Ring-1 pedestrians flinch and step back. `street.trafficAiStats()` reports `{ laneChanges, detours, sirenYields, activeEmergency, deadlocksResolved }`.
+
 ### People answer by default
 
 Once someone's model answers for a world, the world is given one rule by the engine: `engine/mind/talk.rule.js`, under the id `talk`. When someone speaks, the nearest resident (in the town or on San Francisco's streets) within 9 m stops, turns and answers as an ordinary person of the street. Left alone for 25 seconds they walk on. It is text run in a box like any rule. It does nothing while nobody's model answers, and stands back where another rule listens for `thought`. Put a rule of your own under `talk` to replace it, or take `talk` out. `GET /world/rules?given=1` lists it.
@@ -154,6 +163,7 @@ The voice is Sonnet by default (`--voice`). `--no-voice` turns voicing off for t
 cd engine
 node test/mind.mjs            # thinking with replies kept in test/mind-kept.json, no model
 node test/sf-residents.mjs    # shared SF walk graph, daily routines, 3-ring LOD, take/release & talk.rule.js
+node test/traffic-ai.mjs      # per-driver profiles, rain braking, lane-changing, detours, sirens & ped coupling
 node test/living.mjs          # a living car driven in Chrome
 node test/person.mjs          # a person's own body, alone and in a shared world
 node test/moves.mjs           # moves and looks sent by a rule
