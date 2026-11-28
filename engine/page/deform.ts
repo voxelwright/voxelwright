@@ -31,6 +31,44 @@ export interface BodyState {
 }
 export interface CabinBox { min: DeformVec3; max: DeformVec3 }
 export interface Dent { center: Float64Array; radius: number; dir: Float64Array; depth: number }
+/** Pure mapping from crash closing speed and impulse to GPU crease parameters and core physical hull crush depth (#166). */
+export interface ImpactCrush {
+  /** Normalized impact severity in [0, 1]; zero below the 18 cells/s dent threshold. */
+  severity: number
+  /** GPU dent support radius in mesh cells (coarse 10 cm cells when `cell === 1`, scaled by `1 / cell` for fine meshes). */
+  creaseRadius: number
+  /** GPU dent crease depth in mesh cells (coarse 10 cm cells when `cell === 1`, scaled by `1 / cell` for fine meshes). */
+  creaseDepth: number
+  /** Physical `Hull::crush_local` indentation depth in coarse 10 cm cells (0 for minor rubs below 35 cells/s). */
+  physicalCrushDepth: number
+}
+/** Maps a crash impulse (`closingSpeed` in 10 cm cells/s and impulse `push`) to both GPU crease parameters
+ * and the Rust core's physical `Hull::crush_local` indentation depth. Mirrors `living.rs` `crush_depth_for_impact`. */
+export function crushDepthForImpact(
+  closingSpeed: number,
+  push = 0,
+  cell = 1,
+  maxPhysicalCrush = 6.0,
+): ImpactCrush {
+  if (
+    !Number.isFinite(closingSpeed) || closingSpeed < 18 ||
+    !Number.isFinite(push) || push < 0 ||
+    !Number.isFinite(cell) || cell <= 0 ||
+    !Number.isFinite(maxPhysicalCrush) || maxPhysicalCrush < 0
+  ) {
+    return { severity: 0, creaseRadius: 0, creaseDepth: 0, physicalCrushDepth: 0 }
+  }
+  const severity = clamp((closingSpeed - 18) / 110) * (0.85 + 0.15 * push / (push + 8000))
+  const coarseRadius = 2.5 + 10.5 * Math.sqrt(severity)
+  const coarseDepth = 0.08 + 2.5 * severity
+  const physicalCrushDepth = closingSpeed >= 35 ? clamp(coarseDepth * 0.9, 0, maxPhysicalCrush) : 0
+  return {
+    severity,
+    creaseRadius: coarseRadius / cell,
+    creaseDepth: coarseDepth / cell,
+    physicalCrushDepth,
+  }
+}
 export interface DeformState {
   readonly dents: readonly Dent[]
   dentCount: number
