@@ -77,7 +77,7 @@ export function read(words: Uint32Array<ArrayBuffer>): Told {
     else if (tag === FLOW) told.water = words.slice(at, at + n)
     else if (tag === BURST) told.bursts.push({ at: [f[at], f[at + 1], f[at + 2]], radius: words[at + 3] })
     else if (tag === STRUCK) told.struck.push({ a: words[at], b: words[at + 1], at: [f[at + 2], f[at + 3], f[at + 4]], speed: f[at + 5], push: f[at + 6], kindA: words[at + 7], kindB: words[at + 8], flags: words[at + 9] })
-    else if (tag === LIVE) for (let k = at; k < at + n; k += 12) { const flags = words[k + 7]; told.live.push({ id: words[k], speed: f[k + 1], feet: f[k + 2], touches: f[k + 3], go: f[k + 4], turn: f[k + 5], rise: f[k + 6], aloft: (flags & 1) !== 0, boosting: (flags & 2) !== 0, launching: (flags & 4) !== 0, boost: ((flags >>> 8) & 255) / 255, burnout: ((flags >>> 16) & 255) / 255, frame: [f[k + 8], f[k + 9], f[k + 10], f[k + 11]] }) }
+    else if (tag === LIVE) for (let k = at; k < at + n; k += 12) { const flags = words[k + 7]; told.live.push({ id: words[k], speed: f[k + 1], feet: words[k + 2], touches: words[k + 3], go: f[k + 4], turn: f[k + 5], rise: f[k + 6], aloft: (flags & 1) !== 0, boosting: (flags & 2) !== 0, launching: (flags & 4) !== 0, boost: ((flags >>> 8) & 255) / 255, burnout: ((flags >>> 16) & 255) / 255, frame: [f[k + 8], f[k + 9], f[k + 10], f[k + 11]] }) }
     else if (tag === FIGURE) told.figures.push({ id: words[at], size: [words[at + 1], words[at + 2], words[at + 3]], com: [f[at + 4], f[at + 5], f[at + 6]] })
     else if (tag === MOVES) for (let k = at; k < at + n; k += 8) told.moves.push(placed(k))
     else if (tag === POSE) for (let k = at; k < at + n; k += POSE_RECORD_WORDS) told.poses.push(unpackPoseWords(words, k))
