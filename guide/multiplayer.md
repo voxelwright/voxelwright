@@ -122,7 +122,7 @@ Only the routes in `ROUTES` pass. The door matches the path whole, rebuilds the 
 | Everyone let in | Read the stream (`GET /world/stream`, rules without their sources). Say where they are (`here`), talk (`say`), play what a rule offers (`act`, `pick`), and drive only what they ride (`drive`). Ask about the world: `at`, `look`, `tops`, `things`, `realm`, `ground`, `rules` without sources, and a living thing's fine look. |
 | Builders (everyone, or admins only, as an admin sets) | Change the world by hand: `POST /world/ask` (blasts, fire, balls, bricks, made things, holding and throwing) and `POST /world/fine`. |
 | Admins only | Rules put in, changed or taken out, and the realm's record (`POST /world/ask` with `rule`, `unrule` or `realm`). Rules' sources, gaps, realms made and taken out, plugins and the core read again. |
-| Nobody | Voicing the world's people (`/world/minds`, `/world/mind`), which would spend the host's model on a stranger's behalf. Seats for agents (`join`, `walk` and the rest), tiles (`/release/`, `/bay/`), pages and plugins' page sides, `/report`, and other realms. |
+| Nobody | Voicing the world's people (`/world/minds`, `/world/mind`), which would spend the host's model on a stranger's behalf. Seats for agents (`join`, `walk` and the rest), tiles (`/release/`, `/bay/`), pages and plugins' page sides, `/report`, [anchor zones](/engine#anchor-zones) (`/world/anchors`), and other realms. |
 
 ### Limits
 

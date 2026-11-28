@@ -29,6 +29,7 @@ export const RULES = [
   [/^engine\/(blocks|kit)\//, 'the Voxelmorphism kit and its stage, which the SF realm carries', ['types', 'blocks', ...REALM]],
   [/^engine\/landing\//, 'the landing', ['types']],
   [/^engine\/studio\//, 'the in-game T3 Studio Bridge & Game-Use MCP server', ['studio']],
+  [/^engine\/page\/studio\/cutaway\.ts$/, "the cutaway review cameras and contact sheet", ['types', 'maker-qa']],
   [/^engine\/page\/studio\//, 'the in-game T3 Studio client runtime & IDE', ['types', 'studio']],
   [/^engine\/bay\/[^/]+\.py$/, "the Bay's bake, run outside the checks", []],
   [/^engine\/page\//, 'the page, which every check that opens it runs', EVERY],
