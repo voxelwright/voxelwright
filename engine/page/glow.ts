@@ -5,9 +5,9 @@ import { shader, type Gpu, type Offscreen, GLOWS_OVER } from '../probe/gpu.ts'
 
 /** Diagnostic tonemap override: `?tonemap=aces` selects Narkowicz ACES; default is AgX. */
 const TONEMAP_ACES = typeof location !== 'undefined' && new URLSearchParams(location.search).get('tonemap') === 'aces'
-/** Base scene exposure before AgX tonemapping: lifts sunlit daytime whites above 1.0 while keeping dusk/night depth. */
-const DAY_EXPOSURE = 1.14
-const NIGHT_EXPOSURE = 0.64
+/** Base scene exposure before AgX tonemapping: keeps midday asphalt/shadows deep while holding sunlit whites & clouds crisp. */
+const DAY_EXPOSURE = 1.08
+const NIGHT_EXPOSURE = 0.70
 
 const codeOf = (useF16: boolean) => /* wgsl */ `${useF16 ? 'enable f16;\n' : ''}
 @group(0) @binding(0) var picture: texture_2d<f32>;
@@ -137,10 +137,9 @@ fn agxDefaultContrastApprox(x: vec3f) -> vec3f {
     - 0.00232;
 }
 fn agxLook(val: vec3f) -> vec3f {
-  // AgX Punchy CDL look (power 1.34, saturation 1.23): crisp sunlit contrast, airy sky hue, and deep night shadows without highlight hue skew.
-  let v = pow(max(val, vec3f(0.0)), vec3f(1.34));
-  let l = luma(v);
-  return vec3f(l) + 1.23 * (v - vec3f(l));
+  // Neutral-saturation AgX CDL look (slope 1.015, power 1.56, sat 1.00): deepens the dark shadow toe and asphalt
+  // while leaving hour-dependent grade as the single saturation control (no double-saturation).
+  return pow(max(val * 1.015, vec3f(0.0)), vec3f(1.56));
 }
 fn tonemapAgX(color: vec3f) -> vec3f {
   let minEv = -12.47393;

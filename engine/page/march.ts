@@ -2297,6 +2297,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     ).finally(() => { if (making.get(k) === p) making.delete(k) })
     making.set(k, p)
   }
+  // Background-warm the daytime blast / local-light mirrors variant so a sudden daytime explosion never snaps windows opaque while Metal compiles.
+  if (initMirrors && !behind) warm(true, false, true, false, false, true, undefined, format)
   const requirePipeline = (mirrors: boolean, foggy: boolean, night: boolean, far: boolean, isUnder: boolean, occ = false, targetFormat: GPUTextureFormat = format) => {
     const k = keyOf(mirrors, foggy, night, far, isUnder, occ, targetFormat)
     let p = pipelines.get(k)
@@ -2626,8 +2628,9 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       const wantUnder = !isReadback && (under || (flags & UNDER) !== 0)
       const wantFog = !isReadback && fog > 0
       // Never block the main thread compiling a MIRRORS variant synchronously: warm in the background while keeping
-      // the frame running on the non-mirrors (or non-occluded mirrors) pipeline until Metal finishes compiling.
+      // the frame running on the non-mirrors (or already-compiled daytime/non-occluded mirrors) pipeline until Metal finishes compiling.
       let mirrors = false
+      let useNight = wantNight
       let useOcc = wantOcc
       if (wantsMirrors) {
         const wantMirrorFog = wantFog && pipelines.has(keyOf(true, true, wantNight, wantFar, wantUnder, wantOcc, targetFormat))
@@ -2638,6 +2641,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
           mirrors = true
           useOcc = false
           warm(true, false, wantNight, wantFar, wantUnder, true, undefined, targetFormat)
+        } else if (wantNight && lightsNow() === 0 && screen.up === 0 && pipelines.has(keyOf(true, false, false, wantFar, wantUnder, false, targetFormat))) {
+          // Transient daytime local light (e.g. a blast): keep transparent glass alive while the night+mirrors variant warms in the background.
+          mirrors = true
+          useNight = false
+          useOcc = false
+          warm(true, false, true, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat)
         } else {
           mirrorsStarted = true
           warm(true, false, wantNight, wantFar, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat)
@@ -2646,10 +2655,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       }
       let useFog = false
       if (wantFog) {
-        if (pipelines.has(keyOf(mirrors, true, wantNight, wantFar, wantUnder, useOcc, targetFormat))) useFog = true
-        else warm(mirrors, true, wantNight, wantFar, wantUnder, useOcc, undefined, targetFormat)
+        if (pipelines.has(keyOf(mirrors, true, useNight, wantFar, wantUnder, useOcc, targetFormat))) useFog = true
+        else warm(mirrors, true, useNight, wantFar, wantUnder, useOcc, undefined, targetFormat)
       }
-      const active = requirePipeline(mirrors, useFog, wantNight, wantFar, wantUnder, useOcc, targetFormat)
+      const active = requirePipeline(mirrors, useFog, useNight, wantFar, wantUnder, useOcc, targetFormat)
       const allocSize = to.allocSize ?? to.size
       const panes = panesFor(allocSize)
       glassReady = !wantsMirrors || mirrors

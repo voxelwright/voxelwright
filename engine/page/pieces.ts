@@ -181,8 +181,9 @@ fn carPaint(col: vec3f, n: vec3f, rd: vec3f, direct: f32) -> vec3f {
   let back = reflect(rd, n);
   let sky = mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(clamp(back.y, 0.0, 1.0), g.skyZenith.a));
   let seen = select(sky, sky * 0.2, back.y < 0.0);
-  let sheen = pow(max(dot(back, u.sun), 0.0), 60.0) * direct * 1.2;
-  return col * (1.0 - f) + seen * f + vec3f(sheen);
+  let sunScale = g.lightSun.rgb * mix(0.25, 1.25, g.day);
+  let sheen = sunScale * (pow(max(dot(back, u.sun), 0.0), 60.0) * direct * 1.2);
+  return col * (1.0 - f) + seen * f + sheen;
 }
 // What a smooth panel of glass or clear coat mirrors (#38): the sky as the hour colours it, a bright band along the
 // horizon (the line down a car's flank), and below it the street: warm with light thrown up from the road near the
@@ -205,9 +206,10 @@ fn clearCoat(col: vec3f, albedo: vec3f, n: vec3f, rd: vec3f, direct: f32, open: 
   let f = 0.04 + 0.92 * pow(1.0 - clamp(dot(-rd, n), 0.0, 1.0), 5.0);
   let back = reflect(rd, n);
   let toSun = max(dot(back, u.sun), 0.0);
-  let sheen = pow(toSun, 22.0) * direct * 0.35 * mix(vec3f(1.0), albedo, 0.55);
-  let coat = pow(toSun, 150.0) * direct * 1.8;
-  return col * (1.0 - f) + street(back, open) * f * mix(0.7, 1.0, open) + sheen + vec3f(coat);
+  let sunScale = g.lightSun.rgb * mix(0.25, 1.25, g.day);
+  let sheen = sunScale * (pow(toSun, 22.0) * direct * 0.35 * mix(vec3f(1.0), albedo, 0.55));
+  let coat = sunScale * (pow(toSun, 150.0) * direct * 1.8);
+  return col * (1.0 - f) + street(back, open) * f * mix(0.7, 1.0, open) + sheen + coat;
 }
 // The colour of a smooth car's paint: as made, with a flake in it a fine cell across, not the town's blotches of wear.
 fn factoryPaint(kind: u32, fine: vec3f) -> vec3f {
