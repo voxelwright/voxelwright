@@ -35,7 +35,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | `scratch.rs` | Building a sector's cells, edits, blasts, finer cells (including per-sector fine blocks at coarse LODs via `sector_fine_runs`). |
 | `tree.rs` | Encoding a sector as a 64-tree with intra-sector SVDAG deduplication (sharing identical non-uniform leaf payloads, mono-kind runs, and mid leaf-node arrays via generation-stamped thread-local scratch tables, keeping the GPU binary format unchanged and `FINE` leaves dedicated). |
 | `kinds.rs` | Materials, flags, palette, what a material weighs and how it breaks. |
-| `support.rs` | What stands and what falls after an edit (reusing thread-local solver scratch and sparse resets). |
+| `support.rs` | What stands and what falls after an edit: bit-packed `u64` connectivity acceleration (`BitGrid`, `bit_reach_pass`), sparse-reset support solver (`loose`, `topple`, `adrift`, `release`), and incremental time-sliced `SupportJob` state machine (`step`, `progress`, `finish`). |
 | `fine.rs` | Fine-voxel meshing (`faces`, `facesWithSmooth` with octahedral smooth normals and AO via `wasm32` SIMD 3D prefix sums), RLE/base64 codec, shell-preserving `coarser` + leak sealing, and procedural vehicle sculptors (`sculptCoupe`, `sculptKart`, `sculptOjai`). |
 | `bodies.rs`, `bodies/living.rs` | Loose bodies, living things, people's bodies, island-wide sleeping and hybrid persistent sleeping debris. |
 | `broadphase.rs` | Spatial broadphase (`SpatialHash` 3.2 m grid + overflow for giant bodies, flat pre-order `DynamicBvh` for AABB/ray queries) and Union-Find `IslandSolver` for connected sleep/wake islands. |
