@@ -171,7 +171,7 @@ export function materials(): Float32Array<ArrayBuffer> {
     ['#cfc6b4', 0.3, 0.9, 0, 0, 0], // plaster
     ['#b98a5a', 0.7, 0.75, 0, 0, 0], // wood
     ['#9fc3d6', 0.1, 0.05, 0.75, 0, 0], // glass
-    ['#8f959c', 0.25, 0.38, 0, 0, 0.82], // steel: metallic GGX specular & Fresnel without per-car reflection rays
+    ['#8f959c', 0.25, 0.38, 0, 0, 0.24], // steel: painted/structural steel keeps diffuse fill; bare/polished chrome boosts in march-shade.ts
     ['#4f8a3a', 1.2, 0.95, 0, 0, 0], // leaves
     ['#4a4744', 0.6, 0.95, 0, 0, 0], // roofing
     ['#ffe2a8', 0.05, 0.45, 0, 1, 0.15], // lamp
@@ -432,7 +432,7 @@ fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f
   let above = 0.5 + 0.5 * n.y;
   let refl = reflect(rd, n);
   let envSky = mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(max(refl.y, 0.0), max(g.skyZenith.a, 0.25)));
-  let envUp = smoothstep(-0.15, 0.35, refl.y);
+  let envUp = smoothstep(-0.65, 0.65, refl.y);
   let roomMask = 1.0 - smoothstep(0.0, 0.15, direct);
   let bounceW = (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
   // Rough dielectrics (earth, sand, grass, brick) scatter ambient via skylight/bounce rather than mirror IBL;
@@ -453,7 +453,7 @@ fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f
   let room = sunCol * f16(g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * roomMask);
   let fEnv = f0 + (max(vec3<f16>(f16(1.0 - r)), f0) - f0) * f16(omNdv5);
   let kDEnv = (vec3<f16>(1.0h) - fEnv * f16(mix(1.0 - r, 1.0, metallic))) * (1.0h - met);
-  let envGround = vec3<f16>(0.14h, 0.13h, 0.12h) * f16(g.lightFill.a) + vec3<f16>(0.18h, 0.15h, 0.12h) * f16(g.lightSun.a);
+  let envGround = fillCol * 0.55h + vec3<f16>(0.14h, 0.145h, 0.155h) * f16(g.lightFill.a * 0.35 + g.lightSun.a * 0.95);
   let envSkyH = vec3<f16>(min(max(envSky, vec3f(0.0)), vec3f(60000.0)));
   let envSpec = mix(envGround, mix(fillCol, envSkyH, f16(1.0 - r * 0.75)), f16(envUp)) * fEnv * f16(envWeight);
   let ambientLit = (alb * kDEnv * ((skylight + bounce) * f16(skyLit) + room) + envSpec) * openH;
@@ -467,7 +467,7 @@ fn shadePbr(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f
   let room = SUN_LIGHT * g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * roomMask;
   let fEnv = f0 + (max(vec3f(1.0 - r), f0) - f0) * omNdv5;
   let kDEnv = (vec3f(1.0) - fEnv * mix(1.0 - r, 1.0, metallic)) * (1.0 - metallic);
-  let envGround = vec3f(0.14, 0.13, 0.12) * g.lightFill.a + vec3f(0.18, 0.15, 0.12) * g.lightSun.a;
+  let envGround = g.lightFill.rgb * 0.55 + vec3f(0.14, 0.145, 0.155) * (g.lightFill.a * 0.35 + g.lightSun.a * 0.95);
   let envSpec = mix(envGround, mix(g.lightFill.rgb, envSky, 1.0 - r * 0.75), envUp) * fEnv * envWeight;
   let ambientLit = (albedo * kDEnv * ((skylight + bounce) * skyLit + room) + envSpec) * open;
   return directLit + ambientLit + albedo * glow * 3.2;`}

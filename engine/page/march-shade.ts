@@ -605,7 +605,8 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
   let ci = (hit.kind >> 8u) & 255u;
   let sign = stuff == 15u && ci != 46u;
   let surfRough = select(m.rough, min(m.rough, 0.22), (hit.kind & 128u) != 0u);
-  ${useF16 ? 'var col = vec3<f16>(min(max(shadePbr(albedo, n, rd, g.sun, direct, open, surfRough, select(m.glow, 0.0, sign), m.metallic), vec3f(0.0)), vec3f(60000.0)));' : 'var col = shadePbr(albedo, n, rd, g.sun, direct, open, surfRough, select(m.glow, 0.0, sign), m.metallic);'}
+  let surfMet = select(m.metallic, max(m.metallic, 0.65), stuff == 12u && (((hit.kind & 128u) != 0u) || ci == 0u));
+  ${useF16 ? 'var col = vec3<f16>(min(max(shadePbr(albedo, n, rd, g.sun, direct, open, surfRough, select(m.glow, 0.0, sign), surfMet), vec3f(0.0)), vec3f(60000.0)));' : 'var col = shadePbr(albedo, n, rd, g.sun, direct, open, surfRough, select(m.glow, 0.0, sign), surfMet);'}
   if (NIGHT && g.weather.z > 0.0) {
     let dark = g.weather.z;
     let letters = lettered(p, n, stuff == 15u && ci == 6u);
@@ -694,8 +695,9 @@ fn litPrimary(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> PrimaryLit {
 fn litPane(rd: vec3f, p: vec3f, n: vec3f, kind: u32, level: u32, cell: vec3i, t: f32, shadows: u32) -> vec3f {
   let m = looks.material[11u];
   let ci = (kind >> 8u) & 255u;
-  var albedo = m.colour;
-  if (ci != 0u) { albedo = looks.palette[ci].rgb; }
+  let lvh = g.level[level];
+  let qc = clamp((p - lvh.boxMin) * lvh.scale - vec3f(cell - lvh.cells), vec3f(0.0), vec3f(0.999));
+  let albedo = paint(kind, cell * i32(1u << level), n, select(0.0, 1.0, level == 0u), qc, select(0.0, 1.0 / (max(t, 1.0) * g.pixel), level == 0u));
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0 && g.sunMaps != 0u) {
     let sunny = sunlit(p, n, level);
@@ -715,6 +717,9 @@ fn litPane(rd: vec3f, p: vec3f, n: vec3f, kind: u32, level: u32, cell: vec3i, t:
       let pic = screenOf(p);
       col += warm * w * dark * mix(1.5, PANE_LIGHT, smoothstep(1.5, 5.0, wide)) * (1.0 - 0.33 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
     }
+  }
+  if (NIGHT && localLights.info.x > 0u && t < 1600.0) {
+    col += evalLocalLights(p, n, rd, albedo, m.rough, 0.0, 0.0, shadows == 1u, t);
   }
   return col;
 }
@@ -736,7 +741,9 @@ fn litReflect(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     if (sunny >= 0.0) { direct *= sunny; }
   }
   let sign = stuff == 15u && ci != 46u;
-  var col = shadePbr(albedo, n, rd, g.sun, direct, 1.0, m.rough, select(m.glow, 0.0, sign), m.metallic);
+  let surfRough = select(m.rough, min(m.rough, 0.22), (hit.kind & 128u) != 0u);
+  let surfMet = select(m.metallic, max(m.metallic, 0.65), stuff == 12u && (((hit.kind & 128u) != 0u) || ci == 0u));
+  var col = shadePbr(albedo, n, rd, g.sun, direct, 1.0, surfRough, select(m.glow, 0.0, sign), surfMet);
   if (NIGHT && g.weather.z > 0.0) {
     let dark = g.weather.z;
     if (sign) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
