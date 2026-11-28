@@ -3,9 +3,13 @@
 // march.ts, pieces.ts, people.ts, and wheels.ts.
 //
 // Performance design:
-// - One compact uniform buffer (4,640 bytes, fits in L1 constant cache) shared across every render pass.
-// - An 8x8 horizontal XZ spatial tile bitmask (64 bits per cell) centered ahead of the camera so each pixel
-//   iterates only overlapping lights via `countTrailingZeros`, exiting distant/unlit pixels in one check.
+// - Dual-backend zero-GC architecture:
+//   1. Compact 4,640-byte uniform buffer (fits in L1 constant cache) with an 8x8 horizontal XZ spatial tile
+//      bitmask (64 bits per cell) holding the top 12 / 28 / 48 priority lights for pieces.ts, people.ts,
+//      wheels.ts, puffs.ts, water.ts, and Low preset / fallback shading.
+//   2. Optional 512-light GPU Compute 3D Frustum-Clustered backend (`lights-cluster.ts`, 16 x 9 x 24 = 3,456
+//      clusters with logarithmic Z-slices) initialized via `initClustered()` and dispatched via `dispatchCluster()`,
+//      separating skyscraper floors vertically and near/far streets in depth without CPU binning.
 // - Zero-GC CPU frame packing using pre-allocated flat typed-array pools (zero per-frame JS object allocations).
 // - Zero daytime GPU cost via WGSL `override NIGHT` + `override LOCAL_OCCLUDE` pipeline specialization in march.ts.
 // - Scales across graphics presets:
@@ -15,6 +19,39 @@
 //                 diffuse + clearcoat specular + wet asphalt streaks + 2-tap level-1 world occlusion in march.ts
 //                 (compiled only on High via LOCAL_OCCLUDE, skipped on mirror/through-pane rays and past 60 m).
 import type { View } from './march.ts'
+import {
+  CLUSTER_COUNT,
+  CLUSTER_LIGHTS_WGSL,
+  CLUSTER_X,
+  CLUSTER_Y,
+  CLUSTER_Z,
+  DEFAULT_CLUSTER_Z_FAR,
+  DEFAULT_CLUSTER_Z_NEAR,
+  MAX_CLUSTER_LIGHTS,
+  clusterLightsBindings,
+  clusterZToDepth,
+  createClusteredLights,
+  depthToClusterZ,
+  type ClusterCameraParams,
+  type ClusterTimingWrites,
+  type ClusteredLights,
+  type ClusteredLightsStats,
+} from './lights-cluster.ts'
+
+export {
+  CLUSTER_COUNT,
+  CLUSTER_LIGHTS_WGSL,
+  CLUSTER_X,
+  CLUSTER_Y,
+  CLUSTER_Z,
+  DEFAULT_CLUSTER_Z_FAR,
+  DEFAULT_CLUSTER_Z_NEAR,
+  MAX_CLUSTER_LIGHTS,
+  clusterLightsBindings,
+  clusterZToDepth,
+  depthToClusterZ,
+}
+export type { ClusterCameraParams, ClusterTimingWrites, ClusteredLights, ClusteredLightsStats }
 
 export type LightQuality = 'low' | 'medium' | 'high'
 
@@ -38,6 +75,8 @@ export interface LocalLightsStats {
   extra: number
   quality: LightQuality
   budget: number
+  /** Total lights staged into the 512-light GPU 3D frustum-clustered backend (0 when uninitialized). */
+  clustered: number
 }
 
 /** Zero-GC per-frame sink passed to vehicles, pieces, puffs, portals, world edits, and SF street lamps. */
@@ -84,6 +123,27 @@ export interface LocalLights extends LocalLightSink {
   readonly buffer: GPUBuffer
   readonly count: number
   readonly stats: LocalLightsStats
+  /** Active 512-light GPU compute 3D frustum clustering backend, or `null` until `initClustered()` completes. */
+  readonly clustered: ClusteredLights | null
+  /** Total lights staged into the 3D clustered backend this frame (up to 512). */
+  readonly clusterCount: number
+  /** Fragment/compute bind group layout matching `clusterLightsBindings()` (0=params, 1=lights, 2=grid, 3=indices). */
+  readonly clusterBindGroupLayout: GPUBindGroupLayout | null
+  /** Bind group for `CLUSTER_LIGHTS_WGSL` evaluation in render or compute passes, or `null` until initialized. */
+  readonly clusterBindGroup: GPUBindGroup | null
+  /** Lazily creates (or returns the existing) 512-light GPU compute 3D frustum-clustered backend. */
+  initClustered(maxLights?: number): Promise<ClusteredLights>
+  /** Uploads staged lights (<= 512) and dispatches `cs_cluster_bounds` (dirty-cached) + `cs_cluster_cull`. */
+  dispatchCluster(
+    encoder: GPUCommandEncoder,
+    view: View,
+    aspect: number,
+    zNear?: number,
+    zFar?: number,
+    timing?: ClusterTimingWrites,
+  ): void
+  /** Releases GPU buffers owned by the 3D clustered backend (no-op if uninitialized). */
+  destroyClustered(): void
   /** Begins a frame of light collection. `anchor` must match march.ts (`Math.floor(eye / 64) * 64`). */
   beginFrame(
     view: View,
@@ -244,6 +304,8 @@ const TIER: Record<LightQuality, {
 // Pre-allocated flat candidate pool (zero per-frame JS heap allocations).
 const MAX_CANDIDATES = 512
 const CAND_STRIDE = 16 // px,py,pz, dx,dy,dz, cr,cg,cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec
+/** World-space reach (cells) for the 512-light 3D frustum-clustered backend (400 m = DEFAULT_CLUSTER_Z_FAR). */
+const CLUSTER_REACH = DEFAULT_CLUSTER_Z_FAR
 
 /** Partial insertion/selection of top-K candidate indices by descending score (zero allocations). */
 function selectTop(indices: Int32Array, count: number, scores: Float32Array, k: number): number {
@@ -298,9 +360,40 @@ export function createLocalLights(device: GPUDevice): LocalLights {
   let frameWet = 0
   let frameDayScale = 0.48
 
-  const stats: LocalLightsStats = { total: 0, car: 0, street: 0, extra: 0, quality: 'high', budget: TIER.high.maxLights }
+  // Optional 512-light GPU compute 3D frustum-clustered backend (lazily initialized via initClustered()).
+  let clustered: ClusteredLights | null = null
+  let clusterInitPromise: Promise<ClusteredLights> | null = null
+  let clusterBindGroupLayout: GPUBindGroupLayout | null = null
+  let clusterBindGroup: GPUBindGroup | null = null
+  let clusterStagedCount = 0
 
-  const pushRaw = (
+  // Pre-allocated mutable camera parameter struct reused every frame in dispatchCluster() (zero GC).
+  const camEye: [number, number, number] = [0, 0, 0]
+  const camFwd: [number, number, number] = [0, 0, -1]
+  const camRight: [number, number, number] = [1, 0, 0]
+  const camUp: [number, number, number] = [0, 1, 0]
+  const clusterCam = {
+    eye: camEye,
+    forward: camFwd,
+    right: camRight,
+    up: camUp,
+    tanHalf: 0.577350269,
+    aspect: 16 / 9,
+    zNear: DEFAULT_CLUSTER_Z_NEAR,
+    zFar: DEFAULT_CLUSTER_Z_FAR,
+  }
+
+  const stats: LocalLightsStats = {
+    total: 0,
+    car: 0,
+    street: 0,
+    extra: 0,
+    quality: 'high',
+    budget: TIER.high.maxLights,
+    clustered: 0,
+  }
+
+  const pushUniform = (
     px: number, py: number, pz: number,
     dx: number, dy: number, dz: number,
     cr: number, cg: number, cb: number,
@@ -324,7 +417,45 @@ export function createLocalLights(device: GPUDevice): LocalLights {
     else extraIdx[extraCandCount++] = i
   }
 
-  const clear = () => {
+  // Converts LocalLightSink peak irradiance + half-falloff radius (dHalf) to physical luminous intensity
+  // (cd in cell^2 units) so evalClusterLightGGX's `win^2 / (d^2 + 1)` matches real SF night exposure.
+  const pushCluster = (
+    px: number, py: number, pz: number,
+    dx: number, dy: number, dz: number,
+    cr: number, cg: number, cb: number,
+    range: number, dHalf: number, cosOuter: number, cosInner: number,
+    focus: number, shadow: number,
+    kind: LightKind,
+  ) => {
+    if (clustered === null || clusterStagedCount >= clustered.maxLights) return
+    const scale = dHalf > 1 ? dHalf * dHalf : 1
+    const r = cr * scale
+    const g = cg * scale
+    const b = cb * scale
+    const idx = cosOuter < -1.5
+      ? clustered.addPoint(px, py, pz, r, g, b, range, dHalf, shadow, kind, focus)
+      : clustered.addSpot(px, py, pz, dx, dy, dz, r, g, b, range, cosOuter, cosInner, dHalf, shadow, kind, focus)
+    if (idx >= 0) clusterStagedCount++
+  }
+
+  const pushEmit = (
+    inUniform: boolean, inCluster: boolean,
+    px: number, py: number, pz: number,
+    dx: number, dy: number, dz: number,
+    cr: number, cg: number, cb: number,
+    range: number, dHalf: number, cosOuter: number, cosInner: number,
+    focus: number, shadow: number, spec: number,
+    score: number, kind: LightKind,
+  ) => {
+    if (inUniform) {
+      pushUniform(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, score, kind)
+    }
+    if (inCluster) {
+      pushCluster(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, kind)
+    }
+  }
+
+  const clearUniform = () => {
     if (activeCount === 0 && stats.total === 0) return
     activeCount = 0
     stats.total = 0; stats.car = 0; stats.street = 0; stats.extra = 0
@@ -332,10 +463,23 @@ export function createLocalLights(device: GPUDevice): LocalLights {
     device.queue.writeBuffer(buffer, 0, raw, 0, 32)
   }
 
+  const clear = () => {
+    clearUniform()
+    if (clustered !== null) {
+      clustered.beginFrame(frameAncX, frameAncY, frameAncZ)
+      clusterStagedCount = 0
+      stats.clustered = 0
+    }
+  }
+
   const self: LocalLights = {
     buffer,
     get count() { return activeCount },
     stats,
+    get clustered() { return clustered },
+    get clusterCount() { return clusterStagedCount },
+    get clusterBindGroupLayout() { return clusterBindGroupLayout },
+    get clusterBindGroup() { return clusterBindGroup },
     get quality() { return frameQuality },
     get dark() { return frameDark },
     get eyeX() { return frameEyeX },
@@ -344,12 +488,72 @@ export function createLocalLights(device: GPUDevice): LocalLights {
     get fwdX() { return frameFwdX },
     get fwdY() { return frameFwdY },
     get fwdZ() { return frameFwdZ },
+    initClustered(maxLights = MAX_CLUSTER_LIGHTS) {
+      if (clustered !== null) return Promise.resolve(clustered)
+      if (clusterInitPromise !== null) return clusterInitPromise
+      clusterInitPromise = createClusteredLights(device, maxLights).then((c) => {
+        const bgl = device.createBindGroupLayout({
+          label: 'local-lights-cluster-bgl',
+          entries: [
+            { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+            { binding: 1, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+            { binding: 2, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+            { binding: 3, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+          ],
+        })
+        const bg = device.createBindGroup({
+          label: 'local-lights-cluster-bg',
+          layout: bgl,
+          entries: [
+            { binding: 0, resource: { buffer: c.paramsBuffer } },
+            { binding: 1, resource: { buffer: c.lightsBuffer } },
+            { binding: 2, resource: { buffer: c.clusterGridBuffer } },
+            { binding: 3, resource: { buffer: c.lightIndexBuffer } },
+          ],
+        })
+        c.beginFrame(frameAncX, frameAncY, frameAncZ)
+        clustered = c
+        clusterBindGroupLayout = bgl
+        clusterBindGroup = bg
+        clusterStagedCount = 0
+        stats.clustered = 0
+        return c
+      }, (err) => {
+        clusterInitPromise = null
+        throw err
+      })
+      return clusterInitPromise
+    },
+    dispatchCluster(encoder, view, aspect, zNear = DEFAULT_CLUSTER_Z_NEAR, zFar = DEFAULT_CLUSTER_Z_FAR, timing) {
+      if (clustered === null) return
+      camEye[0] = view.eye[0]; camEye[1] = view.eye[1]; camEye[2] = view.eye[2]
+      camFwd[0] = view.forward[0]; camFwd[1] = view.forward[1]; camFwd[2] = view.forward[2]
+      camRight[0] = view.right[0]; camRight[1] = view.right[1]; camRight[2] = view.right[2]
+      camUp[0] = view.up[0]; camUp[1] = view.up[1]; camUp[2] = view.up[2]
+      clusterCam.tanHalf = view.tanHalf
+      clusterCam.aspect = aspect
+      clusterCam.zNear = zNear
+      clusterCam.zFar = zFar
+      clustered.dispatch(encoder, clusterCam, timing)
+    },
+    destroyClustered() {
+      if (clustered !== null) {
+        clustered.destroy()
+        clustered = null
+      }
+      clusterInitPromise = null
+      clusterBindGroupLayout = null
+      clusterBindGroup = null
+      clusterStagedCount = 0
+      stats.clustered = 0
+    },
     clear,
     beginFrame(view, anchorX, anchorY, anchorZ, quality, dark, wet) {
       candCount = 0
       carCandCount = 0
       streetCandCount = 0
       extraCandCount = 0
+      clusterStagedCount = 0
       frameEyeX = view.eye[0]; frameEyeY = view.eye[1]; frameEyeZ = view.eye[2]
       frameFwdX = view.forward[0]; frameFwdY = view.forward[1]; frameFwdZ = view.forward[2]
       frameAncX = anchorX; frameAncY = anchorY; frameAncZ = anchorZ
@@ -361,31 +565,50 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       frameDayScale = 0.48 + 0.52 * Math.min(1, dark * 1.4)
       stats.quality = quality
       stats.budget = frameTier.maxLights
+      stats.clustered = 0
+      if (clustered !== null) {
+        clustered.beginFrame(anchorX, anchorY, anchorZ)
+      }
     },
     addPoint(px, py, pz, cr, cg, cb, range, dHalf, spec, priority, kind = LIGHT_EXTRA) {
       const vx = px - frameEyeX, vy = py - frameEyeY, vz = pz - frameEyeZ
       const dist = Math.hypot(vx, vy, vz)
       const reach = kind === LIGHT_CAR ? frameTier.carReach : kind === LIGHT_STREET ? frameTier.streetReach : frameTier.extraReach
-      if (!(dist <= reach + range)) return
+      const inUniform = dist <= reach + range
+      const inCluster = clustered !== null && dist <= CLUSTER_REACH + range
+      if (!inUniform && !inCluster) return
       const ahead = vx * frameFwdX + vy * frameFwdY + vz * frameFwdZ
       if (ahead < -(range + 40)) return
-      const inView = ahead > -30 ? 1.0 : 0.45
-      const score = (priority / (1 + dist * 0.008)) * inView
-      pushRaw(px, py, pz, 0, -1, 0, cr, cg, cb, range, dHalf, -2.0, -1.0, 0.0, 0.0, spec, score, kind)
+      if (inUniform) {
+        const inView = ahead > -30 ? 1.0 : 0.45
+        const score = (priority / (1 + dist * 0.008)) * inView
+        pushUniform(px, py, pz, 0, -1, 0, cr, cg, cb, range, dHalf, -2.0, -1.0, 0.0, 0.0, spec, score, kind)
+      }
+      if (inCluster) {
+        pushCluster(px, py, pz, 0, -1, 0, cr, cg, cb, range, dHalf, -2.0, -1.0, 0.0, 0.0, kind)
+      }
     },
     addSpot(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, priority, kind = LIGHT_EXTRA) {
       const vx = px - frameEyeX, vy = py - frameEyeY, vz = pz - frameEyeZ
       const dist = Math.hypot(vx, vy, vz)
       const reach = kind === LIGHT_CAR ? frameTier.carReach : kind === LIGHT_STREET ? frameTier.streetReach : frameTier.extraReach
-      if (!(dist <= reach + range)) return
+      const inUniform = dist <= reach + range
+      const inCluster = clustered !== null && dist <= CLUSTER_REACH + range
+      if (!inUniform && !inCluster) return
       const ahead = vx * frameFwdX + vy * frameFwdY + vz * frameFwdZ
       const facing = dx * frameFwdX + dy * frameFwdY + dz * frameFwdZ
       // Allow lights behind the camera if their cone points forward into the view.
       if (ahead < -50 && (dist > range + 60 || facing < 0.2)) return
       const inv = 1 / (Math.hypot(dx, dy, dz) || 1)
-      const inView = ahead > -40 ? 1.0 : 0.45
-      const score = (priority / (1 + dist * 0.008)) * inView
-      pushRaw(px, py, pz, dx * inv, dy * inv, dz * inv, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, score, kind)
+      const ndx = dx * inv, ndy = dy * inv, ndz = dz * inv
+      if (inUniform) {
+        const inView = ahead > -40 ? 1.0 : 0.45
+        const score = (priority / (1 + dist * 0.008)) * inView
+        pushUniform(px, py, pz, ndx, ndy, ndz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, score, kind)
+      }
+      if (inCluster) {
+        pushCluster(px, py, pz, ndx, ndy, ndz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, kind)
+      }
     },
     addVehicle(
       bx, by, bz,
@@ -398,7 +621,9 @@ export function createLocalLights(device: GPUDevice): LocalLights {
     ) {
       const vx = bx - frameEyeX, vy = by - frameEyeY, vz = bz - frameEyeZ
       const dist = Math.hypot(vx, vy, vz)
-      if (!Number.isFinite(dist) || (!player && dist > frameTier.carReach)) return
+      const inUniform = player || dist <= frameTier.carReach
+      const inCluster = clustered !== null && (player || dist <= CLUSTER_REACH)
+      if (!Number.isFinite(dist) || (!inUniform && !inCluster)) return
       const ahead = vx * frameFwdX + vy * frameFwdY + vz * frameFwdZ
       const behind = ahead < -60
       const facingView = fx * frameFwdX + fz * frameFwdZ
@@ -439,7 +664,8 @@ export function createLocalLights(device: GPUDevice): LocalLights {
             const toe = side * 0.04
             const sx = dx + rx * toe, sy = dy + ry * toe, sz = dz + rz * toe
             const invS = 1 / (Math.hypot(sx, sy, sz) || 1)
-            pushRaw(
+            pushEmit(
+              inUniform, inCluster,
               basePx + rx * (latOff * side), basePy + ry * (latOff * side), basePz + rz * (latOff * side),
               sx * invS, sy * invS, sz * invS,
               cr, cg, cb, range, dHalf, cosOuter, cosInner,
@@ -447,7 +673,8 @@ export function createLocalLights(device: GPUDevice): LocalLights {
             )
           }
         } else {
-          pushRaw(
+          pushEmit(
+            inUniform, inCluster,
             basePx, basePy, basePz, dx, dy, dz,
             cr, cg, cb, range, dHalf, cosOuter, cosInner,
             1.0, 1.0, spec, baseScore * (1.3 + hi * 0.3), LIGHT_CAR,
@@ -456,7 +683,9 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       }
 
       // 2. Taillights & brake lights (rear crimson glow).
-      if ((head > 0.02 || brake > 0.04) && (player || dist < Math.min(frameTier.carReach, 850))) {
+      const tailUniform = inUniform && (player || dist < Math.min(frameTier.carReach, 850))
+      const tailCluster = inCluster && (player || dist < Math.min(CLUSTER_REACH, 2200))
+      if ((head > 0.02 || brake > 0.04) && (tailUniform || tailCluster)) {
         const stop = Math.min(brake, 1.35)
         const tail = Math.min(head, 1.0)
         const braking = stop > 0.05
@@ -465,7 +694,8 @@ export function createLocalLights(device: GPUDevice): LocalLights {
           const backOff = halfLen + 1.4
           const d0x = -fx - ux * 0.20, d0y = -fy - uy * 0.20, d0z = -fz - uz * 0.20
           const inv0 = 1 / (Math.hypot(d0x, d0y, d0z) || 1)
-          pushRaw(
+          pushEmit(
+            tailUniform, tailCluster,
             bx - fx * backOff + ux * tailY, by - fy * backOff + uy * tailY, bz - fz * backOff + uz * tailY,
             d0x * inv0, d0y * inv0, d0z * inv0,
             1.0 * power, (braking ? 0.045 : 0.035) * power, 0.012 * power,
@@ -476,12 +706,15 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       }
 
       // 3. Reverse lights (crisp cool white behind rear bumper).
-      if (rev > 0.05 && (player || dist < 550)) {
+      const revUniform = inUniform && (player || dist < 550)
+      const revCluster = inCluster && (player || dist < 1200)
+      if (rev > 0.05 && (revUniform || revCluster)) {
         const backOff = halfLen + 1.4
         const d0x = -fx - ux * 0.16, d0y = -fy - uy * 0.16, d0z = -fz - uz * 0.16
         const inv0 = 1 / (Math.hypot(d0x, d0y, d0z) || 1)
         const power = rev * 3.6
-        pushRaw(
+        pushEmit(
+          revUniform, revCluster,
           bx - fx * backOff + ux * (tailY - 0.8), by - fy * backOff + uy * (tailY - 0.8), bz - fz * backOff + uz * (tailY - 0.8),
           d0x * inv0, d0y * inv0, d0z * inv0,
           0.92 * power, 0.96 * power, 1.0 * power,
@@ -490,9 +723,12 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       }
 
       // 4. 4-way amber hazard blinkers (complements stuck robotaxi's amber roof LiDAR dome).
-      if (hazard > 0.05 && (player || dist < 600)) {
+      const hazUniform = inUniform && (player || dist < 600)
+      const hazCluster = inCluster && (player || dist < 1400)
+      if (hazard > 0.05 && (hazUniform || hazCluster)) {
         const power = hazard * 1.25 * frameDayScale
-        pushRaw(
+        pushEmit(
+          hazUniform, hazCluster,
           bx + ux * lampY, by + uy * lampY, bz + uz * lampY,
           0, -1, 0,
           1.0 * power, 0.28 * power, 0.01 * power,
@@ -504,7 +740,8 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       if (boost > 0.05) {
         const backOff = halfLen + 2.5
         const power = boost * 5.0
-        pushRaw(
+        pushEmit(
+          inUniform, inCluster,
           bx - fx * backOff + ux * 4.5, by - fy * backOff + uy * 4.5, bz - fz * backOff + uz * 4.5,
           0, -1, 0,
           0.16 * power, 0.74 * power, 1.0 * power,
@@ -514,29 +751,42 @@ export function createLocalLights(device: GPUDevice): LocalLights {
     },
     addStreetLamps(lamps, count = lamps.length) {
       if (frameDark <= 0.02 || count < 3) return
-      const reach = frameTier.streetReach
-      const reach2 = reach * reach
+      const uniformReach = frameTier.streetReach
+      const uniformReach2 = uniformReach * uniformReach
+      const hasCluster = clustered !== null
+      const maxReach = hasCluster ? Math.max(uniformReach, CLUSTER_REACH) : uniformReach
+      const maxReach2 = maxReach * maxReach
       const power = 2.6 * Math.min(1, frameDark * 1.25)
       const cr = 1.0 * power, cg = 0.78 * power, cb = 0.48 * power
       for (let i = 0; i < count; i += 3) {
         const lx = lamps[i], ly = lamps[i + 1], lz = lamps[i + 2]
         const dx = lx - frameEyeX, dy = ly - frameEyeY, dz = lz - frameEyeZ
         const d2 = dx * dx + dy * dy + dz * dz
-        if (d2 > reach2) continue
+        if (d2 > maxReach2) continue
         const ahead = dx * frameFwdX + dy * frameFwdY + dz * frameFwdZ
         if (ahead < -220) continue
-        const dist = Math.sqrt(d2)
-        const inView = ahead > -40 ? 1.0 : 0.4
-        pushRaw(
-          lx, ly - 1.5, lz, // just beneath the glowing luminaire hood
-          0, -1, 0, cr, cg, cb,
-          215, 82, -0.05, 0.58, 0.0, 0.0, 1.0,
-          (65 / (1 + dist * 0.008)) * inView, LIGHT_STREET,
-        )
+        if (d2 <= uniformReach2) {
+          const dist = Math.sqrt(d2)
+          const inView = ahead > -40 ? 1.0 : 0.4
+          pushUniform(
+            lx, ly - 1.5, lz, // just beneath the glowing luminaire hood
+            0, -1, 0, cr, cg, cb,
+            215, 82, -0.05, 0.58, 0.0, 0.0, 1.0,
+            (65 / (1 + dist * 0.008)) * inView, LIGHT_STREET,
+          )
+        }
+        if (hasCluster) {
+          pushCluster(
+            lx, ly - 1.5, lz,
+            0, -1, 0, cr, cg, cb,
+            215, 82, -0.05, 0.58, 0.0, 0.0, LIGHT_STREET,
+          )
+        }
       }
     },
     finishFrame() {
-      if (candCount === 0) { clear(); return }
+      stats.clustered = clusterStagedCount
+      if (candCount === 0) { clearUniform(); return }
 
       // Fair per-category reservations so dense traffic/depots never starve street lamps, signals, canopies, or LiDAR domes,
       // while redistributing any unused reserve slots to the highest-scoring remaining lights across all categories.
@@ -577,7 +827,7 @@ export function createLocalLights(device: GPUDevice): LocalLights {
         n += extraTake
       }
 
-      if (n === 0) { clear(); return }
+      if (n === 0) { clearUniform(); return }
       activeCount = n
 
       // 8x8 XZ spatial grid centered ahead of the camera so visible street space gets full grid coverage.
