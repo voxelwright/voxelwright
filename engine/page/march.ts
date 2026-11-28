@@ -601,17 +601,20 @@ export const AUTOTILE_ON = new URLSearchParams(globalThis.location?.search ?? ''
 /**
  * Architectural auto-tiling (#226): a face of a fine cell takes trim from the cells round it, as building blocks do,
  * at no geometry cost. Only the march's shading has `kindAt`, so this lives beside PAINT and not in it (pieces.ts
- * shares PAINT). Each pixel asks only of the neighbours whose edges it is nearest: the cell over it or under it, the
- * one beside it on its nearer side, and the one at its foot in front. A wall's face (brick, plaster, concrete, wood):
- *   - coping: open air or glass over it, or another material, gives a lit cap and a hairline shadow under it;
- *   - drip: open air or glass under it (a lintel, a sill's underside) gives a shadow line along its foot;
- *   - plinth: ground in front of its foot gives a darker stone course with a lit chamfer and a joint on top;
+ * shares PAINT). A wall's pixel asks of the cell over it, the one under it (unless it stands on the ground), the one
+ * at its foot in front, and the one beside it on its nearer side (and, where that is open, the one behind that).
+ * On a wall of brick, plaster, concrete or wood:
+ *   - coping or sill: open air, glass or another material over it gives a cap of stone, its top lit, a shadow line
+ *     along its foot;
+ *   - lintel: open air or glass under it gives a course of stone with a drip line along its foot;
+ *   - plinth: ground in front of its foot gives a darker course of stone with a lit chamfer and a joint on top;
  *   - arris: an outside corner (open beside and behind that) or a window's glass beside gives a chamfered edge, so a
- *     post one cell wide is fluted on both sides and a band one cell high is moulded top and bottom;
- *   - seam: earth, grass or sand at its foot or beside it creeps onto it, feathered by noise. A paved top face
- *     (asphalt, concrete, brick, plaster) takes the same seam from terrain beside it.
- * Bands are drawn with a pixel's width of smoothing, hairlines only where a cell is many pixels across, and the whole
- * fades out by two and a half pixels a cell, where no lookup is made at all.
+ *     post one cell wide is fluted on both sides;
+ *   - seam: earth, grass or sand at its foot or beside it stains it with moss or dirt, feathered by noise. A paved
+ *     top face (asphalt, concrete, brick, plaster) takes the same seam from terrain beside it.
+ * Stone replaces a whole cell's pattern (wood keeps its own). Bands inside a cell are smoothed by a pixel's width,
+ * hairlines show only where a cell is six pixels or more, and the whole fades out by two and a half pixels a cell,
+ * past which no lookup is made.
  */
 export const AUTOTILE = /* wgsl */ `
 fn tileOpen(k: u32) -> bool { return k == 0u || (k & 15u) == 11u; }
@@ -645,6 +648,8 @@ fn autotile(albedo: vec3f, kind: u32, cell: vec3i, level: u32, n: vec3f, q: vec3
   let paved = stuff == 6u || stuff == 7u || stuff == 8u || stuff == 9u;
   if (!structural && !paved) { return albedo; }
   let c = cell - g.level[level].cells;
+  // Past the edge of the level's box every cell reads as air: a cell next to it would take false trim, so it takes none.
+  if (any(c < vec3i(1)) || any(c >= vec3i(g.level[level].boxSize) - vec3i(1))) { return albedo; }
   let px = 1.0 / max(sharp, 1.0);
   let w = max(px * 0.7, 0.015);
   let crisp = clamp((sharp - 6.0) / 6.0, 0.0, 1.0) * fade;
@@ -666,14 +671,12 @@ fn autotile(albedo: vec3f, kind: u32, cell: vec3i, level: u32, n: vec3f, q: vec3
     let low = kindAt(c - up + out, level);
     let grounded = tileSolid(low);
     if (structural) {
-      if (fu >= 0.5) {
-        let above = kindAt(c + up, level);
-        if (tileOpen(above) || ((above & 15u) != stuff && !tileTerrain(above))) {
-          // Coping or sill: a stone cap, its top arris lit, a shadow line under its lip.
-          stone = select(0.0, 0.8, masonry);
-          v *= 1.06 + 0.07 * smoothstep(0.8 - w, 0.8 + w, fu);
-          v *= 1.0 - 0.28 * crisp * (1.0 - smoothstep(0.08 - w, 0.08 + w, fu));
-        }
+      let above = kindAt(c + up, level);
+      if (tileOpen(above) || ((above & 15u) != stuff && !tileTerrain(above))) {
+        // Coping or sill: a stone cap, its top arris lit, a shadow line under its lip.
+        stone = select(0.0, 0.8, masonry);
+        v *= 1.06 + 0.07 * smoothstep(0.8 - w, 0.8 + w, fu);
+        v *= 1.0 - 0.28 * crisp * (1.0 - smoothstep(0.08 - w, 0.08 + w, fu));
       } else if (!grounded && tileOpen(kindAt(c - up, level))) {
         // Lintel or soffit edge: a stone course with a drip line along its foot.
         stone = select(0.0, 0.7, masonry);

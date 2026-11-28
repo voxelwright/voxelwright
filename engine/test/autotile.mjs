@@ -73,11 +73,11 @@ async function build(page, at) {
   return spot
 }
 
-/** Stands the eye `back` cells in front of the scene's middle, a little over it, looking at it. */
-const look = (page, [X, G, Z], back) => page.evaluate(([X, G, Z, back]) => {
-  const e = globalThis.engine, f = [X + 26, G + 7 + back * 0.08, Z - back], t = [X + 26, G + 7, Z]
+/** Stands the eye `back` cells in front of the scene's middle, a little over it, looking at it (moved `aside` cells along the wall). */
+const look = (page, [X, G, Z], back, aside = 0) => page.evaluate(([X, G, Z, back, aside]) => {
+  const e = globalThis.engine, f = [X + 26 + aside, G + 7 + back * 0.08, Z - back], t = [X + 26 + aside, G + 7, Z]
   Object.assign(e.pose, { x: f[0] / 10, y: f[1] / 10, z: f[2] / 10, yaw: Math.atan2(t[0] - f[0], -(t[2] - f[2])), pitch: Math.atan2(t[1] - f[1], Math.hypot(t[0] - f[0], t[2] - f[2])) })
-}, [X, G, Z, back])
+}, [X, G, Z, back, aside])
 
 /** The picture as shown, once the town and the sun's maps are made, saved as `name`. */
 async function shot(page, name) {
@@ -141,6 +141,10 @@ try {
   await look(page, spot, 34)
   const nearOn = await shot(page, 'near-autotile-1')
   const msOn = await gpuTime(page)
+  await look(page, spot, 100)
+  const midOn = await shot(page, 'mid-autotile-1')
+  await look(page, spot, 100, 0.3)
+  const midOnAside = await shot(page, 'mid-autotile-1-aside')
   await look(page, spot, 170)
   const farOn = await shot(page, 'far-autotile-1')
   const faultsOn = await page.evaluate(() => [...globalThis.engine.gpu.faults])
@@ -157,6 +161,10 @@ try {
   const nearOff = await shot(page, 'near-autotile-0')
   const msOff = await gpuTime(page)
   console.log(`  GPU a frame, near (median): ${msOn.toFixed(2)} ms with the trims, ${msOff.toFixed(2)} ms without (one session, a shared GPU: a ratio, not a budget)`)
+  await look(page, spot, 100)
+  const midOff = await shot(page, 'mid-autotile-0')
+  await look(page, spot, 100, 0.3)
+  const midOffAside = await shot(page, 'mid-autotile-0-aside')
   await look(page, spot, 170)
   const farOff = await shot(page, 'far-autotile-0')
   const again = await shot(page, 'far-autotile-0-again')
@@ -182,6 +190,14 @@ try {
   const farScene = await sceneBox()
   const far = await differ(page, farOn, farOff, [farScene])
   const noise = await differ(page, farOff, again, [farScene])
+  // Shimmer: at 10 m (where a cell is 4 to 7 pixels, the trims half faded in) the eye moved a third of a cell along
+  // the wall changes the picture with the trims no more than without them.
+  await look(page, spot, 100)
+  const midScene = await sceneBox()
+  const shimmerOn = (await differ(page, midOn, midOnAside, [midScene])).bands[0], shimmerOff = (await differ(page, midOff, midOffAside, [midScene])).bands[0]
+  const midChange = (await differ(page, midOn, midOff, [midScene])).bands[0]
+  console.log(`  mid (10 m): trims change the scene by ${midChange.toFixed(2)}; a third of a cell aside changes it by ${shimmerOn.toFixed(2)} with them, ${shimmerOff.toFixed(2)} without`)
+  check(shimmerOn < shimmerOff * 1.25 + 0.3, `at 10 m the trims add no shimmer: a third of a cell aside changes the scene by ${shimmerOn.toFixed(2)} with them, ${shimmerOff.toFixed(2)} without`)
   const [foot, top, mid, sceneNear] = near.bands
   const sceneFar = far.bands[0], sceneNoise = noise.bands[0]
   console.log(`  near: ${(near.off * 100).toFixed(2)}% of pixels changed, mean ${near.mean.toFixed(2)}; foot course ${foot.toFixed(1)}, top course ${top.toFixed(1)}, middle course ${mid.toFixed(1)} (of 255)`)
