@@ -3,7 +3,7 @@
 // overlay for border-gliding compass & destination pips, directional player arrow, street/landmark labels,
 // and interactive click-to-route GPS navigation.
 import { MapGpu, cameraMatrices, projectMapPoint, unprojectToGround, type MapCamera } from './map-gpu.ts'
-import { computeRoute, describeSpot, formatDistance, snapToRoad, trackRoute, type GpsRoute, type RouteProgress } from './gps.ts'
+import { computeMultiStopRoute, computeRoute, describeSpot, formatDistance, snapToRoad, trackRoute, type GpsRoute, type GpsStop, type MultiStopRoute, type RouteProgress } from './gps.ts'
 import {
   SEARCH_CATEGORIES,
   buildSearchIndex,
@@ -87,6 +87,8 @@ export interface MapSystemOptions {
   onVisit?(x: number, z: number, name: string, cam: MapCameraSnapshot): Promise<boolean | void> | boolean | void
 }
 
+export type MapWaypoint = GpsStop
+
 export interface MapSystem {
   readonly open: boolean
   /** True when the fullscreen map is open in pre-entry starting-location picker mode. */
@@ -96,6 +98,8 @@ export interface MapSystem {
   readonly ready: boolean
   readonly mode: '2d' | '3d'
   readonly destination: { x: number; z: number; name: string } | null
+  readonly waypoints: readonly MapWaypoint[]
+  readonly multiRoute: MultiStopRoute | null
   readonly route: GpsRoute | null
   readonly progress: RouteProgress | null
   readonly places: readonly MapPlace[]
@@ -115,6 +119,11 @@ export interface MapSystem {
   setMode(mode: '2d' | '3d'): void
   setDestination(x: number, z: number, name?: string): GpsRoute | null
   clearDestination(): void
+  /** Sets an ordered multi-stop GPS route (Apple Maps / Google Maps style) with numbered pins & reorder UI. */
+  setWaypoints(stops: readonly MapWaypoint[], opts?: { onReorder?: (stops: MapWaypoint[]) => void }): MultiStopRoute | null
+  /** Reorders an active multi-stop GPS queue and recomputes the route immediately. */
+  reorderWaypoints(fromIndex: number, toIndex: number): MultiStopRoute | null
+  clearWaypoints(): void
   centerOnPlayer(): void
   /** Run an Apple Maps-style quick POI search (free text or category id). */
   search(query: string, opts?: { categoryId?: string | null }): void
@@ -974,6 +983,81 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
 @media (prefers-reduced-motion: reduce) {
   #minimap, #world-map { transition: none !important; animation: none !important; }
 }
+/* ── Multi-Stop GPS Reorderable Stop List (Apple Maps / Google Maps style) ── */
+#world-map .wm-stops {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(11, 17, 26, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: auto;
+  max-height: 220px;
+  overflow-y: auto;
+}
+#world-map .wm-stops[hidden] { display: none; }
+#world-map .wm-stops-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 700 10.5px/1.2 -apple-system, system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(220, 232, 248, 0.72);
+  padding-bottom: 2px;
+}
+#world-map .wm-stop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+#world-map .wm-stop-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 800 11px/1 -apple-system, system-ui, sans-serif;
+  color: #fff;
+  flex: none;
+}
+#world-map .wm-stop-copy { min-width: 0; flex: 1; }
+#world-map .wm-stop-name {
+  font: 600 12px/1.2 -apple-system, system-ui, sans-serif;
+  color: #f4f7fb;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#world-map .wm-stop-sub {
+  font: 500 10.5px/1.2 -apple-system, system-ui, sans-serif;
+  color: rgba(215, 226, 242, 0.68);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#world-map .wm-stop-btns { display: flex; gap: 4px; flex: none; }
+#world-map .wm-stop-mv {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef3f8;
+  font: 700 11px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+}
+#world-map .wm-stop-mv:hover:not(:disabled) { background: rgba(255, 255, 255, 0.2); }
+#world-map .wm-stop-mv:disabled { opacity: 0.3; cursor: default; }
 `
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v)
@@ -1137,6 +1221,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         <button class="wm-visit" type="button" title="Fast travel to destination">Visit</button>
         <button class="wm-clear" type="button" title="Clear GPS route (Backspace)" aria-label="Clear GPS route">&times;</button>
       </div>
+      <div class="wm-stops" hidden></div>
     </div>
     <button class="wm-search-here" type="button" hidden>Search here</button>
     <div class="wm-tools">
@@ -1245,10 +1330,65 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
   // Active GPS state
   let destination: { x: number; z: number; name: string } | null = null
+  let waypoints: MapWaypoint[] = []
+  let multiRoute: MultiStopRoute | null = null
+  let onWaypointsReorder: ((stops: MapWaypoint[]) => void) | null = null
   let route: GpsRoute | null = null
   let progress: RouteProgress | null = null
   let lastRerouteAt = 0
   let pinDropAt = -10
+  const wmStopsEl = wmRoot.querySelector<HTMLElement>('.wm-stops')!
+
+  const stopColor = (kind?: MapWaypoint['kind'], accent?: string) => {
+    if (accent) return accent
+    if (kind === 'pickup') return '#ff4d3d'
+    if (kind === 'shop') return '#38bdf8'
+    if (kind === 'dropoff') return '#10b981'
+    if (kind === 'hangout') return '#f59e0b'
+    return '#ff2a85'
+  }
+
+  const syncStopsPanel = () => {
+    if (entrySession || waypoints.length === 0) {
+      wmStopsEl.hidden = true
+      return
+    }
+    wmStopsEl.hidden = false
+    wmStopsEl.replaceChildren()
+    const hdr = document.createElement('div')
+    hdr.className = 'wm-stops-hdr'
+    hdr.innerHTML = `<span>Multi-Stop Route (${waypoints.length})</span><span>Reorder ↑↓</span>`
+    wmStopsEl.append(hdr)
+    waypoints.forEach((st, idx) => {
+      const row = document.createElement('div')
+      row.className = 'wm-stop-row'
+      const legM = multiRoute?.legDistancesM[idx]
+      const col = stopColor(st.kind, st.accent)
+      row.innerHTML = `
+        <span class="wm-stop-num" style="background:${col}">${idx + 1}</span>
+        <div class="wm-stop-copy">
+          <div class="wm-stop-name"></div>
+          <div class="wm-stop-sub"></div>
+        </div>
+        <div class="wm-stop-btns">
+          <button type="button" class="wm-stop-mv wm-up" title="Move stop earlier" aria-label="Move stop up" ${idx === 0 ? 'disabled' : ''}>↑</button>
+          <button type="button" class="wm-stop-mv wm-dn" title="Move stop later" aria-label="Move stop down" ${idx === waypoints.length - 1 ? 'disabled' : ''}>↓</button>
+        </div>
+      `
+      row.querySelector('.wm-stop-name')!.textContent = st.name
+      const subParts = [st.subtitle, legM !== undefined ? formatDistance(legM) : ''].filter(Boolean)
+      row.querySelector('.wm-stop-sub')!.textContent = subParts.join(' · ')
+      row.querySelector('.wm-up')!.addEventListener('click', (e) => {
+        e.stopPropagation()
+        if (idx > 0) reorderWaypoints(idx, idx - 1)
+      })
+      row.querySelector('.wm-dn')!.addEventListener('click', (e) => {
+        e.stopPropagation()
+        if (idx < waypoints.length - 1) reorderWaypoints(idx, idx + 1)
+      })
+      wmStopsEl.append(row)
+    })
+  }
 
   // Smooth speed-reactive 3D minimap chase camera state
   const BASE_SPAN = 132
@@ -1305,6 +1445,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     wmRouteName.textContent = destination.name
     wmRouteMeta.textContent = `${formatDistance(rem)} · ~${driveMin} min drive · ${walkMin} min walk`
     wmRouteCard.hidden = false
+    syncStopsPanel()
     for (const b of wmPlacesEl.querySelectorAll<HTMLButtonElement>('.wm-chip')) {
       b.classList.toggle('on', b.dataset.name === destination.name)
     }
@@ -1386,6 +1527,9 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
   const setDestination = (x: number, z: number, name?: string): GpsRoute | null => {
     if (!map) return null
+    waypoints = []
+    multiRoute = null
+    onWaypointsReorder = null
     const p = opts.player()
     const computed = computeRoute(map, p.x, p.z, x, z, name)
     destination = { x, z, name: computed.destName }
@@ -1400,10 +1544,71 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
   const clearDestination = () => {
     destination = null
+    waypoints = []
+    multiRoute = null
+    onWaypointsReorder = null
     route = null
     progress = null
     gpu.setRoute(null)
+    syncStopsPanel()
     syncRouteCard()
+  }
+
+  const recomputeWaypoints = (): MultiStopRoute | null => {
+    if (!waypoints.length) {
+      multiRoute = null
+      destination = null
+      route = null
+      progress = null
+      gpu.setRoute(null)
+      syncStopsPanel()
+      syncRouteCard()
+      return null
+    }
+    const first = waypoints[0]
+    destination = { x: first.x, z: first.z, name: first.name }
+    if (!map) {
+      syncStopsPanel()
+      syncRouteCard()
+      return null
+    }
+    const p = opts.player()
+    const mr = computeMultiStopRoute(map, p.x, p.z, waypoints)
+    multiRoute = mr
+    if (mr) {
+      route = mr.combined
+      destination = { x: first.x, z: first.z, name: mr.combined.destName }
+      progress = trackRoute(map, mr.legs[0] ?? mr.combined, p.x, p.z)
+      lastRerouteAt = performance.now()
+      pinDropAt = time
+      gpu.setRoute(mr.combined)
+    }
+    syncStopsPanel()
+    syncRouteCard()
+    return mr
+  }
+
+  const setWaypoints = (stops: readonly MapWaypoint[], wOpts?: { onReorder?: (stops: MapWaypoint[]) => void }): MultiStopRoute | null => {
+    waypoints = stops.map((s) => ({ ...s }))
+    if (wOpts && 'onReorder' in wOpts) onWaypointsReorder = wOpts.onReorder ?? null
+    return recomputeWaypoints()
+  }
+
+  const reorderWaypoints = (fromIndex: number, toIndex: number): MultiStopRoute | null => {
+    if (fromIndex < 0 || fromIndex >= waypoints.length || toIndex < 0 || toIndex >= waypoints.length || fromIndex === toIndex) {
+      return multiRoute
+    }
+    const next = [...waypoints]
+    const [moved] = next.splice(fromIndex, 1)
+    next.splice(toIndex, 0, moved)
+    waypoints = next
+    const mr = recomputeWaypoints()
+    onWaypointsReorder?.(waypoints.map((s) => ({ ...s })))
+    return mr
+  }
+
+  const clearWaypoints = () => {
+    clearDestination()
   }
 
   const centerOnPlayer = () => {
@@ -2671,6 +2876,29 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       }
     }
 
+    // 1b. Secondary multi-stop numbered markers on the minimap overlay (stops #2, #3, ...)
+    if (waypoints.length > 1) {
+      for (let i = 1; i < waypoints.length; i++) {
+        const st = waypoints[i]
+        const sp = projectMapPoint(vp, st.x, 1.0, st.z, cssW, cssH)
+        if (!sp || sp[0] < 6 || sp[0] > cssW - 6 || sp[1] < 6 || sp[1] > cssH - 6) continue
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(sp[0] + pad, sp[1] + pad, 6.5, 0, Math.PI * 2)
+        ctx.fillStyle = stopColor(st.kind, st.accent)
+        ctx.fill()
+        ctx.lineWidth = 1.4
+        ctx.strokeStyle = '#ffffff'
+        ctx.stroke()
+        ctx.fillStyle = '#ffffff'
+        ctx.font = '700 8.5px -apple-system, system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(i + 1), sp[0] + pad, sp[1] + pad + 0.5)
+        ctx.restore()
+      }
+    }
+
     // 2. GTA VI circular black 'N' North compass badge gliding along the rounded border!
     {
       const northRel = -cam.yaw // North is world bearing 0
@@ -3171,6 +3399,31 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       }
     }
 
+    // 5b. Additional numbered multi-stop waypoint pins on fullscreen map (#2, #3, ...)
+    if (!entrySession && waypoints.length > 1) {
+      for (let i = 1; i < waypoints.length; i++) {
+        const st = waypoints[i]
+        const sp = projectMapPoint(vp, st.x, 1.5, st.z, cssW, cssH)
+        if (!sp || sp[0] < -24 || sp[0] > cssW + 24 || sp[1] < -24 || sp[1] > cssH + 24) continue
+        const col = stopColor(st.kind, st.accent)
+        ctx.save()
+        ctx.translate(sp[0], sp[1])
+        ctx.beginPath()
+        ctx.arc(0, -14, 11, 0, Math.PI * 2)
+        ctx.fillStyle = col
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = '#ffffff'
+        ctx.stroke()
+        ctx.fillStyle = '#ffffff'
+        ctx.font = '800 11px -apple-system, system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(i + 1), 0, -13.5)
+        ctx.restore()
+      }
+    }
+
     // 6. Clickable North Compass Rose when map is rotated away from North
     if (Math.abs(wrapAngle(cam.yaw)) > 0.03) {
       const cx = cssW - 36, cy = 84, r = 18
@@ -3302,16 +3555,21 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
     // 1. Live GPS route tracking, progress trimming, off-route auto-reroute, and arrival detection!
     if (engaged && destination && route) {
-      progress = trackRoute(map, route, p.x, p.z)
-      if (progress.arrived) {
+      const activeLeg = multiRoute?.legs[0] ?? route
+      progress = trackRoute(map, activeLeg, p.x, p.z)
+      if (progress.arrived && waypoints.length === 0) {
         const reached = destination.name
         clearDestination()
         opts.hud.notice(`Arrived at ${reached}`, 3500)
       } else if (progress.offRouteM > 48 && performance.now() - lastRerouteAt > 1400) {
         lastRerouteAt = performance.now()
-        route = computeRoute(map, p.x, p.z, destination.x, destination.z, destination.name)
-        progress = trackRoute(map, route, p.x, p.z)
-        gpu.setRoute(route)
+        if (waypoints.length > 0) {
+          recomputeWaypoints()
+        } else {
+          route = computeRoute(map, p.x, p.z, destination.x, destination.z, destination.name)
+          progress = trackRoute(map, route, p.x, p.z)
+          gpu.setRoute(route)
+        }
       }
       if (isOpen) syncRouteCard()
     }
@@ -3474,6 +3732,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     get data() { return map },
     get mode() { return viewMode },
     get destination() { return destination ? { ...destination } : null },
+    get waypoints() { return waypoints.map((s) => ({ ...s })) },
+    get multiRoute() { return multiRoute },
     get route() { return route },
     get progress() { return progress },
     get places() { return map?.places ?? [] },
@@ -3510,6 +3770,9 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     setMode,
     setDestination,
     clearDestination,
+    setWaypoints,
+    reorderWaypoints,
+    clearWaypoints,
     centerOnPlayer,
     search(query: string, sOpts?: { categoryId?: string | null }) {
       runSearch(query, { categoryId: sOpts?.categoryId ?? null, useMapCenter: false, frame: true })
@@ -3532,8 +3795,9 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         pinDropAt = time
       }
       if (opts.engaged()) mmRoot.hidden = false
-      // If a destination was active before a map refresh, re-route on the new graph.
-      if (destination) setDestination(destination.x, destination.z, destination.name)
+      // If a destination or multi-stop route was active before a map refresh, re-route on the new graph.
+      if (waypoints.length > 0) recomputeWaypoints()
+      else if (destination) setDestination(destination.x, destination.z, destination.name)
     },
     setPlacesData(places: PlacesPayload) {
       placesPayload = places
