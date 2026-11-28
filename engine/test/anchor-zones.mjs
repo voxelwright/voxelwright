@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AnchorZoneManager, POLICY, compactLogEntries, policyOf } from '../anchor-zones.mjs'
+import { AnchorZoneManager, CELLS_MOST, POLICY, compactLogEntries, healable, policyOf } from '../anchor-zones.mjs'
 import { here } from './kit.mjs'
 
 const failures = []
@@ -48,6 +48,10 @@ check(same(policyOf(), POLICY) && !POLICY.enabled && POLICY.regenTtlMs === 600_0
   w.write(healed.runs)
   check(same(healed.runs, [[6, 12, 0, 0, 0]]) && healed.remainingEphemeral === 0 && kinds(w, [[-2, 6, 0, 0]]).every((k) => k === 9) && kinds(w, [[6, 12, 0, 0]]).every((k) => k === 0), 'long after, what was done outside is back as it was and what was done inside is untouched')
   check(m.healedTotal === 6 && m.stats().healedTotal === 6 && m.stats().ephemeralCells === 0 && m.stats().anchors[0].id === 'altar', 'the stats count what was healed')
+}
+{
+  const ball = (radius, kind = 0) => [0, 0, 0, 0, radius, kind], row = (n) => [1, 1, 0, n, 0, 0, 0]
+  check([8, 18, 40].every((r) => healable(ball(r))) && healable(ball(40, 8)) && !healable([...ball(40), ...ball(40)]) && healable(row(CELLS_MOST)) && !healable(row(CELLS_MOST + 1)), 'every single ball an ask may have is healed; more than the widest blast, or more cells in rows than are remembered, stays')
 }
 {
   // Gradually, in bounded batches, to the first baseline, whatever was done between.

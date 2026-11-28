@@ -43,7 +43,7 @@ import { inferAffordances } from './make/affordances.mjs'
 import { directorCityBrief } from './make/director.mjs'
 import { text } from './text.mjs'
 import { reading } from './ground.mjs'
-import { AnchorZoneManager, CELLS_MOST, ballRows, blocksOf, cellsAbout, rowsOf as cellRows, worldRows } from './anchor-zones.mjs'
+import { AnchorZoneManager, ballRows, blocksOf, healable, rowsOf as cellRows, worldRows } from './anchor-zones.mjs'
 import { dropped, forget, ground as groundOf, hold, holding as tilesHeld, holds, owned, owning, prepare, shares, unpin } from './page/bay.ts'
 
 // ── The ground (#526) ──────────────────────────────────────────────────────
@@ -1490,8 +1490,8 @@ function handle(said) {
   // emptied (its cells left the world when it first lived).
   if (ask.gone && !ask.thing && alive.has(ask.gone)) unplace(ask)
   // Whether what this ask does may be healed back (anchor-zones.mjs): not what a made thing is put, taken or held by.
-  // Nor an edit of more cells than the zones remember: going through them would hold up the world.
-  const loose = !ask.thing && ask.gone === undefined && ask.put === undefined && ask.hold === undefined && !(zones && ask.edit && cellsAbout(ask.edit) > CELLS_MOST) ? 'loose' : 'kept'
+  // Nor an edit too big to be healed (`healable`).
+  const loose = !ask.thing && ask.gone === undefined && ask.put === undefined && ask.hold === undefined && !(zones && ask.edit && !healable(ask.edit)) ? 'loose' : 'kept'
   // A blast or a ball of cells is told again as the rows it changed, so that a heal can take their place in the world's
   // file: the echo says so, and compacting drops it (serve.mjs).
   if (zones && loose === 'loose' && (ask.blast || (ask.edit && [...blocksOf(ask.edit)].some((b) => b.ball) && [...blocksOf(ask.edit)].every((b) => b.ball || b.per === 1)))) ask.restated = true
@@ -1794,6 +1794,8 @@ function heal(now) {
     const rows = cellRows(cells), words = [1, rows.length, ...rows.flat()]
     parentPort.postMessage({ echo: { by: 'the world', edit: words, box: boxRound(rows), heal: what } })
     edit(words, 'replay')
+    // A page counts an answer for each edit it is told of (page/main.ts `asked`), as for one the world lays itself.
+    told(core.bodies_advance(0), true)
   }
   zonesDirty = true
   nudged = true

@@ -47,21 +47,28 @@ export function* blocksOf(words) {
   }
 }
 
-/** About how many of the world's cells an edit goes through. */
-export function cellsAbout(words) {
-  let n = 0
-  for (const b of blocksOf(words)) {
-    if (b.ball) n += Math.ceil(4.2 * reach(b.ball[3], b.ball[4]) ** 3)
-    else for (const [x0, x1] of b.runs) n += x1 - x0
-  }
-  return n
-}
-
 /** Rows counted in finer cells, as the rows of the world's cells they lie in. */
 export const worldRows = (runs, per = 1) => (per === 1 ? runs : runs.map(([x0, x1, y, z, kind]) => [Math.floor(x0 / per), Math.floor((x1 - 1) / per) + 1, Math.floor(y / per), Math.floor(z / per), kind]))
 
 /** How far from its centre a ball may change a cell (page/edits.ts `reachOf`, and one over for where a cell is measured from). */
 const reach = (radius, kind) => (kind === 0 ? Math.ceil((radius * 44) / 16) + 1 : radius) + 1
+
+/** About how many cells a ball goes through. */
+const ballCells = (radius, kind) => 4.2 * reach(radius, kind) ** 3
+
+/**
+ * Whether an edit is small enough to be healed: its balls go through no more than one blast of the widest radius an
+ * ask may have (40), and its rows through no more cells than are remembered. Past that it stays: going through it would
+ * hold the world up.
+ */
+export function healable(words) {
+  let balls = 0, rows = 0
+  for (const b of blocksOf(words)) {
+    if (b.ball) balls += ballCells(b.ball[3], b.ball[4])
+    else for (const [x0, x1] of b.runs) rows += x1 - x0
+  }
+  return balls <= ballCells(40, 0) && rows <= CELLS_MOST
+}
 
 /** Whether a ball may change a cell. */
 export const ballCovers = ([cx, cy, cz, radius, kind]) => (x, y, z) => (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 <= reach(radius, kind) ** 2
