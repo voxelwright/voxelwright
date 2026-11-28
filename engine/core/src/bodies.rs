@@ -1100,6 +1100,65 @@ fn contact_feature_key(local_ra: V, n: V) -> u64 {
 
 /// One active articulated ragdoll tracked by `Bodies` with its stable non-zero ID
 /// and any severed independent limbs (`ragdoll::DetachedLimb`).
+/// What the Cleave lifted off its cut (`Bodies::cleave_wedge`): carried up off the cut by `lift_vec` over `snap_dur`
+/// seconds of real time (eased out, `1 - (1 - t)^3`), held there still until `snap_dur + hang_dur`, then let go
+/// with `release_vel` and `release_spin` (`Bodies::hang_tick`). While it hangs the solver neither pulls nor
+/// touches it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CleaveHang {
+    pub elapsed: f32,
+    pub snap_dur: f32,
+    pub hang_dur: f32,
+    pub start_pos: V,
+    pub lift_vec: V,
+    pub release_vel: V,
+    pub release_spin: V,
+}
+
+impl CleaveHang {
+    /// A hang from `start_pos`, lifted by `lift_vec`, with Small Magic's timing (0.2 s up, 1.0 s held).
+    pub fn new(start_pos: V, lift_vec: V, release_vel: V, release_spin: V) -> Self {
+        CleaveHang { elapsed: 0.0, snap_dur: 0.2, hang_dur: 1.0, start_pos, lift_vec, release_vel, release_spin }
+    }
+}
+
+/// A body something has taken hold of (`Bodies::capture_orbit`): carried round `center` by hand, out of the solver,
+/// until it is flung (`Bodies::capture_fling`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CaptureOrbit {
+    pub center: V,
+    /// How far out it goes round, and its height over the middle.
+    pub dist: f32,
+    pub height: f32,
+    pub angle: f32,
+    /// Where it was taken from, and how long it has been held (it is eased onto its round).
+    pub from: V,
+    pub t: f32,
+    pub spin: V,
+}
+
+/// The most bodies held in orbit at once, and the most let go in one call of `advance`: with thousands taken and
+/// given back in one frame, the solver paid 33 ms a frame for it (Small Magic's `HOLD` and `OUT`).
+pub const HOLD: usize = 1000;
+pub const OUT: usize = 150;
+/// How long a captured body takes to be eased onto its round, and its speed round it (cells a second).
+const ORBIT_EASE: f32 = 0.6;
+const ORBIT_SPEED: f32 = 60.0;
+/// The Cleave's kerf: cells whose middle is this near the cut's sheet are cut (2.5 cells across).
+const KERF: f32 = 1.25;
+/// How far a cut reaches at most (cells), and how far apart its samples are across the sheet.
+const CLEAVE_REACH: f32 = 1024.0;
+const CLEAVE_STEP: f32 = 0.5;
+/// What is lifted off a cut is lifted this far straight off it (cells, scaled down for a steep cut), slides off at
+/// this speed (cells a second) with this much lift, and tips over at this rate (radians a second).
+const CLEAVE_LIFT: f32 = 24.0;
+const CLEAVE_SLIDE: f32 = 6.5;
+const CLEAVE_HOP: f32 = 9.0;
+const CLEAVE_TIP: f32 = 0.32;
+/// The most boxes asked what a cut let go (each `SETTLE` across, one over each tile of the cut, nearest first): a cut
+/// wider than that frees only what is in the nearest.
+const CLEAVE_BOXES: usize = 16;
+
 pub struct ActiveRagdoll {
     pub id: u32,
     pub ragdoll: crate::ragdoll::Ragdoll,
@@ -1182,6 +1241,13 @@ pub struct Bodies {
     ballistic_targets_buf: Vec<crate::ballistics::DynamicTarget>,
     shock_targets_buf: Vec<crate::ballistics::DynamicTarget>,
     ballistic_events_buf: Vec<crate::ballistics::BallisticEvent>,
+    /// What the Cleave holds in the air, by body id (`cleave_wedge`, `hang_tick`).
+    hangs: Vec<(u32, CleaveHang)>,
+    /// What is held in orbit, by body id (`capture_orbit`).
+    orbits: Vec<(u32, CaptureOrbit)>,
+    /// Flung bodies still held, waiting to be let go `OUT` a call: id, velocity, spin, distance out. The outermost is
+    /// last, and goes first.
+    outgoing: Vec<(u32, V, V, f32)>,
 }
 
 /// A wide box that is to be asked what stands in it (`Bodies::far`): its low corner, how many seconds it still
@@ -1251,6 +1317,9 @@ impl Bodies {
             ballistic_targets_buf: Vec::new(),
             shock_targets_buf: Vec::new(),
             ballistic_events_buf: Vec::new(),
+            hangs: Vec::new(),
+            orbits: Vec::new(),
+            outgoing: Vec::new(),
         }
     }
 
@@ -1634,6 +1703,49 @@ impl Bodies {
         self.wake_body_id(a);
         self.wake_body_id(b);
         id
+    }
+
+    /// Adds a breakable weld between `a` and `b` (`0` = static world) anchored at `local_a` on `a` and `local_b` on
+    /// `b`, each from that body's middle of mass in its own frame (world coordinates for the static world), holding the
+    /// two as they are turned now. `break_force` / `break_torque` (`<= 0` or not finite: unbreakable);
+    /// `yield_torque` makes it plastic (it bends past it and stays bent) and `break_bend` is how far it bends before it
+    /// snaps (`<= 0` or not finite: never). Returns the joint ID, or `0` if an endpoint body was not found.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_fixed(
+        &mut self,
+        a: u32,
+        b: u32,
+        local_a: [f32; 3],
+        local_b: [f32; 3],
+        break_force: f32,
+        break_torque: f32,
+        yield_torque: f32,
+        break_bend: f32,
+    ) -> u32 {
+        if a == 0 && b == 0 {
+            return 0;
+        }
+        let rot_of = |id: u32| if id == 0 { Some([0.0, 0.0, 0.0, 1.0]) } else { self.list.iter().find(|x| x.id == id).map(|x| x.rot) };
+        let (Some(qa), Some(qb)) = (rot_of(a), rot_of(b)) else { return 0 };
+        let limit = |v: f32| if v.is_finite() && v > 0.0 { v } else { f32::INFINITY };
+        let rel = crate::joints::quat_mul(crate::joints::quat_conj(qa), qb);
+        let cfg = crate::joints::FixedJoint::default().with_rel_rot(rel).plastic(limit(yield_torque), limit(break_bend));
+        let joint = crate::joints::Joint::fixed(a, b, local_a, local_b, cfg).with_break(limit(break_force), limit(break_torque));
+        let id = self.joints.add(joint);
+        self.wake_body_id(a);
+        self.wake_body_id(b);
+        id
+    }
+
+    /// How far weld `id` has bent for good (radians), or `-1` if it is gone, broken, or not a weld.
+    pub fn joint_bend(&self, id: u32) -> f32 {
+        match self.joints.get(id) {
+            Some(j) if !j.broken => match j.kind {
+                crate::joints::JointKind::Fixed(cfg) => cfg.yielded_angle,
+                _ => -1.0,
+            },
+            _ => -1.0,
+        }
     }
 
     /// Adds a unilateral rope/cable between `a` and `b` (`0` = static world) anchored at world points
@@ -2649,12 +2761,20 @@ impl Bodies {
                 self.wake_body_id(bid);
             }
         }
+        self.let_out();
+        // What is held (hung by the Cleave, in something's grip) is out of the solver while it steps.
+        let held = self.take_held();
+        if !held.is_empty() {
+            self.rebuild_broadphase();
+        }
         while self.owed >= STEP && self.list.iter().any(|b| !b.asleep) {
             self.owed -= STEP;
             self.step(STEP);
             self.steps += 1;
         }
-        if self.steps > 0 {
+        let any_held = !held.is_empty();
+        self.put_held(held);
+        if self.steps > 0 || any_held {
             self.rebuild_broadphase();
         }
         if !self.list.iter().any(|b| !b.asleep) {
@@ -3527,6 +3647,13 @@ impl Bodies {
                     sb.refresh_world_inertia(b.inv_inertia);
                 }
             }
+            // A plastic weld that gave this step holds where it bent before positions are projected.
+            let mut yielded = Vec::new();
+            self.joints.evaluate_plastic_yield(&joint_bodies, h, &mut yielded);
+            if !yielded.is_empty() {
+                let ids: Vec<u32> = yielded.iter().map(|&crate::joints::JointEvent::Broken { id, .. }| id).collect();
+                self.wake_joint_bodies(&ids);
+            }
             self.joints.solve_positions(&mut joint_bodies, h, &joint_cfg);
             for sb in &joint_bodies {
                 if let Some(b) = self.list.iter_mut().find(|b| b.id == sb.id) {
@@ -3874,6 +4001,409 @@ impl Bodies {
             self.list.push(chunk);
         }
         chunk_of.iter().map(|&k| k != 0 && sits[k as usize - 1]).collect()
+    }
+}
+
+// ── The Cleave, holding and letting go, and poses put from outside (#226) ───────────────────────────────────────
+
+impl Bodies {
+    fn held(&self, id: u32) -> bool {
+        self.hangs.iter().any(|h| h.0 == id) || self.orbits.iter().any(|o| o.0 == id) || self.outgoing.iter().any(|o| o.0 == id)
+    }
+
+    /// Whether `id` hangs where the Cleave lifted it.
+    pub fn hang_of(&self, id: u32) -> Option<&CleaveHang> {
+        self.hangs.iter().find(|h| h.0 == id).map(|h| &h.1)
+    }
+
+    /// How many bodies are held in orbit or waiting to be let go.
+    pub fn captured(&self) -> usize {
+        self.orbits.len() + self.outgoing.len()
+    }
+
+    fn jointed(&self, id: u32) -> bool {
+        self.joints.active_count() > 0 && self.joints.joints().iter().any(|j| !j.broken && (j.body_a == id || j.body_b == id))
+    }
+
+    /// Takes the held bodies out of the list, each with where it was, in order. Holds whose bodies are gone are dropped.
+    fn take_held(&mut self) -> Vec<(usize, Body)> {
+        if self.hangs.is_empty() && self.orbits.is_empty() && self.outgoing.is_empty() {
+            return Vec::new();
+        }
+        let mut ids: Vec<u32> = self.hangs.iter().map(|h| h.0).chain(self.orbits.iter().map(|o| o.0)).chain(self.outgoing.iter().map(|o| o.0)).collect();
+        ids.sort_unstable();
+        let mut held = Vec::new();
+        let mut kept = Vec::with_capacity(self.list.len());
+        for (i, b) in std::mem::take(&mut self.list).into_iter().enumerate() {
+            if ids.binary_search(&b.id).is_ok() {
+                held.push((i, b));
+            } else {
+                kept.push(b);
+            }
+        }
+        self.list = kept;
+        let mut found: Vec<u32> = held.iter().map(|(_, b)| b.id).collect();
+        found.sort_unstable();
+        let there = |id: &u32| found.binary_search(id).is_ok();
+        self.hangs.retain(|h| there(&h.0));
+        self.orbits.retain(|o| there(&o.0));
+        self.outgoing.retain(|o| there(&o.0));
+        held
+    }
+
+    /// Puts what `take_held` took back where it was.
+    fn put_held(&mut self, held: Vec<(usize, Body)>) {
+        if held.is_empty() {
+            return;
+        }
+        for (i, b) in held {
+            let at = i.min(self.list.len());
+            self.list.insert(at, b);
+        }
+        self.broadphase_stale = true;
+    }
+
+    /// Lets go of up to `OUT` flung bodies, the outermost first.
+    fn let_out(&mut self) {
+        for _ in 0..OUT {
+            let Some((id, vel, spin, _)) = self.outgoing.pop() else { break };
+            if let Some(b) = self.list.iter_mut().find(|b| b.id == id) {
+                b.vel = vel;
+                b.spin = spin;
+                b.asleep = false;
+                b.still = 0.0;
+                b.apart = 1.0;
+            }
+        }
+    }
+
+    /// Moves what the Cleave holds on by `real_dt` seconds of the clock on the wall (not the world's, which may be
+    /// slowed): lifted off the cut over its `snap_dur`, held, then let go, sliding and tipping. What is held in orbit
+    /// is carried round too. Returns how many bodies still hang. Their poses are told in `advance`'s `MOVES`.
+    pub fn hang_tick(&mut self, real_dt: f32) -> usize {
+        if real_dt <= 0.0 || (self.hangs.is_empty() && self.orbits.is_empty()) {
+            return self.hangs.len();
+        }
+        let index: Map<u32, usize> = self.list.iter().enumerate().map(|(i, b)| (b.id, i)).collect();
+        let mut k = 0;
+        while k < self.hangs.len() {
+            let (id, h) = &mut self.hangs[k];
+            let Some(&i) = index.get(id) else {
+                self.hangs.remove(k);
+                continue;
+            };
+            h.elapsed += real_dt;
+            let u = (h.elapsed / h.snap_dur.max(1e-4)).min(1.0);
+            let e = 1.0 - (1.0 - u) * (1.0 - u) * (1.0 - u);
+            let b = &mut self.list[i];
+            b.pos = add(h.start_pos, scale(h.lift_vec, e));
+            if h.elapsed >= h.snap_dur + h.hang_dur {
+                (b.vel, b.spin, b.asleep, b.still, b.apart) = (h.release_vel, h.release_spin, false, 0.0, 1.0);
+                self.hangs.remove(k);
+            } else {
+                (b.vel, b.spin) = ([0.0; 3], [0.0; 3]);
+                k += 1;
+            }
+        }
+        for (id, o) in &mut self.orbits {
+            let Some(&i) = index.get(id) else { continue };
+            o.t += real_dt;
+            o.angle += real_dt * ORBIT_SPEED / o.dist.max(1.0);
+            let round = add(o.center, [o.angle.cos() * o.dist, o.height, o.angle.sin() * o.dist]);
+            let e = (o.t / ORBIT_EASE).min(1.0);
+            let ease = e * e * (3.0 - 2.0 * e);
+            let b = &mut self.list[i];
+            let to = add(o.from, scale(sub(round, o.from), ease));
+            b.vel = scale(sub(to, b.pos), 1.0 / real_dt);
+            b.pos = to;
+            b.spin = o.spin;
+        }
+        self.broadphase_stale = true;
+        self.hangs.len()
+    }
+
+    /// Takes hold of what lies loose within `radius` of `center`, the nearest first and no more than `max_count`
+    /// (nor more than `HOLD` in all): each is lifted out of the solver and carried round the middle by `hang_tick`.
+    /// Living things and jointed bodies are left alone. Returns how many were taken.
+    pub fn capture_orbit(&mut self, center: V, radius: f32, max_count: usize) -> usize {
+        let room = HOLD.saturating_sub(self.captured()).min(max_count);
+        if room == 0 || radius <= 0.0 {
+            return 0;
+        }
+        let mut near: Vec<(f32, u32)> = Vec::new();
+        for b in &self.list {
+            if b.live.is_some() || b.count == 0 {
+                continue;
+            }
+            let d = sub(b.pos, center);
+            let d2 = dot(d, d);
+            if d2 <= radius * radius {
+                near.push((d2, b.id));
+            }
+        }
+        near.retain(|&(_, id)| !self.held(id) && !self.jointed(id));
+        near.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        near.truncate(room);
+        for &(_, id) in &near {
+            let Some(i) = self.list.iter().position(|b| b.id == id) else { continue };
+            // What rested on it is woken before it is taken away.
+            self.wake_body_and_island(i);
+            let b = &self.list[i];
+            let d = sub(b.pos, center);
+            let h = |seed: u32| hash3(id as i32, b.born[0], b.born[2], seed) as f32 / u32::MAX as f32 - 0.5;
+            let flat = (d[0] * d[0] + d[2] * d[2]).sqrt();
+            let angle = if flat > 1e-3 { d[2].atan2(d[0]) } else { h(1) * std::f32::consts::TAU };
+            let orbit = CaptureOrbit {
+                center,
+                dist: flat.clamp(4.0, radius.max(4.0)),
+                height: d[1] * 0.3,
+                angle,
+                from: b.pos,
+                t: 0.0,
+                spin: [h(2) * 4.0, h(3) * 4.0, h(4) * 4.0],
+            };
+            self.orbits.push((id, orbit));
+        }
+        near.len()
+    }
+
+    /// Flings what is held in orbit: each goes out from the middle (and along `dir`, if it is not zero) at about
+    /// `speed`, a quarter of its speed round kept. They are let go `OUT` a call of `advance`, the outermost first, so
+    /// they are never all in one place at once. Returns how many were flung.
+    pub fn capture_fling(&mut self, dir: V, speed: f32) -> usize {
+        if self.orbits.is_empty() {
+            return 0;
+        }
+        let along = if dot(dir, dir) > 1e-12 { unit(dir) } else { [0.0; 3] };
+        let index: Map<u32, usize> = self.list.iter().enumerate().map(|(i, b)| (b.id, i)).collect();
+        let orbits = std::mem::take(&mut self.orbits);
+        let n = orbits.len();
+        for (id, o) in orbits {
+            let Some(&i) = index.get(&id) else { continue };
+            let b = &self.list[i];
+            let h = |seed: u32| hash3(id as i32, b.born[0], b.born[1], seed) as f32 / u32::MAX as f32;
+            let d = sub(b.pos, o.center);
+            let flat = (d[0] * d[0] + d[2] * d[2]).sqrt();
+            let out = if flat > 0.3 { [d[0] / flat, 0.0, d[2] / flat] } else { let a = h(1) * std::f32::consts::TAU; [a.cos(), 0.0, a.sin()] };
+            let sp = speed * (0.6 + 0.8 * h(2));
+            let mut vel = add(scale(b.vel, 0.25), scale(add(out, along), sp));
+            vel[1] += sp * (0.1 + 0.3 * h(3));
+            self.outgoing.push((id, vel, o.spin, dot(d, d)));
+        }
+        // The outermost last: `let_out` pops it first.
+        self.outgoing.sort_by(|a, b| a.3.total_cmp(&b.3).then(a.0.cmp(&b.0)));
+        n
+    }
+
+    /// Puts a body where it was (a rewind, resumed): its place, turn, speed and spin, awake. A hold on it is let go.
+    /// Returns false if there is no such body.
+    pub fn set_pose(&mut self, id: u32, pos: V, rot: Q, vel: V, spin: V) -> bool {
+        let Some(i) = self.list.iter().position(|b| b.id == id) else { return false };
+        let l = (rot[0] * rot[0] + rot[1] * rot[1] + rot[2] * rot[2] + rot[3] * rot[3]).sqrt();
+        let rot = if l > 1e-6 { [rot[0] / l, rot[1] / l, rot[2] / l, rot[3] / l] } else { [0.0, 0.0, 0.0, 1.0] };
+        let b = &mut self.list[i];
+        (b.pos, b.rot, b.vel, b.spin, b.still, b.apart) = (pos, rot, vel, spin, 0.0, 1.0);
+        // Its contact points are turned afresh from its turn on the next step; the joints read its inertia from it.
+        b.turned.clear();
+        self.hangs.retain(|h| h.0 != id);
+        self.orbits.retain(|o| o.0 != id);
+        self.outgoing.retain(|o| o.0 != id);
+        self.wake_body_and_island(i);
+        self.broadphase_stale = true;
+        true
+    }
+
+    /// The Cleave: everything in the wedge of the sheet through `eye` with normal `normal`, between the ways `e1` and
+    /// `e1` turned by `theta` toward `e2`, within `reach` cells, comes apart along it.
+    ///
+    /// Moving bodies the sheet crosses are sliced (`carve_plane`). The world is cut by a fan of samples across the
+    /// wedge (no more than 0.7 cells apart, as far as `CLEAVE_REACH`): every solid cell whose middle is within `KERF`
+    /// of the sheet goes (water stays), told as `EDIT` and `DUST`. Then what the cut left unheld comes loose
+    /// (`support::release` in up to `CLEAVE_BOXES` boxes over the cut), and every piece above the sheet (and every
+    /// sliced half above it) is lifted off the cut and held there in the air (`CleaveHang`), to be let go sliding along
+    /// `slide` and tipping over its far edge. Returns how many pieces it lifted.
+    pub fn cleave_wedge(&mut self, eye: V, normal: V, e1: V, e2: V, theta: f32, reach: f32, slide: V) -> usize {
+        if !(theta > 0.0) || !(reach > 0.0) || dot(normal, normal) < 1e-12 || dot(e1, e1) < 1e-12 || dot(e2, e2) < 1e-12 {
+            return 0;
+        }
+        let n = unit(normal);
+        let up = if n[1] < 0.0 { scale(n, -1.0) } else { n };
+        let (e1, e2) = (unit(e1), unit(e2));
+        let theta = theta.min(std::f32::consts::TAU);
+        let reach = reach.min(CLEAVE_REACH);
+        let (ct, st) = (theta.cos(), theta.sin());
+        let first = self.next;
+        // Whether a point lies in the wedge, `slack` cells either side of its edges (half-planes, no angles).
+        let in_wedge = |v: V, slack: f32| -> bool {
+            let r = reach + slack;
+            if dot(v, v) > r * r {
+                return false;
+            }
+            let (x, y) = (dot(v, e1), dot(v, e2));
+            let past_start = y >= -slack;
+            let before_end = x * st - y * ct >= -slack;
+            if theta <= std::f32::consts::PI { past_start && before_end } else { past_start || before_end }
+        };
+
+        // 1. Moving bodies the sheet crosses are sliced along it.
+        let crossed: Vec<u32> = self
+            .list
+            .iter()
+            .filter(|b| b.live.is_none() && b.count > 0 && !self.held(b.id))
+            .filter(|b| {
+                let v = sub(b.pos, eye);
+                dot(n, v).abs() <= b.radius + KERF && in_wedge(v, b.radius)
+            })
+            .map(|b| b.id)
+            .collect();
+        for &id in &crossed {
+            self.carve_plane(id, eye, n, KERF * 2.0);
+        }
+
+        // 2. The world: samples on rings out from the eye, each ring as many as keep them CLEAVE_STEP apart along it
+        // (turned by a fixed small turn, so no sine is asked of each one), and the kerf's cells round each.
+        let offsets = [-1.0f32, -0.5, 0.0, 0.5, 1.0];
+        let mut cells: Vec<[i32; 3]> = Vec::new();
+        let mut last = [i32::MIN; 3];
+        let mut t = CLEAVE_STEP;
+        while t <= reach {
+            let m = ((theta * t / CLEAVE_STEP).ceil() as usize).max(1);
+            let d = theta / m as f32;
+            let (cd, sd) = (d.cos(), d.sin());
+            let (mut c, mut si) = (1.0f32, 0.0f32);
+            for _ in 0..=m {
+                let dir = add(scale(e1, c), scale(e2, si));
+                let p = add(eye, scale(dir, t));
+                for &o in &offsets {
+                    let q = add(p, scale(n, o));
+                    let cell = [q[0].floor() as i32, q[1].floor() as i32, q[2].floor() as i32];
+                    if cell == last {
+                        continue;
+                    }
+                    last = cell;
+                    let mid = [cell[0] as f32 + 0.5 - eye[0], cell[1] as f32 + 0.5 - eye[1], cell[2] as f32 + 0.5 - eye[2]];
+                    if dot(n, mid).abs() <= KERF && self.ground.solid(cell[0], cell[1], cell[2]) {
+                        cells.push(cell);
+                    }
+                }
+                (c, si) = (c * cd - si * sd, c * sd + si * cd);
+            }
+            t += CLEAVE_STEP;
+        }
+        // In sector order, so what each is made of is asked of few sectors at a time.
+        cells.sort_unstable_by_key(|c| ([c[1] >> 6, c[2] >> 6, c[0] >> 6], c[1], c[2], c[0]));
+        cells.dedup();
+        let mut cut: Vec<([i32; 3], Kind)> = Vec::with_capacity(cells.len());
+        for c in cells {
+            let kind = self.ground.kind(c[0], c[1], c[2]);
+            if kind != 0 && material(kind) != WATER {
+                cut.push((c, kind));
+            }
+        }
+        let mut made = 0;
+        if !cut.is_empty() {
+            let (mut lo, mut hi) = ([i32::MAX; 3], [i32::MIN; 3]);
+            for (c, _) in &cut {
+                for a in 0..3 {
+                    lo[a] = lo[a].min(c[a]);
+                    hi[a] = hi[a].max(c[a] + 1);
+                }
+            }
+            let chunks = (cut.len() / 16).clamp(1, 8);
+            let per = cut.len().div_ceil(chunks);
+            for chunk in cut.chunks(per) {
+                let mut sum = [0.0f32; 3];
+                for (c, _) in chunk {
+                    sum = add(sum, [c[0] as f32 + 0.5, c[1] as f32 + 0.5, c[2] as f32 + 0.5]);
+                }
+                let p = scale(sum, 1.0 / chunk.len() as f32);
+                self.record(DUST, &[p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), chunk[0].1 as u32, chunk.len() as u32]);
+            }
+            let mut runs: Vec<Run> = Vec::new();
+            cut.sort_unstable_by_key(|(c, _)| (c[1], c[2], c[0]));
+            for (c, _) in &cut {
+                match runs.last_mut() {
+                    Some(r) if r.y == c[1] && r.z == c[2] && r.x1 == c[0] => r.x1 += 1,
+                    _ => runs.push(Run { x0: c[0], x1: c[0] + 1, y: c[1], z: c[2], kind: 0 }),
+                }
+            }
+            self.change(runs);
+
+            // 3. What the cut left unheld comes loose. The cut's cells are bucketed into tiles a box across, and a box
+            // is asked over each tile that holds any, the nearest the eye first: each is centred on its own tile's cut
+            // and stands from a little under it, so what stands over a sloping sheet is inside its box.
+            let side = SETTLE[0] as i32;
+            let tile = side - 32;
+            let mut tiles: Vec<([i32; 2], [i32; 3], [i32; 3])> = Vec::new();
+            for (c, _) in &cut {
+                let key = [c[0].div_euclid(tile), c[2].div_euclid(tile)];
+                match tiles.iter_mut().find(|t| t.0 == key) {
+                    Some(t) => {
+                        for a in 0..3 {
+                            t.1[a] = t.1[a].min(c[a]);
+                            t.2[a] = t.2[a].max(c[a] + 1);
+                        }
+                    }
+                    None => tiles.push((key, *c, [c[0] + 1, c[1] + 1, c[2] + 1])),
+                }
+            }
+            let far = |t: &([i32; 2], [i32; 3], [i32; 3])| {
+                let m = [(t.1[0] + t.2[0]) as f32 * 0.5 - eye[0], (t.1[2] + t.2[2]) as f32 * 0.5 - eye[2]];
+                m[0] * m[0] + m[1] * m[1]
+            };
+            tiles.sort_by(|a, b| far(a).total_cmp(&far(b)).then(a.0.cmp(&b.0)));
+            for (_, tlo, thi) in tiles.into_iter().take(CLEAVE_BOXES) {
+                let mid = [(tlo[0] + thi[0]) / 2, (tlo[2] + thi[2]) / 2];
+                let low = [mid[0] - side / 2, tlo[1] - 48, mid[1] - side / 2];
+                let size = [SETTLE[0], SETTLE[1], SETTLE[2]];
+                let top = [low[0] + side, low[1] + SETTLE[1] as i32, low[2] + SETTLE[2] as i32];
+                self.wake_in_aabb(low.map(|v| v as f32 - 2.0), top.map(|v| v as f32 + 2.0));
+                let mut region = self.ground.region(low, size);
+                let (pieces, dust) = support::release(&mut region, None);
+                made += self.take(pieces, dust, None, usize::MAX);
+            }
+        }
+        let _ = made;
+
+        // 4. Every piece above the sheet that this cut made is lifted off it and held, every one by the same amount.
+        let upper: Vec<usize> = (0..self.list.len())
+            .filter(|&i| {
+                let b = &self.list[i];
+                (b.id >= first || crossed.contains(&b.id)) && b.live.is_none() && dot(up, sub(b.pos, eye)) > 0.0
+            })
+            .collect();
+        if upper.is_empty() {
+            return 0;
+        }
+        let slide = if dot(slide, slide) > 1e-12 {
+            unit(slide)
+        } else {
+            // Down the sheet if it slopes; along the stroke if it lies flat.
+            let down = add([0.0, -1.0, 0.0], scale(up, up[1]));
+            if dot(down, down) > 0.09 { unit(down) } else { unit(sub(add(scale(e1, ct), scale(e2, st)), e1)) }
+        };
+        // Straight off the cut, never down; a steep cut parts its halves by less.
+        let lift_dir = unit([up[0], up[1].max(0.0), up[2]]);
+        let lift = scale(lift_dir, CLEAVE_LIFT * (0.35 + 0.65 * up[1].abs()));
+        // It turns as one about the middle of what lies on the cut, tipping over toward the slide.
+        let near_cut: Vec<V> = upper.iter().map(|&i| self.list[i].pos).filter(|p| dot(up, sub(*p, eye)) < 12.0).collect();
+        let pool: Vec<V> = if near_cut.is_empty() { upper.iter().map(|&i| self.list[i].pos).collect() } else { near_cut };
+        let pivot = scale(pool.iter().fold([0.0; 3], |s, p| add(s, *p)), 1.0 / pool.len() as f32);
+        let spin = scale(cross(up, slide), CLEAVE_TIP);
+        let mut hung = 0;
+        for &i in &upper {
+            let b = &mut self.list[i];
+            let r = sub(b.pos, pivot);
+            let mut vel = add(scale(slide, CLEAVE_SLIDE), cross(spin, r));
+            vel[1] += CLEAVE_HOP;
+            (b.vel, b.spin, b.asleep, b.still) = ([0.0; 3], [0.0; 3], false, 0.0);
+            let hang = CleaveHang::new(b.pos, lift, vel, spin);
+            let id = b.id;
+            self.hangs.retain(|h| h.0 != id);
+            self.hangs.push((id, hang));
+            hung += 1;
+        }
+        hung
     }
 }
 
@@ -5263,5 +5793,217 @@ mod tests {
             max_slice_ms < 25.0,
             "time-sliced SupportJob per-frame step must stay bounded (got max={max_slice_ms:.2} ms)"
         );
+    }
+
+    /// A concrete pillar 10 by 60 by 10 cells stood on the street at (X, Z), as cells of the world.
+    fn pillar(bodies: &mut Bodies) -> i32 {
+        let ground = city::ground(X, Z);
+        let mut runs = Vec::new();
+        for y in ground + 1..ground + 61 {
+            for z in Z..Z + 10 {
+                runs.push(Run { x0: X, x1: X + 10, y, z, kind: kind(CONCRETE, OWN) });
+            }
+        }
+        bodies.change(runs);
+        ground
+    }
+
+    #[test]
+    fn the_cleave_cuts_a_pillar_and_lifts_holds_and_lets_go_of_its_top() {
+        let mut bodies = Bodies::new();
+        let ground = pillar(&mut bodies);
+        assert_eq!(bodies.release([X + 5, ground + 30, Z + 5], 0), 0, "the pillar stands by itself");
+        // A sheet tipped a little about x, through the pillar 30 cells up, swept across it from 40 cells off.
+        let cut_y = (ground + 30) as f32;
+        let n = unit([0.0, 1.0, 0.2]);
+        let along = [1.0, 0.0, 0.0];
+        let across = cross(n, along);
+        let (c, s) = (0.3f32.cos(), 0.3f32.sin());
+        let e1 = sub(scale(along, c), scale(across, s));
+        let e2 = add(scale(along, s), scale(across, c));
+        let eye = [(X - 40) as f32, cut_y, (Z + 5) as f32];
+        bodies.out.clear();
+        let hung = bodies.cleave_wedge(eye, n, e1, e2, 0.6, 50.0, [1.0, 0.0, 0.0]);
+        assert!(hung >= 1, "the pillar's top is lifted off the cut");
+        let out = bodies.out.clone();
+        let (mut tags, mut i) = (Vec::new(), 0);
+        while i < out.len() {
+            tags.push(out[i]);
+            i += 2 + out[i + 1] as usize;
+        }
+        assert!(tags.contains(&EDIT) && tags.contains(&DUST) && tags.contains(&BORN), "the cut is told as an edit, dust and a body born: {tags:?}");
+        let top_cells = bodies.list.iter().find(|b| b.id == bodies.hangs[0].0).unwrap().count;
+        assert!(top_cells > 2000, "the whole top comes away as one ({top_cells} cells)");
+        // The kerf: the pillar's middle at the sheet is empty, a few cells off it is not.
+        let mid = [X + 5, Z + 5];
+        let on_sheet = |x: i32, z: i32| (cut_y - (dot(n, [x as f32 + 0.5 - eye[0], 0.0, z as f32 + 0.5 - eye[2]]) / n[1]) - 0.5).round() as i32;
+        let y = on_sheet(mid[0], mid[1]);
+        assert!(!bodies.ground.solid(mid[0], y, mid[1]), "the kerf is cut");
+        assert!(bodies.ground.solid(mid[0], y - 4, mid[1]), "below the kerf the pillar stands");
+        // The top hangs, out of the solver: lifted over 0.2 s of real time, held till 1.2 s, then let go.
+        let id = bodies.hangs[0].0;
+        let start = bodies.hang_of(id).unwrap().start_pos;
+        let lift = bodies.hang_of(id).unwrap().lift_vec;
+        assert!(bodies.list.iter().find(|b| b.id == id).unwrap().born[1] > ground + 25, "what hangs is the top");
+        let pos = |b: &Bodies| b.list.iter().find(|b| b.id == id).unwrap().pos;
+        for _ in 0..10 {
+            bodies.advance(1.0 / 60.0);
+        }
+        assert_eq!(pos(&bodies), start, "nothing pulls on what hangs");
+        assert_eq!(bodies.hang_tick(0.1), 1);
+        let up = dot(sub(pos(&bodies), start), unit(lift)) / dot(lift, lift).sqrt();
+        assert!((up - 0.875).abs() < 1e-3, "eased out: half the time, seven eighths of the way ({up})");
+        bodies.hang_tick(0.1);
+        let top = add(start, lift);
+        assert!(dot(sub(pos(&bodies), top), sub(pos(&bodies), top)) < 1e-6, "all the way up at 0.2 s");
+        for _ in 0..30 {
+            bodies.advance(1.0 / 60.0);
+        }
+        assert!(dot(sub(pos(&bodies), top), sub(pos(&bodies), top)) < 1e-6, "held where it was lifted");
+        assert_eq!(bodies.hang_tick(0.5), 1, "still held at 0.7 s");
+        assert_eq!(bodies.hang_tick(0.6), 0, "let go at 1.2 s");
+        let b = bodies.list.iter().find(|b| b.id == id).unwrap();
+        assert!(b.vel[0] > 3.0 && b.vel[1] > 3.0 && !b.asleep, "let go sliding along and up off the cut: {:?}", b.vel);
+        assert!(dot(b.spin, b.spin) > 0.01, "and tipping");
+        bodies.advance(1.0 / 60.0);
+        assert!(pos(&bodies) != top, "once let go it moves");
+    }
+
+    #[test]
+    fn a_long_sloping_cleave_lifts_the_top_off_the_yard_chimney() {
+        use crate::city::{BLOCK_X, BLOCK_Z, YARD, YARD_CHIMNEY};
+        let (x, z) = (YARD.0 * BLOCK_X + YARD_CHIMNEY.0, YARD.1 * BLOCK_Z + YARD_CHIMNEY.1);
+        let g = city::ground(x, z);
+        let mut bodies = Bodies::new();
+        // A pillar 25 m to one side, so the cut is wider than one box: each tile of it must get its own.
+        let (px, pz) = (x, z - 250);
+        let gp = city::ground(px, pz);
+        assert!(gp < g + 50);
+        let mut runs = Vec::new();
+        for y in gp + 1..g + 150 {
+            for dz in 0..10 {
+                runs.push(Run { x0: px, x1: px + 10, y, z: pz + dz, kind: kind(CONCRETE, OWN) });
+            }
+        }
+        bodies.change(runs);
+        // From 30 m off, a sheet sloping down away from the eye that crosses the chimney 60 cells up, reaching 45 m,
+        // swept from past the pillar to past the chimney.
+        let eye = [(x - 300) as f32, (g + 90) as f32, z as f32];
+        let along = unit([300.0, -30.0, 0.0]);
+        let n = unit(cross([0.0, 0.0, 1.0], along));
+        let across = cross(n, along);
+        // `across` is the sheet's own +z or -z: start the fan on the pillar's side of it.
+        let toward_pillar = if across[2] < 0.0 { across } else { scale(across, -1.0) };
+        let (c, s) = (0.85f32.cos(), 0.85f32.sin());
+        let e1 = add(scale(along, c), scale(toward_pillar, s));
+        let e2 = cross(n, e1);
+        let e2 = if dot(e2, along) > 0.0 { e2 } else { scale(e2, -1.0) };
+        let hung = bodies.cleave_wedge(eye, n, e1, e2, 1.0, 450.0, [0.0; 3]);
+        let biggest = |cx: i32, cz: i32| bodies.list.iter().filter(|b| bodies.hang_of(b.id).is_some() && (b.pos[0] - cx as f32).abs() < 20.0 && (b.pos[2] - cz as f32).abs() < 20.0).map(|b| b.count).max();
+        let chimney = biggest(x, z);
+        assert!(chimney.is_some_and(|n| n > 2000), "the chimney's top hangs ({hung} hung, biggest over it {chimney:?})");
+        // The pillar (it may come away joined to what stands beside it): gone from the world above the cut, standing below.
+        let column: Vec<bool> = (g + 70..g + 140).map(|y| bodies.ground.solid(px + 5, y, pz + 5)).collect();
+        assert!(column.iter().all(|s| !s), "the pillar's top came away");
+        assert!(bodies.ground.solid(px + 5, g + 45, pz + 5), "below the cut the pillar stands");
+    }
+
+    #[test]
+    fn the_cleave_slices_a_moving_body_and_lifts_its_upper_half() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let size = [8, 12, 8];
+        bodies.list.push(Body::new(1, block(size, kind(WOOD, OWN)), size, [X, ground + 300, Z]));
+        bodies.next = 2;
+        let eye = [(X - 30) as f32, (ground + 306) as f32, (Z + 4) as f32];
+        let (c, s) = (0.2f32.cos(), 0.2f32.sin());
+        bodies.out.clear();
+        let hung = bodies.cleave_wedge(eye, [0.0, 1.0, 0.0], [c, 0.0, s], [s, 0.0, -c], 0.4, 60.0, [0.0; 3]);
+        assert_eq!(bodies.list.len(), 2, "the block is cut in two");
+        assert!(bodies.out.contains(&BROKE));
+        assert_eq!(hung, 1, "its upper half is lifted");
+        let up = bodies.list.iter().find(|b| bodies.hang_of(b.id).is_some()).unwrap();
+        let down = bodies.list.iter().find(|b| bodies.hang_of(b.id).is_none()).unwrap();
+        assert!(up.pos[1] > eye[1] && down.pos[1] < eye[1]);
+    }
+
+    #[test]
+    fn capture_holds_the_nearest_and_lets_them_go_a_few_at_a_time() {
+        let ground = city::ground(X, Z);
+        let y = ground + 200;
+        let mut bodies = Bodies::new();
+        let mut id = 1;
+        for i in 0..14 {
+            for k in 0..12 {
+                bodies.list.push(Body::new(id, block([2, 2, 2], kind(WOOD, OWN)), [2, 2, 2], [X + i * 6, y, Z + k * 6]));
+                id += 1;
+            }
+        }
+        let center = [X as f32 + 40.0, y as f32, Z as f32 + 33.0];
+        assert_eq!(bodies.capture_orbit(center, 10.0, 3), 3, "no more than asked");
+        let taken: Vec<u32> = bodies.orbits.iter().map(|o| o.0).collect();
+        let nearest = |b: &Body| dot(sub(b.pos, center), sub(b.pos, center));
+        let worst_taken = taken.iter().map(|t| nearest(bodies.list.iter().find(|b| b.id == *t).unwrap())).fold(0.0, f32::max);
+        let closer_left = bodies.list.iter().filter(|b| !taken.contains(&b.id)).any(|b| nearest(b) < worst_taken - 1e-3);
+        assert!(!closer_left, "the nearest are taken first");
+        let y_before: Vec<f32> = taken.iter().map(|t| bodies.list.iter().find(|b| b.id == *t).unwrap().pos[1]).collect();
+        for _ in 0..6 {
+            bodies.advance(1.0 / 60.0);
+        }
+        let y_after: Vec<f32> = taken.iter().map(|t| bodies.list.iter().find(|b| b.id == *t).unwrap().pos[1]).collect();
+        assert_eq!(y_before, y_after, "what is held does not fall");
+        // All of them, then flung: OUT go each call, the outermost first.
+        let all = bodies.capture_orbit(center, 1000.0, 10_000);
+        assert_eq!(all + 3, 168, "everything in reach is taken");
+        assert_eq!(bodies.captured(), 168);
+        bodies.hang_tick(0.2);
+        assert_eq!(bodies.capture_fling([0.0, 0.0, 0.0], 50.0), 168);
+        let first_out = bodies.outgoing.last().unwrap().3;
+        assert!(bodies.outgoing.iter().all(|o| o.3 <= first_out), "the outermost goes first");
+        bodies.advance(1.0 / 60.0);
+        assert_eq!(bodies.captured(), 168 - OUT, "no more than OUT let go in one call");
+        bodies.advance(1.0 / 60.0);
+        assert_eq!(bodies.captured(), 0);
+        let moving = bodies.list.iter().filter(|b| b.vel[0].abs() + b.vel[2].abs() > 20.0).count();
+        assert!(moving >= 160, "what was flung goes ({moving} of 168 moving)");
+    }
+
+    #[test]
+    fn set_pose_puts_a_body_back_awake_and_lets_go_of_a_hold() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        bodies.list.push(Body::new(1, block([4, 4, 4], kind(WOOD, OWN)), [4, 4, 4], [X, ground + 100, Z]));
+        bodies.list[0].asleep = true;
+        assert_eq!(bodies.capture_orbit(bodies.list[0].pos, 20.0, 1), 1);
+        let to = [X as f32, (ground + 120) as f32, Z as f32];
+        let l = (0.7f32 * 0.7 + 1.7 * 1.7).sqrt();
+        let q = [0.0, 0.7 / l, 0.0, 1.7 / l];
+        assert!(bodies.set_pose(1, to, [0.0, 0.7, 0.0, 1.7], [1.0, 2.0, 3.0], [0.0, 0.5, 0.0]));
+        let b = &bodies.list[0];
+        assert_eq!((b.pos, b.vel, b.spin, b.asleep), (to, [1.0, 2.0, 3.0], [0.0, 0.5, 0.0], false));
+        assert!(b.rot.iter().zip(q).all(|(a, b)| (a - b).abs() < 1e-5), "its turn is put, made whole: {:?}", b.rot);
+        assert_eq!(bodies.captured(), 0, "a body put from outside is let go");
+        assert!(!bodies.set_pose(99, to, q, [0.0; 3], [0.0; 3]));
+    }
+
+    #[test]
+    fn a_plastic_weld_bends_in_the_live_solver() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let size = [20, 4, 4];
+        bodies.list.push(Body::new(1, block(size, kind(WOOD, OWN)), size, [X, ground + 100, Z]));
+        let root = [X as f32, (ground + 102) as f32, Z as f32 + 2.0];
+        let local = back(bodies.list[0].rot, sub(root, bodies.list[0].pos));
+        let id = bodies.add_fixed(0, 1, root, local, 0.0, 0.0, 5_000.0, 0.15);
+        assert!(id > 0 && bodies.joint_bend(id) == 0.0);
+        let mut broke = false;
+        for _ in 0..240 {
+            bodies.advance(1.0 / 60.0);
+            if bodies.joint_bend(id) < 0.0 {
+                broke = true;
+                break;
+            }
+        }
+        assert!(broke, "an overloaded plastic weld bends to its limit and breaks in Bodies::advance");
     }
 }
