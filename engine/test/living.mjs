@@ -111,6 +111,27 @@ try {
   const round = await where()
   const turned = round ? Math.abs(Math.atan2(slowed.front[2], slowed.front[0]) - Math.atan2(round.front[2], round.front[0])) : 0
   check(round && turned > 0.2 && round.up > 0.9, `with A as well it comes round (${(turned * 180 / Math.PI).toFixed(0)} degrees) without going over`)
+  // Flipped upside down: seated rider frame inverts with the chassis (never floating upright), and steering rolls the car back upright.
+  await page.evaluate(() => {
+    const e = globalThis.engine, w = e.alive.where(globalThis.thing)
+    e.alive.place(globalThis.thing, [w.at[0], w.at[1] + 2, w.at[2]], [1, 0, 0, 0])
+  })
+  await page.waitForTimeout(350)
+  const flipped = await page.evaluate(() => {
+    const r = globalThis.engine.alive.rider
+    if (!r || !r.frame) return null
+    const q = r.frame
+    return { upY: 1 - 2 * (q[0] * q[0] + q[2] * q[2]) }
+  })
+  check(flipped && flipped.upY < -0.5, `when overturned, seated rider frame rotates upside down with the chassis (upY=${flipped?.upY?.toFixed(2)})`)
+  await page.keyboard.down('KeyD')
+  await page.waitForFunction(() => {
+    const w = globalThis.engine.alive.where(globalThis.thing)
+    return w && (1 - 2 * (w.rot[0] ** 2 + w.rot[2] ** 2)) > 0.85
+  }, null, { timeout: 6000 }).catch(() => {})
+  await page.keyboard.up('KeyD')
+  const righted = await where()
+  check(righted && righted.up > 0.85, `steering rolls an overturned car back onto its wheels (up=${righted?.up?.toFixed(2)})`)
   // Off again.
   await tap('KeyE')
   await page.waitForTimeout(300)

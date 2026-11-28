@@ -161,8 +161,8 @@ export interface Living {
   view(inside: boolean): void
   /** A living thing's look as drawn now, for a check: how big a cell of its own body is drawn (0: not drawn; null: no body), and each part of its fine look, where its low corner is (the world's cells), its turn and how big a cell of it is drawn. */
   look(thing: Thing): { body: number | null; parts: { pos: [number, number, number]; rot: [number, number, number, number]; cell: number; size: [number, number, number]; low: [number, number, number]; per: number; cracks: (readonly [number, number, number] | null)[] | null }[] }
-  /** Where whoever rides from this page sits now and which way they face (cells; 0 is north), as the world's process places every rider (rules/things.mjs `carry`): in the thing's first seat, or its middle. Null when nobody rides. */
-  readonly rider: { at: [number, number, number]; yaw: number } | null
+  /** Where whoever rides from this page sits now, which way they face (world yaw & local seat yaw; 0 is north), and the vehicle's full 3D orientation quaternion (`frame`) so seated riders rotate with pitch/roll/flips. Null when nobody rides. */
+  readonly rider: { at: [number, number, number]; yaw: number; localYaw: number; frame: [number, number, number, number] } | null
   /** Lets go of every living thing, as the solver does when it forgets the world (mover.ts `forget`): whoever rides is set down, looks are put away, and a spawn still waiting is answered as not made. */
   forget(): void
   /** Tells a thing what to do as its rider would, for a check or a script: held for a second unless said again. */
@@ -589,6 +589,8 @@ export function living(o: {
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
+      // Keep unmounted/woken parked vehicle lamps explicitly off (lampAxis = front + 1) so pieces.ts never lights them as generic lamps.
+      if ((thing.controls ?? 'drive') === 'drive') piece.lamps = [0, 0, 0, thing.motor.front + 1]
       return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: interior ? EMPTY_GLASS : glassOf(kinds, f.size) }
     }))
     // The eye where it sees out (#74): once, as its look is worn, and kept on it for the seat, its dents and its card.
@@ -801,7 +803,7 @@ export function living(o: {
       if (at) { o.pose.x = at.at[0] / M - at.front[2] * (riding.size[2] / M / 2 + 1.2); o.pose.z = at.at[2] / M + at.front[0] * (riding.size[2] / M / 2 + 1.2); o.pose.y = Math.max(o.pose.y, o.ground(o.pose.x, o.pose.z) + 1.7) }
     }
     const was = riding
-    if (was && was !== thing) setLamps(was, undefined)
+    if (was && was !== thing) setLamps(was, (was.controls ?? 'drive') === 'drive' ? [0, 0, 0, was.motor.front + 1] : undefined)
     view(false)
     riding = thing?.alive ? thing : null
     said = ''
@@ -863,7 +865,13 @@ export function living(o: {
       const at = riding && where(riding)
       if (!riding || !at) return null
       const off = turned(at.rot, riding.seat ?? [0, -3, 0])
-      return { at: [at.at[0] + off[0], at.at[1] + off[1], at.at[2] + off[2]] as [number, number, number], yaw: Math.atan2(at.front[0], -at.front[2]) }
+      const lf = FRONTS[riding.motor.front] ?? FRONTS[0]
+      return {
+        at: [at.at[0] + off[0], at.at[1] + off[1], at.at[2] + off[2]] as [number, number, number],
+        yaw: Math.atan2(at.front[0], -at.front[2]),
+        localYaw: Math.atan2(lf[0], -lf[2]),
+        frame: [...at.rot] as [number, number, number, number],
+      }
     },
     get near() { return near },
     spawn: (making) => new Promise((done) => {

@@ -9,7 +9,7 @@ const hue = (h: number, tone: number) => 16 + (h % 24) * 10 + (tone % 10)
 const grey = (step: number) => 1 + Math.max(0, Math.min(14, step))
 
 /** Smooth electric AWD Ojai robotaxi handling archetype (10 cm cells/s; 1 cell/s = 0.36 km/h -> 158 km/h top). */
-export const ROBOTAXI_HANDLING = { power: 108, top: 440, grip: 1.52, steer: 0.58, tough: 270 } as const
+export const ROBOTAXI_HANDLING = { power: 108, top: 440, grip: 1.52, steer: 0.58, tough: 400 } as const
 
 export interface StationBay {
   id: number

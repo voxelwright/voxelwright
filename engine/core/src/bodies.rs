@@ -2498,6 +2498,7 @@ impl Bodies {
             let near = (0..parts).min_by_key(|&k| (0..3).map(|a| (c[a] as i32 - seeds[k][a] as i32).pow(2)).sum::<i32>()).unwrap();
             shares[near].push(*c);
         }
+        let from_vehicle = whole.live.as_ref().is_some_and(|l| l.rides());
         self.detach_removed_body(whole.id);
         self.record(BROKE, &[whole.id]);
         let mut debris = self.list.iter().filter(|b| b.live.is_none()).count();
@@ -2522,7 +2523,12 @@ impl Bodies {
             let size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
             let mut grid = vec![0 as Kind; size[0] * size[1] * size[2]];
             for c in &share {
-                grid[c[0] - lo[0] + size[0] * (c[2] - lo[2] + size[2] * (c[1] - lo[1]))] = whole.cells[whole.at(c[0], c[1], c[2])];
+                let mut cell_kind = whole.cells[whole.at(c[0], c[1], c[2])];
+                // Extinguish headlight/taillight voxels on wrecked vehicle chunks so detached wrecks never glow.
+                if from_vehicle && material(cell_kind) == crate::kinds::LAMP {
+                    cell_kind = crate::kinds::kind(GLASS, crate::kinds::grey(11));
+                }
+                grid[c[0] - lo[0] + size[0] * (c[2] - lo[2] + size[2] * (c[1] - lo[1]))] = cell_kind;
             }
             let born = [whole.born[0] + lo[0] as i32, whole.born[1] + lo[1] as i32, whole.born[2] + lo[2] as i32];
             let mut body = Body::new(self.next, grid, size, born);
@@ -2534,10 +2540,11 @@ impl Bodies {
             body.vel = add(whole.speed_at(own), scale(unit(r), 6.0));
             body.spin = whole.spin;
             body.broken = whole.broken + 1;
-            body.passing = whole.passing || body.count < 40;
+            // Wrecked vehicle chunks tumble dramatically then clear into dust instead of baking jagged debris into roads.
+            body.passing = whole.passing || from_vehicle || body.count < 40;
             body.lump = whole.lump || body.count < 80;
             body.limit_points(if body.count < 80 { LUMP_POINTS } else { 48 });
-            if self.persist_debris || whole.persist_sleep {
+            if !from_vehicle && (self.persist_debris || whole.persist_sleep) {
                 body.persist_sleep = body.qualifies_for_persist_sleep();
             }
             debris += 1;
@@ -3964,6 +3971,65 @@ mod tests {
             previous = b.wear;
         }
         panic!("repeated collisions never exhausted chassis integrity");
+    }
+
+    #[test]
+    fn overturned_car_recovers_onto_wheels_with_steering_input() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let id = living::tests::car(&mut bodies, low);
+        let pos = living::tests::the(&bodies, id).pos;
+        // Flip the car completely upside down (180 degrees around X) resting on the road.
+        assert!(bodies.place(id, [pos[0], low[1] as f32 + 5.5, pos[2]], [1.0, 0.0, 0.0, 0.0]));
+        let _ = living::tests::run(&mut bodies, 0.5, id, [0.0, 0.0, 0.0]);
+        let before_up = turn(living::tests::the(&bodies, id).rot, [0.0, 1.0, 0.0])[1];
+        assert!(before_up < -0.5, "car should start resting upside down (up.y={before_up})");
+        // Steer to right the overturned car.
+        let _ = living::tests::run(&mut bodies, 2.5, id, [0.0, 1.0, 0.0]);
+        let after = living::tests::the(&bodies, id);
+        let after_up = turn(after.rot, [0.0, 1.0, 0.0])[1];
+        assert!(after_up > 0.85, "overturned car must roll back onto its wheels when steered (up.y={after_up})");
+        assert!(after.live.as_ref().unwrap().on >= 2, "recovered car should land on its wheels");
+    }
+
+    #[test]
+    fn shattered_vehicle_shards_pass_to_dust_and_extinguish_lamps() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let id = living::tests::car(&mut bodies, low);
+        // Put glowing headlight LAMP voxels on the car chassis before shattering.
+        let idx = bodies.list.iter().position(|b| b.id == id).unwrap();
+        let mut lit = 0;
+        for cell in &mut bodies.list[idx].cells {
+            if *cell != 0 && lit < 8 {
+                *cell = kind(crate::kinds::LAMP, OWN);
+                lit += 1;
+            }
+        }
+        let edits_before = bodies.ground.edits.len();
+        let whole = bodies.list.remove(idx);
+        bodies.shatter(whole);
+        assert!(!bodies.list.is_empty(), "shattered vehicle should spawn tumbling shards");
+        for shard in &bodies.list {
+            assert!(shard.passing, "vehicle wreck shards must be marked passing so they never bake into roads");
+            assert!(
+                !shard.cells.iter().any(|&c| material(c) == crate::kinds::LAMP),
+                "vehicle wreck shards must extinguish LAMP voxels"
+            );
+        }
+        // Advance until all shards come to rest and verify zero permanent road edits were baked.
+        for _ in 0..400 {
+            bodies.advance(0.05);
+            if bodies.list.is_empty() {
+                break;
+            }
+        }
+        assert!(bodies.list.is_empty(), "passing vehicle shards should settle into dust and clear");
+        assert_eq!(
+            bodies.ground.edits.len(),
+            edits_before,
+            "shattered vehicle shards must not bake static voxel debris into the road"
+        );
     }
 
     #[test]

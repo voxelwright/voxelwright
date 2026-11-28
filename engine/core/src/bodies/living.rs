@@ -238,6 +238,7 @@ pub struct Live {
     pub boost_on: bool,
     boost_cd: f32,
     air_time: f32,
+    overturned: f32,
     /// Surface-aware grip & archetype: rain wetness (0..1), optional explicit surface grip override (<= 0 uses `city::top`),
     /// cached terrain cell and base grip, and wheelbase (cells) derived from feet.
     pub wetness: f32,
@@ -271,7 +272,7 @@ impl Live {
             go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, ghost: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, reel: 0.0, base: None, frame: None, cling: false, turning: 0, lost: 0.0, fresh: 0.0, was: [0.0; 3], jolt: 0.0,
             steer_now: 0.0, prev_rolls: 0.0, long_acc: 0.0, lat_acc: 0.0,
             burnout_charge: 0.0, launch_timer: 0.0, launch_power: 0.0,
-            boost_ask: false, boost_fuel: 1.0, boost_on: false, boost_cd: 0.0, air_time: 0.0,
+            boost_ask: false, boost_fuel: 1.0, boost_on: false, boost_cd: 0.0, air_time: 0.0, overturned: 0.0,
             wetness: 0.0, surface_grip: 0.0, surf_cell: [i32::MIN; 2], surf_base: 1.0, wheelbase: 28.0, hull: None, given: [0.0; 3],
             detached_wheels: 0, detached_panels: 0, wheel_health: [1.0; 4], panel_health: [1.0; 4],
             front_hitch: TowingHitch::new([0.0; 3], 250_000.0),
@@ -1136,11 +1137,34 @@ impl Live {
                         b.spin = add(b.spin, add(scale(body_right, pitch_torque), scale(flat, roll_torque)));
                     }
                 }
+                self.overturned = 0.0;
+            } else if self.on == 0 && !flies && body_up[1] < 0.45 && b.apart < 0.15 && dot(b.vel, b.vel) < 35.0 * 35.0 {
+                // GTA-style roll-over recovery: an overturned car resting on its roof or side rights itself
+                // when the driver steers (or holds throttle/reverse for > 1.2 s) instead of staying stuck upside down.
+                self.overturned += h;
+                if told && (turning.abs() > 0.1 || (go.abs() > 0.1 && self.overturned > 1.2)) {
+                    let dir = if turning.abs() > 0.1 {
+                        turning.signum()
+                    } else if dot(body_up, right) >= 0.0 {
+                        -1.0
+                    } else {
+                        1.0
+                    };
+                    let want = scale(flat, dir * 5.2);
+                    let blend = (h * 10.0).min(1.0);
+                    b.spin = add(b.spin, scale(sub(want, b.spin), blend));
+                    if body_up[1] < 0.15 && b.vel[1] < 10.0 {
+                        b.vel[1] = b.vel[1].max(16.0);
+                    }
+                }
             } else if self.on == 0 {
+                self.overturned = 0.0;
                 // Airborne off a hill crest: damp wild pitch/roll tumble while keeping true ballistic trajectory.
                 let damp = (1.0 - 1.4 * h).max(0.0);
                 b.spin[0] *= damp;
                 b.spin[2] *= damp;
+            } else {
+                self.overturned = 0.0;
             }
         }
         self.reel = (self.reel - h).max(0.0);

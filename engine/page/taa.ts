@@ -262,6 +262,24 @@ fn fetchHistoryBicubic(prevUV: vec2f, outSize: vec2f, invCap: vec2f) -> vec4f {
   return vec4f(max(bicubic, vec3f(0.0)), conf);
 }
 
+// Unjittered 3x3 Karis-weighted Gaussian reconstruction for dynamic overlays (cars, people, wheels,
+// water, puffs) that are rasterized without Halton jitter and tagged with velocity == (2.0, 2.0).
+fn reconstructUnjittered(renderPos: vec2f, unjitCenterI: vec2i, renderMaxI: vec2i) -> vec3f {
+  var unjitSum = vec3f(0.0);
+  var unjitW = 0.0;
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let tc = clamp(unjitCenterI + vec2i(dx, dy), vec2i(0), renderMaxI);
+      let cKaris = karisFwd(cleanRgb(textureLoad(colorTex, tc, 0).rgb));
+      let dRenderU = (vec2f(tc) + 0.5) - renderPos;
+      let wf = exp(-2.35 * dot(dRenderU, dRenderU));
+      unjitSum += cKaris * wf;
+      unjitW += wf;
+    }
+  }
+  return karisInv(unjitSum / max(unjitW, 1e-5));
+}
+
 @compute @workgroup_size(8, 8)
 fn cs_resolve(@builtin(global_invocation_id) gid: vec3u) {
   let outSizeF = params.outputInfo.xy;
@@ -281,8 +299,19 @@ fn cs_resolve(@builtin(global_invocation_id) gid: vec3u) {
 
   // Unjittered pixel coordinate in render-res space, and nearest jittered render texel center.
   let renderPos = curUV * renderSizeF;
-  let centerI = clamp(vec2i(floor(renderPos - jitter)), vec2i(0), renderMaxI);
+  let unjitCenterI = clamp(vec2i(floor(renderPos)), vec2i(0), renderMaxI);
   let scaleRatio = outSizeF * invRender;
+
+  // Dynamic overlays (cars, people, wheels, water, puffs) are rasterized unjittered and tagged with
+  // velocity == (2.0, 2.0) by march-trace.ts fs_patch_vel. Reconstruct them without Halton jitter
+  // so they never vibrate by +/-0.5 render pixels per frame.
+  let centerVel = textureLoad(velTex, unjitCenterI, 0).xy;
+  if (centerVel.x > 1.5 && centerVel.y > 1.5) {
+    textureStore(historyOut, px, vec4f(reconstructUnjittered(renderPos, unjitCenterI, renderMaxI), 0.01));
+    return;
+  }
+
+  let centerI = clamp(vec2i(floor(renderPos - jitter)), vec2i(0), renderMaxI);
 
   // Single 3x3 render-space pass:
   //   - Closest-depth search for velocity dilation (0 = near, 1 = far).
@@ -348,6 +377,11 @@ fn cs_resolve(@builtin(global_invocation_id) gid: vec3u) {
 
   // Dilated velocity at closest foreground depth (prevUV - curUV).
   let velRaw = textureLoad(velTex, closestCoord, 0).xy;
+  if (velRaw.x > 1.5 && velRaw.y > 1.5) {
+    // 1-pixel silhouette border around an unjittered dynamic overlay: reconstruct unjittered too.
+    textureStore(historyOut, px, vec4f(reconstructUnjittered(renderPos, unjitCenterI, renderMaxI), 0.01));
+    return;
+  }
   let vel = select(vec2f(0.0), velRaw, abs(velRaw) < vec2f(10.0));
   let prevUV = curUV + vel;
   let velPx = length(vel * outSizeF);
