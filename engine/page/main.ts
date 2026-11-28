@@ -1636,6 +1636,7 @@ async function main() {
     telemetry?.onPresented(canvas)
     lap('draw')
     over.frame(project, playedHud?.parts())
+    interiorSys?.projectOverlay(project)
     social?.frame()
     if (timed) {
       clock.busy = true
@@ -2306,6 +2307,7 @@ async function main() {
       if (entryCtrl) await entryCtrl.visit(x, z, name, cam)
       else await classicVisit(x, z, name)
     },
+    interior: () => interiorSys?.indoorMapState() ?? null,
   })
   watchers.add((gap) => {
     mapSys?.frame(gap / 1000)
