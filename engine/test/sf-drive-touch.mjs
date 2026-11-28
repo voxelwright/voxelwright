@@ -143,7 +143,15 @@ try {
   const blurred = await told()
   await touch('touchEnd', 3); await settle()
   check(blurred?.throttle === 0, `the window losing focus lets Gas go (${blurred?.throttle})`)
-  // Brake held at a stop backs up; drift and boost under the same thumb.
+  // Gas under one thumb and Boost under the other, held at once: the car boosts.
+  const N = k.find((x) => x.act === 'boost')
+  await touch('touchStart', 3, G.x, G.y); await settle(500)
+  await touch('touchStart', 4, N.x, N.y); await settle(300)
+  const boosted = await page.evaluate(() => ({ boosting: !!globalThis.engine.alive.telemetry?.boosting, throttle: globalThis.engine.alive.wheelDrive?.throttle }))
+  await page.screenshot({ path: join(shots, 'arrows-pedals-boosting.png') })
+  await touch('touchEnd', 3); await touch('touchEnd', 4); await settle()
+  check(N.x < VW / 2 && G.x > VW / 2 && boosted.throttle === 1 && boosted.boosting, `Gas under the right thumb and Boost under the left, held at once, boost the car (${JSON.stringify(boosted)})`)
+  // Brake held at a stop backs up, with Drift under the same thumb.
   const B = k.find((x) => x.act === 'brake'), D = k.find((x) => x.act === 'drift')
   await touch('touchStart', 3, B.x, B.y); await touch('touchStart', 4, D.x, D.y); await settle()
   const braking = await told()
@@ -202,6 +210,13 @@ try {
   const slid = await told()
   await touch('touchEnd', 10)
   check(slid?.steer > 0.2 && slid?.throttle === 0, `a slide to the right steers right and up-and-down does nothing (${JSON.stringify(slid)})`)
+  // Boost stands in the slide's half: a touch on it is the key's, never the slide's, and its mark is over the key.
+  k = await laid('slide-pedals')
+  const SB = k.find((x) => x.act === 'boost')
+  await touch('touchStart', 10, SB.x, SB.y); await touch('touchMove', 10, SB.x + 60, SB.y); await settle()
+  const onKey = await page.evaluate(() => ({ boost: globalThis.engine.alive.touch.read().boost, slide: document.documentElement.classList.contains('thumb-down'), mark: document.querySelector('.dt-ghost').getBoundingClientRect().bottom }))
+  await touch('touchEnd', 10); await settle()
+  check(onKey.boost && !onKey.slide && onKey.mark <= SB.top, `a touch on Boost in the slide's half holds Boost and starts no slide, the slide's mark over it (${JSON.stringify(onKey)})`)
   await set({ hand: 'left' }); await settle(400)
   k = await laid('slide-pedals-left-handed')
   const gasLeft = k.find((x) => x.act === 'gas')
@@ -218,6 +233,16 @@ try {
     await laid(`youtube-${steer}-${hand}-handed`)
     await yt(false)
   }
+  // The slide's mark, which is no key, stands clear of the player and of Boost too.
+  await set({ steer: 'slide', hand: 'right' }); await yt(true); await settle(400)
+  await laid('youtube-slide-right-handed')
+  const mark = await page.evaluate(() => {
+    const box = (s) => document.querySelector(s).getBoundingClientRect()
+    const m = box('.dt-ghost'), meets = (b) => m.left < b.right && m.right > b.left && m.top < b.bottom && m.bottom > b.top
+    return { player: meets(box('[data-panel="radio-yt"]')), boost: meets(box('.dt-cluster [data-act="boost"]')) }
+  })
+  check(!mark.player && !mark.boost, `under the player the slide's mark meets neither it nor Boost (${JSON.stringify(mark)})`)
+  await yt(false)
   await set({ steer: 'arrows', hand: 'right' }); await settle(300)
 
   // Tilt: refused, given, no sensor.
