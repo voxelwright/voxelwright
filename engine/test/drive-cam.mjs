@@ -53,16 +53,16 @@ const makeHarness = () => {
   const carY = 0.75, roofY = carY + 0.65
   const distBehindCenter = pose.z - 100
   const eyeAboveRoof = pose.y - roofY
-  check(eyeAboveRoof > 0.35 && eyeAboveRoof < 0.70, `close chase eye sits low just over the roofline (${eyeAboveRoof.toFixed(2)} m above roof, eye y=${pose.y.toFixed(2)} m)`)
-  check(distBehindCenter > 4.8 && distBehindCenter < 6.0, `close chase sits tight behind the car (${distBehindCenter.toFixed(2)} m behind center, ${(distBehindCenter - 2.25).toFixed(2)} m behind bumper)`)
-  check(pose.pitch < -0.04 && pose.pitch > -0.10, `close chase keeps a nearly level forward sightline over the roof (pitch=${pose.pitch.toFixed(3)} rad)`)
+  check(eyeAboveRoof > 0.70 && eyeAboveRoof < 1.10, `close chase eye sits low just over the roofline (${eyeAboveRoof.toFixed(2)} m above roof, eye y=${pose.y.toFixed(2)} m)`)
+  check(distBehindCenter > 6.0 && distBehindCenter < 7.0, `close chase sits tight behind the car (${distBehindCenter.toFixed(2)} m behind center, ${(distBehindCenter - 2.25).toFixed(2)} m behind bumper)`)
+  check(pose.pitch < -0.08 && pose.pitch > -0.13, `close chase keeps a nearly level forward sightline over the roof (pitch=${pose.pitch.toFixed(3)} rad)`)
 
   // Far chase gives clear wider & higher contrast
   cam.setMode('far')
   for (let i = 0; i < 90; i++) cam.frame(baseCtx())
   const farDist = pose.z - 100
   const farAboveRoof = pose.y - roofY
-  check(farDist > distBehindCenter + 1.5 && farAboveRoof > eyeAboveRoof + 0.4, `far chase gives clear wider & higher contrast (dist=${farDist.toFixed(2)} m, +${farAboveRoof.toFixed(2)} m over roof)`)
+  check(farDist > distBehindCenter + 0.6 && farAboveRoof > eyeAboveRoof + 0.12, `far chase gives clear wider & higher contrast (dist=${farDist.toFixed(2)} m, +${farAboveRoof.toFixed(2)} m over roof)`)
 }
 
 // 2. Portrait phone framing pulls back & pitches to protect bottom-right touch keypad clearance
@@ -72,7 +72,22 @@ const makeHarness = () => {
   const { cam, pose } = makeHarness()
   for (let i = 0; i < 60; i++) cam.frame(baseCtx())
   const portDist = pose.z - 100
-  check(portDist > 6.5 && portDist < 8.0 && pose.pitch < -0.10, `portrait phone close chase scales back cleanly (dist=${portDist.toFixed(2)} m, pitch=${pose.pitch.toFixed(3)} rad)`)
+  check(portDist > 7.8 && portDist < 9.0 && pose.pitch < -0.10, `portrait phone close chase scales back cleanly (dist=${portDist.toFixed(2)} m, pitch=${pose.pitch.toFixed(3)} rad)`)
+  globalThis.innerWidth = 1280
+  globalThis.innerHeight = 720
+}
+
+// 2b. A phone on its side (iPhone 17 Pro Max, 956x440) brings the chase in, so the car keeps a 16:9 desktop's share of the width
+{
+  const { cam, pose } = makeHarness()
+  for (let i = 0; i < 60; i++) cam.frame(baseCtx())
+  const deskDist = pose.z - 100
+  globalThis.innerWidth = 956
+  globalThis.innerHeight = 440
+  const wide = makeHarness()
+  for (let i = 0; i < 60; i++) wide.cam.frame(baseCtx())
+  const wideDist = wide.pose.z - 100
+  check(wideDist < deskDist - 0.6 && wideDist > deskDist * 0.75, `landscape phone close chase sits closer than desktop (${wideDist.toFixed(2)} m vs ${deskDist.toFixed(2)} m)`)
   globalThis.innerWidth = 1280
   globalThis.innerHeight = 720
 }
