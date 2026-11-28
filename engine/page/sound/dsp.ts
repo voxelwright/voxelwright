@@ -11,6 +11,9 @@
 //   air                        noise through a band that sweeps: a crash, a whoosh, a blast's crack and boom
 //   beds                       rain, wind, fire, surf, the sea over your head, rubble shifting: noise shaped slowly, and grains
 //   a room                     four delay lines fed back through each other
+//   the hills                  what the world sends comes back 0.71 s later, dark, and again fainter
+//   the head                   a bus for what is heard inside the head (a spell's own sounds): the world's hush and
+//                              the ears' dullness after a blast do not reach it; the ceiling does
 //   the ceiling                a limiter that looks 3 ms ahead and then a hard stop: nothing leaves louder than CEILING,
 //                              whatever a patch says, and a number that is not a number silences and resets everything
 //
@@ -23,12 +26,20 @@ const TAU = Math.PI * 2
 export const CEILING = 0.89, KNEE = 0.6
 /** Numbers in a note: when (frames), which patch, pitch (Hz, or 0 for the patch's own over size), size (1 is the patch's own), force 0 to 1, how long held (s), left and right gain, low-pass (Hz), how much goes to the room, bus, and last: 0, or 1 for a piece of something breaking, or from 2 up a name for a note that is held until it is let go (`release`) and can be bent meanwhile (`glide`). */
 export const NOTE = 12
-/** Things set from outside and eased to: the beds' levels and where they are, the room, the buses, and the driven vehicle. */
-export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17, engineRpm: 18, engineLoad: 19, engineTone: 20, tireSlip: 21, roadRoll: 22, roadRough: 23, turboBoost: 24 } as const
-const SETS = 25
+/**
+ * Things set from outside and eased to: the beds' levels and where they are, the room, the buses, the driven vehicle,
+ * and the world's bus alone: how far it is hushed (`worldHush`, 0 none to 1 silent: time slowed, the instant a blast
+ * lands), how dull the ears are to it (`earMuffle`, Hz: after a blast, while time is stopped) and how much of it the
+ * hills send back (`hillGain`).
+ */
+export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17, engineRpm: 18, engineLoad: 19, engineTone: 20, tireSlip: 21, roadRoll: 22, roadRough: 23, turboBoost: 24, worldHush: 25, earMuffle: 26, hillGain: 27 } as const
+const SETS = 28
 /** The least and the most each may be set to: a level is 0 to 1 whoever asks. */
-const LEAST = [0, 0, 0, -1, 40, 0, -1, 0, 0, -1, 40, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], MOST = [1, 1, 1, 1, 20000, 1, 1, 1, 1, 1, 20000, 8, 1, 1.5, 1.5, 1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1]
-export const BUS = { world: 0, music: 1, play: 2 } as const
+const LEAST = [0, 0, 0, -1, 40, 0, -1, 0, 0, -1, 40, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 40, 0], MOST = [1, 1, 1, 1, 20000, 1, 1, 1, 1, 1, 20000, 8, 1, 1.5, 1.5, 1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 20000, 1]
+/** `head` is heard inside the head: it is not hushed, dulled or muffled with the world, and nothing of the world or the music takes its voices. */
+export const BUS = { world: 0, music: 1, play: 2, head: 3 } as const
+/** The hills: how late they answer (s), where their answer loses its top (Hz), how much of it they answer again, and how loud it comes back. */
+const HILL_LATE = 0.71, HILL_DARK = 1250, HILL_AGAIN = 0.34, HILL_BACK = 0.85
 const BLOCK = 128
 const MV = 64, MM = 12, SV = 16, TV = 16, AV = 24, GV = 40, PENDING = 4096
 
@@ -46,7 +57,7 @@ export class Synth {
   // Work space for one block.
   private x = new Float32Array(BLOCK)
   private tmp = new Float32Array(BLOCK)
-  private bus = [0, 1, 2, 3, 4, 5].map(() => new Float32Array(BLOCK))
+  private bus = [0, 1, 2, 3, 4, 5, 6, 7].map(() => new Float32Array(BLOCK))
   private send = new Float32Array(BLOCK)
   // Struck and rubbed: MV voices of up to MM modes.
   private mOn = new Uint8Array(MV); private mWait = new Int32Array(MV); private mAge = new Int32Array(MV); private mLife = new Int32Array(MV); private mN = new Uint8Array(MV)
@@ -81,6 +92,9 @@ export class Synth {
   private readonly toneFade: number; private readonly limRelease: number; private readonly limAttack: number; private readonly duckEase: number; private readonly dcHold: number; private readonly glueDown: number
   private lastRoomTime = -1; private rG0 = 0; private rG1 = 0; private rG2 = 0; private rG3 = 0
   private lastMuffle = -1; private lastMuffleCut = 1
+  // The hills (two lines, left and right) and the ears' own dullness to the world.
+  private hLen: number; private hBuf: Float32Array[]; private hAt = 0; private hZ = new Float64Array(2); private hLive = 0; private readonly hillCut: number
+  private lastEar = -1; private lastEarCut = 1; private ear = new Float64Array(4)
   // The ceiling.
   private look: number; private lBuf: Float32Array[]; private lAt = 0; private lEnv = 0; private lGain = 1; private mfl = new Float32Array(4); private duck = 0; private dc = new Float64Array(4); private glue = 0
 
@@ -102,9 +116,12 @@ export class Synth {
     this.rLen = Int32Array.from([0.0317, 0.0379, 0.0443, 0.0521].map((s) => Math.round(s * sr)))
     this.rBuf = [...this.rLen].map((n) => new Float32Array(n))
     this.rPre = new Float32Array(Math.round(0.012 * sr))
+    this.hLen = Math.max(1, Math.round(HILL_LATE * sr))
+    this.hBuf = [new Float32Array(this.hLen), new Float32Array(this.hLen)]
+    this.hillCut = 1 - Math.exp((-TAU * HILL_DARK) / sr)
     this.look = Math.round(0.003 * sr)
     this.lBuf = [new Float32Array(this.look), new Float32Array(this.look)]
-    this.target.set([0, 0, 0, 0, 20000, 0, 0, 0, 0, 0, 20000, 0.9, 0.5, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+    this.target.set([0, 0, 0, 0, 20000, 0, 0, 0, 0, 0, 20000, 0.9, 0.5, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20000, 0])
     this.now.set(this.target)
   }
 
@@ -196,7 +213,7 @@ export class Synth {
     if (!p) return
     const wait = Math.max(0, Math.round(q[i] - this.frame)), size = Math.min(8, Math.max(0.125, q[i + 3] || 1)), force = Math.min(1, Math.max(0.02, q[i + 4])), piece = q[i + 11] === 1, id = q[i + 11] >= 2 ? q[i + 11] | 0 : 0
     const pitch = Math.min(0.45 * this.sr, Math.max(16, q[i + 2] > 0 ? q[i + 2] : p.pitch / size))
-    const gl = Math.min(1, Math.max(0, q[i + 6])), gr = Math.min(1, Math.max(0, q[i + 7])), lp = q[i + 8] > 0 ? q[i + 8] : 20000, send = Math.min(1, Math.max(0, q[i + 9])), bus = q[i + 10] === 1 ? 1 : q[i + 10] === 2 ? 2 : 0
+    const gl = Math.min(1, Math.max(0, q[i + 6])), gr = Math.min(1, Math.max(0, q[i + 7])), lp = q[i + 8] > 0 ? q[i + 8] : 20000, send = Math.min(1, Math.max(0, q[i + 9])), bus = q[i + 10] === 1 ? 1 : q[i + 10] === 2 ? 2 : q[i + 10] === 3 ? 3 : 0
     const gain = Math.min(1, Math.max(0, p.gain)) * force ** 1.2 * (piece ? 0.5 : 1)
     const v = p.strung ? this.pluck(p, wait, pitch, force, gain, id ? 0 : q[i + 5], gl, gr, lp, send, bus) : p.tone ? this.hold(p, wait, pitch, force, gain, id ? 1e6 : q[i + 5], gl, gr, lp, send, bus) : this.strike(p, wait, pitch, force, gain, p.how === 3 ? Math.max(0.02, id ? 30 : q[i + 5] || 0.3) : 0, piece, gl, gr, lp, send, bus)
     if (v < 0) { this.stats.dropped++; return }
@@ -221,8 +238,8 @@ export class Synth {
     let best = -1, least = Infinity
     for (let v = 0; v < n; v++) {
       if (!on[v]) return v
-      // What is played by hand is never cut short for the world or the music.
-      if (buses[v] === 2 && bus !== 2) continue
+      // What is played by hand is never cut short for the world or the music, nor is what is heard in the head.
+      if ((buses[v] === 2 && bus !== 2) || (buses[v] === 3 && bus < 2)) continue
       const l = loud ? loud[v] : v
       if (l < least) { least = l; best = v }
     }
@@ -305,7 +322,7 @@ export class Synth {
 
   private hold(p: Compiled, wait: number, pitch: number, force: number, gain: number, dur: number, gl: number, gr: number, lp: number, send: number, bus: number) {
     let v = -1, oldest = -1
-    for (let k = 0; k < TV; k++) { if (!this.tOn[k]) { v = k; oldest = -1; break } if ((this.tBus[k] === 2 || this.tId[k]) && bus !== 2) continue; if (this.tAge[k] > oldest) { oldest = this.tAge[k]; v = k } }
+    for (let k = 0; k < TV; k++) { if (!this.tOn[k]) { v = k; oldest = -1; break } if (((this.tBus[k] === 2 || this.tId[k]) && bus !== 2) || (this.tBus[k] === 3 && bus < 2)) continue; if (this.tAge[k] > oldest) { oldest = this.tAge[k]; v = k } }
     if (v < 0) return -1
     if (oldest >= 0) this.stats.stolen++
     const sr = this.sr
@@ -742,7 +759,7 @@ export class Synth {
 
   // ── The room, the buses, the ceiling ────────────────────────────────────
   private out(L: Float32Array, R: Float32Array, at: number, len: number) {
-    const now = this.now, sr = this.sr, [wl, wr, ml, mr, pl, pr] = this.bus, send = this.send
+    const now = this.now, sr = this.sr, [wl, wr, ml, mr, pl, pr, hl, hr] = this.bus, send = this.send
     // The room: what was sent waits 12 ms, then goes round four lines that feed each other, losing their top as they go.
     const time = Math.min(8, Math.max(0.1, now[SET.roomTime])), back = now[SET.roomGain], pre = this.rPre, rb = this.rBuf, rl = this.rLen, rz = this.rZ, ra = this.rAt
     if (time !== this.lastRoomTime) {
@@ -774,10 +791,32 @@ export class Synth {
     ra[0] = ra0; ra[1] = ra1; ra[2] = ra2; ra[3] = ra3
     rz[0] = rz0; rz[1] = rz1; rz[2] = rz2; rz[3] = rz3
     this.rPreAt = pa
+    // The hills: what the world sends them comes back late and dull, and comes back again fainter. Nothing is done
+    // while nothing is sent and the lines have had two trips of silence.
+    const hills = now[SET.hillGain]
+    if (hills > 0.0005 || this.hLive > 0) {
+      const h0 = this.hBuf[0], h1 = this.hBuf[1], hn = this.hLen, hc = this.hillCut, hz = this.hZ
+      let ha = this.hAt, z0 = hz[0], z1 = hz[1], loud = 0
+      for (let i = 0; i < len; i++) {
+        z0 += hc * (h0[ha] - z0); z1 += hc * (h1[ha] - z1)
+        const sl = wl[i] * hills, sr2 = wr[i] * hills
+        h0[ha] = sl + z0 * HILL_AGAIN; h1[ha] = sr2 + z1 * HILL_AGAIN
+        if (++ha === hn) ha = 0
+        const a = (z0 < 0 ? -z0 : z0) + (sl < 0 ? -sl : sl) + (sr2 < 0 ? -sr2 : sr2)
+        if (a > loud) loud = a
+        wl[i] += z0 * HILL_BACK; wr[i] += z1 * HILL_BACK
+      }
+      this.hAt = ha; hz[0] = z0; hz[1] = z1
+      this.hLive = loud > 1e-5 ? hn * 2 : this.hLive - len
+    }
     // The music gives way to the world when the world is loud, and comes back slowly.
     const world = now[SET.world], music = now[SET.music], play = now[SET.play], master = now[SET.master]
     const muffleHz = now[SET.muffle]
     if (muffleHz !== this.lastMuffle) { this.lastMuffle = muffleHz; this.lastMuffleCut = this.lpCoef(muffleHz) }
+    // The world alone is hushed and dulled to the ears (time slowed or stopped, the ears after a blast): what is heard in the head is not.
+    const quiet = 1 - now[SET.worldHush], earHz = now[SET.earMuffle], e = this.ear
+    if (earHz !== this.lastEar) { this.lastEar = earHz; this.lastEarCut = this.lpCoef(earHz) }
+    const ec = this.lastEarCut
     const cut = this.lastMuffleCut, m = this.mfl, la = this.lBuf, look = this.look, release = this.limRelease, attack = this.limAttack, ease = this.duckEase
     let duck = this.duck, env = this.lEnv, gain = this.lGain, lat = this.lAt, bad = false, peak = this.stats.peak, held = this.stats.held
     // A blow is a push one way, and what is left of it under 20 Hz is not heard: it only moves the cone and eats the room under the ceiling.
@@ -793,11 +832,15 @@ export class Synth {
       const mb = Math.max(Math.abs(ml[i]), Math.abs(mr[i]))
       glue = mb > glue ? mb : glue * glueDown
       const under = (music / (1 + 2.5 * Math.min(1, duck))) * (glue > 0.05 ? (0.05 / glue) ** 0.55 : 1) * 2.4
-      let l = (wl[i] * world + ml[i] * under + pl[i] * play) * master, r = (wr[i] * world + mr[i] * under + pr[i] * play) * master
+      let el = wl[i] * world * quiet, er = wr[i] * world * quiet
+      if (ec < 1) { e[0] += ec * (el - e[0]); e[1] += ec * (e[0] - e[1]); e[2] += ec * (er - e[2]); e[3] += ec * (e[2] - e[3]); el = e[1]; er = e[3] } else { e[0] = el; e[1] = el; e[2] = er; e[3] = er }
+      let l = (el + ml[i] * under + pl[i] * play) * master, r = (er + mr[i] * under + pr[i] * play) * master
       // Under water, or with a wall between, everything loses its top (two poles).
       m[0] += cut * (l - m[0]); m[1] += cut * (m[0] - m[1]); m[2] += cut * (r - m[2]); m[3] += cut * (m[2] - m[3])
-      l = m[1] - dc[0] + hold * dc[1]; dc[0] = m[1]; dc[1] = l
-      r = m[3] - dc[2] + hold * dc[3]; dc[2] = m[3]; dc[3] = r
+      // What is in the head joins here: past the hush and both dullnesses, before the ceiling.
+      const xl = m[1] + hl[i] * master, xr = m[3] + hr[i] * master
+      l = xl - dc[0] + hold * dc[1]; dc[0] = xl; dc[1] = l
+      r = xr - dc[2] + hold * dc[3]; dc[2] = xr; dc[3] = r
       if (!(l - l === 0) || !(r - r === 0)) { bad = true; break }
       // The ceiling: what comes is seen 3 ms before it leaves, and the gain is down by then.
       const big = Math.max(Math.abs(l), Math.abs(r))
@@ -821,8 +864,8 @@ export class Synth {
   silence() {
     this.stats.reset++
     for (const on of [this.mOn, this.sOn, this.tOn, this.aOn, this.gOn]) on.fill(0)
-    for (const b of [...this.rBuf, ...this.lBuf, this.rPre, this.rZ, this.mfl, this.sBuf]) b.fill(0)
-    this.bed.fill(0); this.dc.fill(0); this.glue = 0; this.duck = 0; this.lEnv = 0; this.lGain = 1
+    for (const b of [...this.rBuf, ...this.lBuf, ...this.hBuf, this.rPre, this.rZ, this.mfl, this.sBuf]) b.fill(0)
+    this.bed.fill(0); this.dc.fill(0); this.hZ.fill(0); this.ear.fill(0); this.hLive = 0; this.glue = 0; this.duck = 0; this.lEnv = 0; this.lGain = 1
   }
 }
 

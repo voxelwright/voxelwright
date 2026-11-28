@@ -36,6 +36,7 @@ export interface Play {
   room?: number
   /** Metres at which it is half as loud as close to: a hammer blow 4, a charge 40. */
   reach?: number
+  /** Which bus (BUS): the world's unless said. `BUS.head` is for a spell's own sounds: the world's hush and the ears' dullness (SET.worldHush, SET.earMuffle) do not reach it. */
   bus?: number
   /** -1 to 1, for what is heard in the head. */
   pan?: number
@@ -54,6 +55,8 @@ export interface Sound {
   listen(eye: readonly [number, number, number], yaw: number): void
   /** Sets a bed's level, the room or a bus (SET). */
   set(which: number, value: number): void
+  /** Plays a patch inside the head, on `BUS.head`: as it is, whatever the world's bus is hushed or dulled to. */
+  head(patch: Patch, how?: Play): boolean
   /** A place as the ears have it: how loud (0 to 1), which side (-1 to 1), how dull (Hz), how late (s). */
   hear(at: readonly [number, number, number], reach?: number): { gain: number; pan: number; lp: number; late: number; far: number }
   /** Stops what is held on a bus. */
@@ -132,8 +135,8 @@ export async function sound(): Promise<Sound> {
     }
     const when = ((how.when ?? context.currentTime + (how.after ?? 0)) + late) * context.sampleRate
     notes.push(when, id(patch), how.pitch ?? 0, how.size ?? 1, how.force ?? 0.7, how.dur ?? 0, gain * Math.sqrt(0.5 * (1 - pan)) * 1.25, gain * Math.sqrt(0.5 * (1 + pan)) * 1.25, lp, send, how.bus ?? BUS.world, name)
-    // What is played by hand does not wait for the frame.
-    if (how.bus === BUS.play) flush()
+    // What is played by hand does not wait for the frame, nor does what is heard in the head (a spell's own sounds).
+    if (how.bus === BUS.play || how.bus === BUS.head) flush()
     spent += (performance.now() - t0 - spent) * 0.05
     return true
   }
@@ -144,6 +147,7 @@ export async function sound(): Promise<Sound> {
     get spent() { return spent },
     hear, flush,
     play,
+    head: (patch, how = {}) => play(patch, { ...how, at: undefined, bus: BUS.head }),
     forget(patch) { const n = ids.get(patch); if (n !== undefined) { ids.delete(patch); spare.push(n) } },
     hold(patch, how = {}) { const name = ++held + 1; return play(patch, { bus: BUS.play, ...how }, name) ? name : 0 },
     release(id) { if (id) node.port.postMessage({ release: id }) },
