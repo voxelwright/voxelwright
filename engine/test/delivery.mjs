@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { CargoBay } from '../page/delivery-cargo.ts'
 import { buildDeliveryVehicle, cargoGridSizeFor, defaultUpgrades, DELIVERY_VEHICLES } from '../page/delivery-vehicles.ts'
 import { computeMultiStopRoute } from '../page/gps.ts'
-import { buildRoomShellAsset, buildShoppingCartAsset } from '../page/interior-modules.ts'
+import { buildRoomShellAsset, buildShoppingCartAsset, getInteriorModuleKit } from '../page/interior-modules.ts'
 import { synthesizeInteriorBlueprint } from '../page/interiors.ts'
 import { arg, has, start } from './kit.mjs'
 
@@ -114,6 +114,57 @@ console.log('3. Modular non-cookie-cutter store & restaurant interiors + 1:1 blu
   const cart4 = buildShoppingCartAsset(4)
   check(shell.born.cells > 5000 && cart4.born.cells > cart0.born.cells,
     `3D voxel room shell (${shell.born.cells} cells) & shopping cart visually fills (${cart0.born.cells} -> ${cart4.born.cells} cells)`)
+
+  // Regression gate: no standing NPC inside any solid fixture (e.g. Staff/Chef inside pizza oven),
+  // no NPC clipping walls, and no solid modules overlapping each other across all categories & sizes.
+  const kit = getInteriorModuleKit()
+  const allCats = ['pizza', 'supermarket', 'grocery', 'corner_store', 'market', 'burger', 'coffee', 'bakery', 'ice_cream', 'bar', 'restaurant']
+  const testWidths = [7.2, 8.2, 9.5, 12.0]
+  const npcRadius = 0.28
+  const overlapErrors = []
+  const modBox = (m) => {
+    const asset = kit[m.kind]
+    if (!asset?.solid) return null
+    const rot = Math.abs(Math.sin(m.yaw ?? 0)) > 0.5
+    const hx = m.collider ? m.collider[0] : (rot ? asset.halfZ : asset.halfX)
+    const hz = m.collider ? m.collider[1] : (rot ? asset.halfX : asset.halfZ)
+    return { x0: m.x - hx, x1: m.x + hx, z0: m.z - hz, z1: m.z + hz, id: m.id, kind: m.kind }
+  }
+  const auditPlace = (place) => {
+    const bp = synthesizeInteriorBlueprint(place, 4)
+    const boxes = bp.modules.map(modBox).filter(Boolean)
+    for (const npc of bp.npcs) {
+      if (npc.role === 'patron_sit') continue
+      for (const b of boxes) {
+        if (npc.x + npcRadius > b.x0 && npc.x - npcRadius < b.x1 && npc.z + npcRadius > b.z0 && npc.z - npcRadius < b.z1) {
+          overlapErrors.push(`${place.category}:${place.name} NPC ${npc.id} inside ${b.id}(${b.kind})`)
+        }
+      }
+      if (npc.x < 0.35 || npc.x > bp.room.widthM - 0.35 || npc.z < 0.35 || npc.z > bp.room.depthM - 0.35) {
+        overlapErrors.push(`${place.category}:${place.name} NPC ${npc.id} clips wall`)
+      }
+    }
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j]
+        if (a.x0 < b.x1 - 0.02 && a.x1 > b.x0 + 0.02 && a.z0 < b.z1 - 0.02 && a.z1 > b.z0 + 0.02) {
+          overlapErrors.push(`${place.category}:${place.name} module ${a.id}(${a.kind}) overlaps ${b.id}(${b.kind})`)
+        }
+      }
+    }
+  }
+  auditPlace({ id: 'calzones', name: "Calzone's Pizza Cucina", category: 'pizza', x: 52106, z: 66325, widthM: 9.0, heightM: 9 })
+  for (const cat of allCats) {
+    for (const w of testWidths) {
+      for (let s = 0; s < 4; s++) {
+        auditPlace({ id: `${cat}-${w}-${s}`, name: `Shop ${cat} ${s}`, category: cat, x: 52000 + s * 13, z: 66000 + s * 17, widthM: w, heightM: 9 })
+      }
+    }
+  }
+  check(overlapErrors.length === 0,
+    overlapErrors.length === 0
+      ? `zero NPC/module or module/module overlaps across ${1 + allCats.length * testWidths.length * 4} interior blueprints`
+      : `${overlapErrors.length} interior overlaps (first: ${overlapErrors[0]})`)
 }
 
 console.log('4. Multi-stop GPS route calculation & stop reordering')
