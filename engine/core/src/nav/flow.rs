@@ -10,7 +10,7 @@
 //! per tick with zero per-agent A* searches).
 
 use crate::nav::heightfield::{
-    DIR_OFFSETS, MOVE_DROP, MOVE_VAULT, MOVE_WALK, NAV_STEP, TILE_CELLS, TILE_COLS, VoxelSource,
+    DIR_OFFSETS, MOVE_DROP, MOVE_VAULT, MOVE_WALK, NAV_STEP, TILE_CELLS, VoxelSource,
     col_center, col_index, world_to_col, world_to_tile,
 };
 use crate::nav::tiles::{TileCache, edge_step_cost};
@@ -19,8 +19,8 @@ use std::collections::BinaryHeap;
 
 /// Maximum threat radius clamped per threat source (500 cells = 50 m).
 const MAX_THREAT_RADIUS: f32 = 500.0;
-/// Maximum flow bounding box width/height in nav tiles (20 * 6.4 m = 128 m across).
-const MAX_FLOW_TILES_SIDE: i32 = 20;
+/// Maximum flow bounding box width/height in nav tiles (12 * 6.4 m = 76.8 m across).
+const MAX_FLOW_TILES_SIDE: i32 = 12;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Threat {
@@ -30,7 +30,8 @@ pub struct Threat {
     pub radius: f32,
 }
 
-/// Built panic flow field ready for O(1) per-agent sampling.
+/// Built panic flow field ready for O(1) per-agent sampling, with reusable flat CSR scratch buffers
+/// so repeated builds during explosions allocate zero nested `Vec`s.
 #[derive(Default)]
 pub struct FlowField {
     threats: Vec<Threat>,
@@ -45,6 +46,23 @@ pub struct FlowField {
     vectors: Vec<[f32; 2]>,
     /// Reusable output slot for WASM C-ABI `nav_flow_sample` / `nav_flow_vec_ptr`.
     pub last_vec: [f32; 2],
+    // Reusable flat scratch buffers for `build_budgeted` (zero per-call nested heap allocations).
+    wx_arr: Vec<f32>,
+    wy_arr: Vec<f32>,
+    wz_arr: Vec<f32>,
+    danger: Vec<f32>,
+    is_safe: Vec<u8>,
+    escape: Vec<f32>,
+    raw_edges: Vec<(u32, u32, f32)>,
+    rev_offsets: Vec<u32>,
+    rev_cursor: Vec<u32>,
+    rev_edges: Vec<(u32, f32)>,
+    sum_x: Vec<f32>,
+    sum_z: Vec<f32>,
+    best_drop: Vec<f32>,
+    best_dx: Vec<f32>,
+    best_dz: Vec<f32>,
+    heap: BinaryHeap<Reverse<(u32, u32)>>,
 }
 
 impl FlowField {
@@ -122,7 +140,8 @@ impl FlowField {
         self.tz0 = min_tz;
         self.grid_w = gw;
         self.grid_h = gh;
-        self.tile_offsets = vec![u32::MAX; gw * gh];
+        self.tile_offsets.clear();
+        self.tile_offsets.resize(gw * gh, u32::MAX);
 
         // Bake up to `max_bake` missing tiles in the threat window, nearest-to-threat first.
         if max_bake == usize::MAX {
@@ -170,16 +189,20 @@ impl FlowField {
             return 0;
         }
 
-        // Metadata per dense span id.
-        let mut wx_arr = vec![0.0f32; total_spans];
-        let mut wy_arr = vec![0.0f32; total_spans];
-        let mut wz_arr = vec![0.0f32; total_spans];
-        let mut danger = vec![0.0f32; total_spans];
-        let mut is_safe = vec![false; total_spans];
-
-        // Forward and reverse walkable adjacency (Walk, Vault, Drop — never Climb for panic crowds).
-        let mut fwd_adj: Vec<Vec<(u32, f32)>> = vec![Vec::new(); total_spans];
-        let mut rev_adj: Vec<Vec<(u32, f32)>> = vec![Vec::new(); total_spans];
+        // Reuse flat metadata & edge scratch buffers (zero nested Vec allocations).
+        self.wx_arr.clear();
+        self.wx_arr.resize(total_spans, 0.0);
+        self.wy_arr.clear();
+        self.wy_arr.resize(total_spans, 0.0);
+        self.wz_arr.clear();
+        self.wz_arr.resize(total_spans, 0.0);
+        self.danger.clear();
+        self.danger.resize(total_spans, 0.0);
+        self.is_safe.clear();
+        self.is_safe.resize(total_spans, 0);
+        self.raw_edges.clear();
+        self.rev_cursor.clear();
+        self.rev_cursor.resize(total_spans, 0);
 
         for tz in min_tz..=max_tz {
             for tx in min_tx..=max_tx {
@@ -193,9 +216,9 @@ impl FlowField {
                     let u = base as usize + sidx;
                     let (wx, wy, wz) = tile.span_world(sidx as u16);
                     let (fx, fy, fz) = (wx as f32, wy as f32, wz as f32);
-                    wx_arr[u] = fx;
-                    wy_arr[u] = fy;
-                    wz_arr[u] = fz;
+                    self.wx_arr[u] = fx;
+                    self.wy_arr[u] = fy;
+                    self.wz_arr[u] = fz;
 
                     // Evaluate danger and safe-exit status across all threats.
                     let mut safe_all = true;
@@ -204,149 +227,172 @@ impl FlowField {
                         let dx = fx - t.x;
                         let dz = fz - t.z;
                         let dy = (fy - t.y) * 0.5;
-                        let d = (dx * dx + dy * dy + dz * dz).sqrt();
-                        if d < t.radius {
+                        let d2 = dx * dx + dy * dy + dz * dz;
+                        if d2 < t.radius * t.radius {
                             safe_all = false;
-                            let frac = 1.0 - (d / t.radius);
+                            let frac = 1.0 - (d2.sqrt() / t.radius);
                             // Strong quadratic threat core penalty keeps paths routing around blasts.
                             pen += frac * frac * 64.0;
                         }
                     }
-                    is_safe[u] = safe_all;
-                    danger[u] = pen;
+                    self.is_safe[u] = safe_all as u8;
+                    self.danger[u] = pen;
 
                     let uy = tile.spans[sidx].y;
-                    // Intra-tile transitions.
+                    // Intra-tile transitions (Walk, Vault, Drop — never Climb for panic crowds).
                     for e in tile.span_edges(sidx as u16) {
                         if !matches!(e.move_kind, MOVE_WALK | MOVE_VAULT | MOVE_DROP) {
                             continue;
                         }
                         let v = base + e.to_span as u32;
                         let step = edge_step_cost(uy, &tile.spans[e.to_span as usize], e.move_kind);
-                        fwd_adj[u].push((v, step));
-                        rev_adj[v as usize].push((u as u32, step));
+                        self.raw_edges.push((u as u32, v, step));
+                        self.rev_cursor[v as usize] += 1;
                     }
-                    // Cross-tile border transitions inside the flow window.
-                    let col = tile.spans[sidx].col as usize;
-                    let cx = col % TILE_COLS;
-                    let cz = col / TILE_COLS;
-                    let on_border = [cx == TILE_COLS - 1, cx == 0, cz == TILE_COLS - 1, cz == 0];
-                    for dir in 0..4usize {
-                        if !on_border[dir] {
+                }
+                // Cross-tile border transitions once per (tile, dir) in O(border_links) instead of O(spans * border_links).
+                for dir in 0..4usize {
+                    if tile.border_links[dir].is_empty() {
+                        continue;
+                    }
+                    let (ox, oz) = DIR_OFFSETS[dir];
+                    let ntx = tx + ox;
+                    let ntz = tz + oz;
+                    if ntx < min_tx || ntx > max_tx || ntz < min_tz || ntz > max_tz {
+                        continue;
+                    }
+                    let ngidx = (ntz - min_tz) as usize * gw + (ntx - min_tx) as usize;
+                    let nbase = self.tile_offsets[ngidx];
+                    if nbase == u32::MAX {
+                        continue;
+                    }
+                    let Some(ntile) = cache.get((ntx, ntz)) else { continue };
+                    for &(fs, ts, mk) in &tile.border_links[dir] {
+                        if !matches!(mk, MOVE_WALK | MOVE_VAULT | MOVE_DROP) {
                             continue;
                         }
-                        let (ox, oz) = DIR_OFFSETS[dir];
-                        let ntx = tx + ox;
-                        let ntz = tz + oz;
-                        if ntx < min_tx || ntx > max_tx || ntz < min_tz || ntz > max_tz {
-                            continue;
-                        }
-                        let ngidx = (ntz - min_tz) as usize * gw + (ntx - min_tx) as usize;
-                        let nbase = self.tile_offsets[ngidx];
-                        if nbase == u32::MAX {
-                            continue;
-                        }
-                        let Some(ntile) = cache.get((ntx, ntz)) else { continue };
-                        for &(fs, ts, mk) in &tile.border_links[dir] {
-                            if fs as usize != sidx || !matches!(mk, MOVE_WALK | MOVE_VAULT | MOVE_DROP) {
-                                continue;
-                            }
-                            let v = nbase + ts as u32;
-                            let step = edge_step_cost(uy, &ntile.spans[ts as usize], mk);
-                            fwd_adj[u].push((v, step));
-                            rev_adj[v as usize].push((u as u32, step));
-                        }
+                        let u = base + fs as u32;
+                        let v = nbase + ts as u32;
+                        let uy = tile.spans[fs as usize].y;
+                        let step = edge_step_cost(uy, &ntile.spans[ts as usize], mk);
+                        self.raw_edges.push((u, v, step));
+                        self.rev_cursor[v as usize] += 1;
                     }
                 }
             }
+        }
+
+        // Build flat CSR reverse adjacency in O(V + E).
+        self.rev_offsets.clear();
+        self.rev_offsets.reserve(total_spans + 1);
+        let mut acc = 0u32;
+        self.rev_offsets.push(0);
+        for i in 0..total_spans {
+            let deg = self.rev_cursor[i];
+            self.rev_cursor[i] = acc;
+            acc += deg;
+            self.rev_offsets.push(acc);
+        }
+        self.rev_edges.resize(acc as usize, (0, 0.0));
+        for &(u, v, step) in &self.raw_edges {
+            let dst = self.rev_cursor[v as usize] as usize;
+            self.rev_cursor[v as usize] += 1;
+            self.rev_edges[dst] = (u, step);
         }
 
         // Pass 1: Safe-Boundary Dijkstra propagating escape integration cost inward from all safe spans.
-        let mut escape = vec![f32::INFINITY; total_spans];
-        let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new();
+        self.escape.clear();
+        self.escape.resize(total_spans, f32::INFINITY);
+        self.heap.clear();
         for u in 0..total_spans {
-            if is_safe[u] {
-                escape[u] = 0.0;
-                heap.push(Reverse((0, u as u32)));
+            if self.is_safe[u] != 0 {
+                self.escape[u] = 0.0;
+                self.heap.push(Reverse((0, u as u32)));
             }
         }
 
-        run_reverse_dijkstra(&rev_adj, &danger, &mut escape, &mut heap);
+        run_reverse_dijkstra(&self.rev_offsets, &self.rev_edges, &self.danger, &mut self.escape, &mut self.heap);
 
-        // Fallback for enclosed rooms / pockets with no walkable exit outside threat radii:
-        // seed the furthest span from the nearest threat inside any unreached component.
-        let mut unreached_any = false;
-        for u in 0..total_spans {
-            if !is_safe[u] && !escape[u].is_finite() {
-                unreached_any = true;
-                break;
-            }
-        }
-        if unreached_any {
-            // Find local maxima of minimum distance to threats among unreached spans.
+        // Fallback for enclosed rooms / pockets or large threat radii exceeding the cached tile window:
+        // seed the furthest connected unreached span from the nearest threat (skipping isolated 1-span specks).
+        for _ in 0..16 {
             let mut best_u: Option<(usize, f32)> = None;
             for u in 0..total_spans {
-                if escape[u].is_finite() {
+                if self.escape[u].is_finite() || self.rev_offsets[u] == self.rev_offsets[u + 1] {
                     continue;
                 }
-                let mut min_d = f32::INFINITY;
+                let mut min_d2 = f32::INFINITY;
                 for t in &self.threats {
-                    let dx = wx_arr[u] - t.x;
-                    let dz = wz_arr[u] - t.z;
-                    min_d = min_d.min((dx * dx + dz * dz).sqrt());
+                    let dx = self.wx_arr[u] - t.x;
+                    let dz = self.wz_arr[u] - t.z;
+                    min_d2 = min_d2.min(dx * dx + dz * dz);
                 }
-                if best_u.is_none_or(|(_, bd)| min_d > bd) {
-                    best_u = Some((u, min_d));
+                if best_u.is_none_or(|(_, bd2)| min_d2 > bd2) {
+                    best_u = Some((u, min_d2));
                 }
             }
-            if let Some((seed, _)) = best_u {
-                escape[seed] = 0.0;
-                heap.push(Reverse((0, seed as u32)));
-                run_reverse_dijkstra(&rev_adj, &danger, &mut escape, &mut heap);
+            let Some((seed, _)) = best_u else { break };
+            self.escape[seed] = 0.0;
+            self.heap.push(Reverse((0, seed as u32)));
+            run_reverse_dijkstra(&self.rev_offsets, &self.rev_edges, &self.danger, &mut self.escape, &mut self.heap);
+        }
+
+        // Compute smooth unit escape vector `[dx, dz]` per span from steepest downhill descent in one flat edge pass.
+        self.sum_x.clear();
+        self.sum_x.resize(total_spans, 0.0);
+        self.sum_z.clear();
+        self.sum_z.resize(total_spans, 0.0);
+        self.best_drop.clear();
+        self.best_drop.resize(total_spans, 0.0);
+        self.best_dx.clear();
+        self.best_dx.resize(total_spans, 0.0);
+        self.best_dz.clear();
+        self.best_dz.resize(total_spans, 0.0);
+
+        for &(u, v, _) in &self.raw_edges {
+            let ui = u as usize;
+            if self.is_safe[ui] != 0 {
+                continue;
+            }
+            let cu = self.escape[ui];
+            let vi = v as usize;
+            let cv = self.escape[vi];
+            if !cu.is_finite() || !cv.is_finite() || cv >= cu {
+                continue;
+            }
+            let drop = cu - cv;
+            let dx = self.wx_arr[vi] - self.wx_arr[ui];
+            let dz = self.wz_arr[vi] - self.wz_arr[ui];
+            let len = (dx * dx + dz * dz).sqrt();
+            if len < 1e-4 {
+                continue;
+            }
+            let ux = dx / len;
+            let uz = dz / len;
+            self.sum_x[ui] += ux * drop;
+            self.sum_z[ui] += uz * drop;
+            if drop > self.best_drop[ui] {
+                self.best_drop[ui] = drop;
+                self.best_dx[ui] = ux;
+                self.best_dz[ui] = uz;
             }
         }
 
-        // Compute smooth unit escape vector `[dx, dz]` per span from steepest downhill descent.
-        self.vectors = vec![[0.0, 0.0]; total_spans];
+        self.vectors.clear();
+        self.vectors.resize(total_spans, [0.0, 0.0]);
         let mut active = 0usize;
         for u in 0..total_spans {
-            if is_safe[u] || !escape[u].is_finite() {
+            if self.is_safe[u] != 0 || !self.escape[u].is_finite() {
                 continue;
             }
-            let cu = escape[u];
-            let mut sum_x = 0.0f32;
-            let mut sum_z = 0.0f32;
-            let mut best_drop = 0.0f32;
-            let mut best_dir = [0.0f32; 2];
-
-            for &(v, _) in &fwd_adj[u] {
-                let cv = escape[v as usize];
-                if !cv.is_finite() || cv >= cu {
-                    continue;
-                }
-                let drop = cu - cv;
-                let dx = wx_arr[v as usize] - wx_arr[u];
-                let dz = wz_arr[v as usize] - wz_arr[u];
-                let len = (dx * dx + dz * dz).sqrt();
-                if len < 1e-4 {
-                    continue;
-                }
-                let ux = dx / len;
-                let uz = dz / len;
-                sum_x += ux * drop;
-                sum_z += uz * drop;
-                if drop > best_drop {
-                    best_drop = drop;
-                    best_dir = [ux, uz];
-                }
-            }
-
-            let slen = (sum_x * sum_x + sum_z * sum_z).sqrt();
+            let sx = self.sum_x[u];
+            let sz = self.sum_z[u];
+            let slen = (sx * sx + sz * sz).sqrt();
             if slen > 1e-4 {
-                self.vectors[u] = [sum_x / slen, sum_z / slen];
+                self.vectors[u] = [sx / slen, sz / slen];
                 active += 1;
-            } else if best_drop > 0.0 {
-                self.vectors[u] = best_dir;
+            } else if self.best_drop[u] > 0.0 {
+                self.vectors[u] = [self.best_dx[u], self.best_dz[u]];
                 active += 1;
             }
         }
@@ -431,20 +477,25 @@ impl FlowField {
 }
 
 fn run_reverse_dijkstra(
-    rev_adj: &[Vec<(u32, f32)>],
+    rev_offsets: &[u32],
+    rev_edges: &[(u32, f32)],
     danger: &[f32],
     escape: &mut [f32],
     heap: &mut BinaryHeap<Reverse<(u32, u32)>>,
 ) {
     while let Some(Reverse((bits, v))) = heap.pop() {
         let dv = f32::from_bits(bits);
-        if dv > escape[v as usize] {
+        let vi = v as usize;
+        if dv > escape[vi] {
             continue;
         }
-        for &(u, step) in &rev_adj[v as usize] {
-            let nu = dv + step + danger[u as usize];
-            if nu < escape[u as usize] {
-                escape[u as usize] = nu;
+        let start = rev_offsets[vi] as usize;
+        let end = rev_offsets[vi + 1] as usize;
+        for &(u, step) in &rev_edges[start..end] {
+            let ui = u as usize;
+            let nu = dv + step + danger[ui];
+            if nu < escape[ui] {
+                escape[ui] = nu;
                 heap.push(Reverse((nu.to_bits(), u)));
             }
         }

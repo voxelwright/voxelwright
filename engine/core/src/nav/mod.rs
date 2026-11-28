@@ -137,11 +137,12 @@ impl NavWorld {
         )
     }
 
-    /// Builds the multi-threat escape flow field over cached walkable nav tiles, baking at most 4
-    /// missing tiles nearest to the threats so live crash/strike events never stall the main thread.
+    /// Builds the multi-threat escape flow field over already-cached walkable nav tiles
+    /// (baking at most 1 tile only if the cache is completely empty) so live blasts never stall the main thread.
     pub fn flow_build(&mut self, ground: &mut Ground) -> usize {
         self.sync_edits(ground);
-        self.flow.build_budgeted(&mut self.cache, ground, 4)
+        let max_bake = if self.cache.tile_count() == 0 { 1 } else { 0 };
+        self.flow.build_budgeted(&mut self.cache, ground, max_bake)
     }
 
     /// Samples the flow field at `(x, y, z)` in O(1), storing `[dx, dz]` in `self.flow.last_vec`.
@@ -834,5 +835,96 @@ mod tests {
         let v = flow.sample(&cache, 32.0, 10.0, 32.0).expect("agent near threat must get an escape vector");
         let len = (v[0] * v[0] + v[1] * v[1]).sqrt();
         assert!((len - 1.0).abs() < 1e-3, "escape vector should be unit length (got {len})");
+    }
+
+    #[test]
+    fn high_altitude_skyscraper_blasts_do_not_bloat_nav_or_dirty_cold_tiles() {
+        let mut bodies = Bodies::new();
+        bodies.ground.set_keep_limit(12);
+        let mut nav = NavWorld::new();
+        let bx = 700;
+        let bz = 4070;
+        let by = city::ground(bx, bz);
+
+        // Pre-bake 5x5 street tiles around the building base.
+        assert_eq!(nav.bake_area(&mut bodies.ground, bx as f32, bz as f32, 2, 64), 25);
+        assert_eq!(nav.cache.tile_count(), 25);
+        assert_eq!(nav.cache.dirty_count(), 0);
+
+        // Replay 20 large blasts high up on a skyscraper facade (+400 cells above street level).
+        for k in 0..20 {
+            let e = Edit::Ball { centre: [bx + (k % 3) * 4, by + 400 + (k % 4) * 5, bz], radius: 32, kind: 0 };
+            let (lo, hi) = bodies::reach(&e);
+            bodies.ground.push(e, false, None);
+            nav.mark_dirty_box(lo, hi);
+        }
+        nav.seen_edits = bodies.ground.edits.len();
+
+        // High-altitude facade blasts must neither dirty street-level cached tiles nor queue cold tiles.
+        assert_eq!(
+            nav.cache.dirty_count(),
+            0,
+            "high-altitude skyscraper blasts must not dirty street nav tiles (got {})",
+            nav.cache.dirty_count()
+        );
+
+        // Even when an edit records a high `ey1`, `tile_y_bounds` must stay bounded to walkable elevation.
+        let (tx, tz) = (world_to_tile(bx), world_to_tile(bz));
+        let (y_lo, y_hi) = bodies.ground.tile_y_bounds(tx, tz, Some((by, by + 450)));
+        assert!(
+            y_hi - y_lo <= 260,
+            "tile_y_bounds must cap skyscraper vertical scan height (got {y_lo}..{y_hi})"
+        );
+
+        // Ground-level blasts must dirty only cached tiles (never unbaked cold tiles outside the 5x5 cache),
+        // and `flow_build` must not bake extra cold tiles when the cache is already populated.
+        for k in 0..6 {
+            let e = Edit::Ball { centre: [bx + k * 2, by, bz], radius: 14, kind: 0 };
+            let (lo, hi) = bodies::reach(&e);
+            bodies.ground.push(e, false, None);
+            nav.mark_dirty_box(lo, hi);
+        }
+        nav.seen_edits = bodies.ground.edits.len();
+        assert!(
+            nav.cache.dirty_count() >= 9 && nav.cache.dirty_count() <= 25,
+            "ground blast must dirty cached tiles without queueing unbaked cold tiles (got {})",
+            nav.cache.dirty_count()
+        );
+
+        nav.flow.clear();
+        nav.flow.add_threat(bx as f32, by as f32, bz as f32, 260.0);
+        let t0 = Instant::now();
+        let active_spans = nav.flow_build(&mut bodies.ground);
+        let flow_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        assert!(active_spans > 0, "flow_build should populate escape vectors over cached tiles");
+        assert_eq!(nav.cache.tile_count(), 25, "flow_build must not bake cold tiles when cache is non-empty");
+
+        let t1 = Instant::now();
+        let rebaked = nav.rebake_budget(&mut bodies.ground, bx as f32, bz as f32, 1);
+        let cold_rebake_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(rebaked, 1);
+
+        // Push 10 more blasts on the now-warm center tile: in-place `Edit::Ball` updates must keep
+        // subsequent rebakes sub-2 ms instead of replaying all edits from scratch.
+        for k in 0..10 {
+            let e = Edit::Ball { centre: [bx + (k % 3), by, bz + (k % 2)], radius: 14, kind: 0 };
+            let (lo, hi) = bodies::reach(&e);
+            bodies.ground.push(e, false, None);
+            nav.mark_dirty_box(lo, hi);
+        }
+        nav.seen_edits = bodies.ground.edits.len();
+        let t2 = Instant::now();
+        let rebaked2 = nav.rebake_budget(&mut bodies.ground, bx as f32, bz as f32, 1);
+        let warm_rebake_ms = t2.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(rebaked2, 1);
+        eprintln!(
+            "skyscraper blast regression: flow_build={flow_ms:.2} ms ({active_spans} spans), cold_rebake1={cold_rebake_ms:.2} ms, warm_rebake1={warm_rebake_ms:.2} ms"
+        );
+        #[cfg(not(debug_assertions))]
+        {
+            assert!(flow_ms < 25.0, "flow_build took {flow_ms:.2} ms (gate < 25 ms)");
+            assert!(cold_rebake_ms < 25.0, "cold rebake after eviction took {cold_rebake_ms:.2} ms (gate < 25 ms)");
+            assert!(warm_rebake_ms < 2.5, "warm rebake after 10 in-place blasts took {warm_rebake_ms:.2} ms (gate < 2.5 ms)");
+        }
     }
 }

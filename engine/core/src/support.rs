@@ -924,11 +924,20 @@ fn loose_inner(r: &Region, blocks: Option<(&[u8], usize)>, need_meta: bool) -> (
         let built_bits: &[u64] = &*built_bits;
         let non_vert_built_bits: &[u64] = &*non_vert_built_bits;
 
-        if s.cost_enc.len() < active_n { s.cost_enc.resize(active_n, 0); }
-        if s.join.len() < active_n { s.join.resize(active_n, NONE); }
-        if s.load.len() < active_n { s.load.resize(active_n, 0); }
+        #[inline]
+        fn grow_zeroed<T: Copy>(v: &mut Vec<T>, len: usize, zero: T) {
+            if v.len() < len {
+                // Entries are zeroed between calls; drop old buffer first so WASM linear memory
+                // never holds old + 2x doubled capacity simultaneously on large blasts.
+                *v = Vec::new();
+                *v = vec![zero; len];
+            }
+        }
+        grow_zeroed(&mut s.cost_enc, active_n, 0);
+        grow_zeroed(&mut s.join, active_n, NONE);
+        grow_zeroed(&mut s.load, active_n, 0);
         if AGAIN > 0 {
-            if s.torn.len() < active_n { s.torn.resize(active_n, 0); }
+            grow_zeroed(&mut s.torn, active_n, 0);
             s.torn[..active_n].fill(0);
         }
         let cost_enc = &mut s.cost_enc[..active_n];
