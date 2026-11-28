@@ -20,6 +20,7 @@ use crate::{Edit, SETTLE, WIDE, city, fill_of};
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hasher};
 
+pub mod carve;
 mod hull;
 mod living;
 #[cfg(test)]
@@ -735,38 +736,38 @@ pub struct Body {
     /// Its cells, laid out flat from its own low corner: x + across * (z + deep * y).
     pub cells: Vec<Kind>,
     pub count: usize,
-    inv_mass: f32,
+    pub(crate) inv_mass: f32,
     /// Its middle of mass, from its own low corner.
     pub com: V,
     /// What resists its turning, inverted, in its own axes.
-    inv_inertia: [V; 3],
+    pub(crate) inv_inertia: [V; 3],
     /// Where its middle of mass is in the world, and how it is turned.
     pub pos: V,
     pub rot: Q,
     pub vel: V,
     pub spin: V,
     /// Where it meets things: corners of its cells, from its middle of mass.
-    points: Vec<V>,
+    pub(crate) points: Vec<V>,
     /// The same as they are turned in this step, from its middle.
-    turned: Vec<V>,
-    radius: f32,
-    still: f32,
-    age: f32,
+    pub(crate) turned: Vec<V>,
+    pub(crate) radius: f32,
+    pub(crate) still: f32,
+    pub(crate) age: f32,
     /// How long since it last touched anything.
-    apart: f32,
+    pub(crate) apart: f32,
     /// The stretch its touches cover this step, from its middle of mass: least and most along x and z.
-    footing: [f32; 4],
+    pub(crate) footing: [f32; 4],
     /// The hardest single knock it took in the last step, as a change of speed; and how many times it has broken already.
-    knock: f32,
-    broken: u8,
+    pub(crate) knock: f32,
+    pub(crate) broken: u8,
     /// Rolling chassis damage, accumulated from substantial impacts; one means structural collapse.
-    wear: f32,
+    pub(crate) wear: f32,
     /// What most of it is made of.
-    stuff: u8,
+    pub(crate) stuff: u8,
     /// Whether it is a lump a blast threw out: these are many, and are not tried against each other however big.
-    lump: bool,
+    pub(crate) lump: bool,
     /// Whether a blast threw it (and not merely let it go).
-    thrown: bool,
+    pub(crate) thrown: bool,
     /// Whether it passes: come to rest it is gone, and is cells of nothing. A shot is not litter in the street.
     pub passing: bool,
     /// Where its low corner was in the world when it came loose: its cells keep the shades they had.
@@ -787,10 +788,19 @@ impl Body {
     }
 
     /// Keep collision samples distributed over the whole fragment, not just its first face.
-    fn limit_points(&mut self, limit: usize) {
+    pub(crate) fn limit_points(&mut self, limit: usize) {
         if self.points.len() > limit {
             let all = std::mem::take(&mut self.points);
             self.points = (0..limit).map(|k| all[k * all.len() / limit]).collect();
+        }
+    }
+
+    /// Rebuilds the vehicle collision hull (`bodies/hull.rs`) after in-place cell edits.
+    pub(crate) fn refresh_hull(&mut self) {
+        let has_hull = self.live.as_ref().is_some_and(|live| live.hull.is_some());
+        if has_hull {
+            let next_hull = (self.count > 0).then(|| Box::new(hull::Hull::of(self)));
+            self.live.as_mut().unwrap().hull = next_hull;
         }
     }
 
@@ -1079,13 +1089,100 @@ impl Bodies {
         self.ground.push(Edit::Runs(runs), true, None);
     }
 
-    fn born(&mut self, body: &Body) {
-        let faces = support::faces_of(&body.cells, body.size);
-        let mut words = vec![body.id, body.count as u32, body.size[0] as u32, body.size[1] as u32, body.size[2] as u32];
-        words.extend(body.com.iter().map(|v| v.to_bits()));
-        words.extend(body.born.iter().map(|&v| v as u32));
+    fn emit_born(&mut self, id: u32, count: usize, size: [usize; 3], com: V, born: [i32; 3], faces: Vec<u32>) {
+        let mut words = Vec::with_capacity(11 + faces.len());
+        words.extend_from_slice(&[id, count as u32, size[0] as u32, size[1] as u32, size[2] as u32]);
+        words.extend(com.iter().map(|v| v.to_bits()));
+        words.extend(born.iter().map(|&v| v as u32));
         words.extend(faces);
         self.record(BORN, &words);
+    }
+
+    fn born(&mut self, body: &Body) {
+        let faces = support::faces_of(&body.cells, body.size);
+        self.emit_born(body.id, body.count, body.size, body.com, body.born, faces);
+    }
+
+    /// Carves a world-space sphere out of a moving body, updating or splitting it in place.
+    /// Returns the number of cells removed.
+    pub fn carve_sphere(&mut self, body_id: u32, center: [f32; 3], radius: f32) -> usize {
+        self.carve_body(body_id, |b, next| carve::carve_sphere(b, center, radius, next))
+    }
+
+    /// Carves a world-space sphere out of a moving body with material-resistance options.
+    pub fn carve_sphere_with(&mut self, body_id: u32, center: [f32; 3], radius: f32, opts: carve::CarveOptions) -> usize {
+        self.carve_body(body_id, |b, next| carve::carve_sphere_with(b, center, radius, opts, next))
+    }
+
+    /// Carves a world-space capsule (swept blade or bullet tunnel) out of a moving body.
+    /// Returns the number of cells removed.
+    pub fn carve_capsule(&mut self, body_id: u32, a: [f32; 3], b: [f32; 3], radius: f32) -> usize {
+        self.carve_body(body_id, |body, next| carve::carve_capsule(body, a, b, radius, next))
+    }
+
+    /// Slices a moving body along a world-space plane of given kerf thickness.
+    /// Returns the number of cells removed.
+    pub fn carve_plane(&mut self, body_id: u32, point: [f32; 3], normal: [f32; 3], thickness: f32) -> usize {
+        self.carve_body(body_id, |body, next| carve::carve_plane(body, point, normal, thickness, next))
+    }
+
+    fn carve_body(&mut self, body_id: u32, f: impl FnOnce(&mut Body, &mut u32) -> carve::CarveReport) -> usize {
+        let Some(idx) = self.list.iter().position(|b| b.id == body_id) else {
+            return 0;
+        };
+        let (old_pos, old_rot, old_com, old_radius) = {
+            let b = &self.list[idx];
+            (b.pos, b.rot, b.com, b.radius)
+        };
+        let mut next = self.next;
+        let report = f(&mut self.list[idx], &mut next);
+        self.next = next;
+        if report.removed == 0 {
+            return 0;
+        }
+        let n = report.removed_cells.len();
+        let chunks = (n / 16).clamp(1, 8);
+        let step = n.div_ceil(chunks);
+        for chunk in report.removed_cells.chunks(step) {
+            let mut sum = [0.0f32; 3];
+            for &(c, _) in chunk {
+                let local = [c[0] as f32 + 0.5, c[1] as f32 + 0.5, c[2] as f32 + 0.5];
+                let world = add(old_pos, turn(old_rot, sub(local, old_com)));
+                sum = add(sum, world);
+            }
+            let p = scale(sum, 1.0 / chunk.len() as f32);
+            let kind = chunk[0].1;
+            self.record(DUST, &[p[0].to_bits(), p[1].to_bits(), p[2].to_bits(), kind as u32, chunk.len() as u32]);
+        }
+        let reach = old_radius.ceil() as i32 + 2;
+        let center = old_pos.map(|v| v.round() as i32);
+        self.stir(center.map(|c| c - reach), center.map(|c| c + reach));
+
+        if report.destroyed {
+            let body = self.list.swap_remove(idx);
+            let mut words = vec![body.id];
+            words.extend(body.pos.iter().chain(body.rot.iter()).map(|v| v.to_bits()));
+            self.record(GONE, &words);
+            return report.removed;
+        }
+
+        self.list[idx].asleep = false;
+        self.list[idx].still = 0.0;
+        carve::sync_hull_after_carve(&mut self.list[idx]);
+        self.record(BROKE, &[body_id]);
+        let (id, count, size, com, born, faces) = {
+            let b = &self.list[idx];
+            (b.id, b.count, b.size, b.com, b.born, carve::rebuild_faces(b))
+        };
+        self.emit_born(id, count, size, com, born, faces);
+        for mut island in report.split_bodies {
+            island.asleep = false;
+            island.still = 0.0;
+            let faces = carve::rebuild_faces(&island);
+            self.emit_born(island.id, island.count, island.size, island.com, island.born, faces);
+            self.list.push(island);
+        }
+        report.removed
     }
 
     /// What is no longer held round a point comes loose and is a body. `radius` is how big the blast there was:
