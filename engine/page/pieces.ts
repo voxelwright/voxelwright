@@ -1320,7 +1320,13 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
           const wy = py0 + m10 * ox + m11 * oy + m12 * oz
           const wz = pz0 + m20 * ox + m21 * oy + m22 * oz
           const rad = Math.sqrt(Math.max(areaW, 0.5))
-          const power = Math.min(2.35, Math.max(1.45, 1.35 + Math.log2(1 + areaW) * 0.26)) * darkScale
+          // Small warm decorative bulbs (plaza festoon string lights, pergola bulbs) emit gentle cozy pools
+          // rather than stacking 10+ full-strength point lights that wash out entire courtyards at night.
+          const isSmallDecorative = !e.vivid && areaW < 6
+          const basePower = isSmallDecorative
+            ? 0.42 + Math.min(0.68, areaW * 0.12)
+            : Math.min(2.35, Math.max(1.45, 1.35 + Math.log2(1 + areaW) * 0.26))
+          const power = basePower * darkScale
           const cr = e.r * power, cg = e.g * power, cb = e.b * power
           if (e.directional) {
             let dnx = m00 * e.nx + m01 * e.ny + m02 * e.nz
@@ -1338,10 +1344,12 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
             sink.addSpot(wx, wy, wz, dnx, dny, dnz, cr, cg, cb, range, dHalf, cosOuter, cosInner, 0.25, 0.0, 1.05, prio, LIGHT_EXTRA)
           } else {
             // Omnidirectional emitters (spinning robotaxi LiDAR dome rings, active charging bay halos, glowing orbs/lanterns).
-            const range = Math.min(145, Math.max(68, 52 + rad * 18))
-            const dHalf = range * 0.33
-            const prio = e.vivid ? 54 : 48
-            sink.addPoint(wx, wy, wz, cr, cg, cb, range, dHalf, 1.0, prio, LIGHT_EXTRA)
+            const range = isSmallDecorative
+              ? Math.min(72, Math.max(36, 32 + rad * 14))
+              : Math.min(145, Math.max(68, 52 + rad * 18))
+            const dHalf = range * (isSmallDecorative ? 0.28 : 0.33)
+            const prio = e.vivid ? 54 : isSmallDecorative ? 32 : 48
+            sink.addPoint(wx, wy, wz, cr, cg, cb, range, dHalf, isSmallDecorative ? 0.65 : 1.0, prio, LIGHT_EXTRA)
           }
         }
       }

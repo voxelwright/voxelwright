@@ -34,6 +34,7 @@ import {
   createClusteredLights,
   depthToClusterZ,
   type ClusterCameraParams,
+  type ClusterLightKind,
   type ClusterTimingWrites,
   type ClusteredLights,
   type ClusteredLightsStats,
@@ -306,7 +307,9 @@ const TIER: Record<LightQuality, {
 
 // Pre-allocated flat candidate pool (zero per-frame JS heap allocations).
 const MAX_CANDIDATES = 512
+const MAX_CLUSTER_CANDIDATES = 2048
 const CAND_STRIDE = 16 // px,py,pz, dx,dy,dz, cr,cg,cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec
+const CLUSTER_CAND_STRIDE = 15 // px,py,pz, dx,dy,dz, cr,cg,cb, range, dHalf, cosOuter, cosInner, focus, shadow
 /** World-space reach (cells) for the 512-light 3D frustum-clustered backend (400 m = DEFAULT_CLUSTER_Z_FAR). */
 const CLUSTER_REACH = DEFAULT_CLUSTER_Z_FAR
 
@@ -327,6 +330,31 @@ function selectTop(indices: Int32Array, count: number, scores: Float32Array, k: 
     }
   }
   return n
+}
+
+/** O(N) average-time in-place quickselect placing the top-K highest-scoring indices in `indices[0..k)` (zero allocations). */
+function partitionTopK(indices: Int32Array, count: number, scores: Float32Array, k: number): number {
+  if (count <= k) return count
+  let lo = 0, hi = count - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    const pivot = scores[indices[mid]]
+    let i = lo, j = hi
+    while (i <= j) {
+      while (scores[indices[i]] > pivot) i++
+      while (scores[indices[j]] < pivot) j--
+      if (i <= j) {
+        const tmp = indices[i]
+        indices[i] = indices[j]
+        indices[j] = tmp
+        i++; j--
+      }
+    }
+    if (j >= k - 1) hi = j
+    else if (i <= k - 1) lo = i
+    else break
+  }
+  return k
 }
 
 export function createLocalLights(device: GPUDevice): LocalLights {
@@ -364,11 +392,18 @@ export function createLocalLights(device: GPUDevice): LocalLights {
   let frameDayScale = 0.48
 
   // Optional 512-light GPU compute 3D frustum-clustered backend (lazily initialized via initClustered()).
+  // Staged into a priority-scored candidate pool and top-K selected in finishFrame() so nearby/in-view lights
+  // never pop or drop out in dense neighborhoods when >512 street lamps fall within CLUSTER_REACH.
   let clustered: ClusteredLights | null = null
   let clusterInitPromise: Promise<ClusteredLights> | null = null
   let clusterBindGroupLayout: GPUBindGroupLayout | null = null
   let clusterBindGroup: GPUBindGroup | null = null
   let clusterStagedCount = 0
+  const clCandF32 = new Float32Array(MAX_CLUSTER_CANDIDATES * CLUSTER_CAND_STRIDE)
+  const clCandScore = new Float32Array(MAX_CLUSTER_CANDIDATES)
+  const clCandKind = new Uint8Array(MAX_CLUSTER_CANDIDATES)
+  const clCandIdx = new Int32Array(MAX_CLUSTER_CANDIDATES)
+  let clCandCount = 0
 
   // Pre-allocated mutable camera parameter struct reused every frame in dispatchCluster() (zero GC).
   const camEye: [number, number, number] = [0, 0, 0]
@@ -420,25 +455,60 @@ export function createLocalLights(device: GPUDevice): LocalLights {
     else extraIdx[extraCandCount++] = i
   }
 
-  // Converts LocalLightSink peak irradiance + half-falloff radius (dHalf) to physical luminous intensity
-  // (cd in cell^2 units) so evalClusterLightGGX's `win^2 / (d^2 + 1)` matches real SF night exposure.
+  // Stages a candidate for the 512-light 3D frustum-clustered backend with priority scoring so finishFrame()
+  // selects the highest-priority lights (matching uniform-tier priority instead of arbitrary insertion order).
   const pushCluster = (
     px: number, py: number, pz: number,
     dx: number, dy: number, dz: number,
     cr: number, cg: number, cb: number,
     range: number, dHalf: number, cosOuter: number, cosInner: number,
     focus: number, shadow: number,
-    kind: LightKind,
+    score: number, kind: LightKind,
   ) => {
-    if (clustered === null || clusterStagedCount >= clustered.maxLights) return
-    const scale = dHalf > 1 ? dHalf * dHalf : 1
-    const r = cr * scale
-    const g = cg * scale
-    const b = cb * scale
-    const idx = cosOuter < -1.5
-      ? clustered.addPoint(px, py, pz, r, g, b, range, dHalf, shadow, kind, focus)
-      : clustered.addSpot(px, py, pz, dx, dy, dz, r, g, b, range, cosOuter, cosInner, dHalf, shadow, kind, focus)
-    if (idx >= 0) clusterStagedCount++
+    if (clustered === null || clCandCount >= MAX_CLUSTER_CANDIDATES) return
+    const i = clCandCount++
+    const o = i * CLUSTER_CAND_STRIDE
+    clCandF32[o + 0] = px; clCandF32[o + 1] = py; clCandF32[o + 2] = pz
+    clCandF32[o + 3] = dx; clCandF32[o + 4] = dy; clCandF32[o + 5] = dz
+    clCandF32[o + 6] = cr; clCandF32[o + 7] = cg; clCandF32[o + 8] = cb
+    clCandF32[o + 9] = range; clCandF32[o + 10] = dHalf
+    clCandF32[o + 11] = cosOuter; clCandF32[o + 12] = cosInner
+    clCandF32[o + 13] = focus; clCandF32[o + 14] = shadow
+    clCandScore[i] = score
+    clCandKind[i] = kind
+    clCandIdx[i] = i
+  }
+
+  const flushClusterCandidates = () => {
+    if (clustered === null) { clusterStagedCount = 0; stats.clustered = 0; return }
+    const count = clCandCount
+    if (count === 0) { clusterStagedCount = 0; stats.clustered = 0; return }
+    const take = partitionTopK(clCandIdx, count, clCandScore, clustered.maxLights)
+    let staged = 0
+    for (let i = 0; i < take; i++) {
+      const ci = clCandIdx[i]
+      const o = ci * CLUSTER_CAND_STRIDE
+      const dHalf = clCandF32[o + 10]
+      const scale = dHalf > 1 ? dHalf * dHalf : 1
+      const r = clCandF32[o + 6] * scale
+      const g = clCandF32[o + 7] * scale
+      const b = clCandF32[o + 8] * scale
+      const cosOuter = clCandF32[o + 11]
+      const kind = clCandKind[ci] as ClusterLightKind
+      const idx = cosOuter < -1.5
+        ? clustered.addPoint(
+            clCandF32[o + 0], clCandF32[o + 1], clCandF32[o + 2],
+            r, g, b, clCandF32[o + 9], dHalf, clCandF32[o + 14], kind, clCandF32[o + 13],
+          )
+        : clustered.addSpot(
+            clCandF32[o + 0], clCandF32[o + 1], clCandF32[o + 2],
+            clCandF32[o + 3], clCandF32[o + 4], clCandF32[o + 5],
+            r, g, b, clCandF32[o + 9], cosOuter, clCandF32[o + 12], dHalf, clCandF32[o + 14], kind, clCandF32[o + 13],
+          )
+      if (idx >= 0) staged++
+    }
+    clusterStagedCount = staged
+    stats.clustered = staged
   }
 
   const pushEmit = (
@@ -454,7 +524,7 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       pushUniform(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, score, kind)
     }
     if (inCluster) {
-      pushCluster(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, kind)
+      pushCluster(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, score, kind)
     }
   }
 
@@ -468,6 +538,7 @@ export function createLocalLights(device: GPUDevice): LocalLights {
 
   const clear = () => {
     clearUniform()
+    clCandCount = 0
     if (clustered !== null) {
       clustered.beginFrame(frameAncX, frameAncY, frameAncZ)
       clusterStagedCount = 0
@@ -556,6 +627,7 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       carCandCount = 0
       streetCandCount = 0
       extraCandCount = 0
+      clCandCount = 0
       clusterStagedCount = 0
       frameEyeX = view.eye[0]; frameEyeY = view.eye[1]; frameEyeZ = view.eye[2]
       frameFwdX = view.forward[0]; frameFwdY = view.forward[1]; frameFwdZ = view.forward[2]
@@ -582,13 +654,13 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       if (!inUniform && !inCluster) return
       const ahead = vx * frameFwdX + vy * frameFwdY + vz * frameFwdZ
       if (ahead < -(range + 40)) return
+      const inView = ahead > -30 ? 1.0 : 0.45
+      const score = (priority / (1 + dist * 0.008)) * inView
       if (inUniform) {
-        const inView = ahead > -30 ? 1.0 : 0.45
-        const score = (priority / (1 + dist * 0.008)) * inView
         pushUniform(px, py, pz, 0, -1, 0, cr, cg, cb, range, dHalf, -2.0, -1.0, 0.0, 0.0, spec, score, kind)
       }
       if (inCluster) {
-        pushCluster(px, py, pz, 0, -1, 0, cr, cg, cb, range, dHalf, -2.0, -1.0, 0.0, 0.0, kind)
+        pushCluster(px, py, pz, 0, -1, 0, cr, cg, cb, range, dHalf, -2.0, -1.0, 0.0, 0.0, score, kind)
       }
     },
     addSpot(px, py, pz, dx, dy, dz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, priority, kind = LIGHT_EXTRA) {
@@ -604,13 +676,13 @@ export function createLocalLights(device: GPUDevice): LocalLights {
       if (ahead < -50 && (dist > range + 60 || facing < 0.2)) return
       const inv = 1 / (Math.hypot(dx, dy, dz) || 1)
       const ndx = dx * inv, ndy = dy * inv, ndz = dz * inv
+      const inView = ahead > -40 ? 1.0 : 0.45
+      const score = (priority / (1 + dist * 0.008)) * inView
       if (inUniform) {
-        const inView = ahead > -40 ? 1.0 : 0.45
-        const score = (priority / (1 + dist * 0.008)) * inView
         pushUniform(px, py, pz, ndx, ndy, ndz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, spec, score, kind)
       }
       if (inCluster) {
-        pushCluster(px, py, pz, ndx, ndy, ndz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, kind)
+        pushCluster(px, py, pz, ndx, ndy, ndz, cr, cg, cb, range, dHalf, cosOuter, cosInner, focus, shadow, score, kind)
       }
     },
     addVehicle(
@@ -768,27 +840,29 @@ export function createLocalLights(device: GPUDevice): LocalLights {
         if (d2 > maxReach2) continue
         const ahead = dx * frameFwdX + dy * frameFwdY + dz * frameFwdZ
         if (ahead < -220) continue
+        const dist = Math.sqrt(d2)
+        const inView = ahead > -40 ? 1.0 : 0.4
+        const score = (65 / (1 + dist * 0.008)) * inView
         if (d2 <= uniformReach2) {
-          const dist = Math.sqrt(d2)
-          const inView = ahead > -40 ? 1.0 : 0.4
           pushUniform(
             lx, ly - 1.5, lz, // just beneath the glowing luminaire hood
             0, -1, 0, cr, cg, cb,
             215, 82, -0.05, 0.58, 0.0, 0.0, 1.0,
-            (65 / (1 + dist * 0.008)) * inView, LIGHT_STREET,
+            score, LIGHT_STREET,
           )
         }
         if (hasCluster) {
           pushCluster(
             lx, ly - 1.5, lz,
             0, -1, 0, cr, cg, cb,
-            215, 82, -0.05, 0.58, 0.0, 0.0, LIGHT_STREET,
+            215, 82, -0.05, 0.58, 0.0, 0.0,
+            score, LIGHT_STREET,
           )
         }
       }
     },
     finishFrame() {
-      stats.clustered = clusterStagedCount
+      flushClusterCandidates()
       if (candCount === 0) { clearUniform(); return }
 
       // Fair per-category reservations so dense traffic/depots never starve street lamps, signals, canopies, or LiDAR domes,

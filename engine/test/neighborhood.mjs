@@ -209,6 +209,9 @@ for (const [name, asset] of assets) {
   assert.ok(asset.born.faces.length > 0, `${name} has 0 merged faces`)
   assert.ok(asset.cell > 0 && asset.cell <= 1, `${name} has invalid cell scale ${asset.cell}`)
 }
+// Festoon string lights must use 5 cm voxels (cell = 0.5 world cells, per = 2) so the sagging catenary wire never drops voxels between hanging bulbs.
+assert.equal(kit.festoon.cell, 0.5, `festoon must use 5 cm (cell=0.5 world cells) grid, got ${kit.festoon.cell}`)
+assert.ok(kit.festoon.born.cells >= 300, `festoon cable + bulbs should be continuous (>= 300 voxels), got ${kit.festoon.born.cells}`)
 
 console.log(`PASS neighborhood: ${built.summary} (${assets.length} voxel prop kits verified)`)
 void root
