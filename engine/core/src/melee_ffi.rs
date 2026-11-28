@@ -57,6 +57,9 @@ enum Ground {
     World,
 }
 
+/// What a cell is, given the cells carved so far.
+type KindAt<'a> = dyn FnMut([i32; 3], &HashSet<[i32; 3]>) -> Kind + 'a;
+
 struct Hand {
     id: u32,
     pos: [f32; 3],
@@ -240,7 +243,7 @@ fn encode(out: &mut Vec<u32>, e: &MeleeEvent) {
 fn step(a: &mut Arena, dt: f32) -> usize {
     a.events.clear();
     a.records = 0;
-    if !(dt > 0.0) {
+    if dt.is_nan() || dt <= 0.0 {
         return 0;
     }
     let dt = dt.min(MAX_STEP);
@@ -252,7 +255,7 @@ fn step(a: &mut Arena, dt: f32) -> usize {
     world.events.clear();
     let substeps = ((dt / SUBSTEP_DT).round() as usize).max(world.config.substeps_per_tick.max(1));
     let dt_sub = dt / substeps as f32;
-    let mut sub = |world: &mut MeleeWorld, carved: &mut HashSet<[i32; 3]>, kind_at: &mut dyn FnMut([i32; 3], &HashSet<[i32; 3]>) -> Kind| {
+    let mut sub = |world: &mut MeleeWorld, carved: &mut HashSet<[i32; 3]>, kind_at: &mut KindAt| {
         for _ in 0..substeps {
             let seen = world.events.len();
             world.step_substep(dt_sub, &mut no_targets, &mut |c| kind_at(c, carved));
