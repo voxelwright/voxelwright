@@ -5,10 +5,13 @@
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { CargoBay } from '../page/delivery-cargo.ts'
+import { findSidewalkDropoff, isSidewalkGround } from '../page/delivery.ts'
 import { buildDeliveryVehicle, cargoGridSizeFor, defaultUpgrades, DELIVERY_VEHICLES } from '../page/delivery-vehicles.ts'
+import { DEFAULTS as DRIVE_TOUCH_DEFAULTS, layout as driveTouchLayout } from '../page/drive-touch.ts'
 import { computeMultiStopRoute } from '../page/gps.ts'
 import { buildRoomShellAsset, buildShoppingCartAsset, getInteriorModuleKit } from '../page/interior-modules.ts'
 import { synthesizeInteriorBlueprint } from '../page/interiors.ts'
+import { computeMobileDriveDock } from '../page/phone.ts'
 import { arg, has, start } from './kit.mjs'
 
 const unitOnly = has('unit-only')
@@ -107,8 +110,21 @@ console.log('3. Modular non-cookie-cutter store & restaurant interiors + 1:1 blu
   const floors = new Set(bps.map((b) => b.theme.floor))
   check(archetypes.size >= 4 && floors.size >= 3, `synthesized distinct non-cookie-cutter interiors (${[...archetypes].join(', ')}; floors: ${[...floors].join(', ')})`)
   const marketBp = bps[1]
-  check(marketBp.shoppingZones.length >= 3 && marketBp.npcs.some((n) => n.role === 'worker') && marketBp.npcs.some((n) => n.role === 'delivery_driver'),
-    `supermarket interior has ${marketBp.shoppingZones.length} shopping aisles, NPC workers, shoppers & queued drivers`)
+  const bodegaBp = synthesizeInteriorBlueprint({ id: '6', name: 'Corner Bodega', category: 'corner_store', x: 51400, z: 67500, widthM: 9.6, heightM: 8 }, 2)
+  const kitMods = getInteriorModuleKit()
+  const aisleCounts = new Set([
+    kitMods.aisle_produce.born.cells,
+    kitMods.aisle_bakery.born.cells,
+    kitMods.aisle_pantry.born.cells,
+    kitMods.aisle_snacks.born.cells,
+    kitMods.aisle_dairy.born.cells,
+  ])
+  check(aisleCounts.size === 5, `all 5 supermarket departments have distinct sculpted voxel silhouettes (cell counts: ${[...aisleCounts].join(', ')})`)
+  const neededCats = ['produce', 'bakery', 'pantry', 'snacks', 'dairy']
+  const marketHasAll = neededCats.every((c) => marketBp.shoppingZones.some((z) => z.category === c && z.shelfAt?.length === 3))
+  const bodegaHasAll = neededCats.every((c) => bodegaBp.shoppingZones.some((z) => z.category === c && z.shelfAt?.length === 3))
+  check(marketBp.shoppingZones.length >= 5 && marketHasAll && bodegaHasAll && marketBp.npcs.some((n) => n.role === 'worker') && marketBp.npcs.some((n) => n.role === 'delivery_driver'),
+    `both supermarkets and compact bodegas expose all 5 department shelf zones with 3D shelf coordinates, NPC workers & couriers`)
   const shell = buildRoomShellAsset(marketBp)
   const cart0 = buildShoppingCartAsset(0)
   const cart4 = buildShoppingCartAsset(4)
@@ -167,6 +183,61 @@ console.log('3. Modular non-cookie-cutter store & restaurant interiors + 1:1 blu
       : `${overlapErrors.length} interior overlaps (first: ${overlapErrors[0]})`)
 }
 
+console.log('3b. Customer drop-off sidewalk snapping (never in the middle of asphalt roads)')
+{
+  // Synthetic street cross-section: x in [-40..40] cells (-4..4 m) = ASPHALT(6), [-80..-41] & [41..80] = CONCRETE(7) sidewalk, outside = building wall!
+  const mockLand = {
+    top_at(x, _z) {
+      if (Math.abs(x) <= 40) return 6 // asphalt carriageway
+      if (Math.abs(x) <= 80) return 7 // concrete sidewalk
+      return 8 // brick building
+    },
+    ground_at(x, _z) {
+      return Math.abs(x) <= 40 ? 100 : Math.abs(x) <= 80 ? 102 : 240
+    },
+    feet_at(x, _z) {
+      return Math.abs(x) <= 40 ? 100 : Math.abs(x) <= 80 ? 102 : 240
+    },
+    world_kind(x, y, _z) {
+      if (Math.abs(x) > 80 && y >= 100 && y <= 240) return 8
+      return 0
+    },
+  }
+  const snapped = findSidewalkDropoff(mockLand, 0, 0, 1, 0)
+  check(!!snapped && snapped.snapped && Math.abs(snapped.x) >= 4.5 && Math.abs(snapped.x) <= 7.8 && isSidewalkGround(mockLand, snapped.x, snapped.z, 100),
+    `road-center drop-off (0,0) snaps cleanly onto sidewalk (${JSON.stringify(snapped)})`)
+
+  // Unloaded tile (ground=0, top_at=0) returns null so delivery waits for tile streaming
+  const unloadedLand = { top_at: () => 0, ground_at: () => 0, feet_at: () => 0, world_kind: () => 0 }
+  check(findSidewalkDropoff(unloadedLand, 10, 10, 1, 0) === null, 'unloaded tile returns null instead of committing road coordinates')
+}
+
+console.log('3c. Mobile touch dashboard phone dock geometry (portrait & landscape, both hands)')
+{
+  const overlaps = (a, b) => a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5
+  const cases = [
+    { name: 'portrait-right', vw: 390, vh: 844, portrait: true, safe: { top: 59, bottom: 34, left: 0, right: 0 }, topHudBottom: 175, hand: 'right' },
+    { name: 'landscape-right', vw: 844, vh: 390, portrait: false, safe: { top: 0, bottom: 21, left: 59, right: 59 }, topHudBottom: 68, hand: 'right' },
+    { name: 'landscape-left', vw: 844, vh: 390, portrait: false, safe: { top: 0, bottom: 21, left: 59, right: 59 }, topHudBottom: 68, hand: 'left' },
+  ]
+  for (const c of cases) {
+    const placed = driveTouchLayout({ ...DRIVE_TOUCH_DEFAULTS, hand: c.hand }, 'arrows', { width: c.vw, height: c.vh, portrait: c.portrait })
+    const rects = placed.map((p) => {
+      const bottom = c.vh - c.safe.bottom - (14 + p.y)
+      const top = bottom - p.h
+      const left = p.side === 'left' ? c.safe.left + 14 + p.x : c.vw - c.safe.right - 14 - p.x - p.w
+      return { left, top, right: left + p.w, bottom }
+    })
+    const dock = computeMobileDriveDock({ vw: c.vw, vh: c.vh, safe: c.safe, controls: rects, topHudBottom: c.topHudBottom })
+    const box = { left: dock.left, top: dock.top, right: dock.left + dock.width, bottom: dock.top + dock.height }
+    const hitsControl = rects.some((r) => overlaps(box, r))
+    const inSafe = box.left >= c.safe.left && box.right <= c.vw - c.safe.right && box.top >= c.safe.top && box.bottom <= c.vh - c.safe.bottom
+    const windshieldGap = box.top - c.topHudBottom
+    check(!hitsControl && inSafe && dock.width >= 200 && dock.height >= 165 && windshieldGap >= 8,
+      `${c.name}: dock ${dock.width}x${dock.height} at (${dock.left},${dock.top}), zero overlap with controls, windshield clear by ${Math.round(windshieldGap)}px`)
+  }
+}
+
 console.log('4. Multi-stop GPS route calculation & stop reordering')
 {
   // Minimal road graph square: (0,0) - (100,0) - (100,100) - (0,100)
@@ -209,10 +280,39 @@ if (!unitOnly) {
     await page.waitForFunction(() => Boolean(globalThis.engine?.phone && globalThis.engine?.delivery && globalThis.engine?.interiors), null, { timeout: 30_000 })
     await page.waitForTimeout(800)
 
-    // A. Phone OS extensibility + ArrowUp open/close (generate 2 live offers first & let 280ms open transition settle!)
+    // A. Shift sign-up / sign-off & shift-only notifications + Phone OS extensibility
+    const shiftOffCheck = await page.evaluate(() => {
+      const e = globalThis.engine
+      e.delivery.resetProgress()
+      const offInitially = !e.delivery.onShift
+      // Generating an offer while off shift must NOT show a phone notification toast!
+      e.delivery.generateOffer({ pizza: true })
+      const toastWhileOff = document.querySelector('[data-panel="phone-toast"]')?.classList.contains('show') ?? false
+      e.phone.openPhone('doorsmash')
+      const hasStartBtn = !!document.querySelector('.ds-start-shift')
+      return { offInitially, toastWhileOff, hasStartBtn }
+    })
+    check(shiftOffCheck.offInitially && !shiftOffCheck.toastWhileOff && shiftOffCheck.hasStartBtn,
+      `starts off shift with notifications silenced and Sign Up UI visible (${JSON.stringify(shiftOffCheck)})`)
+
+    await page.waitForTimeout(450)
+    if (shotsDir) await page.screenshot({ path: join(shotsDir, '00-shift-signup.png') })
+
     const phoneCheck = await page.evaluate(() => {
       const e = globalThis.engine
       e.delivery.resetProgress()
+      e.phone.closePhone()
+      // Sign up for shift -> now notifications fire!
+      const started = e.delivery.startShift({ focus: 'citywide' })
+      const toastOnShift = document.querySelector('[data-panel="phone-toast"]')?.classList.contains('show') ?? false
+      e.delivery.generateOffer({ pizza: true, soup: true, obnoxious: true })
+      e.delivery.generateOffer({ supermarket: true })
+      // Sign off -> clears offers, dismisses toast, silences notifications
+      const summary = e.delivery.endShift()
+      const toastAfterSignoff = document.querySelector('[data-panel="phone-toast"]')?.classList.contains('show') ?? false
+      const offersAfterSignoff = e.delivery.offers.length
+      // Sign back on for the rest of the playtest
+      e.delivery.startShift({ focus: 'citywide' })
       e.delivery.generateOffer({ pizza: true, soup: true, obnoxious: true })
       e.delivery.generateOffer({ supermarket: true })
       e.phone.registerApp({
@@ -224,12 +324,16 @@ if (!unitOnly) {
       })
       const count = e.phone.apps.length
       e.phone.openPhone('doorsmash')
-      const openState = { open: e.phone.open, app: e.phone.activeAppId, reading: e.me.phoneReading }
+      const openState = { open: e.phone.open, app: e.phone.activeAppId, reading: e.me.phoneReading, onShift: e.delivery.onShift }
+      const hasSignoffBtn = !!document.querySelector('.ds-signoff')
       e.phone.unregisterApp('test-ext')
-      return { count, openState }
+      return { started, toastOnShift, summaryOk: !!summary, toastAfterSignoff, offersAfterSignoff, count, openState, hasSignoffBtn }
     })
-    check(phoneCheck.count >= 2 && phoneCheck.openState.open && phoneCheck.openState.app === 'doorsmash',
-      `extensible Phone OS registers additional apps & opens DoorSmash (${JSON.stringify(phoneCheck)})`)
+    check(
+      phoneCheck.started && phoneCheck.toastOnShift && phoneCheck.summaryOk && !phoneCheck.toastAfterSignoff && phoneCheck.offersAfterSignoff === 0
+      && phoneCheck.count >= 2 && phoneCheck.openState.open && phoneCheck.openState.app === 'doorsmash' && phoneCheck.hasSignoffBtn,
+      `shift sign-up/sign-off controls offers & notifications cleanly + extensible Phone OS (${JSON.stringify(phoneCheck)})`,
+    )
 
     await page.waitForTimeout(450)
     if (shotsDir) await page.screenshot({ path: join(shotsDir, '01-phone-doorsmash-onfoot.png') })
@@ -238,6 +342,7 @@ if (!unitOnly) {
     const orderFlow = await page.evaluate(() => {
       const d = globalThis.engine.delivery
       d.resetProgress()
+      d.startShift({ focus: 'citywide' })
       const oPizza = d.generateOffer({ pizza: true, soup: true, obnoxious: true })
       const oMarket = d.generateOffer({ supermarket: true })
       const acc1 = d.acceptOffer(oPizza.id)
@@ -260,7 +365,7 @@ if (!unitOnly) {
     check(orderFlow.acc1 && orderFlow.acc2 && orderFlow.activeCount === 2 && orderFlow.reordered && orderFlow.swapped,
       `stacked 2 orders & reordered multi-stop GPS (${JSON.stringify({ active: orderFlow.activeCount, stops: orderFlow.stopsBefore, swapped: orderFlow.swapped })})`)
 
-    // C. Enter modular 3D Supermarket Interior, auto-buy every aisle item with rolling cart, collect order & exit!
+    // C. Enter modular 3D Supermarket Interior: verify HUD checklist, GTA 6 pink markers, indoor floorplan radar, cart & checkout!
     await page.evaluate((store) => {
       globalThis.engine.phone.closePhone()
       globalThis.engine.delivery.enterStore(store)
@@ -268,30 +373,59 @@ if (!unitOnly) {
     await page.waitForTimeout(900)
     if (shotsDir) await page.screenshot({ path: join(shotsDir, '02-supermarket-interior.png') })
 
+    const marketHud = await page.evaluate(() => {
+      const int = globalThis.engine.interiors
+      const checklistEl = document.querySelector('[data-panel="store-checklist"]')
+      const itemsCount = checklistEl ? checklistEl.querySelectorAll('.sc-item').length : 0
+      const markersCount = document.querySelectorAll('[data-panel="store-markers"] .sm-pin').length
+      const radar = int.indoorMapState()
+      const mmVisible = !!document.querySelector('#minimap') && !document.querySelector('#minimap').hidden
+      return {
+        checklistVisible: !!checklistEl && !checklistEl.hidden,
+        itemsCount,
+        markersCount,
+        radarFixtures: radar?.fixtures.length ?? 0,
+        radarTargets: radar?.targets.length ?? 0,
+        mmVisible,
+      }
+    })
+    check(
+      marketHud.checklistVisible && marketHud.itemsCount >= 4 && marketHud.markersCount >= 1
+      && marketHud.radarFixtures >= 5 && marketHud.radarTargets >= 4 && marketHud.mmVisible,
+      `supermarket HUD checklist, GTA 6 pink markers & indoor radar minimap active (${JSON.stringify(marketHud)})`,
+    )
+
     const marketResult = await page.evaluate((marketOrderId) => {
       const d = globalThis.engine.delivery
       const int = globalThis.engine.interiors
       const bp = int.currentBlueprint
       const ord = d.activeOrders.find((o) => o.id === marketOrderId)
       for (const it of ord.shoppingList) d.collectShoppingItem(ord.id, it.id)
+      const doneText = document.querySelector('[data-panel="store-checklist"] .sc-count')?.textContent ?? ''
       const picked = d.collectOrder(ord.id)
       // Also pick up the pizza+soup order (skip delay for test) and verify cargo items loaded
       const ordP = d.activeOrders.find((o) => o.id !== marketOrderId)
       ordP.delayRemaining = 0
       const pickedP = d.collectOrder(ordP.id)
       int.exit()
+      const checklistHiddenAfterExit = document.querySelector('[data-panel="store-checklist"]')?.hidden === true
       return {
         bpArchetype: bp?.archetype,
         aisles: bp?.shoppingZones.length ?? 0,
         npcs: bp?.npcs.length ?? 0,
+        doneText,
         picked,
         pickedP,
         cargoItems: d.cargo.items.length,
         exited: !int.active,
+        checklistHiddenAfterExit,
       }
     }, orderFlow.oMarketId)
-    check(marketResult.aisles >= 3 && marketResult.npcs >= 4 && marketResult.picked && marketResult.pickedP && marketResult.cargoItems >= 3 && marketResult.exited,
-      `walkable 3D supermarket interior shopping + checkout + exit (${JSON.stringify(marketResult)})`)
+    check(
+      marketResult.aisles >= 5 && marketResult.npcs >= 4 && marketResult.doneText === 'CHECKOUT'
+      && marketResult.picked && marketResult.pickedP && marketResult.cargoItems >= 3 && marketResult.exited && marketResult.checklistHiddenAfterExit,
+      `walkable 3D supermarket interior shopping + checklist completion + checkout + exit (${JSON.stringify(marketResult)})`,
+    )
 
     // Also capture a Pizzeria interior screenshot so we visually verify non-cookie-cutter interior variety!
     if (shotsDir) {
@@ -377,7 +511,76 @@ if (!unitOnly) {
       && chaosAndPay.goodPay > 6 && chaosAndPay.goodLikes > 0 && chaosAndPay.hangLikes > 0,
       `eat food + 🖕 nukes tip/stars; clean delivery + double-park + hangout pays cash & Death Stranding Likes (${JSON.stringify(chaosAndPay)})`,
     )
+
+    // Close desktop page before opening mobile WebGPU contexts so only one WebGPU context draws at once.
+    await page.close()
+
+    // F. Mobile touch portrait & landscape driving + open phone layout check!
+    console.log('6. Mobile portrait & landscape driving with open smartphone (zero control overlap)')
+    {
+      const mobileViews = [
+        { id: 'portrait', size: [390, 844], safe: { top: 59, bottom: 34, left: 0, right: 0 } },
+        { id: 'landscape', size: [844, 390], safe: { top: 0, bottom: 21, left: 59, right: 59 } },
+      ]
+      for (const mv of mobileViews) {
+        const mp = await kit.page({ size: mv.size, dpr: 2, phone: true })
+        const ctx = mp.context()
+        mp.on('pageerror', (e) => errors.push(`[${mv.id}] ${e.message}`))
+        const cdp = await ctx.newCDPSession(mp)
+        await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: mv.safe })
+        await mp.goto(`${kit.url}/city?fly=0&walk=1&sound=0&people=0&scale=0.5`)
+        await mp.waitForFunction(() => Boolean(globalThis.engine?.phone && globalThis.engine?.delivery), null, { timeout: 60_000 })
+        await mp.waitForTimeout(800)
+        await mp.evaluate(async () => {
+          const e = globalThis.engine
+          e.delivery.resetProgress()
+          e.delivery.startShift({ focus: 'citywide' })
+          e.delivery.profile.cash = 1500
+          e.delivery.selectOrBuyVehicle('prius')
+          const thing = await e.delivery.spawnActiveVehicle()
+          if (thing) e.alive.mount(thing)
+          e.phone.openPhone('doorsmash')
+        })
+        await mp.waitForTimeout(800)
+        if (shotsDir) await mp.screenshot({ path: join(shotsDir, `06-mobile-${mv.id}-drive-phone.png`) })
+        const layoutCheck = await mp.evaluate((safe) => {
+          const panel = document.querySelector('[data-panel="phone"]')
+          const chassis = panel?.querySelector('.ph-chassis')
+          const pRect = chassis?.getBoundingClientRect()
+          const controls = [...document.querySelectorAll('[data-panel="living"] .dt-cluster > *')]
+            .filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+            .map((el) => {
+              const r = el.getBoundingClientRect()
+              const cx = r.left + r.width / 2, cy = r.top + r.height / 2
+              const hit = document.elementFromPoint(cx, cy)
+              return { act: el.dataset.act, left: r.left, top: r.top, right: r.right, bottom: r.bottom, reachable: !!hit && el.contains(hit) }
+            })
+          const meets = (a, b) => a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5
+          const overlapped = pRect ? controls.filter((c) => meets(pRect, c)).map((c) => c.act) : ['missing']
+          const unreachable = controls.filter((c) => !c.reachable).map((c) => c.act)
+          const inSafe = !!pRect && pRect.left >= safe.left - 1 && pRect.right <= innerWidth - safe.right + 1 && pRect.top >= safe.top - 1 && pRect.bottom <= innerHeight - safe.bottom + 1
+          return {
+            docked: panel?.classList.contains('mobile-drive-dock') ?? false,
+            rect: pRect ? { l: Math.round(pRect.left), t: Math.round(pRect.top), w: Math.round(pRect.width), h: Math.round(pRect.height) } : null,
+            controlCount: controls.length,
+            overlapped,
+            unreachable,
+            inSafe,
+          }
+        }, mv.safe)
+        check(
+          layoutCheck.docked && layoutCheck.controlCount >= 5 && layoutCheck.overlapped.length === 0
+          && layoutCheck.unreachable.length === 0 && layoutCheck.inSafe,
+          `mobile ${mv.id} driving + open phone: dashboard dock clear of all ${layoutCheck.controlCount} driving controls & safe areas (${JSON.stringify(layoutCheck)})`,
+        )
+        await ctx.close()
+      }
+    }
+
     check(errors.length === 0, `zero uncaught page errors${errors.length ? `: ${errors.join(' | ')}` : ''}`)
+  } catch (err) {
+    check(false, `uncaught test exception: ${err?.message ?? err}`)
+    console.error(err)
   } finally {
     kit.failures.push(...failures)
     await kit.finish('delivery')

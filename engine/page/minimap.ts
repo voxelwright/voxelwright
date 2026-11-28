@@ -26,6 +26,7 @@ import type { MapData, MapPlace } from './nav-data.ts'
 import type { PlacesPayload } from './neighborhood.ts'
 import type { Input } from './input.ts'
 import type { Hud } from './hud.ts'
+import type { IndoorMapState } from './interiors.ts'
 
 export interface MapDiveState {
   cam: MapCamera
@@ -85,6 +86,8 @@ export interface MapSystemOptions {
   onOpen?(): void
   /** Optional fast-travel handler: lets the visitor dive straight to the chosen destination from the map camera. */
   onVisit?(x: number, z: number, name: string, cam: MapCameraSnapshot): Promise<boolean | void> | boolean | void
+  /** Optional indoor store floorplan state (switches minimap into GTA 6 indoor store radar with pink target dots). */
+  interior?: () => IndoorMapState | null
 }
 
 export type MapWaypoint = GpsStop
@@ -3526,6 +3529,134 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     }
   }
 
+  // ── 2D Overlay Drawing: GTA 6–Style Indoor Store Floorplan Radar ──
+  const drawIndoorMinimap = (indoor: IndoorMapState) => {
+    const cssW = mmRoot.clientWidth, cssH = mmRoot.clientHeight
+    if (cssW < 10 || cssH < 10) return
+    const pad = cssW < 134 ? 6 : 8
+    const ovW = cssW + pad * 2, ovH = cssH + pad * 2
+    const dpr = Math.min(2.5, devicePixelRatio || 1)
+    const pw = Math.round(ovW * dpr), ph = Math.round(ovH * dpr)
+    if (mmOv.width !== pw || mmOv.height !== ph) { mmOv.width = pw; mmOv.height = ph }
+
+    const ctx = mmCtx
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, ovW, ovH)
+
+    // Clip to the rounded minimap interior window so we render a crisp GTA 6 store radar cleanly over mmGpu!
+    ctx.save()
+    ctx.beginPath()
+    ctx.roundRect(pad, pad, cssW, cssH, 4)
+    ctx.clip()
+
+    // Charcoal store radar backdrop
+    ctx.fillStyle = '#252a33'
+    ctx.fillRect(pad, pad, cssW, cssH)
+
+    // Transform room into player-heading-up local radar space (player sits slightly below center like GTA 6!)
+    const scale = Math.min(cssW / Math.max(10, indoor.widthM * 0.92), cssH / Math.max(9, indoor.depthM * 0.88)) * 0.88
+    const originX = pad + cssW * 0.5
+    const originY = pad + cssH * 0.58
+
+    ctx.save()
+    ctx.translate(originX, originY)
+    // Rotate world by -playerYaw so player forward (sin(yaw), -cos(yaw)) always points UP (-Y on canvas)
+    ctx.rotate(-indoor.playerYaw)
+    ctx.scale(scale, scale)
+    ctx.translate(-indoor.playerX, -indoor.playerZ)
+
+    // Room floor slab + crisp architectural perimeter walls
+    ctx.fillStyle = '#3b424d'
+    ctx.fillRect(0, 0, indoor.widthM, indoor.depthM)
+    ctx.strokeStyle = '#737d8c'
+    ctx.lineWidth = 2.2 / scale
+    ctx.strokeRect(0, 0, indoor.widthM, indoor.depthM)
+
+    // Front glass entrance door indicator (emerald threshold bar at z=0)
+    ctx.strokeStyle = '#34d399'
+    ctx.lineWidth = 3.2 / scale
+    ctx.beginPath()
+    ctx.moveTo(indoor.exitX - 0.95, 0)
+    ctx.lineTo(indoor.exitX + 0.95, 0)
+    ctx.stroke()
+
+    // Store fixtures: aisles, produce farm-stand, illuminated back coolers, checkout lane
+    for (const f of indoor.fixtures) {
+      ctx.fillStyle =
+        f.kind === 'cooler' ? '#3d6982'
+        : f.kind === 'produce' ? '#3b7357'
+        : f.kind === 'checkout' ? '#3d6b5e'
+        : f.kind === 'aisle' ? '#6c7585'
+        : '#626875'
+      ctx.fillRect(f.x - f.hw, f.z - f.hd, f.hw * 2, f.hd * 2)
+      ctx.strokeStyle = 'rgba(15, 20, 28, 0.65)'
+      ctx.lineWidth = 1.1 / scale
+      ctx.strokeRect(f.x - f.hw, f.z - f.hd, f.hw * 2, f.hd * 2)
+    }
+
+    // GTA 6 hot-pink target dots for every uncollected shopping item (and emerald checkout dot once done!)
+    const pulse = 0.5 + 0.5 * Math.sin(time * 5.2)
+    for (const t of indoor.targets) {
+      const dotR = (cssW < 160 ? 3.8 : 4.6) / scale
+      // Subtle pulsing halo
+      ctx.beginPath()
+      ctx.arc(t.x, t.z, dotR * (1.55 + pulse * 0.45), 0, Math.PI * 2)
+      ctx.fillStyle = t.isCheckout ? 'rgba(16, 185, 129, 0.28)' : 'rgba(255, 62, 157, 0.30)'
+      ctx.fill()
+      // Crisp bright dot with dark outline (matches GTA 6 store minimap pink dots!)
+      ctx.beginPath()
+      ctx.arc(t.x, t.z, dotR, 0, Math.PI * 2)
+      ctx.fillStyle = t.color
+      ctx.fill()
+      ctx.lineWidth = 1.5 / scale
+      ctx.strokeStyle = '#11161d'
+      ctx.stroke()
+    }
+    ctx.restore()
+
+    // Crisp white directional player badge pointing UP (matches GTA 6 bottom-left radar)
+    {
+      const r = cssW < 160 ? 6.5 : 8.2
+      ctx.save()
+      ctx.translate(originX, originY)
+      ctx.beginPath()
+      ctx.arc(0, 0, r, 0, Math.PI * 2)
+      ctx.fillStyle = '#11161d'
+      ctx.fill()
+      ctx.lineWidth = 1.6
+      ctx.strokeStyle = '#ffffff'
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(0, -r * 0.56)
+      ctx.lineTo(r * 0.44, r * 0.42)
+      ctx.lineTo(0, r * 0.16)
+      ctx.lineTo(-r * 0.44, r * 0.42)
+      ctx.closePath()
+      ctx.fillStyle = '#ffffff'
+      ctx.fill()
+      ctx.restore()
+    }
+
+    // Subtle bottom-left indoor radar tag (clear of top aisles & pink item pins!)
+    if (cssW >= 160) {
+      ctx.save()
+      ctx.font = '700 10px -apple-system, BlinkMacSystemFont, system-ui, sans-serif'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'bottom'
+      ctx.lineWidth = 2.8
+      ctx.strokeStyle = 'rgba(10, 14, 20, 0.88)'
+      const tag = indoor.targets.length
+        ? `${indoor.targets.some((t) => t.isCheckout) ? 'CHECKOUT' : `${indoor.targets.length} LEFT`} · STORE`
+        : 'STORE RADAR'
+      ctx.strokeText(tag, pad + 9, pad + cssH - 7)
+      ctx.fillStyle = indoor.targets.some((t) => t.isCheckout) ? '#6ee7b7' : '#ff99cc'
+      ctx.fillText(tag, pad + 9, pad + cssH - 7)
+      ctx.restore()
+    }
+
+    ctx.restore()
+  }
+
   // ── Per-Frame Update & Render ──
   const frame = (dtRaw: number) => {
     const dt = clamp(dtRaw || 0.016, 0.001, 0.05)
@@ -3544,6 +3675,8 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       return
     }
 
+    const indoor = engaged ? (opts.interior?.() ?? null) : null
+
     if (!engaged) {
       if (!mmRoot.hidden) { mmRoot.hidden = true; gpu.release(mmGpu); mmOv.width = 0; mmOv.height = 0 }
       if (!entrySession) {
@@ -3551,7 +3684,14 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         return
       }
     }
-    if (engaged && mmRoot.hidden && map) mmRoot.hidden = false
+    if (engaged && mmRoot.hidden && (map || indoor)) mmRoot.hidden = false
+    if (!isOpen && indoor && !opts.paused()) {
+      const cs = getComputedStyle(mmRoot)
+      if (mmRoot.clientWidth >= 10 && mmRoot.clientHeight >= 10 && cs.display !== 'none' && cs.visibility !== 'hidden' && parseFloat(cs.opacity) >= 0.02) {
+        drawIndoorMinimap(indoor)
+      }
+      return
+    }
     if (!map || opts.paused()) return
 
     const p = opts.player()

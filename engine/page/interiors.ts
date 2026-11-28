@@ -3,7 +3,7 @@
 // supports a 1:1 custom override registry (ready for real-life photo/video interior blueprints),
 // populates NPC workers, diners/shoppers & queued delivery drivers, and powers supermarket aisle shopping!
 import type { Target } from '../probe/gpu.ts'
-import type { Hud } from './hud.ts'
+import type { Hud, Project } from './hud.ts'
 import type { Input } from './input.ts'
 import { LIGHT_EXTRA, type LocalLightSink } from './lights.ts'
 import type { View } from './march.ts'
@@ -15,6 +15,7 @@ import {
   buildRoomShellAsset,
   buildShoppingCartAsset,
   getInteriorModuleKit,
+  getItemBeaconAsset,
   grey,
   hue,
   k,
@@ -48,8 +49,29 @@ export interface StorePlaceMeta {
 
 export interface ActiveShoppingTask {
   orderId: string
-  items: { id: string; name: string; aisleNumber: number; aisleName: string; category: ShoppingAisleZone['category']; collected: boolean }[]
+  items: {
+    id: string
+    name: string
+    price?: number
+    aisleNumber: number
+    aisleName: string
+    category: ShoppingAisleZone['category']
+    collected: boolean
+  }[]
   onCollect: (itemId: string) => void
+}
+
+export interface IndoorMapState {
+  widthM: number
+  depthM: number
+  playerX: number
+  playerZ: number
+  playerYaw: number
+  storeName: string
+  fixtures: { x: number; z: number; hw: number; hd: number; kind: 'aisle' | 'cooler' | 'checkout' | 'produce' | 'counter' }[]
+  targets: { id: string; x: number; z: number; label: string; color: string; isCheckout?: boolean }[]
+  exitX: number
+  exitZ: number
 }
 
 export interface InteriorEnterOptions {
@@ -103,6 +125,10 @@ export interface InteriorSystem {
   exit(): void
   /** Steps 3D first-person walking & module collisions inside the room; returns true while indoors. */
   frame(dt: number): boolean
+  /** Projects GTA 6–style floating shelf item markers & prompts onto the HUD layer each frame. */
+  projectOverlay(project: Project): void
+  /** Returns live indoor floorplan + pink target dots for the GTA 6–style store minimap radar. */
+  indoorMapState(): IndoorMapState | null
   lights(sink: LocalLightSink): void
   prepareSigns(to: Target, view: View, sun: readonly [number, number, number], day: number, dull: number): boolean
   recordSigns(pass: GPURenderPassEncoder): void
@@ -136,13 +162,259 @@ const DEFAULT_STYLE: SignStyle = {
   bg: '#1c2432', ink: '#f8f5ec', accent: '#f59e0b', trim: '#0f141d', font: 'bold', glow: true,
 }
 
-const SUPERMARKET_AISLES: readonly { num: number; name: string; category: ShoppingAisleZone['category']; module: ModuleKind; items: string[] }[] = [
-  { num: 1, name: 'PRODUCE', category: 'produce', module: 'aisle_produce', items: ['Organic Avocados', 'Honeycrisp Apples', 'Baby Spinach', 'Heirloom Tomatoes', 'Bananas'] },
-  { num: 2, name: 'BAKERY', category: 'bakery', module: 'aisle_bakery', items: ['SF Sourdough Loaf', 'Almond Croissants', 'Everything Bagels', 'Blueberry Muffins'] },
-  { num: 3, name: 'DAIRY & COLD', category: 'dairy', module: 'aisle_dairy', items: ['Oat Milk Half-Gal', 'Pasture Eggs (Fragile)', 'Greek Yogurt', 'Aged Cheddar'] },
-  { num: 4, name: 'PANTRY & DRINKS', category: 'pantry', module: 'aisle_pantry', items: ['Sparkling Water 12-Pack', 'Spicy Ramen 4-Pack', 'Olive Oil', 'Espresso Beans'] },
-  { num: 5, name: 'SNACKS', category: 'snacks', module: 'aisle_snacks', items: ['Kettle Chips', 'Dark Chocolate Bar', 'Trail Mix', 'Tortilla Chips'] },
+const SUPERMARKET_AISLES: readonly {
+  num: number
+  name: string
+  category: ShoppingAisleZone['category']
+  module: ModuleKind
+  items: string[]
+  signStyle: SignStyle
+}[] = [
+  {
+    num: 1,
+    name: 'PRODUCE',
+    category: 'produce',
+    module: 'aisle_produce',
+    items: ['Organic Avocados', 'Honeycrisp Apples', 'Baby Spinach Box', 'Heirloom Tomatoes'],
+    signStyle: { bg: '#14452f', ink: '#f2fff5', accent: '#6ee7b7', trim: '#0b2b1d', font: 'bold', glow: true },
+  },
+  {
+    num: 2,
+    name: 'BAKERY',
+    category: 'bakery',
+    module: 'aisle_bakery',
+    items: ['SF Sourdough Loaf', 'Almond Croissants', 'Everything Bagels', 'Blueberry Muffins'],
+    signStyle: { bg: '#5a3114', ink: '#fff7e8', accent: '#fbbf24', trim: '#381c09', font: 'serif', glow: true },
+  },
+  {
+    num: 3,
+    name: 'CEREAL & PANTRY',
+    category: 'pantry',
+    module: 'aisle_pantry',
+    items: ['Colonel Crunch Cereal', 'Spicy Ramen 4-Pack', 'Olive Oil Bottle', 'Espresso Roast Beans'],
+    signStyle: { bg: '#7f1d1d', ink: '#fff5f5', accent: '#fde047', trim: '#450a0a', font: 'bold', glow: true },
+  },
+  {
+    num: 4,
+    name: 'SNACKS & DRINKS',
+    category: 'snacks',
+    module: 'aisle_snacks',
+    items: ['Kettle Chips Bag', 'Sparkling Water 12-Pack', 'Dark Chocolate Bar', 'Crispy Tortilla Chips'],
+    signStyle: { bg: '#3b1c6e', ink: '#f8f5ff', accent: '#f472b6', trim: '#220f42', font: 'bold', glow: true },
+  },
+  {
+    num: 5,
+    name: 'DAIRY & COLD',
+    category: 'dairy',
+    module: 'aisle_dairy',
+    items: ['Pasture Eggs (Fragile)', 'Oat Milk Half-Gal', 'Greek Yogurt Cup', 'Aged Cheddar Block'],
+    signStyle: { bg: '#0c3b5e', ink: '#e8f9ff', accent: '#38bdf8', trim: '#07243b', font: 'bold', glow: true },
+  },
 ]
+
+const DEPT_COLORS: Record<ShoppingAisleZone['category'], { bg: string; fg: string; short: string }> = {
+  produce: { bg: 'rgba(16, 185, 129, 0.24)', fg: '#6ee7b7', short: 'PRODUCE' },
+  bakery: { bg: 'rgba(245, 158, 11, 0.25)', fg: '#fcd34d', short: 'BAKERY' },
+  pantry: { bg: 'rgba(239, 68, 68, 0.25)', fg: '#fca5a5', short: 'PANTRY' },
+  snacks: { bg: 'rgba(192, 132, 252, 0.24)', fg: '#e9d5ff', short: 'SNACKS' },
+  dairy: { bg: 'rgba(56, 189, 248, 0.24)', fg: '#7dd3fc', short: 'COLD WALL' },
+}
+
+const INTERIOR_HUD_STYLE = /* css */ `
+/* ── In-Store Shopping Checklist HUD (top-left on desktop, below minimap on touch) ── */
+[data-panel="store-checklist"] {
+  position: fixed;
+  top: max(18px, calc(env(safe-area-inset-top, 0px) + 14px));
+  left: max(18px, calc(env(safe-area-inset-left, 0px) + 14px));
+  z-index: 12;
+  width: min(276px, calc(100vw - 36px));
+  pointer-events: auto;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "IBM Plex Sans", system-ui, sans-serif;
+  color: #f3f6fb;
+  user-select: none;
+  -webkit-user-select: none;
+}
+[data-panel="store-checklist"][hidden],
+html.first [data-panel="store-checklist"],
+html.map-open [data-panel="store-checklist"],
+html.drawer [data-panel="store-checklist"],
+html.choosing [data-panel="store-checklist"] { display: none !important; }
+@media (pointer: fine) {
+  html:not(.plain) [data-panel="store-checklist"] { top: 44px; }
+}
+@media (pointer: coarse) {
+  [data-panel="store-checklist"] {
+    top: calc(env(safe-area-inset-top, 0px) + 96px);
+    left: max(14px, calc(env(safe-area-inset-left, 0px) + 14px));
+    width: min(232px, calc(100vw - 28px));
+  }
+  html.phone-open [data-panel="store-checklist"] { display: none !important; }
+}
+@media (pointer: coarse) and (orientation: landscape) {
+  [data-panel="store-checklist"] {
+    top: calc(env(safe-area-inset-top, 0px) + 98px);
+    width: min(216px, 34vw);
+  }
+}
+.sc-card {
+  border-radius: 12px;
+  background: rgba(12, 16, 24, 0.84);
+  border: 1.5px solid rgba(255, 79, 160, 0.42);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.sc-card.done { border-color: rgba(16, 185, 129, 0.65); }
+.sc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 11px 7px;
+  background: linear-gradient(135deg, rgba(255, 42, 133, 0.22), rgba(20, 26, 38, 0.35));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+.sc-card.done .sc-head { background: linear-gradient(135deg, rgba(16, 185, 129, 0.26), rgba(20, 26, 38, 0.35)); }
+.sc-title-wrap { min-width: 0; }
+.sc-kicker { font: 800 9.5px/1.1 system-ui, sans-serif; letter-spacing: 0.09em; text-transform: uppercase; color: #ff80ba; }
+.sc-card.done .sc-kicker { color: #6ee7b7; }
+.sc-store { font: 700 12.5px/1.2 system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.sc-count {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 42, 133, 0.28);
+  border: 1px solid rgba(255, 110, 174, 0.55);
+  color: #fff;
+  font: 800 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sc-card.done .sc-count { background: rgba(16, 185, 129, 0.3); border-color: rgba(52, 211, 153, 0.65); color: #a7f3d0; }
+.sc-list { display: flex; flex-direction: column; padding: 5px 6px; gap: 3px; }
+.sc-card.collapsed .sc-list,
+.sc-card.collapsed .sc-foot { display: none; }
+.sc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border-left: 2.5px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background 0.16s ease, opacity 0.16s ease;
+}
+.sc-item.nearest { background: rgba(255, 42, 133, 0.14); border-left-color: #ff4fa0; }
+.sc-item.got { opacity: 0.54; background: transparent; }
+.sc-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 900 10px/1 system-ui, sans-serif;
+  background: #ff2a85;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(255, 42, 133, 0.72);
+}
+.sc-item.got .sc-dot { background: #10b981; box-shadow: none; }
+.sc-info { flex: 1; min-width: 0; }
+.sc-name { font: 700 12px/1.2 system-ui, sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sc-item.got .sc-name { text-decoration: line-through; }
+.sc-sub { display: flex; align-items: center; gap: 5px; margin-top: 2px; font: 700 9.5px/1.1 system-ui, sans-serif; }
+.sc-dept { padding: 1.5px 5px; border-radius: 4px; letter-spacing: 0.04em; }
+.sc-dist { color: rgba(215, 226, 242, 0.76); font-variant-numeric: tabular-nums; margin-left: auto; }
+.sc-foot {
+  padding: 6px 10px 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font: 600 10.5px/1.25 system-ui, sans-serif;
+  color: rgba(226, 234, 248, 0.84);
+  background: rgba(0, 0, 0, 0.22);
+}
+.sc-card.done .sc-foot { color: #6ee7b7; font-weight: 700; }
+
+/* ── GTA 6–Style In-World Projected Shelf Target Markers & Prompts ── */
+[data-panel="store-markers"] {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  overflow: hidden;
+}
+[data-panel="store-markers"][hidden],
+html.first [data-panel="store-markers"],
+html.map-open [data-panel="store-markers"],
+html.drawer [data-panel="store-markers"],
+html.choosing [data-panel="store-markers"] { display: none !important; }
+.sm-pin {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px 4px 7px;
+  border-radius: 999px;
+  background: rgba(10, 14, 22, 0.80);
+  border: 1.5px solid rgba(255, 79, 160, 0.72);
+  color: #f8fafc;
+  font: 700 11px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  will-change: transform;
+}
+.sm-pin.checkout { border-color: rgba(52, 211, 153, 0.85); }
+.sm-pin.near {
+  pointer-events: auto;
+  cursor: pointer;
+  padding: 6px 13px 6px 7px;
+  gap: 8px;
+  border-radius: 10px;
+  background: rgba(11, 14, 20, 0.90);
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  font: 800 13px/1 -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 42, 133, 0.35);
+}
+@media (pointer: coarse) {
+  .sm-pin.near { min-height: 44px; padding: 8px 15px 8px 10px; }
+}
+.sm-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #f8fafc;
+  color: #0b0e14;
+  font: 900 12px/1 -apple-system, system-ui, sans-serif;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.sm-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ff2a85;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 0 10px rgba(255, 42, 133, 0.95);
+  flex: none;
+}
+.sm-pin.checkout .sm-dot {
+  background: #10b981;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.95);
+}
+.sm-dist {
+  font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(255, 182, 217, 0.9);
+}
+.sm-pin.checkout .sm-dist { color: #a7f3d0; }
+`
 
 export function isSupermarketCategory(cat: string): boolean {
   return cat === 'supermarket' || cat === 'grocery' || cat === 'corner_store' || cat === 'market'
@@ -278,60 +550,156 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
   const mx = (x: number) => (mirror ? widthM - x : x)
 
   if (isMarket) {
-    // ── Functional Multi-Aisle Supermarket / Grocery Layout ──
-    const aisleCount = widthM >= 13 ? 4 : 3
-    const aisleSpacing = (widthM - 2.8) / aisleCount
-    const aisleZ = depthM * 0.54
-    for (let i = 0; i < aisleCount; i++) {
-      const def = SUPERMARKET_AISLES[i]
-      // Viewer entering facing +z sees +x on their LEFT, so start Aisle 1 on the high-x (left) side for natural 1..4 L->R order!
-      const ax = widthM - (1.55 + i * aisleSpacing + aisleSpacing * 0.35)
+    // ── Functional Multi-Department Supermarket / Grocery Layout (GTA 6–inspired readability!) ──
+    // Every market size ALWAYS includes all 5 recognizable zones:
+    //   1. PRODUCE (Front farm-stand island + produce aisle in wide markets)
+    //   2. BAKERY (Warm oak bread/pastry display aisle)
+    //   3. CEREAL & PANTRY (GTA 6–style cereal boxes, jars, olive oil & ramen gondola)
+    //   4. SNACKS & DRINKS (Chip bags, canisters & sparkling water 12-pack gondola)
+    //   5. DAIRY & COLD (Illuminated GTA 6–style glass-door back cooler wall!)
+    const wideMarket = widthM >= 12.2
+    const centerDefs = wideMarket
+      ? [SUPERMARKET_AISLES[0], SUPERMARKET_AISLES[1], SUPERMARKET_AISLES[2], SUPERMARKET_AISLES[3]]
+      : [SUPERMARKET_AISLES[1], SUPERMARKET_AISLES[2], SUPERMARKET_AISLES[3]]
+    const aisleSpacing = (widthM - 2.6) / centerDefs.length
+    const aisleZ = depthM * 0.55
+
+    for (let i = 0; i < centerDefs.length; i++) {
+      const def = centerDefs[i]
+      // Viewer entering facing +z sees +x on their LEFT, so lay aisles naturally left-to-right!
+      const ax = widthM - (1.45 + i * aisleSpacing + aisleSpacing * 0.35)
       modules.push({ id: `aisle-${def.num}`, kind: def.module, x: ax, z: aisleZ, yaw: Math.PI * 0.5 })
-      // Crisp overhead aisle sign hanging cleanly below ceiling beams
+      // Department-colored double-sided overhead aisle sign hanging cleanly above the gondola!
       signs.push({
         id: `aisle-sign-${def.num}`,
-        title: `AISLE ${def.num}`,
-        subtitle: def.name,
+        title: `AISLE ${def.num} · ${def.name}`,
+        subtitle: def.items.slice(0, 2).join(' · '),
         category: cat,
         x: ax,
-        y: heightM - 1.28,
-        z: aisleZ - 1.35,
-        widthM: 2.05,
-        heightM: 0.64,
+        y: Math.min(heightM - 0.72, 2.95),
+        z: aisleZ - 1.25,
+        widthM: 2.35,
+        heightM: 0.62,
         yaw: 0,
         both: true,
-        style,
+        style: def.signStyle,
       })
+      const standX = Math.max(1.1, Math.min(widthM - 1.1, ax - 1.02))
+      const shelfFaceX = ax - 0.52
       shoppingZones.push({
-        id: `zone-${def.num}`,
+        id: `zone-${def.category}`,
         aisleNumber: def.num,
         aisleName: def.name,
         category: def.category,
-        x: Math.max(1.2, Math.min(widthM - 1.2, ax - 1.05)),
+        x: standX,
         z: aisleZ,
+        shelfAt: [shelfFaceX, 1.52, aisleZ - 0.35 + (i % 2) * 0.7],
+        shelfYaw: Math.PI * 0.5,
         items: [...def.items],
       })
     }
-    // Produce island right inside the entrance
-    modules.push({ id: 'produce-front', kind: 'produce_island', x: mx(widthM * 0.72), z: 3.1, yaw: 0 })
-    // Illuminated cold dairy & beverage fridge wall along the back!
-    for (let fx = 2.4; fx < widthM - 1.6; fx += 3.2) {
-      modules.push({ id: `fridge-${fx.toFixed(1)}`, kind: 'fridge_wall', x: fx, z: depthM - 0.7, yaw: 0 })
+
+    // Produce farm-stand island right inside the entrance (serves as Zone 1 PRODUCE in compact bodegas too!)
+    const prodX = mx(widthM * 0.72)
+    const prodZ = 3.05
+    modules.push({ id: 'produce-front', kind: 'produce_island', x: prodX, z: prodZ, yaw: 0 })
+    signs.push({
+      id: 'produce-stand-sign',
+      title: 'FRESH PRODUCE',
+      subtitle: 'AVOCADOS · APPLES · GREENS',
+      category: cat,
+      x: prodX,
+      y: 2.52,
+      z: prodZ,
+      widthM: 2.15,
+      heightM: 0.54,
+      yaw: 0,
+      both: true,
+      style: SUPERMARKET_AISLES[0].signStyle,
+    })
+    if (!wideMarket) {
+      shoppingZones.push({
+        id: 'zone-produce',
+        aisleNumber: 1,
+        aisleName: 'PRODUCE',
+        category: 'produce',
+        x: prodX,
+        z: Math.max(1.3, prodZ - 1.25),
+        shelfAt: [prodX - 0.45, 1.24, prodZ - 0.35],
+        shelfYaw: 0,
+        items: [...SUPERMARKET_AISLES[0].items],
+      })
     }
-    // Checkout lanes near the front left
+
+    // Illuminated GTA 6–style glass-door cold dairy & beverage cooler wall along the back!
+    const coolerHeaders = [
+      { title: 'ICE COLD DRINKS', sub: 'SPARKLING · SODA · CRAFT', bg: '#0c4a6e', accent: '#7dd3fc' },
+      { title: 'DAIRY & EGGS', sub: 'OAT MILK · PASTURE EGGS · YOGURT', bg: '#164e63', accent: '#67e8f9' },
+      { title: 'TAP INTO A COOL ONE', sub: 'COLD BEVERAGES · CHILLED', bg: '#065f46', accent: '#a7f3d0' },
+      { title: 'CHILLED & FRESH', sub: 'CHEESE · JUICE · COLD BREW', bg: '#1e3a8a', accent: '#93c5fd' },
+    ]
+    let coolerIdx = 0
+    let dairyX = widthM * 0.5
+    for (let fx = 2.2; fx < widthM - 1.4; fx += 3.1) {
+      modules.push({ id: `fridge-${fx.toFixed(1)}`, kind: 'fridge_wall', x: fx, z: depthM - 0.72, yaw: 0 })
+      const hdr = coolerHeaders[coolerIdx % coolerHeaders.length]
+      signs.push({
+        id: `cooler-hdr-${coolerIdx}`,
+        title: hdr.title,
+        subtitle: hdr.sub,
+        category: cat,
+        x: fx,
+        y: 2.66,
+        z: depthM - 1.06,
+        widthM: 2.75,
+        heightM: 0.56,
+        yaw: 0,
+        style: { bg: hdr.bg, ink: '#ffffff', accent: hdr.accent, trim: '#082032', font: 'bold', glow: true },
+      })
+      if (coolerIdx === 1 || coolerIdx === 0) dairyX = fx
+      coolerIdx++
+    }
+    // Always register Zone 5 (DAIRY & COLD) right along the illuminated back cooler wall!
+    shoppingZones.push({
+      id: 'zone-dairy',
+      aisleNumber: 5,
+      aisleName: 'DAIRY & COLD',
+      category: 'dairy',
+      x: dairyX,
+      z: depthM - 1.95,
+      shelfAt: [dairyX, 1.38, depthM - 1.12],
+      shelfYaw: 0,
+      items: [...SUPERMARKET_AISLES[4].items],
+    })
+
+    // Checkout lanes near the front left with crisp green CHECKOUT sign
     const chkX = mx(2.4)
     modules.push({ id: 'checkout-1', kind: 'checkout_lane', x: chkX, z: 3.0, yaw: Math.PI * 0.5 })
     pickupPoint = [chkX + (mirror ? -1.45 : 1.45), 3.0]
     signs.push({
+      id: 'checkout-sign',
+      title: 'CHECKOUT · LANE 1',
+      subtitle: 'AUTO-BUY PICKUP',
+      category: cat,
+      x: chkX,
+      y: 2.55,
+      z: 3.0,
+      widthM: 1.85,
+      heightM: 0.50,
+      yaw: 0,
+      both: true,
+      style: { bg: '#064e3b', ink: '#ecfdf5', accent: '#34d399', trim: '#022c22', font: 'bold', glow: true },
+    })
+    signs.push({
       id: 'market-banner',
       title: place.name.toUpperCase(),
-      subtitle: 'AUTO-BUY CHECKOUT · PICKUP',
+      subtitle: 'FRESH MARKET · AUTO-BUY CHECKOUT',
       category: cat,
       x: widthM * 0.5,
-      y: heightM - 0.92,
+      y: heightM - 0.62,
       z: depthM - 0.36,
       widthM: Math.min(6.2, widthM * 0.50),
-      heightM: 1.08,
+      heightM: 0.92,
       yaw: 0,
       style,
     })
@@ -527,6 +895,18 @@ export function synthesizeInteriorBlueprint(place: StorePlaceMeta, driverQueueCo
 }
 
 export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSystem {
+  if (typeof document !== 'undefined' && !document.getElementById('vw-interior-hud-style')) {
+    const st = document.createElement('style')
+    st.id = 'vw-interior-hud-style'
+    st.textContent = INTERIOR_HUD_STYLE
+    document.head.append(st)
+  }
+
+  const checklistPanel = opts.hud.panel('store-checklist')
+  checklistPanel.hidden = true
+  const markersPanel = opts.hud.panel('store-markers')
+  markersPanel.hidden = true
+
   const overrides = new Map<string, InteriorBlueprint>()
   let signsPass: StorefrontSigns | null = null
   let pendingSigns: SignSpec[] | null = null
@@ -546,15 +926,21 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
   let roomOrigin: [number, number, number] = [0, INTERIOR_ALT_CELLS, 0] // world cells
   let streetAnchor: [number, number, number] | null = null
   let spawnedPieces: Piece[] = []
+  let beaconPieces = new Map<string, { piece: Piece; baseAt: [number, number, number]; tone: 'pink' | 'emerald' }>()
   let cartPiece: Piece | null = null
   let cartItemsShown = -1
   let colliders: { x0: number; x1: number; z0: number; z1: number }[] = []
   let localX = 4, localZ = 2
   let walkBob = 0
+  let animTime = 0
+  let checklistCollapsed = false
+  let checklistRefreshAcc = 0
   let leaveInput: (() => void) | null = null
   let activeCue: { remove(): void; text: string } | null = null
   let cueKey = ''
   let lastAction: (() => void) | null = null
+  let nearMarkerId = ''
+  const markerEls = new Map<string, HTMLButtonElement>()
   const folkBuf: Person[] = []
 
   const keyVariants = (place: StorePlaceMeta): string[] => {
@@ -578,6 +964,27 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
     return synthesizeInteriorBlueprint(place, driverQueueCount)
   }
 
+  const zoneForItem = (bp: InteriorBlueprint, item: ActiveShoppingTask['items'][number]): ShoppingAisleZone | null => {
+    return bp.shoppingZones.find((z) => z.category === item.category)
+      ?? bp.shoppingZones.find((z) => z.aisleNumber === item.aisleNumber)
+      ?? bp.shoppingZones[0]
+      ?? null
+  }
+
+  const shelfCoordsFor = (zone: ShoppingAisleZone, itemIndex: number): [number, number, number] => {
+    if (zone.shelfAt) {
+      // Spread multiple items in the same zone slightly along the shelf so markers never stack
+      const spread = ((itemIndex % 3) - 1) * 0.45
+      const isBackWall = zone.category === 'dairy' || zone.category === 'produce' && Math.abs(zone.shelfYaw ?? 0) < 0.2
+      return [
+        zone.shelfAt[0] + (isBackWall ? spread : 0),
+        zone.shelfAt[1],
+        zone.shelfAt[2] + (isBackWall ? 0 : spread),
+      ]
+    }
+    return [zone.x, 1.48, zone.z]
+  }
+
   const clearCue = () => {
     activeCue?.remove()
     activeCue = null
@@ -585,8 +992,24 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
     lastAction = null
   }
 
+  const clearMarkers = () => {
+    for (const el of markerEls.values()) el.remove()
+    markerEls.clear()
+    markersPanel.hidden = true
+    nearMarkerId = ''
+  }
+
+  const clearBeacons = () => {
+    for (const b of beaconPieces.values()) b.piece.destroy()
+    beaconPieces.clear()
+  }
+
   const clearScene = () => {
     clearCue()
+    clearBeacons()
+    clearMarkers()
+    checklistPanel.hidden = true
+    checklistPanel.replaceChildren()
     for (const pc of spawnedPieces) pc.destroy()
     spawnedPieces = []
     if (cartPiece) { cartPiece.destroy(); cartPiece = null }
@@ -614,6 +1037,172 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
     cartPiece = opts.pieces.add(asset.born, true)
     cartPiece.cell = asset.cell
     cartItemsShown = collected
+  }
+
+  const syncTargetBeaconsAndSigns = () => {
+    if (!active || !currentBp) { clearBeacons(); return }
+    const bp = currentBp
+    const wantedBeacons = new Map<string, { at: [number, number, number]; tone: 'pink' | 'emerald' }>()
+    const extraSigns: InteriorSignPlacement[] = []
+    const shop = currentEnter?.shopping
+    const pk = currentEnter?.pickupOrder
+
+    if (shop) {
+      const remaining = shop.items.filter((it) => !it.collected)
+      remaining.forEach((it, idx) => {
+        const z = zoneForItem(bp, it)
+        if (!z) return
+        const sAt = shelfCoordsFor(z, idx)
+        wantedBeacons.set(`item:${it.id}`, { at: [sAt[0], sAt[1] + 0.56, sAt[2]], tone: 'pink' })
+      })
+      if (remaining.length === 0) {
+        wantedBeacons.set('checkout', { at: [bp.pickupPoint[0], 1.75, bp.pickupPoint[1]], tone: 'emerald' })
+      }
+    } else if (pk && pk.ready) {
+      wantedBeacons.set('pickup', { at: [bp.pickupPoint[0], 1.85, bp.pickupPoint[1] + 0.45], tone: 'emerald' })
+    }
+
+    // Remove stale beacons
+    for (const [id, b] of beaconPieces) {
+      if (!wantedBeacons.has(id)) {
+        b.piece.destroy()
+        beaconPieces.delete(id)
+      }
+    }
+    // Add missing beacons
+    for (const [id, spec] of wantedBeacons) {
+      if (!beaconPieces.has(id)) {
+        const asset = getItemBeaconAsset(spec.tone)
+        const pc = opts.pieces.add(asset.born, true)
+        const baseAt = toWorldCells(spec.at[0], spec.at[1], spec.at[2])
+        pc.pos = [...baseAt]
+        pc.rot = [0, 0, 0, 1]
+        pc.cell = asset.cell
+        beaconPieces.set(id, { piece: pc, baseAt, tone: spec.tone })
+      }
+    }
+
+    // Re-sync 3D signs with dynamic shelf item tags
+    const allSigns = [...bp.signs, ...extraSigns]
+    const signSpecs: SignSpec[] = allSigns.map((s) => {
+      const nx = Math.sin(s.yaw), nz = -Math.cos(s.yaw)
+      const rx = nz, rz = -nx
+      return {
+        id: `int:${bp.id}:${s.id}`,
+        title: s.title,
+        subtitle: s.subtitle,
+        category: s.category,
+        kind: 'fascia',
+        at: toWorldCells(s.x, s.y, s.z),
+        hu: [rx * s.widthM * 0.5 * M, 0, rz * s.widthM * 0.5 * M],
+        hv: [0, s.heightM * 0.5 * M, 0],
+        normal: [nx, 0, nz],
+        both: s.both ?? false,
+        style: s.style,
+      }
+    })
+    if (signsPass) signsPass.sync(signSpecs)
+    else pendingSigns = signSpecs
+  }
+
+  const renderChecklistHud = () => {
+    if (!active || !currentBp) {
+      checklistPanel.hidden = true
+      return
+    }
+    const shop = currentEnter?.shopping
+    const pk = currentEnter?.pickupOrder
+    if (!shop && !pk) {
+      checklistPanel.hidden = true
+      return
+    }
+    checklistPanel.hidden = false
+    const bp = currentBp
+
+    if (shop) {
+      const done = shop.items.filter((i) => i.collected).length
+      const total = shop.items.length
+      const allDone = done === total
+      // Find nearest uncollected item to highlight!
+      let nearestId = ''
+      let nearestD = Infinity
+      const dists = new Map<string, number>()
+      shop.items.forEach((it, idx) => {
+        const z = zoneForItem(bp, it)
+        const d = z ? Math.hypot(localX - z.x, localZ - z.z) : 0
+        dists.set(it.id, d)
+        if (!it.collected && d < nearestD) { nearestD = d; nearestId = it.id }
+      })
+      const chkDist = Math.hypot(localX - bp.pickupPoint[0], localZ - bp.pickupPoint[1])
+
+      const card = document.createElement('div')
+      card.className = `sc-card ${allDone ? 'done' : ''} ${checklistCollapsed ? 'collapsed' : ''}`
+      card.innerHTML = `
+        <div class="sc-head" role="button" tabindex="0" aria-label="Toggle shopping checklist">
+          <div class="sc-title-wrap">
+            <div class="sc-kicker">${allDone ? 'CART COMPLETE' : 'SHOPPING LIST'}</div>
+            <div class="sc-store"></div>
+          </div>
+          <span class="sc-count">${allDone ? 'CHECKOUT' : `${done}/${total}`}</span>
+        </div>
+        <div class="sc-list"></div>
+        <div class="sc-foot"></div>
+      `
+      card.querySelector('.sc-store')!.textContent = bp.name
+      const head = card.querySelector<HTMLElement>('.sc-head')!
+      head.addEventListener('click', () => { checklistCollapsed = !checklistCollapsed; renderChecklistHud() })
+
+      const listEl = card.querySelector('.sc-list')!
+      for (const it of shop.items) {
+        const dept = DEPT_COLORS[it.category] ?? DEPT_COLORS.pantry
+        const d = Math.max(1, Math.round(dists.get(it.id) ?? 0))
+        const row = document.createElement('div')
+        row.className = `sc-item ${it.collected ? 'got' : it.id === nearestId ? 'nearest' : ''}`
+        row.innerHTML = `
+          <span class="sc-dot">${it.collected ? '✓' : ''}</span>
+          <div class="sc-info">
+            <div class="sc-name"></div>
+            <div class="sc-sub">
+              <span class="sc-dept" style="background:${dept.bg};color:${dept.fg};"></span>
+              <span class="sc-dist"></span>
+            </div>
+          </div>
+        `
+        row.querySelector('.sc-name')!.textContent = `${it.name}${it.price ? ` ($${it.price})` : ''}`
+        row.querySelector('.sc-dept')!.textContent = it.category === 'dairy' ? 'COLD WALL' : it.category === 'produce' ? 'PRODUCE' : `A${it.aisleNumber} · ${dept.short}`
+        row.querySelector('.sc-dist')!.textContent = it.collected ? 'In cart' : `${d} m`
+        listEl.append(row)
+      }
+      const foot = card.querySelector('.sc-foot')!
+      foot.textContent = allDone
+        ? `→ Head to Checkout Lane (${Math.max(1, Math.round(chkDist))} m) · Press E`
+        : 'Follow pink markers & store radar · Press E at shelf'
+      checklistPanel.replaceChildren(card)
+      return
+    }
+
+    // Restaurant Pickup Status Card (clean 2-line HUD summary!)
+    if (pk) {
+      const ready = pk.ready
+      const d = Math.max(1, Math.round(Math.hypot(localX - bp.pickupPoint[0], localZ - bp.pickupPoint[1])))
+      const card = document.createElement('div')
+      card.className = `sc-card ${ready ? 'done' : ''}`
+      card.innerHTML = `
+        <div class="sc-head">
+          <div class="sc-title-wrap">
+            <div class="sc-kicker">${ready ? 'ORDER READY' : 'KITCHEN PREPPING'}</div>
+            <div class="sc-store"></div>
+          </div>
+          <span class="sc-count">${ready ? `${d} m` : `${Math.max(1, Math.ceil(pk.delayRemainingS ?? 5))}s`}</span>
+        </div>
+        <div class="sc-foot"></div>
+      `
+      card.querySelector('.sc-store')!.textContent = pk.label
+      card.querySelector('.sc-foot')!.textContent = ready
+        ? 'Head to the DoorSmash Pickup Rack · Press E'
+        : `${pk.delayReason ?? 'Still prepping'} · Press E at counter to nudge`
+      checklistPanel.replaceChildren(card)
+    }
   }
 
   const buildScene = (bp: InteriorBlueprint) => {
@@ -644,29 +1233,10 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
       }
     }
 
-    // 3. Crisp 3D signs (menu boards, aisle numbers, pickup banner, exit sign)
-    const signSpecs: SignSpec[] = bp.signs.map((s) => {
-      // Forward normal: yaw=0 faces -z (toward front entrance), yaw=PI faces +z.
-      // Viewer looking at sign (viewDir = -normal): viewer's right = cross(-normal, up) = (nz, 0, -nx).
-      const nx = Math.sin(s.yaw), nz = -Math.cos(s.yaw)
-      const rx = nz, rz = -nx
-      return {
-        id: `int:${bp.id}:${s.id}`,
-        title: s.title,
-        subtitle: s.subtitle,
-        category: s.category,
-        kind: 'fascia',
-        at: toWorldCells(s.x, s.y, s.z),
-        hu: [rx * s.widthM * 0.5 * M, 0, rz * s.widthM * 0.5 * M],
-        hv: [0, s.heightM * 0.5 * M, 0],
-        normal: [nx, 0, nz],
-        both: s.both ?? false,
-        style: s.style,
-      }
-    })
-    if (signsPass) signsPass.sync(signSpecs)
-    else pendingSigns = signSpecs
+    // 3. Crisp 3D signs + glowing target item beacons + rolling cart + HUD checklist
+    syncTargetBeaconsAndSigns()
     syncCartMesh()
+    renderChecklistHud()
   }
 
   const enter = (enterOpts: InteriorEnterOptions): InteriorBlueprint => {
@@ -747,7 +1317,18 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
 
   const frame = (dt: number): boolean => {
     if (!active || !currentBp) return false
+    animTime += dt
     syncCartMesh()
+
+    // Gently bob & spin floating 3D target item beacons on shelves
+    if (beaconPieces.size > 0) {
+      const bob = Math.sin(animTime * 3.4) * 1.1
+      const rotQ = yawQuat(animTime * 1.8)
+      for (const b of beaconPieces.values()) {
+        b.piece.pos = [b.baseAt[0], b.baseAt[1] + bob, b.baseAt[2]]
+        b.piece.rot = rotQ
+      }
+    }
 
     // 1. Mouse / touch look + WASD walk inside the 3D interior
     const [turnR, turnU] = opts.input.turn()
@@ -783,11 +1364,20 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
       cartPiece.rot = yawQuat(-opts.pose.yaw + Math.PI * 0.5)
     }
 
+    // Periodically update live distances in the in-store HUD checklist while walking
+    checklistRefreshAcc += dt
+    if (checklistRefreshAcc >= 0.2 && (currentEnter?.shopping || currentEnter?.pickupOrder)) {
+      checklistRefreshAcc = 0
+      renderChecklistHud()
+    }
+
     // 2. Contextual interaction cues inside the room (exit door, shopping shelf auto-buy, or pickup counter)
     let wantKey = ''
     let wantText = ''
     let wantAt: [number, number, number] = toWorldCells(localX, 1.5, localZ)
     let wantAct: (() => void) | null = null
+    let handledByMarker = false
+    nearMarkerId = ''
 
     const distExit = Math.hypot(localX - currentBp.exitPoint[0], localZ - currentBp.exitPoint[1])
     if (distExit < 1.95) {
@@ -797,25 +1387,32 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
       wantAct = exit
     }
 
-    // Check active supermarket aisle items first!
+    // Check active supermarket aisle items first (matched by category or aisle number so every store works!)
     const shopTask = currentEnter?.shopping
     if (shopTask) {
-      let bestDist = 2.65
-      for (const z of currentBp.shoppingZones) {
-        const pending = shopTask.items.find((it) => !it.collected && it.aisleNumber === z.aisleNumber)
-        if (!pending) continue
-        const d = Math.hypot(localX - z.x, localZ - z.z)
+      let bestDist = 2.95
+      const remaining = shopTask.items.filter((it) => !it.collected)
+      remaining.forEach((pending, idx) => {
+        const z = zoneForItem(currentBp!, pending)
+        if (!z) return
+        const sAt = shelfCoordsFor(z, idx)
+        const d = Math.min(
+          Math.hypot(localX - z.x, localZ - z.z),
+          Math.hypot(localX - sAt[0], localZ - sAt[2]),
+        )
         if (d < bestDist) {
           bestDist = d
           wantKey = `shop:${pending.id}`
-          wantText = `E  Take ${pending.name} (Aisle ${z.aisleNumber} · Auto-Buy)`
-          wantAt = toWorldCells(z.x, 1.45, z.z)
+          nearMarkerId = `item:${pending.id}`
+          handledByMarker = true
+          wantText = `E  ${pending.name}${pending.price ? ` ($${pending.price})` : ''}`
+          wantAt = toWorldCells(sAt[0], sAt[1], sAt[2])
           wantAct = () => {
             opts.onSfx?.('scan')
             shopTask.onCollect(pending.id)
           }
         }
-      }
+      })
     }
 
     // Check restaurant pickup counter (or supermarket checkout once all items are collected!)
@@ -826,7 +1423,11 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
       if (distPk < 2.6 && shopDone) {
         if (pk.ready) {
           wantKey = `pickup:${pk.orderId}:ready`
-          wantText = `E  Pick up ${pk.label}`
+          if (shopTask) {
+            nearMarkerId = 'checkout'
+            handledByMarker = true
+          }
+          wantText = shopTask ? `E  Checkout & Load Cart (${pk.label})` : `E  Pick up ${pk.label}`
           wantAt = toWorldCells(currentBp.pickupPoint[0], 1.55, currentBp.pickupPoint[1] + 0.5)
           wantAct = pk.onPickup
         } else {
@@ -844,12 +1445,205 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
       if (wantKey && wantAct) {
         cueKey = wantKey
         lastAction = wantAct
-        const pos = wantAt
-        const act = wantAct
-        activeCue = opts.hud.cue(wantText, () => pos, act)
+        // When the GTA 6 floating shelf prompt is handling this item/checkout, avoid duplicate generic HUD cues!
+        if (!handledByMarker) {
+          const pos = wantAt
+          const act = wantAct
+          activeCue = opts.hud.cue(wantText, () => pos, act)
+        }
       }
     }
     return true
+  }
+
+  /** Projects GTA 6–style floating hot-pink shelf target markers and nearby `[E] ● ITEM ($6)` prompts. */
+  const projectOverlay = (project: Project) => {
+    if (!active || !currentBp) {
+      if (!markersPanel.hidden) clearMarkers()
+      return
+    }
+    const shop = currentEnter?.shopping
+    const pk = currentEnter?.pickupOrder
+    if (!shop && !(pk && pk.ready)) {
+      if (!markersPanel.hidden) clearMarkers()
+      return
+    }
+    const bp = currentBp
+    markersPanel.hidden = false
+
+    interface TargetSpec {
+      id: string
+      worldAt: [number, number, number]
+      distM: number
+      label: string
+      nearLabel: string
+      isCheckout: boolean
+      onAct?: () => void
+    }
+    const targets: TargetSpec[] = []
+    if (shop) {
+      const remaining = shop.items.filter((i) => !i.collected)
+      remaining.forEach((it, idx) => {
+        const z = zoneForItem(bp, it)
+        if (!z) return
+        const sAt = shelfCoordsFor(z, idx)
+        const d = Math.hypot(localX - sAt[0], localZ - sAt[2])
+        const priceStr = it.price ? ` ($${it.price})` : ''
+        targets.push({
+          id: `item:${it.id}`,
+          worldAt: toWorldCells(sAt[0], sAt[1] + 0.25, sAt[2]),
+          distM: d,
+          label: it.name,
+          nearLabel: `${it.name}${priceStr}`,
+          isCheckout: false,
+          onAct: () => {
+            opts.onSfx?.('scan')
+            shop.onCollect(it.id)
+          },
+        })
+      })
+      if (remaining.length === 0 && pk?.ready) {
+        const d = Math.hypot(localX - bp.pickupPoint[0], localZ - bp.pickupPoint[1])
+        targets.push({
+          id: 'checkout',
+          worldAt: toWorldCells(bp.pickupPoint[0], 1.55, bp.pickupPoint[1]),
+          distM: d,
+          label: 'Checkout',
+          nearLabel: 'Checkout & Load Cart',
+          isCheckout: true,
+          onAct: pk.onPickup,
+        })
+      }
+    } else if (pk?.ready) {
+      const d = Math.hypot(localX - bp.pickupPoint[0], localZ - bp.pickupPoint[1])
+      targets.push({
+        id: 'pickup',
+        worldAt: toWorldCells(bp.pickupPoint[0], 1.65, bp.pickupPoint[1] + 0.45),
+        distM: d,
+        label: 'Pickup Rack',
+        nearLabel: `Pick up ${pk.label}`,
+        isCheckout: true,
+        onAct: pk.onPickup,
+      })
+    }
+
+    const wantedIds = new Set(targets.map((t) => t.id))
+    for (const [id, el] of markerEls) {
+      if (!wantedIds.has(id)) { el.remove(); markerEls.delete(id) }
+    }
+
+    const vw = typeof innerWidth === 'number' ? innerWidth : 1280
+    const vh = typeof innerHeight === 'number' ? innerHeight : 720
+    // Place closer/active markers first and nudge farther overlapping pins upward so two aisle labels never collide!
+    targets.sort((a, b) => (a.id === nearMarkerId ? -1 : b.id === nearMarkerId ? 1 : a.distM - b.distM))
+    const placedBoxes: { x: number; y: number; hw: number; hh: number }[] = []
+
+    for (const t of targets) {
+      let el = markerEls.get(t.id)
+      if (!el) {
+        el = document.createElement('button')
+        el.type = 'button'
+        el.className = 'sm-pin'
+        markersPanel.append(el)
+        markerEls.set(t.id, el)
+      }
+      const proj = project(t.worldAt)
+      if (!proj || proj[0] < -40 || proj[0] > vw + 40 || proj[1] < 24 || proj[1] > vh - 24) {
+        el.hidden = true
+        continue
+      }
+      el.hidden = false
+      const isNear = t.id === nearMarkerId
+      el.className = `sm-pin${t.isCheckout ? ' checkout' : ''}${isNear ? ' near' : ''}`
+      const distStr = `${Math.max(1, Math.round(t.distM))}m`
+      const modeKey = isNear ? `near:${t.nearLabel}` : `far:${t.label}:${distStr}`
+      if (el.dataset.mode !== modeKey) {
+        el.dataset.mode = modeKey
+        el.replaceChildren()
+        if (isNear) {
+          const keyCap = document.createElement('span')
+          keyCap.className = 'sm-key'
+          keyCap.textContent = 'E'
+          const dot = document.createElement('span')
+          dot.className = 'sm-dot'
+          const name = document.createElement('span')
+          name.textContent = t.nearLabel
+          el.append(keyCap, dot, name)
+        } else {
+          const dot = document.createElement('span')
+          dot.className = 'sm-dot'
+          const name = document.createElement('span')
+          name.textContent = t.label
+          const dist = document.createElement('span')
+          dist.className = 'sm-dist'
+          dist.textContent = distStr
+          el.append(dot, name, dist)
+        }
+      }
+      el.onclick = isNear && t.onAct ? t.onAct : null
+      const hw = Math.max(76, (el.offsetWidth || 152) * 0.5 + 4)
+      const hh = Math.max(15, (el.offsetHeight || 26) * 0.5 + 4)
+      const cx = Math.max(hw + 8, Math.min(vw - hw - 8, proj[0]))
+      let cy = Math.max(46, Math.min(vh - 46, proj[1]))
+      for (let tries = 0; tries < 4; tries++) {
+        const hit = placedBoxes.find((b) => Math.abs(cx - b.x) < hw + b.hw && Math.abs(cy - b.y) < hh + b.hh)
+        if (!hit) break
+        const above = hit.y - (hh + hit.hh + 2)
+        cy = above >= 46 ? above : Math.min(vh - 46, hit.y + hh + hit.hh + 2)
+      }
+      placedBoxes.push({ x: cx, y: cy, hw, hh })
+      el.style.transform = `translate(${cx.toFixed(1)}px, ${cy.toFixed(1)}px) translate(-50%, -50%)`
+    }
+  }
+
+  /** Builds the live GTA 6–style indoor store floorplan + pink target dots for `#minimap`. */
+  const indoorMapState = (): IndoorMapState | null => {
+    if (!active || !currentBp) return null
+    const bp = currentBp
+    const fixtures: IndoorMapState['fixtures'] = []
+    for (const m of bp.modules) {
+      const asset = moduleKit[m.kind]
+      if (!asset || !asset.solid) continue
+      const rotated = Math.abs(Math.sin(m.yaw ?? 0)) > 0.5
+      const hw = rotated ? asset.halfZ : asset.halfX
+      const hd = rotated ? asset.halfX : asset.halfZ
+      const kind: IndoorMapState['fixtures'][number]['kind'] =
+        m.kind === 'fridge_wall' || m.kind === 'aisle_dairy' ? 'cooler'
+        : m.kind === 'produce_island' || m.kind === 'aisle_produce' ? 'produce'
+        : m.kind === 'checkout_lane' ? 'checkout'
+        : m.kind.startsWith('aisle_') ? 'aisle'
+        : 'counter'
+      fixtures.push({ x: m.x, z: m.z, hw, hd, kind })
+    }
+    const targets: IndoorMapState['targets'] = []
+    const shop = currentEnter?.shopping
+    const pk = currentEnter?.pickupOrder
+    if (shop) {
+      const remaining = shop.items.filter((i) => !i.collected)
+      remaining.forEach((it, idx) => {
+        const z = zoneForItem(bp, it)
+        if (!z) return
+        const sAt = shelfCoordsFor(z, idx)
+        targets.push({ id: it.id, x: sAt[0], z: sAt[2], label: it.name, color: '#ff3e9d' })
+      })
+      if (remaining.length === 0) {
+        targets.push({ id: 'checkout', x: bp.pickupPoint[0], z: bp.pickupPoint[1], label: 'Checkout', color: '#10b981', isCheckout: true })
+      }
+    } else if (pk) {
+      targets.push({ id: 'pickup', x: bp.pickupPoint[0], z: bp.pickupPoint[1], label: 'Pickup', color: pk.ready ? '#10b981' : '#f59e0b', isCheckout: true })
+    }
+    return {
+      widthM: bp.room.widthM,
+      depthM: bp.room.depthM,
+      playerX: localX,
+      playerZ: localZ,
+      playerYaw: opts.pose.yaw,
+      storeName: bp.name,
+      fixtures,
+      targets,
+      exitX: bp.exitPoint[0],
+      exitZ: bp.exitPoint[1],
+    }
   }
 
   const lights = (sink: LocalLightSink) => {
@@ -867,12 +1661,17 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
       const [wx, wy, wz] = toWorldCells(lx, heightM - 0.75, lz)
       sink.addPoint(wx, wy, wz, r * str * 1.45, g * str * 1.45, b * str * 1.45, 95, 38, 0.85, 96, LIGHT_EXTRA)
     }
-    // Warm glow from pizza oven if present!
+    // Warm glow from pizza oven & soft pink/emerald shelf glow on active shopping targets!
     for (const m of currentBp.modules) {
       if (m.kind === 'pizza_oven') {
         const [wx, wy, wz] = toWorldCells(m.x, 1.3, m.z - 0.4)
         sink.addPoint(wx, wy, wz, 2.4, 0.92, 0.25, 55, 22, 0.65, 95, LIGHT_EXTRA)
       }
+    }
+    for (const b of beaconPieces.values()) {
+      const [wx, wy, wz] = b.baseAt
+      if (b.tone === 'pink') sink.addPoint(wx, wy, wz, 1.85, 0.32, 0.95, 36, 14, 0.75, 90, LIGHT_EXTRA)
+      else sink.addPoint(wx, wy, wz, 0.25, 1.85, 0.85, 42, 16, 0.8, 90, LIGHT_EXTRA)
     }
   }
 
@@ -955,16 +1754,24 @@ export function createInteriorSystem(opts: InteriorSystemOptions): InteriorSyste
     },
     enter,
     updatePickup(info) {
-      if (currentEnter) currentEnter.pickupOrder = info
+      if (currentEnter) {
+        currentEnter.pickupOrder = info
+        syncTargetBeaconsAndSigns()
+        renderChecklistHud()
+      }
     },
     updateShopping(task) {
       if (currentEnter) {
         currentEnter.shopping = task ?? undefined
         syncCartMesh()
+        syncTargetBeaconsAndSigns()
+        renderChecklistHud()
       }
     },
     exit,
     frame,
+    projectOverlay,
+    indoorMapState,
     lights,
     prepareSigns(to, view, sun, day, dull) {
       if (!active || !signsPass) return false
