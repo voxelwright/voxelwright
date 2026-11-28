@@ -277,10 +277,15 @@ def main():
             if label not in names:
                 names.append(label)
             ways.append({'name': names.index(label), 'line': [[round(v) for v in xy(*q[:2], step=0.1)] for q in line]})
-    road = np.asarray(centre) & street & ~kerbs & ~inside
+    # Exclude unnavigable cliff faces / public stairway bluffs (e.g. Telegraph Hill paper streets > 38% grade)
+    # from carriageway asphalt so steep rock slopes stay pavement/earth rather than bumpy road ramps.
+    gx = np.abs(np.roll(g2, -2, axis=1) - np.roll(g2, 2, axis=1)) / 2.0
+    gz = np.abs(np.roll(g2, -2, axis=0) - np.roll(g2, 2, axis=0)) / 2.0
+    cliff = np.hypot(gx, gz) > 0.38
+    road = np.asarray(centre) & street & ~kerbs & ~inside & ~cliff
     for _ in range(36):
-        road = grow(road) & street & ~kerbs & ~inside
-    road = grow(road, 1) & street & ~inside  # the kerb line itself is road's
+        road = grow(road) & street & ~kerbs & ~inside & ~cliff
+    road = grow(road, 1) & street & ~inside & ~cliff  # the kerb line itself is road's
     print(f'streets: {street.mean():.2f} of the square, carriageway {road.mean():.2f}, kerb cells {int(kerbs.sum())}')
 
     # ── What the ground is, what grows, and what colour each top is.

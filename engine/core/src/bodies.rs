@@ -2060,8 +2060,14 @@ impl Bodies {
     /// so a blast asks in one as tall as ever, however narrow. A landing's dent asks in a small one: it is asked eight
     /// times a second while a house comes down, and the asking is most of what the solver then does.
     fn release_box(&mut self, at: [i32; 3], radius: i32, size: [usize; 3], max_bodies: usize) -> usize {
+        self.release_box_below(at, radius, size, 48.min(size[1] as i32 / 2), max_bodies)
+    }
+
+    /// Like `release_box`, with an explicit downward margin (`below` cells under `at[1]`) so street-level vehicle
+    /// impacts bias their scan window upward to catch tall severed tree trunks and canopies without leaving them floating.
+    fn release_box_below(&mut self, at: [i32; 3], radius: i32, size: [usize; 3], below: i32, max_bodies: usize) -> usize {
         let side = size[0];
-        let low = [at[0] - side as i32 / 2, at[1] - 48.min(size[1] as i32 / 2), at[2] - side as i32 / 2];
+        let low = [at[0] - side as i32 / 2, at[1] - below.min(size[1] as i32 / 2), at[2] - side as i32 / 2];
         let hi = [low[0] + size[0] as i32, low[1] + size[1] as i32, low[2] + size[2] as i32];
         self.wake_in_aabb(low.map(|v| v as f32 - 2.0), hi.map(|v| v as f32 + 2.0));
         #[cfg(test)]
@@ -2348,14 +2354,45 @@ impl Bodies {
         let radius = ((push / 500.0).cbrt() as i32).clamp(2, 6);
         let far = radius * 3 + 4;
         self.wake_in_aabb(at.map(|c| (c - far) as f32), at.map(|c| (c + far + 1) as f32));
+        let hit_mat = material(self.ground.kind(at[0], at[1], at[2]));
+        // Detect street/park trees (leaves at impact or canopy above a struck wood trunk) so a severed trunk
+        // uses a tall upward-biased support box and does not leave its crown hovering in mid-air, without
+        // widening masonry/house collapse crushes.
+        let is_tree = hit_mat == LEAVES || (hit_mat == WOOD && {
+            let mut has_canopy = false;
+            let mut y = at[1] + 6;
+            while y <= at[1] + 120 {
+                if material(self.ground.kind(at[0], y, at[2])) == LEAVES
+                    || material(self.ground.kind(at[0] + 6, y, at[2])) == LEAVES
+                    || material(self.ground.kind(at[0] - 6, y, at[2])) == LEAVES
+                    || material(self.ground.kind(at[0], y, at[2] + 6)) == LEAVES
+                    || material(self.ground.kind(at[0], y, at[2] - 6)) == LEAVES
+                {
+                    has_canopy = true;
+                    break;
+                }
+                y += 6;
+            }
+            has_canopy
+        });
         // Falling intact structures still need the wider support query and solid rubble to topple correctly.
-        // Vehicles and already loose fragments use a bounded, cheap impact path.
+        // Vehicles and already loose fragments use a bounded, cheap impact path; for trees reserve at least 1
+        // body slot for the newly severed upper trunk + canopy so burst() cannot starve release_box.
         let budget = if fragments { CRASH_LUMPS } else { usize::MAX };
+        let burst_budget = if fragments && is_tree { budget.saturating_sub(1) } else { budget };
         let before = self.next;
-        if self.burst(at, radius, budget) {
-            let size = match radius { 0..=3 if fragments => [20, 32, 20], 4..=5 if fragments => [28, 48, 28], _ => [48, 96, 48] };
+        if self.burst(at, radius, burst_budget) {
+            let size = if is_tree {
+                [64, 160, 64]
+            } else {
+                match radius { 0..=3 if fragments => [20, 32, 20], 4..=5 if fragments => [28, 48, 28], _ => [48, 96, 48] }
+            };
+            let below = if is_tree { 14 } else { 48.min(size[1] as i32 / 2) };
             let remaining = if fragments { budget.saturating_sub((self.next - before) as usize) } else { budget };
-            self.release_box(at, radius, size, remaining);
+            self.release_box_below(at, radius, size, below, remaining);
+            if is_tree {
+                self.ask_far(at, radius.max(4));
+            }
         }
     }
 
@@ -2498,6 +2535,7 @@ impl Bodies {
             let near = (0..parts).min_by_key(|&k| (0..3).map(|a| (c[a] as i32 - seeds[k][a] as i32).pow(2)).sum::<i32>()).unwrap();
             shares[near].push(*c);
         }
+        let from_vehicle = whole.live.as_ref().is_some_and(|l| l.rides());
         self.detach_removed_body(whole.id);
         self.record(BROKE, &[whole.id]);
         let mut debris = self.list.iter().filter(|b| b.live.is_none()).count();
@@ -2522,7 +2560,12 @@ impl Bodies {
             let size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
             let mut grid = vec![0 as Kind; size[0] * size[1] * size[2]];
             for c in &share {
-                grid[c[0] - lo[0] + size[0] * (c[2] - lo[2] + size[2] * (c[1] - lo[1]))] = whole.cells[whole.at(c[0], c[1], c[2])];
+                let mut cell_kind = whole.cells[whole.at(c[0], c[1], c[2])];
+                // Extinguish headlight/taillight voxels on wrecked vehicle chunks so detached wrecks never glow.
+                if from_vehicle && material(cell_kind) == crate::kinds::LAMP {
+                    cell_kind = crate::kinds::kind(GLASS, crate::kinds::grey(11));
+                }
+                grid[c[0] - lo[0] + size[0] * (c[2] - lo[2] + size[2] * (c[1] - lo[1]))] = cell_kind;
             }
             let born = [whole.born[0] + lo[0] as i32, whole.born[1] + lo[1] as i32, whole.born[2] + lo[2] as i32];
             let mut body = Body::new(self.next, grid, size, born);
@@ -2534,10 +2577,11 @@ impl Bodies {
             body.vel = add(whole.speed_at(own), scale(unit(r), 6.0));
             body.spin = whole.spin;
             body.broken = whole.broken + 1;
-            body.passing = whole.passing || body.count < 40;
+            // Wrecked vehicle chunks tumble dramatically then clear into dust instead of baking jagged debris into roads.
+            body.passing = whole.passing || from_vehicle || body.count < 40;
             body.lump = whole.lump || body.count < 80;
             body.limit_points(if body.count < 80 { LUMP_POINTS } else { 48 });
-            if self.persist_debris || whole.persist_sleep {
+            if !from_vehicle && (self.persist_debris || whole.persist_sleep) {
                 body.persist_sleep = body.qualifies_for_persist_sleep();
             }
             debris += 1;
@@ -3967,6 +4011,65 @@ mod tests {
     }
 
     #[test]
+    fn overturned_car_recovers_onto_wheels_with_steering_input() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let id = living::tests::car(&mut bodies, low);
+        let pos = living::tests::the(&bodies, id).pos;
+        // Flip the car completely upside down (180 degrees around X) resting on the road.
+        assert!(bodies.place(id, [pos[0], low[1] as f32 + 5.5, pos[2]], [1.0, 0.0, 0.0, 0.0]));
+        let _ = living::tests::run(&mut bodies, 0.5, id, [0.0, 0.0, 0.0]);
+        let before_up = turn(living::tests::the(&bodies, id).rot, [0.0, 1.0, 0.0])[1];
+        assert!(before_up < -0.5, "car should start resting upside down (up.y={before_up})");
+        // Steer to right the overturned car.
+        let _ = living::tests::run(&mut bodies, 2.5, id, [0.0, 1.0, 0.0]);
+        let after = living::tests::the(&bodies, id);
+        let after_up = turn(after.rot, [0.0, 1.0, 0.0])[1];
+        assert!(after_up > 0.85, "overturned car must roll back onto its wheels when steered (up.y={after_up})");
+        assert!(after.live.as_ref().unwrap().on >= 2, "recovered car should land on its wheels");
+    }
+
+    #[test]
+    fn shattered_vehicle_shards_pass_to_dust_and_extinguish_lamps() {
+        let mut bodies = Bodies::new();
+        let low = living::tests::level(&mut bodies);
+        let id = living::tests::car(&mut bodies, low);
+        // Put glowing headlight LAMP voxels on the car chassis before shattering.
+        let idx = bodies.list.iter().position(|b| b.id == id).unwrap();
+        let mut lit = 0;
+        for cell in &mut bodies.list[idx].cells {
+            if *cell != 0 && lit < 8 {
+                *cell = kind(crate::kinds::LAMP, OWN);
+                lit += 1;
+            }
+        }
+        let edits_before = bodies.ground.edits.len();
+        let whole = bodies.list.remove(idx);
+        bodies.shatter(whole);
+        assert!(!bodies.list.is_empty(), "shattered vehicle should spawn tumbling shards");
+        for shard in &bodies.list {
+            assert!(shard.passing, "vehicle wreck shards must be marked passing so they never bake into roads");
+            assert!(
+                !shard.cells.iter().any(|&c| material(c) == crate::kinds::LAMP),
+                "vehicle wreck shards must extinguish LAMP voxels"
+            );
+        }
+        // Advance until all shards come to rest and verify zero permanent road edits were baked.
+        for _ in 0..400 {
+            bodies.advance(0.05);
+            if bodies.list.is_empty() {
+                break;
+            }
+        }
+        assert!(bodies.list.is_empty(), "passing vehicle shards should settle into dust and clear");
+        assert_eq!(
+            bodies.ground.edits.len(),
+            edits_before,
+            "shattered vehicle shards must not bake static voxel debris into the road"
+        );
+    }
+
+    #[test]
     fn crash_fragments_have_bounded_points_and_small_debris_becomes_dust() {
         let mut bodies = Bodies::new();
         let low = living::tests::level(&mut bodies);
@@ -3998,6 +4101,34 @@ mod tests {
         assert!(!bodies.ground.solid(at[0], at[1] + 4, at[2]), "unsupported brick above the crater releases");
         assert!(bodies.list.len() <= CRASH_LUMPS);
         assert!(bodies.list.iter().all(|b| b.points.len() <= LUMP_POINTS && (b.count >= 40 || b.passing)));
+    }
+
+    #[test]
+    fn crush_severing_tall_street_tree_releases_upper_trunk_and_canopy() {
+        let mut bodies = Bodies::new();
+        // Ground slab at y = 2400 with a 10 m tall street tree (trunk y = 2401..2475, canopy y = 2470..2500).
+        let cx = 760;
+        let cz = 4055;
+        let mut rows: Vec<Run> = Vec::new();
+        for z in cz - 20..=cz + 20 {
+            rows.push(Run { x0: cx - 20, x1: cx + 21, y: 2400, z, kind: kind(CONCRETE, OWN) });
+        }
+        for y in 2401..2476 {
+            for z in cz - 1..=cz + 1 {
+                rows.push(Run { x0: cx - 1, x1: cx + 2, y, z, kind: kind(WOOD, OWN) });
+            }
+        }
+        for y in 2470..2500 {
+            for z in cz - 8..=cz + 8 {
+                rows.push(Run { x0: cx - 8, x1: cx + 9, y, z, kind: kind(LEAVES, OWN) });
+            }
+        }
+        bodies.ground.push(Edit::Runs(rows), false, None);
+        // Vehicle hits the base of the trunk at y = 2410.
+        bodies.crush([cx, 2410, cz], 500_000.0, true);
+        assert!(!bodies.ground.solid(cx, 2450, cz), "severed upper tree trunk must not remain floating in mid-air");
+        assert!(!bodies.ground.solid(cx, 2485, cz), "severed tree canopy must not remain floating in mid-air");
+        assert!(bodies.list.len() <= CRASH_LUMPS);
     }
 
     /// Run alone on the target machine: cargo test --release car_crash_step_time -- --ignored --nocapture.

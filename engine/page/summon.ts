@@ -68,7 +68,7 @@ function assembleCoupe(cells: Uint16Array, size: [number, number, number], bodyK
     // Blistering & drift-happy sports coupe handling (212 km/h top, matches sf/fleet.mjs HANDLING.coupe).
     motor: {
       front: 0, grip: 1.24, power: 142, top: 590, steer: 0.62,
-      hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 220,
+      hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 420,
       feet: [foot(xr, 1, false), foot(xr, bd - 1, false), foot(xf, 1, true), foot(xf, bd - 1, true)],
     },
     seats: [[ex * 10 + 0.5, -1.2, ez * 10], [ex * 10 + 0.5, -1.2, bd - ez * 10]],

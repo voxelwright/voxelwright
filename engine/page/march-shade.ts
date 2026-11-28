@@ -1169,9 +1169,16 @@ fn depthOf(t: f32, rd: vec3f) -> f32 {
   }
 
   if (UNDERWATER && (g.flags & 128u) != 0u) {
-    let d = depthOf(hit.t, rd);
+    // Rising underwater rays that miss seabed geometry hit the water ceiling at g.sea:
+    // write its depth so above-water rasterized passes (cars, people, billboards, far city)
+    // are occluded by the surface instead of bleeding cleanly through from above.
+    var depthT = hit.t;
+    if (depthT < 0.0 && rd.y > 0.0) {
+      depthT = max((g.sea - g.eye.y) / rd.y, 0.0);
+    }
+    let d = depthOf(depthT, rd);
     let dp = deep(rd, hit, shadows, px, jitUV);
-    let vel = motionVector(rd, hit.t, jitUV);
+    let vel = motionVector(rd, depthT, jitUV);
     if ((g.flags & 4u) != 0u) {
       let h = f32(work) / 128.0;
       return Drawn(vec4f(h * 2.0, h * h * 2.0, pow(h, 4.0) * 2.0, 1.0), vel, vec4f(dp.n, dp.rough), vec4f(0.0), d);

@@ -137,10 +137,11 @@ impl NavWorld {
         )
     }
 
-    /// Builds the multi-threat escape flow field over walkable nav tiles.
+    /// Builds the multi-threat escape flow field over cached walkable nav tiles, baking at most 4
+    /// missing tiles nearest to the threats so live crash/strike events never stall the main thread.
     pub fn flow_build(&mut self, ground: &mut Ground) -> usize {
         self.sync_edits(ground);
-        self.flow.build(&mut self.cache, ground)
+        self.flow.build_budgeted(&mut self.cache, ground, 4)
     }
 
     /// Samples the flow field at `(x, y, z)` in O(1), storing `[dx, dz]` in `self.flow.last_vec`.
@@ -816,5 +817,22 @@ mod tests {
             crowd.step(2, dt, 1.5, None);
         }
         assert_eq!(crowd.agent_pos(1), (20.0, 10.0, 0.0), "static obstacle agent must never move");
+    }
+
+    #[test]
+    fn flow_build_budgeted_caps_cold_tile_baking_and_still_produces_escape_vectors() {
+        let mut world = SyntheticWorld::new(Some(9), 0, 40);
+        let mut cache = TileCache::new();
+        let mut flow = FlowField::new();
+        flow.add_threat(32.0, 10.0, 32.0, 420.0);
+
+        let before = cache.tiles.len();
+        assert_eq!(before, 0);
+        let spans = flow.build_budgeted(&mut cache, &mut world, 2);
+        assert_eq!(cache.tiles.len(), 2, "budgeted flow build must bake at most 2 cold tiles (got {})", cache.tiles.len());
+        assert!(spans > 0, "budgeted flow build must populate escape vectors on baked tiles");
+        let v = flow.sample(&cache, 32.0, 10.0, 32.0).expect("agent near threat must get an escape vector");
+        let len = (v[0] * v[0] + v[1] * v[1]).sqrt();
+        assert!((len - 1.0).abs() < 1e-3, "escape vector should be unit length (got {len})");
     }
 }

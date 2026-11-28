@@ -603,11 +603,50 @@ struct Pack {
     stems: Vec<Vec<u32>>,
     fixtures: Vec<[i32; 8]>,
     fixtures_near: Vec<Vec<usize>>,
+    skybridges: Vec<Skybridge>,
     pw: i32,
     /// The lowest ground and the highest thing in each patch of 6.4 m.
     lows: Vec<i16>,
     highs: Vec<i16>,
     bw: i32,
+}
+
+/// An elevated pedestrian skybridge/overpass merged into a 2D building footprint (e.g. Pier 39 over The Embarcadero):
+/// kept open underneath up to `SKYBRIDGE_CLEAR` so roads, cars and streetcars pass freely beneath its elevated deck.
+#[derive(Clone, Copy)]
+struct Skybridge {
+    bldg: usize,
+    ax: f32,
+    az: f32,
+    ux: f32,
+    uz: f32,
+    len: f32,
+    half_w: f32,
+    low: [i32; 2],
+    high: [i32; 2],
+}
+
+const SKYBRIDGE_CLEAR: i32 = 48; // 4.8 m clearance over road/plaza
+
+impl Skybridge {
+    #[inline]
+    fn contains(&self, bldg: usize, x: f32, z: f32, margin: f32) -> bool {
+        if self.bldg != bldg {
+            return false;
+        }
+        let m = margin.ceil() as i32;
+        let (xi, zi) = (x as i32, z as i32);
+        if xi < self.low[0] - m || xi > self.high[0] + m || zi < self.low[1] - m || zi > self.high[1] + m {
+            return false;
+        }
+        let (dx, dz) = (x - self.ax, z - self.az);
+        let t = dx * self.ux + dz * self.uz;
+        if t < -margin || t > self.len + margin {
+            return false;
+        }
+        let d = (dx * -self.uz + dz * self.ux).abs();
+        d <= self.half_w + margin
+    }
 }
 
 /// Room for a pack's bytes: write them at the address returned, then `load`.
@@ -798,7 +837,7 @@ fn read(b: &[u8]) -> Option<Pack> {
             }
         }
     }
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, edge_len, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), skybridges: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     despike_roofs(&mut p.top, &p.class, tw, p.tstep);
     clean_canopy(&mut p);
     repair_building_roofs(&mut p);
@@ -876,7 +915,170 @@ fn read(b: &[u8]) -> Option<Pack> {
             }
         }
     }
+    p.skybridges = detect_skybridges(&p);
     Some(p)
+}
+
+/// Detect narrow elevated pedestrian skybridges merged into 2D building footprints (such as Pier 39's L-shaped
+/// footbridge across The Embarcadero). A span is a pair of antiparallel outer-ring edges >= 8 m long separated by
+/// 1.5..5.5 m with open street/plaza/grass on both sides; spans that cross ROAD on both sides (and connected spans
+/// of the same building meeting them within 6.5 m) become elevated skybridges.
+fn detect_skybridges(p: &Pack) -> Vec<Skybridge> {
+    if p.tstep <= 0 || p.tstep > 10 || p.buildings.is_empty() || p.class.is_empty() {
+        return Vec::new();
+    }
+    let cls_at = |x: f32, z: f32| -> u8 {
+        let c = (x.floor() as i32 - p.tx0).div_euclid(p.tstep);
+        let r = (z.floor() as i32 - p.tz0).div_euclid(p.tstep);
+        if c >= 0 && c < p.tw && r >= 0 && r < p.tw {
+            p.class[(r * p.tw + c) as usize] & 7
+        } else {
+            255
+        }
+    };
+    struct Span {
+        bldg: usize,
+        ax: f32,
+        az: f32,
+        ux: f32,
+        uz: f32,
+        len: f32,
+        perp: f32,
+        p0: [f32; 2],
+        p1: [f32; 2],
+        cross: bool,
+    }
+    let mut out = Vec::new();
+    for (bi, b) in p.buildings.iter().enumerate() {
+        let own = &p.verts[b.first..b.first + b.count];
+        // Outer ring: up to and including the first vertex with bit 4 set.
+        let ring_end = own.iter().position(|v| v[2] & 4 != 0).map_or(own.len(), |i| i + 1);
+        if ring_end < 4 {
+            continue;
+        }
+        let ring = &own[..ring_end];
+        let mut edges: Vec<(f32, f32, f32, f32, f32, f32, f32)> = Vec::new();
+        for i in 0..ring.len() {
+            let a = ring[i];
+            let c = ring[(i + 1) % ring.len()];
+            let (dx, dz) = ((c[0] - a[0]) as f32, (c[1] - a[1]) as f32);
+            let len = (dx * dx + dz * dz).sqrt();
+            if len >= 80.0 {
+                edges.push((a[0] as f32, a[1] as f32, c[0] as f32, c[1] as f32, dx / len, dz / len, len));
+            }
+        }
+        if edges.len() < 2 {
+            continue;
+        }
+        let mut spans: Vec<Span> = Vec::new();
+        for ia in 0..edges.len() {
+            let (ax, az, _, _, uax, uaz, la) = edges[ia];
+            for ib in (ia + 1)..edges.len() {
+                let (cx, cz, dx_, dz_, ubx, ubz, _) = edges[ib];
+                if uax * ubx + uaz * ubz > -0.95 {
+                    continue;
+                }
+                let nx = -uaz;
+                let nz = uax;
+                let signed_perp = (cx - ax) * nx + (cz - az) * nz;
+                let perp = signed_perp.abs();
+                if !(15.0..=55.0).contains(&perp) {
+                    continue;
+                }
+                let t_c = (cx - ax) * uax + (cz - az) * uaz;
+                let t_d = (dx_ - ax) * uax + (dz_ - az) * uaz;
+                let lo = t_c.min(t_d).max(0.0);
+                let hi = t_c.max(t_d).min(la);
+                let ov = hi - lo;
+                if ov < 80.0 {
+                    continue;
+                }
+                let sign = if signed_perp >= 0.0 { 1.0 } else { -1.0 };
+                let (snx, snz) = (sign * nx, sign * nz);
+                let samples = ((ov / 20.0) as i32).max(4);
+                let mut both_road = 0i32;
+                let mut both_open = 0i32;
+                let out_d = perp * 0.5 + 25.0;
+                for s in 0..=samples {
+                    let t = lo + ov * (s as f32 / samples as f32);
+                    let mx = ax + uax * t + snx * (perp * 0.5);
+                    let mz = az + uaz * t + snz * (perp * 0.5);
+                    let c1 = cls_at(mx - snx * out_d, mz - snz * out_d);
+                    let c2 = cls_at(mx + snx * out_d, mz + snz * out_d);
+                    if c1 == ROAD && c2 == ROAD {
+                        both_road += 1;
+                    }
+                    if matches!(c1, ROAD | PAVEMENT | GRASS_HERE) && matches!(c2, ROAD | PAVEMENT | GRASS_HERE) {
+                        both_open += 1;
+                    }
+                }
+                if both_open * 10 >= (samples + 1) * 6 {
+                    let p0 = [ax + uax * lo + snx * (perp * 0.5), az + uaz * lo + snz * (perp * 0.5)];
+                    let p1 = [ax + uax * hi + snx * (perp * 0.5), az + uaz * hi + snz * (perp * 0.5)];
+                    spans.push(Span { bldg: bi, ax: p0[0], az: p0[1], ux: uax, uz: uaz, len: ov, perp, p0, p1, cross: both_road >= 1 });
+                }
+            }
+        }
+        // Propagate to connected spans of the same building (e.g. L-shaped skybridge legs meeting at a corner).
+        loop {
+            let mut changed = false;
+            for i in 0..spans.len() {
+                if spans[i].cross {
+                    continue;
+                }
+                let (p0, p1) = (spans[i].p0, spans[i].p1);
+                let hits = spans.iter().any(|s| {
+                    s.cross && [p0, p1].iter().any(|a| [s.p0, s.p1].iter().any(|b| {
+                        let (dx, dz) = (a[0] - b[0], a[1] - b[1]);
+                        dx * dx + dz * dz < 65.0 * 65.0
+                    }))
+                });
+                if hits {
+                    spans[i].cross = true;
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for i in 0..spans.len() {
+            if !spans[i].cross {
+                continue;
+            }
+            let s = &spans[i];
+            // Extend any endpoint that meets another skybridge span so L-shaped elbows are seamlessly covered.
+            let end_conn = |pt: [f32; 2]| {
+                spans.iter().enumerate().any(|(j, o)| {
+                    j != i && o.cross && [o.p0, o.p1].iter().any(|b| {
+                        let (dx, dz) = (pt[0] - b[0], pt[1] - b[1]);
+                        dx * dx + dz * dz < 65.0 * 65.0
+                    })
+                })
+            };
+            let ext0 = if end_conn(s.p0) { s.perp } else { 0.0 };
+            let ext1 = if end_conn(s.p1) { s.perp } else { 0.0 };
+            let ax = s.ax - s.ux * ext0;
+            let az = s.az - s.uz * ext0;
+            let len = s.len + ext0 + ext1;
+            let half_w = s.perp * 0.5 + 3.0;
+            let bx = ax + s.ux * len;
+            let bz = az + s.uz * len;
+            let pad = half_w.ceil() as i32 + 2;
+            out.push(Skybridge {
+                bldg: s.bldg,
+                ax,
+                az,
+                ux: s.ux,
+                uz: s.uz,
+                len,
+                half_w,
+                low: [ax.min(bx).floor() as i32 - pad, az.min(bz).floor() as i32 - pad],
+                high: [ax.max(bx).ceil() as i32 + pad, az.max(bz).ceil() as i32 + pad],
+            });
+        }
+    }
+    out
 }
 
 /// Remove narrow vertical lidar spikes (rooftop light poles, masts, vents, antennas) from building roofs.
@@ -1821,7 +2023,31 @@ impl Pack {
         None
     }
 
+    #[inline]
+    fn in_skybridge(&self, bldg: usize, x: f32, z: f32, margin: f32) -> bool {
+        self.skybridges.iter().any(|s| s.contains(bldg, x, z, margin))
+    }
+
+    /// True if `(x, z)` sits inside a skybridge span whose perpendicular neighbours (2.5 m outside both edges) are ROAD.
+    fn skybridge_over_road(&self, bldg: usize, x: i32, z: i32) -> bool {
+        let (fx, fz) = (x as f32 + 0.5, z as f32 + 0.5);
+        for s in &self.skybridges {
+            if !s.contains(bldg, fx, fz, 0.0) {
+                continue;
+            }
+            let out_d = s.half_w + 22.0;
+            let (nx, nz) = (-s.uz, s.ux);
+            let c1 = self.surface((fx - nx * out_d) as i32, (fz - nz * out_d) as i32).0 & 7;
+            let c2 = self.surface((fx + nx * out_d) as i32, (fz + nz * out_d) as i32).0 & 7;
+            if c1 == ROAD && c2 == ROAD {
+                return true;
+            }
+        }
+        false
+    }
+
     /// The building a column is in, or the nearest one it is just outside of, with where on its outline.
+    #[allow(dead_code)]
     fn building(&self, x: i32, z: i32) -> Option<(&Building, Probe)> {
         self.building_idx(x, z).map(|(i, p)| (&self.buildings[i], p))
     }
@@ -2434,7 +2660,7 @@ struct OwnedColumn {
 
 enum OwnedWhat {
     Open,
-    In(usize, usize, Probe, i32, u8, bool, i32, i32, f32),
+    In(usize, usize, Probe, i32, u8, bool, i32, i32, f32, bool),
     By(usize, usize, Probe, i32, bool),
     Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
     Mass(i32, u8, Kind),
@@ -2445,8 +2671,8 @@ impl OwnedColumn {
     fn as_column<'a>(&'a self, packs: &'a [Pack]) -> Column<'a> {
         let what = match self.what {
             OwnedWhat::Open => What::Open,
-            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far) =>
-                What::In(&packs[pi].buildings[bi], probe, roof, tint, pitched, wall_top, step_below, step_far),
+            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far, skybridge) =>
+                What::In(&packs[pi].buildings[bi], probe, roof, tint, pitched, wall_top, step_below, step_far, skybridge),
             OwnedWhat::By(pi, bi, probe, roof, stepped) => What::By(&packs[pi].buildings[bi], probe, roof, stepped),
             OwnedWhat::Crown { foot, top, trunk, tint, edge } => What::Crown { foot, top, trunk, tint, edge },
             OwnedWhat::Mass(roof, tint, wall) => What::Mass(roof, tint, wall),
@@ -2520,7 +2746,7 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
     } else if class & 7 == ROAD && kerb_sdf.is_some() {
         p.nearby_asphalt(x, z).map(road_grey)
     } else { None };
-    let (ground, kerb) = match class & 7 {
+    let (mut ground, mut kerb) = match class & 7 {
         _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
@@ -2586,30 +2812,39 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
                     step_far = 2.5;
                 }
             }
-            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far)
+            let skybridge = p.in_skybridge(bi, x as f32 + 0.5, z as f32 + 0.5, 0.0);
+            if skybridge && class & 7 != ROAD && kerb_sdf.is_none() && p.skybridge_over_road(bi, x, z) {
+                ground = kind(ASPHALT, p.nearby_asphalt(x, z).map(road_grey).unwrap_or(OWN));
+                kerb = 0;
+            }
+            OwnedWhat::In(pi, bi, probe, roof, tint, pitched, wall_top, step_below, step_far, skybridge)
         }
         Some((bi, probe)) if size <= 2 && probe.looks & 2 != 0 => {
-            let b = &p.buildings[bi];
-            let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
-            let far = probe.far.max(0.01);
-            let (ux, uz) = (dx / far, dz / far);
-            let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
-            let eave = if probe.looks & 128 != 0 {
-                Some((probe.looks >> 8) as i16 as i32)
-            } else if probe.looks >> 24 & 2 != 0 {
-                p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
+            if p.in_skybridge(bi, probe.on[0], probe.on[1], 4.0) {
+                OwnedWhat::Open
             } else {
-                p.top(ix, iz)
-            };
-            match eave {
-                Some(roof) => {
-                    let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
-                    let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
-                    let behind = b1.into_iter().chain(b2).max();
-                    let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
-                    OwnedWhat::By(pi, bi, probe, roof, stepped)
+                let b = &p.buildings[bi];
+                let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
+                let far = probe.far.max(0.01);
+                let (ux, uz) = (dx / far, dz / far);
+                let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
+                let eave = if probe.looks & 128 != 0 {
+                    Some((probe.looks >> 8) as i16 as i32)
+                } else if probe.looks >> 24 & 2 != 0 {
+                    p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
+                } else {
+                    p.top(ix, iz)
+                };
+                match eave {
+                    Some(roof) => {
+                        let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
+                        let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
+                        let behind = b1.into_iter().chain(b2).max();
+                        let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
+                        OwnedWhat::By(pi, bi, probe, roof, stepped)
+                    }
+                    None => OwnedWhat::Open,
                 }
-                None => OwnedWhat::Open,
             }
         }
         _ if class & BUILT != 0 => match (p.top(x, z), p.cell(x, z)) {
@@ -2651,7 +2886,7 @@ fn owned_column(packs: &[Pack], pack_indices: &[usize], heroes_slice: &[Hero], m
         },
         _ => OwnedWhat::Open,
     };
-    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(..) | OwnedWhat::Mass(..));
+    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, OwnedWhat::In(.., false) | OwnedWhat::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
     let curb = if ramped {
         kerb_sdf.filter(|&d| d.abs() < 0.78).map(|_| {
@@ -2769,8 +3004,9 @@ enum What<'a> {
     Open,
     /// In a building: its roof's cell, colour, whether its roof rises into a pitched gable behind the front,
     /// its clean wall-top eave height (above which interior roof slopes are painted `ROOFING` rather than stucco),
-    /// and (for stepped-back upper walls behind a lower wing) the lower roof height and depth into the step.
-    In(&'a Building, Probe, i32, u8, bool, i32, i32, f32),
+    /// (for stepped-back upper walls behind a lower wing) the lower roof height and depth into the step,
+    /// and whether this column sits inside an elevated skybridge span.
+    In(&'a Building, Probe, i32, u8, bool, i32, i32, f32, bool),
     /// Just outside one, where its bays and cornice stand: how high its wall is there, and whether a pitched gable
     /// or taller upper wall rises directly behind it.
     By(&'a Building, Probe, i32, bool),
@@ -2850,7 +3086,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     } else if class & 7 == ROAD && kerb_sdf.is_some() {
         p.nearby_asphalt(x, z).map(road_grey)
     } else { None };
-    let (ground, kerb) = match class & 7 {
+    let (mut ground, mut kerb) = match class & 7 {
         _ if tread.is_some() => (kind(CONCRETE, colour(2, 7)), 0),
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
@@ -2865,8 +3101,9 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
     };
-    let what = match p.building(x, z) {
-        Some((b, probe)) if probe.inside => {
+    let what = match p.building_idx(x, z) {
+        Some((bi, probe)) if probe.inside => {
+            let b = &p.buildings[bi];
             let raster = p.roof_raster(b, x, z);
             // Glass and the vertical wall can be the highest lidar return at its edge.
             // Give a surveyed plane one eave; blend into the roof over the next metre.
@@ -2923,33 +3160,43 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                     step_far = 2.5;
                 }
             }
-            What::In(b, probe, roof, tint, pitched, wall_top, step_below, step_far)
+            let skybridge = p.in_skybridge(bi, x as f32 + 0.5, z as f32 + 0.5, 0.0);
+            if skybridge && class & 7 != ROAD && kerb_sdf.is_none() && p.skybridge_over_road(bi, x, z) {
+                ground = kind(ASPHALT, p.nearby_asphalt(x, z).map(road_grey).unwrap_or(OWN));
+                kerb = 0;
+            }
+            What::In(b, probe, roof, tint, pitched, wall_top, step_below, step_far, skybridge)
         }
-        Some((b, probe)) if size <= 2 && probe.looks & 2 != 0 => {
-            // The wall's height where this column is nearest it: a little way in from the outline.
-            let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
-            let far = probe.far.max(0.01);
-            let (ux, uz) = (dx / far, dz / far);
-            let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
-            let eave = if probe.looks & 128 != 0 {
-                Some((probe.looks >> 8) as i16 as i32)
-            } else if probe.looks >> 24 & 2 != 0 {
-                p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
+        Some((bi, probe)) if size <= 2 && probe.looks & 2 != 0 => {
+            if p.in_skybridge(bi, probe.on[0], probe.on[1], 4.0) {
+                What::Open
             } else {
-                p.top(ix, iz)
-            };
-            match eave {
-                Some(roof) => {
-                    // Check deeper behind the front edge (1.6 m and 3.6 m inward): if the building rises > 0.8 m
-                    // higher (a pitched gable or a taller upper storey behind a protruding front garage/porch),
-                    // suppress heavy protruding cornice slabs that would otherwise float mid-wall (#60).
-                    let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
-                    let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
-                    let behind = b1.into_iter().chain(b2).max();
-                    let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
-                    What::By(b, probe, roof, stepped)
+                let b = &p.buildings[bi];
+                // The wall's height where this column is nearest it: a little way in from the outline.
+                let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
+                let far = probe.far.max(0.01);
+                let (ux, uz) = (dx / far, dz / far);
+                let (ix, iz) = ((probe.on[0] + ux * 4.0) as i32, (probe.on[1] + uz * 4.0) as i32);
+                let eave = if probe.looks & 128 != 0 {
+                    Some((probe.looks >> 8) as i16 as i32)
+                } else if probe.looks >> 24 & 2 != 0 {
+                    p.eave_near(probe.on, [ux, uz]).or_else(|| p.top(ix, iz))
+                } else {
+                    p.top(ix, iz)
+                };
+                match eave {
+                    Some(roof) => {
+                        // Check deeper behind the front edge (1.6 m and 3.6 m inward): if the building rises > 0.8 m
+                        // higher (a pitched gable or a taller upper storey behind a protruding front garage/porch),
+                        // suppress heavy protruding cornice slabs that would otherwise float mid-wall (#60).
+                        let b1 = p.top((probe.on[0] + ux * 16.0) as i32, (probe.on[1] + uz * 16.0) as i32);
+                        let b2 = p.top((probe.on[0] + ux * 36.0) as i32, (probe.on[1] + uz * 36.0) as i32);
+                        let behind = b1.into_iter().chain(b2).max();
+                        let stepped = behind.is_some_and(|rb| rb > roof + 8) || (roof - b.base) < 44;
+                        What::By(b, probe, roof, stepped)
+                    }
+                    None => What::Open,
                 }
-                None => What::Open,
             }
         }
         _ if class & BUILT != 0 => match (p.top(x, z), p.cell(x, z)) {
@@ -3002,7 +3249,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     // The ground's top in quarter cells, for the finest cells' ramp (`grade_rows`): a road's, a pavement's (over its
     // kerb, so the kerb keeps its height up a hill) and a bank's, wherever the ground is open to the sky. Only the
     // measured asphalt had it, and every pavement and bank up Nob Hill and Telegraph Hill was a stair of 10 cm (#450).
-    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
+    let ramped = size == 1 && tread.is_none() && class & 7 != WATER_HERE && !matches!(what, What::In(.., false) | What::Mass(..));
     let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
     Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, heroes, hero_n }
 }
@@ -3119,7 +3366,33 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     }
     match &c.what {
         What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
-        What::In(b, p, roof, tint, pitched, wall_top, step_below, step_far) => {
+        What::In(b, p, roof, tint, _, _, _, _, true) => {
+            if size == 1 && mid <= c.g + c.kerb {
+                return c.ground;
+            }
+            let clear_y = c.g + SKYBRIDGE_CLEAR;
+            if mid > *roof || *roof < clear_y + 10 || mid < clear_y {
+                0
+            } else if mid > *roof - size {
+                kind(ROOFING, *tint)
+            } else if mid < clear_y + 4 {
+                kind(CONCRETE, grey(5))
+            } else if p.far < 3.0 * size as f32 && size <= 8 {
+                let deck_y = mid - clear_y;
+                let deck_h = (*roof - clear_y).max(12);
+                if deck_y < 11 || deck_y >= deck_h - 4 {
+                    kind(CONCRETE, grey(4))
+                } else if (p.along as i32).rem_euclid(18) < 2 {
+                    kind(STEEL, grey(11))
+                } else {
+                    kind(GLASS, colour(13, 8))
+                }
+            } else {
+                let _ = b;
+                kind(CONCRETE, grey(5))
+            }
+        }
+        What::In(b, p, roof, tint, pitched, wall_top, step_below, step_far, false) => {
             let on_roof_slope = (p.far >= 3.0 * size as f32 || (b.home && p.looks & 2 == 0))
                 && *roof - *wall_top <= 30 && mid > *wall_top && mid <= *step_below;
             if mid > *roof {
@@ -3264,9 +3537,9 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
         match c.what {
-            What::In(b, ref probe, _, _, _, _, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
-                (c.g + 1, true, 0),
-            What::In(_, _, roof, _, _, _, _, _) => (roof + 1, false, 0),
+            What::In(b, ref probe, _, _, _, _, _, _, skybridge) if skybridge || tower_base(b, probe, 16, 1) == Some(0) =>
+                (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
+            What::In(_, _, roof, _, _, _, _, _, false) => (roof + 1, false, 0),
             _ => (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
         }
     })
@@ -4075,7 +4348,7 @@ mod tests {
         // Living green roofs and glass roofs render as GRASS / GLASS rather than grey ROOFING shingles.
         let c_green = Column {
             g: 100, road_top4: None, ground: kind(GRASS, OWN), kerb: 0,
-            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::In(&b, p, 180, colour(8, 5), false, 180, i32::MAX, 1e9, false), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
         };
         assert_eq!(material(kind_at(&c_green, 10, 180, 10, 1)), GRASS);
         // 2-story Outer Sunset house (5.9 m tall, storey 34): floor 1 must get real GLASS windows below its cornice,
@@ -4092,7 +4365,7 @@ mod tests {
         let p_setback = Probe { inside: true, far: 18.0, along: 22.0, round: 22.0, long: 48.0, looks: 3, side: 1, on: [22.0, 0.0] };
         let c_setback = Column {
             g: 585, road_top4: None, ground: kind(CONCRETE, grey(5)), kerb: 0,
-            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
+            what: What::In(&sunset, p_setback, 643, 0, false, 643, 611, 1.6, false), fixtures: Vec::new(), heroes: [None, None], hero_n: 0,
         };
         let setback_glass = (619..643).filter(|&y| material(kind_at(&c_setback, 22, y, 18, 1)) == GLASS).count();
         assert!(setback_glass >= 8, "stepped-back 2nd floor behind wing should have windows, got {setback_glass}");
@@ -4145,7 +4418,7 @@ mod tests {
         // 1. Collapsed front 1.0 m wall is restored up to the real ~5.4 m eave, never left as a 2.2 m stub!
         let c_front = column(&packs, 62, 100, 1);
         match c_front.what {
-            What::In(_, _, roof, _, _, _, _, _) => assert!(roof >= 150, "front wall collapsed to {roof}"),
+            What::In(_, _, roof, _, _, _, _, _, _) => assert!(roof >= 150, "front wall collapsed to {roof}"),
             _ => panic!("expected What::In at front wall"),
         }
         // 2. Single-cell +3.0 m rooftop spike at (122, 102) is denoised down to the roof plane (~168).
@@ -4717,6 +4990,82 @@ mod tests {
         }
         // Previous valid kerb stayed loaded after rejections.
         assert!(KERBS.with_borrow(|k| k.signed_distance(25.0, 2.0).is_some_and(|d| d > 1.5)));
+        clear();
+    }
+
+    #[test]
+    fn skybridges_over_roads_stay_open_underneath_and_keep_normal_houses_solid() {
+        // Pack spanning 0..400 in x and z (40 m x 40 m), ground at y = 20, roof at y = 90 (7 m above ground).
+        // Road runs east-west across z in 150..250 (tstep=5 -> row 30..50).
+        // Building 0: Pier-39-like L-shaped narrow skybridge (3 m wide) crossing north-south across the road
+        //   from (100..130, 40..280) and turning east along (130..250, 250..280) over pavement.
+        // Building 1: Normal 5 m wide corner-lot house at (300..350, 40..145), ROAD only on its south side,
+        //   YARD on its east and west sides -> must NOT be treated as a skybridge.
+        let (gw, gstep, tw, tstep) = (41i32, 10i32, 80i32, 5i32);
+        let mut bytes = Vec::new();
+        let b0_verts: &[[i32; 3]] = &[
+            [100, 40, (18 << 24) | 3],
+            [130, 40, (18 << 24) | 3],
+            [130, 250, (18 << 24) | 3],
+            [250, 250, (18 << 24) | 3],
+            [250, 280, (18 << 24) | 3],
+            [100, 280, (18 << 24) | 3 | 4],
+        ];
+        let b1_verts: &[[i32; 3]] = &[
+            [300, 40, 3],
+            [350, 40, 3],
+            [350, 145, 3],
+            [300, 145, 3 | 4],
+        ];
+        let nb = 2i32;
+        let nv = (b0_verts.len() + b1_verts.len()) as i32;
+        for w in [0x3159_4142i32, 0, 0, 400, gstep, gw, 0, 0, tstep, tw, 0, 0, nb, nv, 0, 0] {
+            bytes.extend(w.to_le_bytes());
+        }
+        for _ in 0..(gw * gw) { bytes.extend(20i16.to_le_bytes()); }
+        for _ in 0..(tw * tw) { bytes.extend(90i16.to_le_bytes()); }
+        for r in 0..tw {
+            for c in 0..tw {
+                let z = r * tstep;
+                let x = c * tstep;
+                let cls = if (150..250).contains(&z) {
+                    ROAD
+                } else if x >= 270 {
+                    YARD
+                } else {
+                    PAVEMENT
+                };
+                bytes.push(cls);
+            }
+        }
+        bytes.extend(vec![1u8; (tw * tw) as usize]); // tint
+        let wall = kind(PLASTER, grey(2)) as u32;
+        let trim = kind(PLASTER, grey(1)) as u32;
+        let style = 30u32 | (30u32 << 8);
+        // Building 0
+        for w in [0i32, b0_verts.len() as i32, wall as i32, trim as i32, style as i32, 20] { bytes.extend(w.to_le_bytes()); }
+        // Building 1
+        for w in [b0_verts.len() as i32, b1_verts.len() as i32, wall as i32, trim as i32, style as i32, 20] { bytes.extend(w.to_le_bytes()); }
+        for v in b0_verts.iter().chain(b1_verts.iter()) {
+            for c in v { bytes.extend(c.to_le_bytes()); }
+        }
+        clear();
+        let at = room(bytes.len());
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), at, bytes.len()) };
+        assert_eq!(load(), 1);
+        // 1. Over the road under the N-S skybridge leg (115, 200): open air up to g+47, bridge deck from g+48..90, footing at ground.
+        assert_eq!(kind_single(115, 35, 200), 0, "roadway under skybridge must be open air at car height");
+        assert_eq!(kind_single(115, 67, 200), 0, "roadway under skybridge must stay clear up to 4.7 m");
+        assert_ne!(kind_single(115, 70, 200), 0, "elevated skybridge deck must exist at 5.0 m");
+        assert_eq!(footing(115, 200).0, 21, "footing under skybridge must be the road surface, not the roof");
+        // 2. Connected E-W skybridge leg over pavement (200, 265): also elevated and clear underneath.
+        assert_eq!(kind_single(200, 35, 265), 0, "connected L-leg of skybridge must be open underneath");
+        assert_ne!(kind_single(200, 70, 265), 0, "connected L-leg deck must exist overhead");
+        // 3. Just outside the skybridge edge (135, 200): no storefront awning on skybridge side.
+        assert_eq!(kind_single(135, 52, 200), 0, "no storefront awning on skybridge side");
+        // 4. Normal 5 m wide house beside road (325, 90): solid down to ground, footing on roof.
+        assert_ne!(kind_single(325, 35, 90), 0, "normal narrow house must remain solid at ground floor");
+        assert_eq!(footing(325, 90).0, 91, "normal narrow house footing must stay on roof");
         clear();
     }
 }

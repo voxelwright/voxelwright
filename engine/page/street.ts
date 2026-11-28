@@ -71,6 +71,7 @@ export interface Ground {
   nav_flow_vec_ptr?(): number
   crowd_reset?(): void
   crowd_clear_obstacles?(): void
+  crowd_add_obstacle?(x0: number, z0: number, x1: number, z1: number): void
   crowd_agents_ptr?(): number
   crowd_step?(count: number, dt: number, time_horizon: number): number
   crowd_capacity?(): number
@@ -103,6 +104,8 @@ interface Car {
   piece: Piece | null; shown: string
   // Driving: the road, its lane, how far along, the road before (for the corner) and the one after.
   road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number; queued?: boolean
+  /** Accumulated seconds this stopped/slow vehicle has remained in OBB overlap with another vehicle (independent of `queued`). */
+  overlapTime?: number
   /** The junction it last came to a stop at (a stop sign's), and how long it has waited on a control (lights, a sign, its turn). */
   stopped?: number; held?: number
   slot?: number; thing?: Thing | null; waking?: boolean
@@ -691,11 +694,12 @@ export function street(o: {
     rainSpot?: { x: number; z: number; y: number } | null
     coverSpot?: { x: number; z: number; y: number } | null
     panicAt?: number
+    crouched?: boolean
   }
   interface ActiveThreat { x: number; y: number; z: number; radius: number; age: number; crash: boolean }
   const crowdAgents = new Map<number, CrowdAgentState>()
   const awningCache = new Map<number, { x: number; z: number; y: number } | null>()
-  let lastFlowSig = '', flowSpansActive = 0, lastAwningShockLen = 0
+  let lastFlowSig = '', lastFlowRefresh = -99, flowSpansActive = 0, lastAwningShockLen = 0
   const crowdStats: CrowdAiStats = {
     rvoAgents: 0,
     rvoStepMs: 0,
@@ -708,7 +712,10 @@ export function street(o: {
   const hasAwningAt = (cx: number, cz: number, baseY: number): number | null => {
     const ix = Math.round(cx), iz = Math.round(cz), fy = feetAt(ix, iz)
     if (Math.abs(fy - baseY) > 10) return null
-    if (o.land.world_kind(ix, fy + 4, iz) !== 0 || o.land.world_kind(ix, fy + 14, iz) !== 0) return null
+    // Require clear pedestrian-width headroom (±3 cells laterally) so shelter spots never sit inside storefront walls/pillars.
+    for (const [ox, oz] of [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3]] as const) {
+      if (o.land.world_kind(ix + ox, fy + 4, iz + oz) !== 0 || o.land.world_kind(ix + ox, fy + 14, iz + oz) !== 0) return null
+    }
     for (let oy = 20; oy <= 56; oy += 4) {
       if (o.land.world_kind(ix, fy + oy, iz) !== 0) return fy
     }
@@ -767,13 +774,15 @@ export function street(o: {
       const a = active[i]
       sig += `${Math.round(a.x)},${Math.round(a.z)},${Math.round(a.radius)},${a.crash ? 1 : 0};`
     }
-    if (sig !== lastFlowSig) {
+    const needsRefresh = sig !== lastFlowSig || (active.length > 0 && (t - lastFlowRefresh >= 0.4 || t < lastFlowRefresh))
+    if (needsRefresh) {
       lastFlowSig = sig
+      lastFlowRefresh = t
       if (hasWasmFlow()) {
         o.land.nav_flow_clear!()
         if (active.length) {
           if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
-            o.land.nav_rebake_budget(active[0].x, active[0].z, 4)
+            o.land.nav_rebake_budget(active[0].x, active[0].z, 2)
           }
           for (let i = 0; i < active.length; i++) {
             const a = active[i]
@@ -831,6 +840,9 @@ export function street(o: {
     }
     if (o.land.nav_rebake_budget && (!o.land.nav_dirty_count || o.land.nav_dirty_count() > 0)) {
       o.land.nav_rebake_budget(eye[0], eye[2], 2)
+    } else if (o.land.nav_bake_area) {
+      // Incrementally pre-warm 1 cold nav tile per frame around the eye so crash/panic flow fields and wall avoidance are instant.
+      o.land.nav_bake_area(eye[0], eye[2], 4, 1)
     }
     const activeThreats = syncPanicFlow(eye, t)
     const nowPerf = performance.now() / 1000
@@ -977,7 +989,7 @@ export function street(o: {
     const preps: PedPrep[] = []
     const rvoIndices: number[] = []
     const cap = wasmRvo ? (o.land.crowd_capacity?.() ?? 512) : 0
-    const maxRvoPeds = wasmRvo ? Math.max(0, cap - 32) : 0
+    const maxRvoPeds = wasmRvo ? Math.max(0, cap - 96) : 0
     const panicCounts = { flee: 0, shelter: 0, film: 0, glance: 0 }
     let rainShelteredNow = 0
 
@@ -1100,7 +1112,8 @@ export function street(o: {
       // Ring 1 & Ring 2: persistent crowd state for WASM RVO2 avoidance, panic flow fields, divergent reactions & rain-awning shelter.
       if (lod <= 2) {
         st = crowdAgents.get(seed) ?? null
-        const stale = !st || seconds - st.seen > 1.5 || seconds < st.seen - 0.5 || Math.hypot(st.x - nomX, st.z - nomZ) > 450
+        const distNom = st ? Math.hypot(st.x - nomX, st.z - nomZ) : 0
+        const stale = !st || seconds - st.seen > 1.5 || seconds < st.seen - 0.5 || distNom > 800
         if (stale) {
           st = {
             x: nomX,
@@ -1144,13 +1157,18 @@ export function street(o: {
               prefVz = fz * maxSpeed
               // Use cached NavTile wall/crater awareness while fleeing blasts.
               flags = flowSpansActive > 0 ? 0 : CROWD_FLAG_IGNORE_WORLD
+              st!.crouched = false
             } else if (panicRole === 'shelter') {
+              flags = 0
               if (st!.coverSpot === undefined) {
                 st!.coverSpot = findAwningNear(Math.round(st!.x), Math.round(st!.y), Math.round(st!.z))
               }
               if (st!.coverSpot) {
                 const cdx = st!.coverSpot.x - st!.x, cdz = st!.coverSpot.z - st!.z, cd = Math.hypot(cdx, cdz)
-                if (cd > 5) {
+                // Hysteresis: enter crouch within 5 cells of cover, exit only if pushed past 10 cells so RVO nudges never pop standing/crouching.
+                const stayCrouched = st!.crouched ? cd <= 10 : cd <= 5
+                st!.crouched = stayCrouched
+                if (!stayCrouched) {
                   maxSpeed = Math.max(20, ev.speed * 1.4)
                   const spd = Math.min(maxSpeed, cd / rvoDt)
                   prefVx = (cdx / cd) * spd
@@ -1159,9 +1177,11 @@ export function street(o: {
                   prefVx = 0; prefVz = 0; maxSpeed = 10; crouched = true
                 }
               } else {
-                prefVx = 0; prefVz = 0; maxSpeed = 10; crouched = true
+                prefVx = 0; prefVz = 0; maxSpeed = 10; crouched = true; st!.crouched = true
               }
             } else if (panicRole === 'film') {
+              flags = 0
+              st!.crouched = false
               const fdx = st!.x - bestTh.x, fdz = st!.z - bestTh.z, fd = Math.hypot(fdx, fdz) || 1
               if (fd < 72) {
                 maxSpeed = 18
@@ -1172,6 +1192,8 @@ export function street(o: {
               }
             } else {
               // 'glance': startle/freeze briefly for 3.5s, then resume walking while glancing back.
+              flags = 0
+              st!.crouched = false
               if (bestTh.age < 3.5) {
                 prefVx = 0; prefVz = 0; maxSpeed = 10
               } else {
@@ -1184,10 +1206,12 @@ export function street(o: {
           } else {
             st!.coverSpot = undefined
             st!.panicAt = undefined
+            st!.crouched = false
           }
         } else {
           st!.coverSpot = undefined
           st!.panicAt = undefined
+          st!.crouched = false
         }
 
         // Rain-awning shelter seeking when rain > 0.3 (Ring 1 & Ring 2, non-panicking, off crosswalks).
@@ -1208,6 +1232,7 @@ export function street(o: {
           }
           if (st!.rainSpot) {
             mode = 'rain'
+            flags = 0
             const adx = st!.rainSpot.x - st!.x, adz = st!.rainSpot.z - st!.z, ad = Math.hypot(adx, adz)
             if (ad > 6 && hasAwningAt(st!.x, st!.z, st!.y) === null) {
               maxSpeed = Math.max(16, ev.speed * 1.25)
@@ -1234,7 +1259,8 @@ export function street(o: {
             const pull = ev.crossing || ev.kind === 1 ? 5.0 : 3.2
             prefVx = routeVx + (nomX - st!.x) * pull
             prefVz = routeVz + (nomZ - st!.z) * pull
-            maxSpeed = Math.max(16, ev.speed * 1.4)
+            maxSpeed = distNom > 450 ? Math.max(26, ev.speed * 1.8) : Math.max(16, ev.speed * 1.4)
+            if (lod === 1 && distNom > 3) flags = 0
           }
         }
 
@@ -1321,44 +1347,91 @@ export function street(o: {
         soa[CROWD_FLAGS * cap + totalSlots] = CROWD_FLAG_STATIC
         totalSlots++
       }
-      // Include nearby vehicles as static/kinematic obstacle agents within Ring 1 + margin.
-      const addCarObst = (c: Car) => {
-        if (totalSlots >= cap) return
-        if (Math.hypot(c.x - eye[0], c.z - eye[2]) > 430) return
-        soa[CROWD_POS_X * cap + totalSlots] = c.x
-        soa[CROWD_POS_Z * cap + totalSlots] = c.z
-        soa[CROWD_POS_Y * cap + totalSlots] = c.y
-        soa[CROWD_VEL_X * cap + totalSlots] = Math.cos(c.heading) * c.v
-        soa[CROWD_VEL_Z * cap + totalSlots] = Math.sin(c.heading) * c.v
-        soa[CROWD_PREF_VX * cap + totalSlots] = 0
-        soa[CROWD_PREF_VZ * cap + totalSlots] = 0
-        soa[CROWD_RADIUS * cap + totalSlots] = Math.max(8, c.model.wide * 0.52)
-        soa[CROWD_MAX_SPEED * cap + totalSlots] = 0
-        soa[CROWD_FLAGS * cap + totalSlots] = CROWD_FLAG_STATIC
-        totalSlots++
+      // Include nearby vehicles (traffic, parked, depot, trams, cables, woken living vehicles) as full oriented OBB
+      // obstacle edges (`crowd_add_obstacle`, unlimited, protects front/rear bumpers & long sides) plus 2-3 kinematic
+      // circles along the vehicle length so pedestrians never walk through car noses/trunks or get pinned inside hulls.
+      const addBoxObst = (cx: number, cy: number, cz: number, fx: number, fz: number, halfL: number, halfW: number, vx: number, vz: number) => {
+        if (Math.hypot(cx - eye[0], cz - eye[2]) > 450) return
+        const rx = -fz, rz = fx
+        if (o.land.crowd_add_obstacle) {
+          const hl = halfL + 0.8, hw = halfW + 0.8
+          const flx = cx + fx * hl - rx * hw, flz = cz + fz * hl - rz * hw
+          const frx = cx + fx * hl + rx * hw, frz = cz + fz * hl + rz * hw
+          const rrx = cx - fx * hl + rx * hw, rrz = cz - fz * hl + rz * hw
+          const rlx = cx - fx * hl - rx * hw, rlz = cz - fz * hl - rz * hw
+          o.land.crowd_add_obstacle(flx, flz, frx, frz)
+          o.land.crowd_add_obstacle(frx, frz, rrx, rrz)
+          o.land.crowd_add_obstacle(rrx, rrz, rlx, rlz)
+          o.land.crowd_add_obstacle(rlx, rlz, flx, flz)
+        }
+        const rad = Math.max(8, halfW * 1.05)
+        const count = halfL > 38 ? 3 : 2
+        const span = Math.max(0, halfL - rad * 0.72)
+        for (let k = 0; k < count && totalSlots < cap; k++) {
+          const off = (-1 + (2 * k) / (count - 1)) * span
+          soa[CROWD_POS_X * cap + totalSlots] = cx + fx * off
+          soa[CROWD_POS_Z * cap + totalSlots] = cz + fz * off
+          soa[CROWD_POS_Y * cap + totalSlots] = cy
+          soa[CROWD_VEL_X * cap + totalSlots] = vx
+          soa[CROWD_VEL_Z * cap + totalSlots] = vz
+          soa[CROWD_PREF_VX * cap + totalSlots] = 0
+          soa[CROWD_PREF_VZ * cap + totalSlots] = 0
+          soa[CROWD_RADIUS * cap + totalSlots] = rad
+          soa[CROWD_MAX_SPEED * cap + totalSlots] = 0
+          soa[CROWD_FLAGS * cap + totalSlots] = CROWD_FLAG_STATIC
+          totalSlots++
+        }
       }
-      for (let ci = 0; ci < traffic.length && totalSlots < cap; ci++) addCarObst(traffic[ci])
-      for (const pc of parked.values()) { if (totalSlots >= cap) break; addCarObst(pc) }
+      const addCarObst = (c: Car) => {
+        const fx = Math.cos(c.heading), fz = Math.sin(c.heading)
+        addBoxObst(c.x, c.y, c.z, fx, fz, c.model.long * 0.5, c.model.wide * 0.5, fx * c.v, fz * c.v)
+      }
+      for (const th of o.alive.things) {
+        const w = o.alive.where(th)
+        if (!w) continue
+        const hl = Math.max(th.size[0], th.size[2]) * 0.5, hw = Math.min(th.size[0], th.size[2]) * 0.5
+        const spd = th.state?.speed ?? 0
+        addBoxObst(w.at[0], w.at[1] - th.size[1] * 0.5, w.at[2], w.front[0], w.front[2], hl, hw, w.front[0] * spd, w.front[2] * spd)
+      }
+      for (let ci = 0; ci < traffic.length; ci++) addCarObst(traffic[ci])
+      for (let ci = 0; ci < depotCars.length; ci++) addCarObst(depotCars[ci])
+      for (let ci = 0; ci < trams.length; ci++) addCarObst(trams[ci])
+      for (let ci = 0; ci < cables.length; ci++) addCarObst(cables[ci])
+      for (const pc of parked.values()) { if (!pc.thing) addCarObst(pc) }
 
       const tRvo0 = performance.now()
       o.land.crowd_step!(totalSlots, rvoDt, 1.4)
       rvoStepMs = performance.now() - tRvo0
 
+      const yBlend = Math.min(1, 1 - Math.exp(-rvoDt * 14))
       soa = new Float32Array(mem.buffer, o.land.crowd_agents_ptr!(), cap * 10)
       for (let i = 0; i < rvoPedCount; i++) {
         const pr = preps[rvoIndices[i]], st = pr.st!
         const nx = soa[CROWD_POS_X * cap + i], nz = soa[CROWD_POS_Z * cap + i]
         const vx = soa[CROWD_VEL_X * cap + i], vz = soa[CROWD_VEL_Z * cap + i]
         if (Number.isFinite(nx) && Number.isFinite(nz)) {
-          st.x = nx; st.z = nz
-          st.vx = Number.isFinite(vx) ? vx : 0
-          st.vz = Number.isFinite(vz) ? vz : 0
-          st.y = feetAt(st.x, st.z)
+          // Guard against RVO pushing a pedestrian into solid building walls before their nav tile is baked.
+          const ix = Math.round(nx), iz = Math.round(nz), nfy = feetAt(ix, iz)
+          const hitWall = (o.land.world_kind(ix, nfy + 6, iz) !== 0 || o.land.world_kind(ix, nfy + 14, iz) !== 0)
+            && o.land.world_kind(Math.round(st.x), Math.round(st.y) + 6, Math.round(st.z)) === 0
+          if (hitWall) {
+            st.vx *= 0.25; st.vz *= 0.25
+          } else {
+            st.x = nx; st.z = nz
+            st.vx = Number.isFinite(vx) ? vx : 0
+            st.vz = Number.isFinite(vz) ? vz : 0
+            st.y = Math.abs(nfy - st.y) > 12 ? nfy : st.y + (nfy - st.y) * yBlend
+          }
         }
         pr.x = st.x; pr.z = st.z
-        pr.y = pr.ev.lod === 1
-          ? (feetAt(pr.x + pr.ev.hx * 2, pr.z + pr.ev.hz * 2) + feetAt(pr.x - pr.ev.hx * 2, pr.z - pr.ev.hz * 2) + st.y) / 3
-          : st.y
+        if (pr.ev.lod === 1) {
+          const spd = Math.hypot(st.vx, st.vz)
+          const sx = spd > 1.5 ? st.vx / spd : pr.ev.hx
+          const sz = spd > 1.5 ? st.vz / spd : pr.ev.hz
+          pr.y = (feetAt(pr.x + sx * 2, pr.z + sz * 2) + feetAt(pr.x - sx * 2, pr.z - sz * 2) + st.y) / 3
+        } else {
+          pr.y = st.y
+        }
         if (pr.mode === 'rain' && !pr.rainSheltered && st.rainSpot && Math.hypot(st.rainSpot.x - st.x, st.rainSpot.z - st.z) <= 6) {
           pr.rainSheltered = true
           rainShelteredNow++
@@ -1889,10 +1962,9 @@ export function street(o: {
       } else if (c.dome) {
         c.dome.destroy(); c.dome = null; c.domeMode = ''
       }
-    } else if (ls.head > 0 || ls.brake > 0) {
-      c.piece.lamps = [ls.brake, 0, ls.head, c.model.front + 1]
     } else {
-      c.piece.lamps = undefined
+      // Always pass lampAxis (`front + 1`) even when off so pieces.ts keeps parked-car lamp voxels dark and skips generic LAMP spotlights.
+      c.piece.lamps = [ls.brake, 0, ls.head, c.model.front + 1]
     }
   }
   const isDarkNow = () => {
@@ -2289,14 +2361,22 @@ export function street(o: {
       return 'ok'
     }
     // Trimming `r.lanes` on a one-way road shifts its symmetric `laneOff`, so re-verify until stable.
+    const stepLen = r.len / steps
     for (let attempt = 0; attempt < 4; attempt++) {
       let openLanes = r.lanes
+      let prevCenterG: number | null = null
       for (let k = 0; k <= steps; k++) {
         const s = (r.len * k) / steps
         along(r.p, r.cum, s, P)
         const centerState = checkSpot(P.x, P.z)
         if (centerState === 'unloaded') return false
         if (centerState === 'blocked') { r.open = false; return false }
+        // Reject unnavigable cliff-grade paper streets (e.g. Telegraph Hill stairways > 38% grade; steepest SF road is 31.5%).
+        const cg = o.land.ground_at(Math.round(P.x), Math.round(P.z))
+        if (prevCenterG !== null && stepLen >= 8 && Math.abs(cg - prevCenterG) / stepLen > 0.38) {
+          r.open = false; return false
+        }
+        prevCenterG = cg
         for (let lane = 0; lane < openLanes; lane++) {
           lanePoint(r, lane, s, P)
           const tx = P.tx, tz = P.tz, lx = P.x, lz = P.z
@@ -3309,7 +3389,7 @@ export function street(o: {
       else c.blockedAheadTime = Math.max(0, (c.blockedAheadTime ?? 0) - dt * 1.5)
 
       const reactDelay = isEmergencyActive ? 0.2 : 0.25 + (1 - profile.laneChangeWillingness) * 0.95
-      const onStraightSegment = c.s! >= CURVE && left >= CURVE
+      const onStraightSegment = (c.s! >= CURVE && left >= CURVE) || ((c.stuck ?? 0) > 2.5 && c.s! >= 15 && left >= 15)
       if (!c.rtStuck && !sy.yielding && onStraightSegment && Math.abs(c.laneShift ?? 0) < 2 && !c.overtake && (c.blockedAheadTime ?? 0) >= reactDelay && simTime >= (c.laneChangeCoolAt ?? 0)) {
         let shifted = false
         // 1) Multi-lane adjacent lane change with smooth lateral interpolation (ZERO snapping, ZERO overlaps).
@@ -3339,8 +3419,8 @@ export function street(o: {
             }
           }
         }
-        // 2) Single-lane or all-lanes-obstructed smooth lateral overtake around stalled PayMo or crater.
-        if (!shifted && (r.lanes === 1 || leadCar?.rtStuck || craterObstruction)) {
+        // 2) Single-lane or all-lanes-obstructed smooth lateral overtake around stalled PayMo, crater, or parked/woken vehicle.
+        if (!shifted && (r.lanes === 1 || leadCar?.rtStuck || craterObstruction || why === 'vehicle')) {
           const obS = leadCar && leadCar.road === r ? (leadCar.s! + leadCar.model.long * 0.5) : (c.s! + Math.min(Math.max(gap, 25), 95) + 25)
           const passDist = Math.max(68, (obS - c.s!) + c.model.long + 26)
           const candShifts = !(r.flags & 1) ? [-33, 26] : [-28, 28]
@@ -3431,24 +3511,28 @@ export function street(o: {
       // Past the junction it held by 8 m: it is free for the next.
       if (c.prev && c.s! > 80) { const h = holds.get(c.prev.b); if (h?.delete(c) && !h.size) holds.delete(c.prev.b) }
       const d = Math.hypot(c.x - view.eye[0], c.z - view.eye[2])
-      // Gone where nobody sees: too far, at a road's end, or stuck a long while out of sight; also recycle mutual car-on-car deadlocks before 12 s (#129).
+      // Gone where nobody sees: too far, at a road's end, or stuck a long while out of sight; also recycle mutual car-on-car deadlocks before 12 s (#129) or unbypassable stationary-vehicle stalls before 16 s.
       const mutualDeadlock = c.stuck! > 9.5 && why === 'car' && !!leadCar && leadCar.v < 2 && !leadCar.queued && !leadCar.rtStuck && (leadCar.stuck ?? 0) > 8 && c.id > leadCar.id
-      if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 10 && unseen(c.x, c.z, view)) || mutualDeadlock) { letGo(c); hide(c); traffic.splice(i, 1); continue }
+      const vehicleStall = c.stuck! > 16 && why === 'vehicle' && !c.rtStuck
+      if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 10 && unseen(c.x, c.z, view)) || mutualDeadlock || vehicleStall) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       // Someone held a junction a long time without moving (a person stands in front of them): let it go.
       if (c.stuck! > 6) letGo(c)
       pose(c)
       // Corner-sweep & lateral-shift OBB guard (#155, #164): if advancing or shifting laterally deepens an OBB overlap
-      // with an adjacent traffic vehicle, revert the step and yield instead of penetrating it.
+      // with an adjacent traffic vehicle, streetcar, or cable car, revert the step and yield instead of penetrating it.
       if (c.v > 0.1 || Math.abs(c.latVel ?? 0) > 0.1) {
         const pBox = { x: prevPose.x, z: prevPose.z, heading: prevPose.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
         const nBox = { x: c.x, z: c.z, heading: c.heading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
         let sweptHit: Car | null = null
-        for (let j = 0; j < traffic.length; j++) {
-          const oCar = traffic[j]
-          if (oCar === c || Math.abs(oCar.y - c.y) > 25) continue
-          if (stepDeepensOverlap(pBox, nBox, { x: oCar.x, z: oCar.z, heading: oCar.heading, halfL: oCar.model.long / 2, halfW: oCar.model.wide / 2 })) {
-            sweptHit = oCar; break
+        for (const list of [traffic, trams, cables]) {
+          for (let j = 0; j < list.length; j++) {
+            const oCar = list[j]
+            if (oCar === c || Math.abs(oCar.y - c.y) > 25) continue
+            if (stepDeepensOverlap(pBox, nBox, { x: oCar.x, z: oCar.z, heading: oCar.heading, halfL: oCar.model.long / 2, halfW: oCar.model.wide / 2 })) {
+              sweptHit = oCar; break
+            }
           }
+          if (sweptHit) break
         }
         if (sweptHit) {
           c.x = prevPose.x; c.z = prevPose.z; c.y = prevPose.y
@@ -3456,17 +3540,35 @@ export function street(o: {
           c.s = prevPose.s; c.road = prevPose.road; c.prev = prevPose.prev; c.next = prevPose.next; c.lane = prevPose.lane
           c.laneShift = prevPose.laneShift; c.overtakeShift = prevPose.overtakeShift; c.sirenYieldShift = prevPose.sirenYieldShift; c.latVel = 0
           if (prevPose.route) c.route = prevPose.route
-          c.v = 0; c.wait = 'car'; c.stuck = (c.stuck ?? 0) + dt
+          c.v = 0; c.wait = sweptHit.kind === 'tram' || sweptHit.kind === 'cable' ? 'tram' : 'car'; c.stuck = (c.stuck ?? 0) + dt
         }
-      } else if (c.stuck! > 2.5) {
-        // If two stopped vehicles are already overlapping (e.g. from a tight junction), clear the higher-id one before it lingers for 4+ s.
+      }
+      // Persistent overlap recovery (runs even while `queued` at a stop sign/light, so two stopped vehicles overlapping
+      // across a junction seam never remain fused together for tens of seconds).
+      if (c.v < 2) {
         const cfx = Math.cos(c.heading), cfz = Math.sin(c.heading)
-        for (let j = 0; j < traffic.length; j++) {
-          const oCar = traffic[j]
-          if (oCar === c || oCar.v >= 2 || c.id <= oCar.id || Math.abs(oCar.x - c.x) > 150 || Math.abs(oCar.z - c.z) > 150 || Math.abs(oCar.y - c.y) > 25) continue
-          const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
-          if (g < -2) { letGo(c); hide(c); traffic.splice(i, 1); break }
+        let overlapping = false
+        for (const oRail of [...trams, ...cables]) {
+          if (Math.abs(oRail.x - c.x) > 180 || Math.abs(oRail.z - c.z) > 180 || Math.abs(oRail.y - c.y) > 25) continue
+          const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oRail.x, oRail.z, Math.cos(oRail.heading), Math.sin(oRail.heading), oRail.model.long / 2, oRail.model.wide / 2)
+          if (g < -2) { overlapping = true; break }
         }
+        if (!overlapping) {
+          for (let j = 0; j < traffic.length; j++) {
+            const oCar = traffic[j]
+            if (oCar === c || oCar.v >= 2 || c.id <= oCar.id || Math.abs(oCar.x - c.x) > 150 || Math.abs(oCar.z - c.z) > 150 || Math.abs(oCar.y - c.y) > 25) continue
+            const g = boxGap(c.x, c.z, cfx, cfz, c.model.long / 2, c.model.wide / 2, oCar.x, oCar.z, Math.cos(oCar.heading), Math.sin(oCar.heading), oCar.model.long / 2, oCar.model.wide / 2)
+            if (g < -2) { overlapping = true; break }
+          }
+        }
+        if (overlapping) {
+          c.overlapTime = (c.overlapTime ?? 0) + dt
+          if (c.overlapTime >= 1.2) { letGo(c); hide(c); traffic.splice(i, 1); continue }
+        } else {
+          c.overlapTime = 0
+        }
+      } else {
+        c.overlapTime = 0
       }
     }
   }
@@ -3528,37 +3630,109 @@ export function street(o: {
     const sig = lightsOf(l as (typeof tramLines)[number]).map((L) => { const j = junctionOf(L.node); return `${L.node}:${L.s}:${phaseOf(j, L.dx, L.dz)}:${j.offset}` }).join()
     if (lightsSeen.get(l) !== sig) { lightsSeen.set(l, sig); timetables.delete(l); cableBases.clear() }
   }
-  /** Each car on a line at a moment: how far along it is and how fast it goes. */
-  const cableAt = (l: Line, t: number, each: (s: number, v: number) => void) => {
+  /** Each car on a line at a moment: how far along it is, how fast it goes, and its departure index `n`. */
+  const cableAt = (l: Line, t: number, each: (s: number, v: number, dep: number) => void) => {
     const { every, base } = departures(l), most = (2 * l.len) / CABLE_SPEED + 300
     for (let n = Math.ceil((t - most - base) / every); n <= Math.floor((t - base) / every); n++) {
       const t0 = base + n * every, tt = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE), f = (t - t0) / STEP, i = Math.floor(f)
       if (i < 0 || i + 1 >= tt.length) continue
-      each(tt[i] + (tt[i + 1] - tt[i]) * (f - i), (tt[i + 1] - tt[i]) / STEP)
+      each(tt[i] + (tt[i + 1] - tt[i]) * (f - i), (tt[i + 1] - tt[i]) / STEP, n)
     }
   }
-  const cableCars = (t: number, view: View) => {
+  /** Live obstacle-aware position along the line per active cable-car departure so cable cars yield instead of ghosting through vehicles. */
+  const cableLive = new Map<string, { s: number; v: number }>()
+  const cableCars = (dt: number, t: number, view: View) => {
     const m = ready.get('cable-car')
     if (!m) return
+    const halfL = m.long / 2, halfW = m.wide / 2
+    // Collect live post-drive() vehicles (living cars, traffic, depot cars, trams) so cable cars yield cleanly to blocked tracks.
+    const railObs: { x: number; z: number; hx: number; hz: number; long: number; wide: number }[] = []
+    for (const list of [traffic, depotCars, trams]) {
+      for (let j = 0; j < list.length; j++) {
+        const vCar = list[j]
+        railObs.push({ x: vCar.x, z: vCar.z, hx: Math.cos(vCar.heading), hz: Math.sin(vCar.heading), long: vCar.model.long / 2, wide: vCar.model.wide / 2 })
+      }
+    }
+    for (const th of o.alive.things) {
+      const w = o.alive.where(th)
+      if (!w) continue
+      const hl = Math.max(th.size[0], th.size[2]) / 2, hw = Math.min(th.size[0], th.size[2]) / 2
+      railObs.push({ x: w.at[0], z: w.at[2], hx: w.front[0], hz: w.front[2], long: hl, wide: hw })
+    }
+    const cableBlockedAt = (x: number, z: number, tx: number, tz: number, margin: number): boolean => {
+      for (let j = 0; j < railObs.length; j++) {
+        const ob = railObs[j]
+        if (Math.abs(ob.x - x) > 160 || Math.abs(ob.z - z) > 160) continue
+        if (obbOverlap(x, z, tx, tz, halfL + margin, halfW + 1, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide) < 0) return true
+      }
+      return false
+    }
+    const seenKeys = new Set<string>()
     let n = 0
     for (const l of lines) {
       // (Not near the eye at all: its timetables are not made.)
       along(l.p, l.cum, l.len / 2, P)
       if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > l.len / 2 + DRAWN) continue
-      cableAt(l, t, (s, v) => {
+      cableAt(l, t, (schedS, schedV, dep) => {
+        const key = `${l.seed}:${dep}`
+        let st = cableLive.get(key)
+        let s = schedS
+        let v = schedV
+        if (st) {
+          seenKeys.add(key)
+          const stepS = Math.min(schedS, st.s + Math.max(schedV, CABLE_SPEED) * Math.max(dt, 0.001))
+          along(l.p, l.cum, st.s, Q)
+          along(l.p, l.cum, stepS, P)
+          const prevBox = { x: Q.x, z: Q.z, heading: Math.atan2(Q.tz, Q.tx), halfL, halfW }
+          const nextBox = { x: P.x, z: P.z, heading: Math.atan2(P.tz, P.tx), halfL, halfW }
+          let blocked = false
+          // Check both forward stopping probe (1.4 m ahead) and exact step-deepens-overlap guard against every live vehicle.
+          const probeS = Math.min(l.len, stepS + 14)
+          along(l.p, l.cum, probeS, Q)
+          for (let j = 0; j < railObs.length; j++) {
+            const ob = railObs[j]
+            if (Math.abs(ob.x - P.x) > 180 || Math.abs(ob.z - P.z) > 180) continue
+            const obBox = { x: ob.x, z: ob.z, heading: Math.atan2(ob.hz, ob.hx), halfL: ob.long, halfW: ob.wide }
+            if (stepDeepensOverlap(prevBox, nextBox, obBox)) { blocked = true; break }
+            const gapProbe = obbOverlap(Q.x, Q.z, Q.tx, Q.tz, halfL, halfW + 1, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide)
+            if (gapProbe < 2) {
+              const gapNow = obbOverlap(prevBox.x, prevBox.z, Math.cos(prevBox.heading), Math.sin(prevBox.heading), halfL, halfW + 1, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide)
+              if (gapProbe <= gapNow) { blocked = true; break }
+            }
+          }
+          if (blocked) {
+            s = st.s
+            v = 0
+          } else {
+            s = stepS
+            v = dt > 0 ? Math.min(CABLE_SPEED, (s - st.s) / dt) : schedV
+          }
+          st.s = s; st.v = v
+        } else {
+          along(l.p, l.cum, schedS, P)
+          if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > DRAWN) return
+          // Never spawn a newly visible cable car on top of a living or traffic vehicle.
+          if (cableBlockedAt(P.x, P.z, P.tx, P.tz, 6)) return
+          st = { s: schedS, v: schedV }
+          cableLive.set(key, st)
+          seenKeys.add(key)
+        }
         along(l.p, l.cum, s, P)
         if (Math.hypot(P.x - view.eye[0], P.z - view.eye[2]) > DRAWN) return
         // Hard invariant: never emit two cable cars overlapping on a shared track or crossing.
         for (let k = 0; k < n; k++) {
           const prev = cables[k]
           if (Math.abs(P.x - prev.x) > 140 || Math.abs(P.z - prev.z) > 140) continue
-          if (obbOverlap(P.x, P.z, P.tx, P.tz, m.long / 2, m.wide / 2, prev.x, prev.z, Math.cos(prev.heading), Math.sin(prev.heading), prev.model.long / 2, prev.model.wide / 2) < 1) return
+          if (obbOverlap(P.x, P.z, P.tx, P.tz, halfL, halfW, prev.x, prev.z, Math.cos(prev.heading), Math.sin(prev.heading), prev.model.long / 2, prev.model.wide / 2) < 1) return
         }
         const c = (cables[n] ??= { id: ids++, model: m, paint: -1, kind: 'cable', seed: n, x: 0, y: 0, z: 0, heading: 0, pitch: 0, v: 0, piece: null, shown: '' })
         c.x = P.x; c.z = P.z; c.heading = Math.atan2(P.tz, P.tx); c.v = v
         settle(c)
         n++
       })
+    }
+    for (const key of cableLive.keys()) {
+      if (!seenKeys.has(key)) cableLive.delete(key)
     }
     for (let i = cables.length - 1; i >= n; i--) { hide(cables[i]); cables.pop() }
   }
@@ -3596,7 +3770,7 @@ export function street(o: {
    * one that stood, from the first frames after the street was filled. test/crash-stack.mjs.) One already in it that
    * it would leave by going on is not waited for.
    */
-  const RAIL_STEP = 24, RAIL_AHEAD = 400
+  const RAIL_STEP = 12, RAIL_AHEAD = 400
   const rail: { x: number; z: number; tx: number; tz: number }[] = []
   /** Where a streetcar will stand along its rails from here, every `RAIL_STEP`: made once for it, for every vehicle near (`railGap`). */
   const railAhead = (c: Car) => {
@@ -3605,7 +3779,7 @@ export function street(o: {
     for (let d = 0; d <= RAIL_AHEAD && c.s! + d <= l.len; d += RAIL_STEP, n++) { along(l.p, l.cum, c.s! + d, Q); (rail[n] ??= { x: 0, z: 0, tx: 1, tz: 0 }); rail[n].x = Q.x; rail[n].z = Q.z; rail[n].tx = Q.tx; rail[n].tz = Q.tz }
     return n
   }
-  const railGap = (c: Car, n: number, ob: (typeof obstacles)[number]) => {
+  const railGap = (c: Car, n: number, ob: { x: number; z: number; long: number; wide: number; hx: number; hz: number }) => {
     const halfL = c.model.long / 2, halfW = c.model.wide / 2 + 1
     if (Math.hypot(ob.x - c.x, ob.z - c.z) > RAIL_AHEAD + halfL + ob.long + ob.wide) return Infinity
     const within = (k: number) => obbOverlap(rail[k].x, rail[k].z, rail[k].tx, rail[k].tz, halfL, halfW, ob.x, ob.z, ob.hx, ob.hz, ob.long, ob.wide) < 0
@@ -3636,18 +3810,36 @@ export function street(o: {
         settle(c); trams.push(c); k++
       }
     }
+    // Check live post-drive() positions of all moving/parked/living vehicles so trams never use stale pre-drive() obstacles.
+    const liveVehicles: { x: number; y: number; z: number; long: number; wide: number; v: number; hx: number; hz: number; heading: number; car?: Car }[] = []
+    for (const list of [traffic, depotCars, trams, cables]) {
+      for (let j = 0; j < list.length; j++) {
+        const vCar = list[j]
+        liveVehicles.push({ x: vCar.x, y: vCar.y, z: vCar.z, long: vCar.model.long / 2, wide: vCar.model.wide / 2, v: vCar.v, hx: Math.cos(vCar.heading), hz: Math.sin(vCar.heading), heading: vCar.heading, car: vCar })
+      }
+    }
+    for (const th of o.alive.things) {
+      const w = o.alive.where(th)
+      if (!w) continue
+      const hl = Math.max(th.size[0], th.size[2]) / 2, hw = Math.min(th.size[0], th.size[2]) / 2
+      const v = th.state ? Math.abs(th.state.speed ?? 0) : 0
+      liveVehicles.push({ x: w.at[0], y: w.at[1] - th.size[1] / 2, z: w.at[2], long: hl, wide: hw, v, hx: w.front[0], hz: w.front[2], heading: Math.atan2(w.front[2], w.front[0]) })
+    }
     for (let i = trams.length - 1; i >= 0; i--) {
       const c = trams[i], l = c.track!, hx = Math.cos(c.heading), hz = Math.sin(c.heading)
       let gap = Infinity, lead = 0, held = false
       const poses = railAhead(c)
-      for (const ob of obstacles) {
+      for (let j = 0; j < liveVehicles.length; j++) {
+        const ob = liveVehicles[j]
         if (ob.car === c) continue
+        if (Math.abs(ob.x - c.x) > 520 || Math.abs(ob.z - c.z) > 520 || Math.abs(ob.y - c.y) > 25) continue
+        const g = railGap(c, poses, ob)
+        if (g < gap) { gap = g; lead = Math.max(0, ob.v * (ob.hx * hx + ob.hz * hz)) }
+      }
+      for (const ob of obstacles) {
+        if (ob.car || ob.alive) continue
         const dx = ob.x - c.x, dz = ob.z - c.z
         if (Math.abs(dx) > 500 || Math.abs(dz) > 500) continue
-        // What drives or lives is looked for along the rails (`railGap`), whichever way it heads: where the rails turn
-        // across the traffic, what comes the other way is in the streetcar's path. What stands (a parked car, a
-        // person, a hole) straight ahead, as it was.
-        if (ob.car || ob.alive) { const g = railGap(c, poses, ob); if (g < gap) { gap = g; lead = Math.max(0, ob.v * (ob.hx * hx + ob.hz * hz)) } continue }
         if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
         const ahead = dx * hx + dz * hz, across = Math.abs(dx * hz - dz * hx)
         if (ahead <= 0 || ahead > 500 || across > c.model.wide / 2 + ob.wide + 2) continue
@@ -3666,11 +3858,38 @@ export function street(o: {
       const acc = GATHER * 0.6 * (1 - (c.v / TRAM_SPEED) ** 4 - (gap < Infinity ? (Math.max(0, want) / Math.max(1, gap)) ** 2 : 0))
       c.v = Math.max(0, Math.min(TRAM_SPEED, c.v + Math.max(-BRAKE * 2, acc) * dt))
       if (gap < 5) c.v = Math.min(c.v, Math.max(0, gap) * 2)
+      const prevS = c.s!, prevX = c.x, prevZ = c.z, prevHeading = c.heading
       c.s! += c.v * dt
+      along(l.p, l.cum, c.s!, P)
+      const nextHeading = Math.atan2(P.tz, P.tx)
+      // Hard OBB guard: never allow a streetcar step to deepen an overlap with any live traffic/depot/rail/living vehicle.
+      if (c.v > 0.1) {
+        const pBox = { x: prevX, z: prevZ, heading: prevHeading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
+        const nBox = { x: P.x, z: P.z, heading: nextHeading, halfL: c.model.long / 2, halfW: c.model.wide / 2 }
+        let blocked = false
+        for (let j = 0; j < liveVehicles.length; j++) {
+          const ob = liveVehicles[j]
+          if (ob.car === c || Math.abs(ob.x - P.x) > 220 || Math.abs(ob.z - P.z) > 220 || Math.abs(ob.y - c.y) > 25) continue
+          if (stepDeepensOverlap(pBox, nBox, { x: ob.x, z: ob.z, heading: ob.heading, halfL: ob.long, halfW: ob.wide })) {
+            blocked = true; break
+          }
+        }
+        if (blocked) {
+          c.s = prevS; c.v = 0; c.wait = 'car'
+          P.x = prevX; P.z = prevZ; P.tx = Math.cos(prevHeading); P.tz = Math.sin(prevHeading)
+        }
+      }
       c.held = held && c.v < 2 ? (c.held ?? 0) + dt : 0
       c.stuck = c.v < 2 && !held ? c.stuck! + dt : 0
-      along(l.p, l.cum, c.s!, P)
       c.x = P.x; c.z = P.z; c.heading = Math.atan2(P.tz, P.tx)
+      // Keep liveVehicles entry in sync for subsequent trams evaluated in the same tick.
+      for (let j = 0; j < liveVehicles.length; j++) {
+        if (liveVehicles[j].car === c) {
+          liveVehicles[j].x = c.x; liveVehicles[j].z = c.z; liveVehicles[j].heading = c.heading
+          liveVehicles[j].hx = Math.cos(c.heading); liveVehicles[j].hz = Math.sin(c.heading); liveVehicles[j].v = c.v
+          break
+        }
+      }
       settle(c)
       // At its line's end (a terminus, or where the squares here end) or far off, out of sight, it is taken off.
       if (Math.hypot(c.x - eye[0], c.z - eye[2]) > DRIVEN * 1.3 || (c.s! >= l.len - 40 && unseen(c.x, c.z, view)) || (c.stuck! > 60 && unseen(c.x, c.z, view))) { hide(c); trams.splice(i, 1) }
@@ -4168,7 +4387,7 @@ export function street(o: {
       lap('depot')
       tramsDrive(dt, view, o.clock(), !trams.length)
       lap('trams')
-      cableCars(o.clock(), view)
+      cableCars(dt, o.clock(), view)
       lap('cables')
       const feet = o.feet()
       lap('feet')
@@ -4218,7 +4437,7 @@ export function street(o: {
       simTime = 0
       aiStats.laneChanges = 0; aiStats.detours = 0; aiStats.sirenYields = 0; aiStats.activeEmergency = 0; aiStats.deadlocksResolved = 0
       detourCache.map.clear(); nearMissCues.length = 0; pedNearMissCool.clear(); activeCongested.clear(); activeBlockedSig = ''
-      watching.clear(); crowdAgents.clear(); awningCache.clear(); lastFlowSig = ''; flowSpansActive = 0; lastAwningShockLen = o.shocks.length
+      watching.clear(); crowdAgents.clear(); awningCache.clear(); lastFlowSig = ''; lastFlowRefresh = -99; flowSpansActive = 0; lastAwningShockLen = o.shocks.length
       crowdStats.rvoAgents = 0; crowdStats.rvoStepMs = 0; crowdStats.flowActive = false
       crowdStats.panicRoles = { flee: 0, shelter: 0, film: 0, glance: 0 }; crowdStats.rainSheltered = 0
       if (o.land.nav_flow_clear) o.land.nav_flow_clear()

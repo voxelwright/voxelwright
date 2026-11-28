@@ -271,6 +271,7 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
   let lastSyncX = -1e9, lastSyncZ = -1e9
   let lastMarketOn = false
   let lastRefreshMs = 0
+  let lastShockCount = 0
 
   const bucketKey = (gx: number, gz: number) => `${gx},${gz}`
   const shopKey = (s: RawShop) => `${s.x},${s.z},${s.n}`
@@ -322,7 +323,19 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
     return g
   }
 
-  /** Lightweight terrain/L0 signature so shops & plazas immediately re-seat when L0 tiles stream in. */
+  /** True if solid building facade (non-air, non-foliage, non-water) exists behind `(xM, yM, zM)` along `-normal`. */
+  const hasWallBacking = (xM: number, yM: number, zM: number, nx: number, nz: number, maxOut = 0.45): boolean => {
+    const py = Math.round(yM * M)
+    for (let step = -0.75; step <= maxOut; step += 0.15) {
+      const px = Math.round((xM + nx * step) * M)
+      const pz = Math.round((zM + nz * step) * M)
+      const kind = o.land.world_kind(px, py, pz) & 15
+      if (kind !== 0 && kind !== 13 && kind !== 5) return true
+    }
+    return false
+  }
+
+  /** Lightweight terrain/L0 + backing-wall signature so shops immediately re-seat on L0 arrival or drop orphaned signs when blasted. */
   const shopSig = (s: RawShop): number | null => {
     const gWall = groundCells(s.x, s.z)
     if (gWall === null) return null
@@ -333,7 +346,15 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
     // Sample facade/awning presence at 0.5m and 0.9m out at 3.2m height to detect when L0 building detail arrives.
     const k1 = o.land.world_kind(Math.round((s.x + s.nx * 0.5) * M), gRef + 32, Math.round((s.z + s.nz * 0.5) * M)) & 15
     const k2 = o.land.world_kind(Math.round((s.x + s.nx * 0.9) * M), gRef + 32, Math.round((s.z + s.nz * 0.9) * M)) & 15
-    return ((gWall >> 1) * 73856093) ^ ((gFront >> 1) * 19349663) ^ (topF << 4) ^ (k1 << 8) ^ (k2 << 12)
+    // Sample backing wall integrity across the storefront width so blasts/cuts immediately remove floating signs.
+    const rx = s.nz, rz = -s.nx
+    const span = Math.max(0.8, Math.min(2.2, s.w * 0.30))
+    const wallY = gRef / M + 3.3
+    let wallBits = 0
+    if (hasWallBacking(s.x - rx * span, wallY, s.z - rz * span, s.nx, s.nz)) wallBits |= 1
+    if (hasWallBacking(s.x, wallY, s.z, s.nx, s.nz)) wallBits |= 2
+    if (hasWallBacking(s.x + rx * span, wallY, s.z + rz * span, s.nx, s.nz)) wallBits |= 4
+    return ((gWall >> 1) * 73856093) ^ ((gFront >> 1) * 19349663) ^ (topF << 4) ^ (k1 << 8) ^ (k2 << 12) ^ (wallBits << 16)
   }
 
   const plazaSig = (p: RawPlaza): number | null => {
@@ -458,19 +479,33 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
     }
     outOffsetM = Math.min(outOffsetM, 1.55)
 
-    signs.push({
-      id: `f:${s.x}:${s.z}:${s.n}`,
-      title: s.n,
-      subtitle: s.t || undefined,
-      category: s.c,
-      kind: 'fascia',
-      at: [(s.x + s.nx * outOffsetM) * M, signCenterY * M, (s.z + s.nz * outOffsetM) * M],
-      hu: [rx * signW * 0.5 * M, 0, rz * signW * 0.5 * M],
-      hv: [0, signH * 0.5 * M, 0],
-      normal: [s.nx, 0, s.nz],
-      both: false,
-      style: st,
-    })
+    // Only mount fascia signboard when its backing wall still stands (prevents neon signs hovering over blast holes).
+    let wallAnchors = 0
+    for (const u of uSamples) {
+      const wx = s.x + rx * u, wz = s.z + rz * u
+      if (
+        hasWallBacking(wx, signCenterY, wz, s.nx, s.nz, outOffsetM)
+        || hasWallBacking(wx, signCenterY + signH * 0.32, wz, s.nx, s.nz, outOffsetM)
+        || hasWallBacking(wx, signCenterY - signH * 0.32, wz, s.nx, s.nz, outOffsetM)
+      ) {
+        wallAnchors++
+      }
+    }
+    if (wallAnchors >= 2) {
+      signs.push({
+        id: `f:${s.x}:${s.z}:${s.n}`,
+        title: s.n,
+        subtitle: s.t || undefined,
+        category: s.c,
+        kind: 'fascia',
+        at: [(s.x + s.nx * outOffsetM) * M, signCenterY * M, (s.z + s.nz * outOffsetM) * M],
+        hu: [rx * signW * 0.5 * M, 0, rz * signW * 0.5 * M],
+        hv: [0, signH * 0.5 * M, 0],
+        normal: [s.nx, 0, s.nz],
+        both: false,
+        style: st,
+      })
+    }
 
     // Projecting perpendicular double-sided blade sign (for eateries, cafés, bookshops, florists, bars, corner stores)
     if (s.bl && s.sw >= 1.5 && s.w >= 3.2) {
@@ -479,29 +514,31 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
       const bxWall = s.x + rx * shiftAlong
       const bzWall = s.z + rz * shiftAlong
       const bladeY = awningTopM > 0 && signCenterY > awningTopM ? Math.min(signCenterY, awningTopM + 0.48) : Math.min(signCenterY - 0.12, groundM + 3.0)
-      const bladeW = 0.92
-      const bladeH = 0.48
-      // Bracket mounted flush at wall, projecting outward along (nx, nz)
-      const bracket = o.pieces.add(kkit.bladeBracket.born, true)
-      bracket.cell = kkit.bladeBracket.cell
-      bracket.pos = [(bxWall + s.nx * (outOffsetM - 0.10)) * M, (bladeY + bladeH * 0.5 + 0.08) * M, (bzWall + s.nz * (outOffsetM - 0.10)) * M]
-      // bladeBracket extends along +X; rotate +X to (nx, nz) via yaw = atan2(-nz, nx)
-      bracket.rot = yawQuat(Math.atan2(-s.nz, s.nx))
-      pieces.push(bracket)
+      if (hasWallBacking(bxWall, bladeY, bzWall, s.nx, s.nz, outOffsetM) || hasWallBacking(bxWall, bladeY + 0.3, bzWall, s.nx, s.nz, outOffsetM)) {
+        const bladeW = 0.92
+        const bladeH = 0.48
+        // Bracket mounted flush at wall, projecting outward along (nx, nz)
+        const bracket = o.pieces.add(kkit.bladeBracket.born, true)
+        bracket.cell = kkit.bladeBracket.cell
+        bracket.pos = [(bxWall + s.nx * (outOffsetM - 0.10)) * M, (bladeY + bladeH * 0.5 + 0.08) * M, (bzWall + s.nz * (outOffsetM - 0.10)) * M]
+        // bladeBracket extends along +X; rotate +X to (nx, nz) via yaw = atan2(-nz, nx)
+        bracket.rot = yawQuat(Math.atan2(-s.nz, s.nx))
+        pieces.push(bracket)
 
-      const bMidOut = outOffsetM + 0.48
-      signs.push({
-        id: `b:${s.x}:${s.z}:${s.n}`,
-        title: s.n,
-        category: s.c,
-        kind: 'blade',
-        at: [(bxWall + s.nx * bMidOut) * M, bladeY * M, (bzWall + s.nz * bMidOut) * M],
-        hu: [s.nx * bladeW * 0.5 * M, 0, s.nz * bladeW * 0.5 * M],
-        hv: [0, bladeH * 0.5 * M, 0],
-        normal: [rx, 0, rz],
-        both: true,
-        style: st,
-      })
+        const bMidOut = outOffsetM + 0.48
+        signs.push({
+          id: `b:${s.x}:${s.z}:${s.n}`,
+          title: s.n,
+          category: s.c,
+          kind: 'blade',
+          at: [(bxWall + s.nx * bMidOut) * M, bladeY * M, (bzWall + s.nz * bMidOut) * M],
+          hu: [s.nx * bladeW * 0.5 * M, 0, s.nz * bladeW * 0.5 * M],
+          hv: [0, bladeH * 0.5 * M, 0],
+          normal: [rx, 0, rz],
+          both: true,
+          style: st,
+        })
+      }
     }
 
     // Sidewalk character props & patrons (strictly clear of asphalt road & existing walls!)
@@ -1041,7 +1078,9 @@ export async function createNeighborhood(o: NeighborhoodOptions): Promise<Neighb
     const marketOpen = hr >= 7.0 && hr <= 18.5
     const now = performance.now()
     const moved = Math.hypot(eyeXM - lastSyncX, eyeZM - lastSyncZ)
-    if (moved < 8.0 && marketOpen === lastMarketOn && now - lastRefreshMs < 450) return
+    const shocked = o.shocks.length !== lastShockCount
+    if (!shocked && moved < 8.0 && marketOpen === lastMarketOn && now - lastRefreshMs < 450) return
+    lastShockCount = o.shocks.length
     lastRefreshMs = now
     let dirty = moved >= 8.0
     if (moved >= 8.0) {

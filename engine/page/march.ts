@@ -1669,8 +1669,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       sunMaps.turn(sun); day = isDay; low = isLow; colours()
       if (lightsNow() > 0) {
         const wantOcc = localLights.count > 0 && localLights.stats.quality === 'high'
-        warmShade(false, false, true, under, wantOcc)
-        if (mirrorsStarted || mirrorsReady) warmShade(true, false, true, under, wantOcc, () => { mirrorsReady = true })
+        warmShade(false, false, true, under, false)
+        if (wantOcc) warmShade(false, false, true, under, true)
+        if (mirrorsStarted || mirrorsReady) {
+          warmShade(true, false, true, under, false, () => { mirrorsReady = true })
+          if (wantOcc) warmShade(true, false, true, under, true, () => { mirrorsReady = true })
+        }
         if (extGi && voxelizer) {
           warmShade(true, false, true, under, wantOcc, undefined, format, false, gtaoPass !== null, true, true, extRestir !== null)
         }
@@ -1867,11 +1871,17 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       const wantsCluster = !isReadback && Boolean(extra?.clusterActive) && localLights.clustered !== null
       const hasLocal = localLights.count > 0 || (wantsCluster && localLights.clusterCount > 0)
       const wantNight = !isReadback && (lightsNow() > 0 || screen.up > 0 || hasLocal)
-      const wantOcc = wantNight && hasLocal && localLights.stats.quality === 'high'
-      const wantFar = farMap[3] > 0
       const wantUnder = !isReadback && (under || (flags & UNDER) !== 0)
-      const wantFog = !isReadback && fog > 0 && !extra?.froxelFogActive
+      const wantFar = !wantUnder && farMap[3] > 0
+      const wantFog = !isReadback && !wantUnder && fog > 0 && !extra?.froxelFogActive
+      const wantOcc = !wantUnder && wantNight && hasLocal && localLights.stats.quality === 'high'
       const wantClusterShade = wantNight && !wantUnder && wantsCluster
+
+      // Async pre-warm underwater vis + shade pipelines when approaching sea level (< 12 m) so splashing in never stalls.
+      if (!isReadback && !wantUnder && view.eye[1] < 120) {
+        warmVis(false, false, true)
+        warmShade(false, false, wantNight, true, false, undefined, targetFormat, false, false, false)
+      }
 
       const allocSize = to.allocSize ?? to.size
       const w = Math.max(1, to.size[0]), h = Math.max(1, to.size[1])
@@ -1902,29 +1912,39 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         && w >= 16 && h >= 16,
       )
 
-      // Select active shade pipeline (non-blocking async warming for mirrors/fog/local-occlude/cluster/GI/ReSTIR variants).
+      // Select active vis + shade pipelines with non-blocking async warming so FAR_MODEL / MIRRORS / NIGHT / LOCAL_OCCLUDE / CLUSTER / GI / RESTIR
+      // transitions never stall the main thread with synchronous Metal compilation.
+      let useFar = wantFar
+      if (runCompute && wantFar && !visPipelines.has(visKeyOf(false, true, wantUnder)) && !visPipelines.has(visKeyOf(true, true, wantUnder))) {
+        warmVis(false, true, wantUnder)
+        if (wantsMirrors) warmVis(true, true, wantUnder)
+        if (visPipelines.has(visKeyOf(false, false, wantUnder))) useFar = false
+      }
+
       let mirrors = false
       let useNight = wantNight
       let useOcc = wantOcc
       let useCluster = wantClusterShade
       let useGi = runGi
       let useRestir = runRestir
-      if (wantsMirrors) {
+      if (wantsMirrors && !wantUnder) {
+        const visMirrorsReady = !runCompute || visPipelines.has(visKeyOf(true, useFar, wantUnder))
+        if (!visMirrorsReady) warmVis(true, useFar, wantUnder)
         const wantMirrorFog = wantFog && shadePipelines.has(shadeKeyOf(true, true, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir))
-        if (shadePipelines.has(shadeKeyOf(true, wantMirrorFog, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir))) {
+        if (visMirrorsReady && shadePipelines.has(shadeKeyOf(true, wantMirrorFog, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir))) {
           mirrors = true
           mirrorsReady = true
-        } else if (wantOcc && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, false, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir))) {
+        } else if (visMirrorsReady && wantOcc && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, false, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir))) {
           mirrors = true
           useOcc = false
           warmShade(true, false, wantNight, wantUnder, true, undefined, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir)
-        } else if ((runGi || runRestir) && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao, wantClusterShade, false, false))) {
+        } else if (visMirrorsReady && (runGi || runRestir) && shadePipelines.has(shadeKeyOf(true, false, wantNight, wantUnder, wantOcc, targetFormat, false, shadeUseGtao, wantClusterShade, false, false))) {
           // Keep transparent glass alive while the GI/ReSTIR mirrors permutation warms in the background.
           mirrors = true
           useGi = false
           useRestir = false
           warmShade(true, false, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir)
-        } else if (wantNight && lightsNow() === 0 && screen.up === 0 && shadePipelines.has(shadeKeyOf(true, false, false, wantUnder, false, targetFormat, false, shadeUseGtao, false, runGi, false))) {
+        } else if (visMirrorsReady && wantNight && lightsNow() === 0 && screen.up === 0 && shadePipelines.has(shadeKeyOf(true, false, false, wantUnder, false, targetFormat, false, shadeUseGtao, false, runGi, false))) {
           // Transient daytime local light (e.g. a blast): keep transparent glass alive while the night+mirrors variant warms in the background.
           mirrors = true
           useNight = false
@@ -1936,6 +1956,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
           mirrorsStarted = true
           warmShade(true, false, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir)
           if (wantFog) warmShade(true, true, wantNight, wantUnder, wantOcc, () => { mirrorsReady = true }, targetFormat, false, shadeUseGtao, wantClusterShade, runGi, runRestir)
+        }
+      }
+      if (!mirrors && useOcc && !shadePipelines.has(shadeKeyOf(false, false, useNight, wantUnder, true, targetFormat, false, shadeUseGtao, useCluster, useGi, useRestir))) {
+        warmShade(false, false, useNight, wantUnder, true, undefined, targetFormat, false, shadeUseGtao, useCluster, useGi, useRestir)
+        if (shadePipelines.has(shadeKeyOf(false, false, useNight, wantUnder, false, targetFormat, false, shadeUseGtao, useCluster, useGi, useRestir))) {
+          useOcc = false
         }
       }
       let useFog = false
@@ -2049,7 +2075,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
 
         // Pass 1: Full-res compute primary geometry + glass visibility pass (vis0/vis1).
         const visMirrors = mirrors && !wantUnder
-        const activeVis = requireVisPipeline(visMirrors, wantFar, wantUnder)
+        const activeVis = requireVisPipeline(visMirrors, useFar, wantUnder)
         if (visBind1) {
           const visPass = encoder.beginComputePass({
             label: 'march-vis',
