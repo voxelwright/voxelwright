@@ -791,7 +791,11 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
 export interface People {
   /** Who is drawn, until told otherwise. Asked afresh each frame, with the view, so that whoever gives them can leave out those out of sight. */
   from: ((view: View, seconds: number) => readonly Person[])[]
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, seconds: number): void
+  /** Packs visible figures, shadows and speech boards and uploads buffers before a render pass begins; returns true when at least one person will draw. */
+  prepare(to: Target, view: View, seconds: number): boolean
+  /** Records the prepared shadows, bodies and speech boards into an active `(to.color, to.depth)` render pass. */
+  record(pass: GPURenderPassEncoder): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, seconds: number, sharedPass?: GPURenderPassEncoder): void
   /** How many people and boxes the last frame drew, and what working them out cost this thread (ms, smoothed). */
   readonly drawn: { people: number; boxes: number; ms: number }
 }
@@ -902,10 +906,12 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
     return w
   }
   const drawn = { people: 0, boxes: 0, ms: 0 }
+  let preparedBoxes = 0, preparedLies = 0, preparedNamed = 0
+  let preparedPanes: GPUTextureView | null = null
   const self: People = {
     from: [],
     drawn,
-    draw(encoder, to, view, seconds) {
+    prepare(to, view, seconds) {
       const began = performance.now()
       const anchor = view.eye.map((e) => Math.floor(e / 64) * 64) as unknown as V3
       const sun = march.sun.s
@@ -938,9 +944,14 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         }
       }
       drawn.people = count; drawn.boxes = n / EACH
-      if (!count) { drawn.ms += (performance.now() - began - drawn.ms) * 0.05; return }
+      if (!count) {
+        preparedBoxes = 0; preparedLies = 0; preparedNamed = 0
+        drawn.ms += (performance.now() - began - drawn.ms) * 0.05
+        return false
+      }
       device.queue.writeBuffer(boxes, 0, packed, 0, n)
-      device.queue.writeBuffer(lain, 0, shade, 0, lies * 8)
+      if (lies) device.queue.writeBuffer(lain, 0, shade, 0, lies * 8)
+      if (named) device.queue.writeBuffer(boards, 0, board, 0, named * 12)
       const wrap = (v: number, by: number) => ((v % by) + by) % by
       // No lamp stands in open country: a block whose middle is more than 3.5 km from where the page starts (march.ts lit).
       const town = Math.hypot((Math.floor(view.eye[0] / 1280) + 0.5) * 1280 - 700, (Math.floor(view.eye[2] / 800) + 0.5) * 800 - 4070) < 35000
@@ -949,32 +960,44 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         ...view.right, to.size[0] / to.size[1], ...view.up, town ? 1 : 0, ...view.forward, 0,
         wrap(anchor[0], 1280), wrap(anchor[2], 800), 0, 0,
       ]))
+      preparedBoxes = n / EACH
+      preparedLies = lies
+      preparedNamed = named
+      preparedPanes = march.panes(to.allocSize ?? to.size)
+      drawn.ms += (performance.now() - began - drawn.ms) * 0.05
+      return true
+    },
+    record(pass) {
+      if (!preparedBoxes || !preparedPanes) return
+      pass.setBindGroup(0, view0)
+      pass.setBindGroup(1, litFor(preparedPanes))
+      if (preparedLies) {
+        pass.setPipeline(shadows)
+        pass.setVertexBuffer(0, lain)
+        pass.draw(6, preparedLies)
+      }
+      pass.setPipeline(bodies)
+      pass.setVertexBuffer(0, boxes)
+      pass.draw(36, preparedBoxes)
+      if (preparedNamed) {
+        pass.setPipeline(signed)
+        pass.setBindGroup(0, signView)
+        pass.setBindGroup(1, signSheet)
+        pass.setVertexBuffer(0, boards)
+        pass.draw(6, preparedNamed)
+      }
+    },
+    draw(encoder, to, view, seconds, sharedPass) {
+      if (!self.prepare(to, view, seconds)) return
+      if (sharedPass) { self.record(sharedPass); return }
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
       pass.setScissorRect(0, 0, to.size[0], to.size[1])
-      pass.setBindGroup(0, view0)
-      pass.setBindGroup(1, litFor(march.panes(to.allocSize ?? to.size)))
-      if (lies) {
-        pass.setPipeline(shadows)
-        pass.setVertexBuffer(0, lain)
-        pass.draw(6, lies)
-      }
-      pass.setPipeline(bodies)
-      pass.setVertexBuffer(0, boxes)
-      pass.draw(36, n / EACH)
-      if (named) {
-        device.queue.writeBuffer(boards, 0, board, 0, named * 12)
-        pass.setPipeline(signed)
-        pass.setBindGroup(0, signView)
-        pass.setBindGroup(1, signSheet)
-        pass.setVertexBuffer(0, boards)
-        pass.draw(6, named)
-      }
+      self.record(pass)
       pass.end()
-      drawn.ms += (performance.now() - began - drawn.ms) * 0.05
     },
   }
   return self
