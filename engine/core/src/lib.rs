@@ -19,6 +19,7 @@ pub mod joints;
 pub mod kinds;
 pub mod land;
 pub mod scratch;
+pub mod solver;
 pub mod sports;
 pub mod support;
 pub mod tree;
