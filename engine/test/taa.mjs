@@ -272,7 +272,7 @@ struct VsOut {
       label: 'scene-vel',
       size: [OUT_W, OUT_H],
       format: 'rg16float',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     })
     const depthTex = device.createTexture({
       label: 'scene-depth',
@@ -783,6 +783,61 @@ struct VsOut {
     }
     const statsAfterDyn = taa.stats()
 
+    // ── Test 5: Unjittered dynamic overlay stability (sentinel velocity == (2.0, 2.0)) ───────
+    // Rasterized overlays (cars, people, wheels, puffs) are drawn unjittered and tagged with
+    // velocity=(2, 2) by march-trace.ts fs_patch_vel. Across varying Halton(2, 3) frame jitters,
+    // their reconstructed output must be 100% invariant (zero frame-to-frame vibration).
+    const unjitVelBuf = new Float32Array(RENDER_W * RENDER_H * 2)
+    for (let i = 0; i < unjitVelBuf.length; i++) unjitVelBuf[i] = 2.0
+    const unjitVelF16 = new Uint16Array(unjitVelBuf.length)
+    // IEEE-754 float16 encoding of 2.0 is 0x4000
+    unjitVelF16.fill(0x4000)
+    // Render one static unjittered scene frame (jitter = [0, 0]) and tag velocity with (2.0, 2.0).
+    writeSceneUniforms(RENDER_W, RENDER_H, staticCam, staticCam, staticBox, staticBox, [0, 0])
+    {
+      const enc = device.createCommandEncoder()
+      encodeScene(enc, RENDER_W, RENDER_H)
+      device.queue.submit([enc.finish()])
+    }
+    device.queue.writeTexture(
+      { texture: velTex },
+      unjitVelF16,
+      { bytesPerRow: RENDER_W * 4, rowsPerImage: RENDER_H },
+      [RENDER_W, RENDER_H],
+    )
+    let unjitMaxDiff = 0
+    let unjitMeanDiff = 0
+    /** @type {Float32Array | null} */
+    let prevUnjitPx = null
+    for (let f = 0; f < 6; f++) {
+      const jitter = taaMod.haltonJitter(f, RENDER_W, RENDER_H)
+      const enc = device.createCommandEncoder()
+      taa.resolve(enc, {
+        color: colorView,
+        depth: depthView,
+        velocity: velView,
+        renderSize: [RENDER_W, RENDER_H],
+        allocSize: [OUT_W, OUT_H],
+        outputSize: [OUT_W, OUT_H],
+        jitter,
+        sharpness: 0.25,
+      })
+      device.queue.submit([enc.finish()])
+      const px = await readRgba16f(taa.texture)
+      if (prevUnjitPx) {
+        let sum = 0
+        for (let i = 0; i < px.length; i += 4) {
+          for (let c = 0; c < 3; c++) {
+            const d = Math.abs(px[i + c] - prevUnjitPx[i + c])
+            if (d > unjitMaxDiff) unjitMaxDiff = d
+            sum += d
+          }
+        }
+        unjitMeanDiff = Math.max(unjitMeanDiff, sum / ((px.length / 4) * 3))
+      }
+      prevUnjitPx = px
+    }
+
     // ── GPU pass timing via timestamp-query (median of 10 runs at 640x360) ───────────────────
     /** @type {number | null} */
     let passGpuMs = null
@@ -886,6 +941,10 @@ struct VsOut {
         dynWorstRmse,
         dynNonFinite,
       },
+      test5: {
+        unjitMaxDiff,
+        unjitMeanDiff,
+      },
       passGpuMs,
       faults: [...gpu.faults],
     }
@@ -940,6 +999,11 @@ struct VsOut {
   check(
     t4.statsAfterDyn.reallocs === 0 && t4.dynNonFinite === 0 && t4.dynWorstRmse < 0.08,
     `Test 4 (dynamic resolution 0.50x/0.65x/0.85x/0.55x): reallocs=${t4.statsAfterDyn.reallocs}, frames=${t4.statsAfterDyn.frames}, worstRMSE=${t4.dynWorstRmse.toFixed(4)}, nonFinite=${t4.dynNonFinite}`,
+  )
+  const t5 = report.test5
+  check(
+    t5.unjitMaxDiff < 1e-4 && t5.unjitMeanDiff < 1e-5,
+    `Test 5 (unjittered dynamic overlay stability, vel=(2,2)): maxDiff=${t5.unjitMaxDiff.toFixed(6)}, meanDiff=${t5.unjitMeanDiff.toFixed(6)} across 6 Halton jitter frames`,
   )
   check(
     report.faults.length === 0,

@@ -117,7 +117,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   canvas.addEventListener('click', () => {
     if (phone || still()) return
     if (document.pointerLockElement === canvas) use()
-    else void canvas.requestPointerLock()
+    else void Promise.resolve(canvas.requestPointerLock()).catch(() => {})
   })
   useButton?.addEventListener('click', use)
   addEventListener('mousemove', (e) => {

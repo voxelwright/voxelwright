@@ -277,6 +277,32 @@ try {
     await page.screenshot({ path: join(shots, '06b-lidar-closeup-high.png') })
   }
 
+  // ── 7. Parked cars at night keep all headlights/taillights off and emit zero generic LAMP spotlights ──
+  console.log('\n7. Parked cars at night (Sansome St curb):')
+  await page.evaluate(() => {
+    const e = globalThis.engine
+    e.me.walk(false)
+    Object.assign(e.pose, { x: 52534.32, y: 6.06, z: 65820.94, yaw: 2.76, pitch: -0.128 })
+    e.fov = 58
+    e.hour = 22
+    e.graphics.preset = 'high'
+  })
+  await settle(page)
+  await page.waitForTimeout(800)
+  const parkedCheck = await page.evaluate(() => {
+    const e = globalThis.engine
+    const cars = e.street.cars(525343, 658209, 400)
+    const parked = cars.filter((c) => c.kind === 'parked')
+    return { parkedCount: parked.length, localLights: { ...e.localLights } }
+  })
+  console.log('  parkedCheck:', parkedCheck)
+  await page.screenshot({ path: join(shots, '07-parked-cars-off.png') })
+  const parkedSample = await sampleRegion(page, { x: 0.05, y: 0.35, w: 0.9, h: 0.55 })
+  console.log(`  parked curb redExcess=${parkedSample.redExcess.toFixed(4)} lum=${parkedSample.lum.toFixed(4)}`)
+  check(parkedCheck.parkedCount >= 4, `parked cars present on Sansome St (${parkedCheck.parkedCount})`)
+  check(parkedCheck.localLights.extra <= 6, `parked cars do not flood localLights.extra with generic LAMP spotlights (${parkedCheck.localLights.extra})`)
+  check(parkedSample.redExcess < 0.04, `parked cars do not cast red taillight glow onto street/buildings (redExcess=${parkedSample.redExcess.toFixed(4)})`)
+
   check(errors.length === 0, errors.length ? `console/page errors: ${errors.join('; ')}` : 'zero console or page errors')
 } catch (e) {
   console.error('TEST ERROR:', e)

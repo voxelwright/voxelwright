@@ -75,6 +75,23 @@ try {
   check(!over.under && below.under, `the page says it is under the sea 5 m under its top (${below.under}) and not 3 m over it (${over.under})`)
   const [r, g, b] = below.rgb
   check(g > r * 2 && b > r * 2, `from under it the picture is blue-green: red ${r.toFixed(2)}, green ${g.toFixed(2)}, blue ${b.toFixed(2)}`)
+
+  // Above-water rasterized objects (people, vehicles, billboards, far city) must be occluded by the water ceiling
+  // when viewed from underwater, not drawn cleanly on top of it.
+  await page.evaluate(([x, z]) => {
+    Object.assign(globalThis.engine.pose, { x, y: -2, z, yaw: 0, pitch: 0.25 })
+    const e = globalThis.engine
+    e.folk.from.push(() => [
+      { id: 99001, seed: 7, at: [x * 10, 2, (z - 7) * 10], yaw: 0, speed: 0 },
+      { id: 99002, seed: 11, at: [(x - 1) * 10, 2, (z - 7) * 10], yaw: 0, speed: 0 },
+      { id: 99003, seed: 19, at: [(x + 1) * 10, 2, (z - 7) * 10], yaw: 0, speed: 0 },
+    ])
+  }, middle)
+  await page.waitForTimeout(400)
+  const occluded = await seen(page)
+  const [or, og, ob] = occluded.rgb
+  check(og > or * 1.8 && ob > or * 1.8, `above-water figures do not bleed through the water ceiling: red ${or.toFixed(2)}, green ${og.toFixed(2)}, blue ${ob.toFixed(2)}`)
+  await page.evaluate(() => { globalThis.engine.folk.from.pop() })
 } catch (e) {
   failures.push(String(e).slice(0, 400))
 }

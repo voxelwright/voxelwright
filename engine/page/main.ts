@@ -497,7 +497,7 @@ async function main() {
   const steer = (budget: number, gap: number, calm = false) => {
     steerState.scale = scale
     steerState.held = held
-    steerScale(steerState, { budget, gap, frameMs, cpuMs, workCpuMs, gpuMs, marchMs, clocked, calm, fixed })
+    steerScale(steerState, { budget, gap, frameMs, cpuMs, workCpuMs, gpuMs, marchMs, fixedGpuMs: taaEnabled && taaPass ? taaMs : 0, clocked, calm, fixed })
     scale = steerState.scale
     held = steerState.held
   }
@@ -1052,9 +1052,11 @@ async function main() {
       )
       gtaoRan = march.gtaoRan
       windowed = portalDraw?.(encoder, to, v, seconds, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
-      farModel.draw(encoder, to, v)
-      skyEggs.draw(encoder, to, farModel.depth, v, seconds)
-      marine.draw(encoder, to, farModel.depth, v, seconds)
+      if (!march.under) {
+        farModel.draw(encoder, to, v)
+        skyEggs.draw(encoder, to, farModel.depth, v, seconds)
+        marine.draw(encoder, to, farModel.depth, v, seconds)
+      }
       if (!off.has('water')) water.draw(encoder, to, v, seconds)
       // Shared TBDR overlay pass (#165): run all CPU prep, queue.writeBuffer uploads, and crumbs-compute BEFORE
       // beginning ONE shared GPURenderPassEncoder over (to.color, to.depth) to avoid 6-7 tile load/store flushes.
@@ -1689,7 +1691,18 @@ async function main() {
   // Whoever rides from this page is seen in their seat (#367): from behind, the kart went up the street with nobody in it.
   // The page places its own rider each frame where the thing is, so they are not the tenth of a second behind that others see them.
   const seated: Person = { at: [0, 0, 0], yaw: 0, seed: seedOf(others?.name ?? 'me'), move: { move: NAMED.sit, t: 10 } }
-  folk.from.push((_view, seconds) => { const r = alive.rider; if (!r || alive.inside) return []; /* With the eye brought right in over them (a wall behind), their own figure is not drawn in its way: as on foot. */ if (Math.hypot(pose.x * M - r.at[0], pose.y * M - r.at[1] - 12, pose.z * M - r.at[2]) < 9) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
+  folk.from.push((_view, seconds) => {
+    const r = alive.rider
+    if (!r || alive.inside) return []
+    const [qx, qy, qz, qw] = r.frame
+    // Rotate the +12 head offset by the vehicle's frame so the near-camera hide check matches the inverted cabin.
+    const hx = 2 * (qx * qy - qw * qz) * 12, hy = (1 - 2 * (qx * qx + qz * qz)) * 12, hz = 2 * (qy * qz + qw * qx) * 12
+    /* With the eye brought right in over them (a wall behind), their own figure is not drawn in its way: as on foot. */
+    if (Math.hypot(pose.x * M - (r.at[0] + hx), pose.y * M - (r.at[1] + hy), pose.z * M - (r.at[2] + hz)) < 9) return []
+    seated.at = r.at; seated.yaw = r.localYaw; seated.frame = r.frame; seated.time = seconds
+    seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look
+    return [seated]
+  })
   controls.always('KeyB', () => { me.walk(!me.on); return true })
   // ── 3D Minimap, Full-Screen Map & GPS Navigation ────────────────────────
   let mapLastX = pose.x, mapLastZ = pose.z, mapLastT = performance.now(), mapSpeed = 0

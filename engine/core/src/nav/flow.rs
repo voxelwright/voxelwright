@@ -69,8 +69,21 @@ impl FlowField {
         self.threats.push(Threat { x, y, z, radius: r });
     }
 
-    /// Builds the escape flow field for all registered threats. Returns number of walkable spans populated.
+    /// Builds the escape flow field for all registered threats, baking all missing tiles in the window.
+    /// Returns number of walkable spans populated.
     pub fn build<S: VoxelSource>(&mut self, cache: &mut TileCache, src: &mut S) -> usize {
+        self.build_budgeted(cache, src, usize::MAX)
+    }
+
+    /// Builds the escape flow field over cached tiles in the threat window while baking at most `max_bake`
+    /// missing tiles (ordered nearest to any active threat) so main-thread crash/strike spikes never stall
+    /// synchronously baking hundreds of cold tiles.
+    pub fn build_budgeted<S: VoxelSource>(
+        &mut self,
+        cache: &mut TileCache,
+        src: &mut S,
+        max_bake: usize,
+    ) -> usize {
         self.tile_offsets.clear();
         self.vectors.clear();
         self.grid_w = 0;
@@ -111,11 +124,41 @@ impl FlowField {
         self.grid_h = gh;
         self.tile_offsets = vec![u32::MAX; gw * gh];
 
-        // Ensure all tiles in the threat window exist in cache and assign dense span IDs.
+        // Bake up to `max_bake` missing tiles in the threat window, nearest-to-threat first.
+        if max_bake == usize::MAX {
+            for tz in min_tz..=max_tz {
+                for tx in min_tx..=max_tx {
+                    cache.ensure_tile(src, (tx, tz));
+                }
+            }
+        } else if max_bake > 0 {
+            let mut missing: Vec<((i32, i32), f32)> = Vec::new();
+            for tz in min_tz..=max_tz {
+                let cz = (tz * TILE_CELLS + TILE_CELLS / 2) as f32;
+                for tx in min_tx..=max_tx {
+                    if cache.get((tx, tz)).is_some() {
+                        continue;
+                    }
+                    let cx = (tx * TILE_CELLS + TILE_CELLS / 2) as f32;
+                    let mut best_d2 = f32::INFINITY;
+                    for t in &self.threats {
+                        let dx = cx - t.x;
+                        let dz = cz - t.z;
+                        best_d2 = best_d2.min(dx * dx + dz * dz);
+                    }
+                    missing.push(((tx, tz), best_d2));
+                }
+            }
+            missing.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+            for (key, _) in missing.into_iter().take(max_bake) {
+                cache.ensure_tile(src, key);
+            }
+        }
+
+        // Assign dense span IDs across all cached tiles in the threat window.
         let mut total_spans = 0usize;
         for tz in min_tz..=max_tz {
             for tx in min_tx..=max_tx {
-                cache.ensure_tile(src, (tx, tz));
                 if let Some(tile) = cache.get((tx, tz)) {
                     let gidx = (tz - min_tz) as usize * gw + (tx - min_tx) as usize;
                     self.tile_offsets[gidx] = total_spans as u32;

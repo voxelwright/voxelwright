@@ -147,14 +147,14 @@ export const trolleybus = () => bus('trolleybus', 'trolley', true)
  *   - bus:    heavy transit reference spec (kept ready if >96-cell living bodies are enabled)
  */
 export const HANDLING = {
-  coupe:  { power: 142, top: 590, grip: 1.24, steer: 0.62, tough: 220 },
-  saloon: { power: 112, top: 475, grip: 1.38, steer: 0.58, tough: 210 },
-  hatch:  { power: 100, top: 445, grip: 1.42, steer: 0.60, tough: 200 },
-  suv:      { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 280 },
+  coupe:  { power: 142, top: 590, grip: 1.24, steer: 0.62, tough: 420 },
+  saloon: { power: 112, top: 475, grip: 1.38, steer: 0.58, tough: 380 },
+  hatch:  { power: 100, top: 445, grip: 1.42, steer: 0.60, tough: 360 },
+  suv:      { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 460 },
   robotaxi: { ...ROBOTAXI_HANDLING },
-  van:      { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 360 },
-  truck:  { power: 76,  top: 295, grip: 1.28, steer: 0.42, tough: 500 },
-  bus:    { power: 70,  top: 265, grip: 1.35, steer: 0.38, tough: 620 },
+  van:      { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 520 },
+  truck:  { power: 76,  top: 295, grip: 1.28, steer: 0.42, tough: 620 },
+  bus:    { power: 70,  top: 265, grip: 1.35, steer: 0.38, tough: 720 },
 }
 
 /** A motor for something driven on four wheels, its feet at the wheels' middles (body cells), front two steering. */

@@ -121,9 +121,10 @@ Each car has a **motor**: `grip`, `power`, `top` speed, `steer` angle and `tough
 - **Brake**: pressing against the direction of travel brakes every wheel. Off the throttle the car coasts, and stops dead below 0.6 m/s.
 - **Handbrake (Space)** cuts rear grip so the tail slides. With throttle it powers a drift. Without, it locks the rear wheels.
 - **Hills** pull the car back, weight shifts in braking and turning, and a car thrown off a crest keeps its flight while its tumbling is damped.
+- **Roll-over recovery.** If a car flips onto its roof or side, holding A/D (or holding throttle/reverse for over 1.2 s) rolls it back onto its wheels while keeping the seated driver rotated with the chassis.
 - **The ground** sets the grip. Dry paving, and anything more than 1 m above the ground (a bridge, a roof), grips fully. Rain takes paving down to 0.78. Grass, earth, sand and leaves grip at 0.64 and water at 0.55, and both drag the car. Less grip lets a slide run wider.
 - **Archetypes.** The core also reads each motor's top speed and wheelbase. A fast, short car turns in sharper and slides more under power. A long, slow one (wheels more than 3.8 m apart) rolls less in corners and coasts further.
-- A car breaks when its speed changes in one step by more than its `tough`ness, or a blast reaches it.
+- A car crumples under heavy hits and breaks when its speed changes in one step by more than `1.2 × tough` (or repeated severe impacts exhaust its chassis), or a blast reaches it. Wrecked vehicle shards tumble with extinguished lamps and clear into dust on rest instead of baking permanently into the road.
 
 The HUD shows km/h, a gear (R, N, 1 to 6), a 12-bar rev meter, a DRIFT tag and a thin boost bar. The six-speed gearbox only drives the rev meter, the sound, exhaust pops and gamepad rumble. The core never reads the gear.
 
@@ -131,13 +132,13 @@ The street's kept cars get their motors from `HANDLING` in `engine/sf/fleet.mjs`
 
 | Class | Cars | Top speed | Power | Grip | Steer | Tough |
 | --- | --- | --- | --- | --- | --- | --- |
-| `coupe` | sports coupe | 590 (212 km/h) | 142 | 1.24 | 0.62 | 220 |
-| `saloon` | grey saloon | 475 (171 km/h) | 112 | 1.38 | 0.58 | 210 |
-| `hatch` | blue saloon, taxi | 445 (160 km/h) | 100 | 1.42 | 0.60 | 200 |
-| `suv` | grey SUV | 420 (151 km/h) | 96 | 1.48 | 0.54 | 280 |
-| `robotaxi` | PayMo (Waymo Ojai) | 440 (158 km/h) | 108 | 1.52 | 0.58 | 270 |
-| `van` | delivery van | 345 (124 km/h) | 84 | 1.32 | 0.48 | 360 |
-| `truck` | box truck | 295 (106 km/h) | 76 | 1.28 | 0.42 | 500 |
+| `coupe` | sports coupe | 590 (212 km/h) | 142 | 1.24 | 0.62 | 420 |
+| `saloon` | grey saloon | 475 (171 km/h) | 112 | 1.38 | 0.58 | 380 |
+| `hatch` | blue saloon, taxi | 445 (160 km/h) | 100 | 1.42 | 0.60 | 360 |
+| `suv` | grey SUV | 420 (151 km/h) | 96 | 1.48 | 0.54 | 460 |
+| `robotaxi` | PayMo (Waymo Ojai) | 440 (158 km/h) | 108 | 1.52 | 0.58 | 400 |
+| `van` | delivery van | 345 (124 km/h) | 84 | 1.32 | 0.48 | 520 |
+| `truck` | box truck | 295 (106 km/h) | 76 | 1.28 | 0.42 | 620 |
 
 `HANDLING` also has a `bus` row, which nothing uses: buses and trolleybuses are driven by the street, not by a motor.
 
@@ -185,7 +186,7 @@ Every living car with two or more wheels gets drawn wheels (`engine/page/wheels.
 
 ### Lamps, skidmarks and light on the road
 
-Only lamp cells (material 15) on the car you ride light up (`engine/page/pieces.ts`), and they go dark when you get out.
+Only active moving traffic, rail vehicles and the car you ride light up their lamp cells (material 15, `engine/page/pieces.ts`); parked and unmounted cars stay dark until driven.
 
 | Lamp | Lights when |
 | --- | --- |
@@ -199,7 +200,7 @@ Only lamp cells (material 15) on the car you ride light up (`engine/page/pieces.
 
 Traffic cars are drawn and steered by the page, not simulated as bodies (`engine/page/street.ts`). They drive within 260 m of the eye at speeds set by the street's size, follow the car ahead, slow for turns and obey signals (`CYCLE`, `GREEN`, `AMBER`), stop signs and turn order. How many there are follows the hour (`TRAFFIC`). They stop for a few seconds after a blast nearby.
 
-No vehicle is set down on another. A car, a bus or a streetcar is placed only where its outline is clear of every vehicle that drives or lives there (`taken`). Opposing traffic lanes beside parallel streetcar tracks are offset right in `engine/sf/life.py` (`clear_opposing_streetcar_rails`, with a runtime `railShiftOf` fallback in `engine/page/street.ts`) so oncoming vehicles pass at least 2.8 m clear of streetcar rails. Cable car lines share a cycle-aligned 120 s departure period (`CABLE_EVERY`) with phases coordinated across all lines (`coordinateCablePhases`) so routes sharing tracks or crossings stay clear of one another through every light cycle, and `cableCars` skips any car whose box would overlap another. A streetcar's path is its rails, which turn across the traffic's lanes. So it looks for whatever drives or lives along its rails, as its 14 m body will stand there every 2.4 m for 40 m (`railGap`), whichever way that vehicle heads, and stops short of it. A car takes another car coming the other way to keep to its own lane. A streetcar, cable car or bus is in a car's way by where its sides are (`inPath`), whichever way it heads and wherever its middle is.
+No vehicle is set down on another. A car, a bus or a streetcar is placed only where its outline is clear of every vehicle that drives or lives there (`taken`). Opposing traffic lanes beside parallel streetcar tracks are offset right in `engine/sf/life.py` (`clear_opposing_streetcar_rails`, with a runtime `railShiftOf` fallback in `engine/page/street.ts`) so oncoming vehicles pass at least 2.8 m clear of streetcar rails. Cable car lines share a cycle-aligned 120 s departure period (`CABLE_EVERY`) with phases coordinated across all lines (`coordinateCablePhases`) so routes sharing tracks or crossings stay clear of one another through every light cycle, and `cableCars` skips any car whose box would overlap another. A streetcar's path is its rails, which turn across the traffic's lanes. So it looks for whatever drives or lives along its rails using live post-step vehicle positions every 1.2 m for 40 m (`railGap`) with a hard OBB step guard, whichever way that vehicle heads, and stops short of it. A car takes another car coming the other way to keep to its own lane. A streetcar, cable car or bus is in a car's way by where its sides are (`inPath` and `stepDeepensOverlap`), whichever way it heads and wherever its middle is. Elevated pedestrian skybridges spanning roads (such as Pier 39 across The Embarcadero) stay clear underneath up to 4.8 m (`SKYBRIDGE_CLEAR`) so cars and streetcars pass underneath.
 
 They react to you:
 

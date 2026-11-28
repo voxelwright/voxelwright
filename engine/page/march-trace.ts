@@ -661,15 +661,18 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
       leaveAt = min(far.x, min(far.y, far.z));
       var roof = lv.roof;
       if (eyed) { roof = lv.roofs[u32(rd.x > 0.0) + 2u * u32(rd.z > 0.0)]; }
+      let seaOut = select(1e30, (g.sea - ro.y) * inv.y, rd.y > 0.0 && ro.y < g.sea && !through);
+      if (t >= seaOut) { break; }
       if (rd.y > 0.0 && !plain) { leaveAt = min(leaveAt, (roof - ro.y) * inv.y); }
       if (rd.y < 0.0 && ro.y > g.sea && !through) { leaveAt = min(leaveAt, (g.sea - ro.y) * inv.y); }
+      if (rd.y > 0.0 && ro.y < g.sea && !through) { leaveAt = min(leaveAt, seaOut); }
       have = 0u;
       supAt = 0xffffffffu;
       fresh = false;
-      if (comeAt > t || leaveAt <= t) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
+      if (comeAt > t || leaveAt <= t) { if (t >= seaOut) { break; } L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
       if (rd.y < 0.0 && ro.y + rd.y * t > roof && !plain) { t = min((roof - ro.y) * inv.y, leaveAt) + eps; }
     }
-    if (t >= leaveAt) { L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
+    if (t >= leaveAt) { if (rd.y > 0.0 && ro.y < g.sea && !through && t >= (g.sea - ro.y) * inv.y) { break; } L += select(1u, 2u, rough && L > level0); fresh = true; continue; }
     var size = 0;
     var low = vec3i(0);
     var kind = 0u;
@@ -1135,12 +1138,15 @@ const FAR = 100000.0;
 
 @fragment fn fs_patch_vel(@builtin(position) at: vec4f) -> @location(0) vec2f {
   let px = vec2i(at.xy);
-  let visT = textureLoad(vis1Tex, px, 0).x;
+  var visT = textureLoad(vis1Tex, px, 0).x;
+  let jitUV = (at.xy + shadeExtra.jitter.xy) / g.res;
+  let uv = jitUV * 2.0 - 1.0;
+  let rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
+  if ((g.flags & 128u) != 0u && visT < 0.0 && rd.y > 0.0) {
+    visT = max((g.sea - g.eye.y) / rd.y, 0.0);
+  }
   var marchD = 1.0;
   if (visT >= 0.0) {
-    let jitUV = (at.xy + shadeExtra.jitter.xy) / g.res;
-    let uv = jitUV * 2.0 - 1.0;
-    let rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
     marchD = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(visT * dot(rd, g.forward), NEAR)), 0.0, 1.0);
   }
   let fdDim = vec2i(textureDimensions(farDepth, 0));
