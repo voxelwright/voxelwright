@@ -49,7 +49,7 @@ export class SunMaps {
 
   constructor(device: GPUDevice, levels: number, sun: V3) {
     this.levels = levels
-    this.texture = device.createTexture({ label: 'sun maps', size: [SUN_SIDE, SUN_SIDE, levels], format: 'r32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST })
+    this.texture = device.createTexture({ label: 'sun maps', size: [SUN_SIDE, SUN_SIDE, levels], format: 'r32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST })
     this.all = this.texture.createView({ dimension: '2d-array' })
     this.layers = Array.from({ length: levels }, (_, i) => this.texture.createView({ dimension: '2d', baseArrayLayer: i, arrayLayerCount: 1 }))
     this.held = Array.from({ length: levels }, () => new Int32Array(TILES * TILES * 2).fill(0x7fffffff))
