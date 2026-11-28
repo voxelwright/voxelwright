@@ -171,6 +171,7 @@ pub struct Ground {
     /// are asked about one after another and lie together.
     sectors: Map<[i32; 3], u32>,
     slots: Vec<Sector>,
+    sector_stamps: Vec<u32>,
     spare: Vec<u32>,
     last: ([i32; 3], u32),
     pub(crate) scratch: Scratch,
@@ -179,6 +180,7 @@ pub struct Ground {
     /// the world is copied out of them and not made again from every edit there has been. Made so, a box 5 m across
     /// took up to 293 ms once a street had burnt and fallen (tens of thousands of edits).
     kept: Map<[i32; 3], (Kept, u32)>,
+    keep_limit: usize,
     asked: u32,
     /// Whether any cell that goes up when hit (kinds.rs `CHARGED`) has been seen in the world: a fire need not look
     /// for one beside it until then.
@@ -217,7 +219,71 @@ pub(crate) fn reach(e: &Edit) -> ([i32; 3], [i32; 3]) {
 
 impl Ground {
     pub fn new() -> Self {
-        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), slots: Vec::new(), spare: Vec::new(), last: ([i32::MIN; 3], 0), scratch: Scratch::new(), kept: Map::default(), asked: 0, charged: false, latest: Vec::new() }
+        Ground { edits: Vec::new(), ours: Vec::new(), boxes: Vec::new(), sectors: Map::default(), slots: Vec::new(), sector_stamps: Vec::new(), spare: Vec::new(), last: ([i32::MIN; 3], 0), scratch: Scratch::new(), kept: Map::default(), keep_limit: KEEPS, asked: 0, charged: false, latest: Vec::new() }
+    }
+
+    /// Sets how many full 64³ sectors (`Kept::Cells`, 512 KB each) this `Ground` keeps hot in memory,
+    /// immediately evicting any excess kept sectors and `Sector::Bits` slots.
+    pub fn set_keep_limit(&mut self, limit: usize) {
+        self.keep_limit = limit.clamp(4, 256);
+        self.evict_kept(None);
+        self.evict_sectors(None);
+    }
+
+    #[inline]
+    pub fn keep_limit(&self) -> usize {
+        self.keep_limit
+    }
+
+    #[inline]
+    pub fn kept_cells_count(&self) -> usize {
+        self.kept.values().filter(|k| matches!(k.0, Kept::Cells(_))).count()
+    }
+
+    fn evict_kept(&mut self, protect: Option<[i32; 3]>) {
+        while self.kept.values().filter(|k| matches!(k.0, Kept::Cells(_))).count() > self.keep_limit {
+            let Some((&oldest, _)) = self
+                .kept
+                .iter()
+                .filter(|(k, v)| Some(**k) != protect && matches!(v.0, Kept::Cells(_)))
+                .min_by_key(|(_, v)| v.1)
+            else {
+                break;
+            };
+            self.kept.remove(&oldest);
+        }
+    }
+
+    fn evict_sectors(&mut self, protect: Option<[i32; 3]>) {
+        // Keep enough `Sector::Bits` slots for `Bodies::far` (WIDE = 5×4×5 = 100 sectors) plus headroom,
+        // while bounding total `Sector::Bits` (~172 KB each) memory on phones and long blast sessions.
+        let sector_limit = self.keep_limit.saturating_mul(6).max(160);
+        loop {
+            let bits_count = self
+                .sectors
+                .values()
+                .filter(|&&slot| matches!(self.slots[slot as usize], Sector::Bits(_, _, _)))
+                .count();
+            if bits_count <= sector_limit {
+                break;
+            }
+            let Some((&oldest_key, &oldest_slot)) = self
+                .sectors
+                .iter()
+                .filter(|(k, slot)| {
+                    Some(**k) != protect && matches!(self.slots[**slot as usize], Sector::Bits(_, _, _))
+                })
+                .min_by_key(|(_, slot)| self.sector_stamps[**slot as usize])
+            else {
+                break;
+            };
+            self.sectors.remove(&oldest_key);
+            self.slots[oldest_slot as usize] = Sector::Air;
+            self.spare.push(oldest_slot);
+            if self.last.0 == oldest_key {
+                self.last.0 = [i32::MIN; 3];
+            }
+        }
     }
 
     /// How many edits of this solver's own are in the world.
@@ -276,6 +342,41 @@ impl Ground {
                     }
                 }
             }
+            // A ball or blast put last updates already-kept sectors in place too, avoiding O(N²) rebuilds
+            // when repeated charges hit the same building on the main thread (`world_edit(-1)`).
+            (Edit::Ball { centre, radius, kind }, true) => {
+                let plain_kind = crate::scratch::plain(*kind);
+                let seed = crate::hash::hash(centre[0], centre[2], centre[1] as u32);
+                let touched: Vec<[i32; 3]> = self
+                    .kept
+                    .iter()
+                    .filter_map(|(&k, (kept, _))| {
+                        if (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a]) {
+                            return None;
+                        }
+                        if *kind == 0 && matches!(kept, Kept::Same(0)) {
+                            return None;
+                        }
+                        if *kind != 0 && matches!(kept, Kept::Same(k0) if *k0 == plain_kind) {
+                            return None;
+                        }
+                        Some(k)
+                    })
+                    .collect();
+                for k in touched {
+                    self.scratch.start_raw(k[0], k[1], k[2], 0);
+                    match &self.kept[&k].0 {
+                        Kept::Same(k0) => self.scratch.cells.fill(*k0),
+                        Kept::Cells(cells) => self.scratch.cells.copy_from_slice(cells),
+                    }
+                    if *kind == 0 {
+                        self.scratch.blast(*centre, *radius, seed);
+                    } else {
+                        self.scratch.ball(*centre, *radius, plain_kind, 0, 0, None);
+                    }
+                    self.store(k);
+                }
+            }
             // Kept sectors any other edit reaches are forgotten: asked for again, they are made with it.
             _ => self.kept.retain(|k, _| (0..3).any(|a| (k[a] + 1) * s <= b.0[a] || k[a] * s >= b.1[a])),
         }
@@ -313,9 +414,12 @@ impl Ground {
     fn forget(&mut self, (lo, hi): ([i32; 3], [i32; 3])) {
         let s = SIDE as i32;
         let spare = &mut self.spare;
+        let slots = &mut self.slots;
         self.sectors.retain(|k, slot| {
             let keeps = (0..3).any(|a| (k[a] + 1) * s <= lo[a] || k[a] * s >= hi[a]);
             if !keeps {
+                // Release `Sector::Bits` heap buffers (~172 KB each) immediately when forgotten.
+                slots[*slot as usize] = Sector::Air;
                 spare.push(*slot);
             }
             keeps
@@ -392,10 +496,7 @@ impl Ground {
         }
         let kept = if uniform { Kept::Same(first) } else { Kept::Cells(self.scratch.cells.clone().into_boxed_slice()) };
         self.kept.insert(key, (kept, self.asked));
-        while self.kept.values().filter(|k| matches!(k.0, Kept::Cells(_))).count() > KEEPS {
-            let oldest = *self.kept.iter().filter(|(_, k)| matches!(k.0, Kept::Cells(_))).min_by_key(|(_, k)| k.1).unwrap().0;
-            self.kept.remove(&oldest);
-        }
+        self.evict_kept(Some(key));
         if self.kept.len() > 4096 {
             // The one just stored stays, whatever it is: whoever asked for it reads it next (a sector all of one
             // kind, asked for after 4,096 others, was dropped here and the read then failed: #264, a survey).
@@ -426,33 +527,50 @@ impl Ground {
         region
     }
 
-    /// The box round a blast as it stands and as the blast leaves it. Each sector is made once: the blast is
-    /// worked on what the scratch then holds. With `made`, the blast goes into the world as its last edit, and the
-    /// sectors kept whole are kept as it left them.
-    fn blasted(&mut self, at: [i32; 3], radius: i32, low: [i32; 3], size: [usize; 3], made: bool) -> (Region, Region) {
-        let (mut before, mut left) = (Region::new(low, size), Region::new(low, size));
+    /// The box round a blast as it stands, plus a 1-bit-per-cell mask of every cell the blast emptied.
+    /// Avoiding a second full `Region` saves ~14 MB on large (`radius = 32`) building blasts.
+    /// Each sector is made once: the blast is worked on what the scratch then holds. With `made`, the blast goes into
+    /// the world as its last edit, and the sectors kept whole are kept as it left them.
+    fn blasted(&mut self, at: [i32; 3], radius: i32, low: [i32; 3], size: [usize; 3], made: bool) -> (Region, Vec<u64>) {
+        let mut before = Region::new(low, size);
+        let mut emptied = vec![0u64; before.cells.len().div_ceil(64)];
         let seed = crate::hash::hash(at[0], at[2], at[1] as u32);
         let edit = Edit::Ball { centre: at, radius, kind: 0 };
         let (lo, hi) = reach(&edit);
         let s = SIDE as i32;
         before.sectors(|sx, sy, sz, before| {
-            self.keep([sx, sy, sz]);
-            match &self.kept[&[sx, sy, sz]].0 {
+            let key = [sx, sy, sz];
+            self.keep(key);
+            match &self.kept[&key].0 {
                 Kept::Same(kind) => before.take_cells(None, *kind, sx, sy, sz),
                 Kept::Cells(cells) => before.take_cells(Some(cells), 0, sx, sy, sz),
             }
             // Air stays air, and a sector the blast does not reach stays as it is.
-            let key = [sx, sy, sz];
             if matches!(self.kept[&key].0, Kept::Same(0)) || (0..3).any(|a| (key[a] + 1) * s <= lo[a] || key[a] * s >= hi[a]) {
-                match &self.kept[&key].0 {
-                    Kept::Same(kind) => left.take_cells(None, *kind, sx, sy, sz),
-                    Kept::Cells(cells) => left.take_cells(Some(cells), 0, sx, sy, sz),
-                }
                 return;
             }
             self.fill(key);
             self.scratch.blast(at, radius, seed);
-            left.take(&self.scratch, sx, sy, sz);
+            let (rx0, ry0, rz0) = (before.low[0], before.low[1], before.low[2]);
+            let (rx1, ry1, rz1) = (rx0 + before.size[0] as i32, ry0 + before.size[1] as i32, rz0 + before.size[2] as i32);
+            let (x0, x1) = (rx0.max(sx * s), rx1.min((sx + 1) * s));
+            let (y0, y1) = (ry0.max(sy * s), ry1.min((sy + 1) * s));
+            let (z0, z1) = (rz0.max(sz * s), rz1.min((sz + 1) * s));
+            for y in y0..y1 {
+                let (ly, ry) = ((y - sy * s) as usize, (y - ry0) as usize);
+                for z in z0..z1 {
+                    let (lz, rz) = ((z - sz * s) as usize, (z - rz0) as usize);
+                    let src_base = at_cell((x0 - sx * s) as usize, ly, lz);
+                    let dst_base = before.at((x0 - rx0) as usize, ry, rz);
+                    let count = (x1 - x0) as usize;
+                    for dx in 0..count {
+                        let di = dst_base + dx;
+                        if before.cells[di] != 0 && self.scratch.cells[src_base + dx] == 0 {
+                            emptied[di >> 6] |= 1u64 << (di & 63);
+                        }
+                    }
+                }
+            }
             if made {
                 self.store(key);
             }
@@ -464,7 +582,7 @@ impl Ground {
             self.boxes.push((lo, hi));
             self.latest.push((lo, hi));
         }
-        (before, left)
+        (before, emptied)
     }
 
     /// Makes up to `most` of the sectors a box reaches that are not yet made. Returns how many it made, and whether
@@ -475,7 +593,9 @@ impl Ground {
         for sy in low[1].div_euclid(s)..=(low[1] + size[1] as i32 - 1).div_euclid(s) {
             for sz in low[2].div_euclid(s)..=(low[2] + size[2] as i32 - 1).div_euclid(s) {
                 for sx in low[0].div_euclid(s)..=(low[0] + size[0] as i32 - 1).div_euclid(s) {
-                    if self.sectors.contains_key(&[sx, sy, sz]) {
+                    if let Some(&slot) = self.sectors.get(&[sx, sy, sz]) {
+                        self.asked = self.asked.wrapping_add(1);
+                        self.sector_stamps[slot as usize] = self.asked;
                         continue;
                     }
                     if made == most {
@@ -584,21 +704,32 @@ impl Ground {
         if key == self.last.0 {
             return self.last.1 as usize;
         }
+        self.asked = self.asked.wrapping_add(1);
+        let stamp = self.asked;
         let slot = match self.sectors.get(&key) {
-            Some(&slot) => slot,
+            Some(&slot) => {
+                self.sector_stamps[slot as usize] = stamp;
+                slot
+            }
             None => {
                 let made = self.make(key);
+                let is_bits = matches!(made, Sector::Bits(_, _, _));
                 let slot = match self.spare.pop() {
                     Some(slot) => {
                         self.slots[slot as usize] = made;
+                        self.sector_stamps[slot as usize] = stamp;
                         slot
                     }
                     None => {
                         self.slots.push(made);
+                        self.sector_stamps.push(stamp);
                         self.slots.len() as u32 - 1
                     }
                 };
                 self.sectors.insert(key, slot);
+                if is_bits {
+                    self.evict_sectors(Some(key));
+                }
                 slot
             }
         };
@@ -2230,12 +2361,20 @@ impl Bodies {
         let t0 = std::time::Instant::now();
         // The blast of someone who had not heard of all the solver's edits goes in among them, and the box is
         // gathered twice; one that goes in last (as nearly all do) is worked out on each sector as it is made.
-        let (before, left) = if after.is_none_or(|k| k >= self.ground.own()) {
+        let (before, emptied) = if after.is_none_or(|k| k >= self.ground.own()) {
             self.ground.blasted(at, radius, low, size, true)
         } else {
             let before = self.ground.region(low, size);
             self.ground.push(Edit::Ball { centre: at, radius, kind: 0 }, false, after);
-            (before, self.ground.region(low, size))
+            let left = self.ground.region(low, size);
+            let mut emptied = vec![0u64; before.cells.len().div_ceil(64)];
+            for i in 0..before.cells.len() {
+                if before.cells[i] != 0 && left.cells[i] == 0 {
+                    emptied[i >> 6] |= 1u64 << (i & 63);
+                }
+            }
+            drop(left);
+            (before, emptied)
         };
         #[cfg(test)]
         let t1 = std::time::Instant::now();
@@ -2245,7 +2384,10 @@ impl Bodies {
         self.invalidate_joint_world_anchors();
         self.wake_in_aabb(at.map(|c| (c - far) as f32), at.map(|c| (c + far + 1) as f32));
         self.shove(at, radius);
-        let made = self.lumps(&before, &left, at, radius, usize::MAX);
+        let made = self.lumps(&before, &emptied, at, radius, usize::MAX);
+        // Free the ~16 MB blast snapshot before `release_in` allocates its own support `Region` + scratch,
+        // avoiding a ~30 MB simultaneous peak in WASM linear memory on large building blasts.
+        drop((before, emptied));
         #[cfg(test)]
         if std::env::var("TIMES").is_ok() { eprintln!("    blast of {radius}: before {:.0} ms, push and left {:.0} ms, lumps {:.0} ms", (t1 - t0).as_secs_f32() * 1e3, (t2 - t1).as_secs_f32() * 1e3, t2.elapsed().as_secs_f32() * 1e3) }
         // What can burn round the blast, and is still there, may catch: about one cell in twelve.
@@ -2256,13 +2398,14 @@ impl Bodies {
         if radius >= FAR_FROM {
             self.ask_far(at, radius);
         }
-        made + self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(SETTLE[0]))
+        let max_side = if self.ground.keep_limit() <= 36 { SETTLE[0].min(128) } else { SETTLE[0] };
+        made + self.release_in(at, radius, ((radius.max(4) * 8 + 32) as usize).min(max_side))
     }
 
-    /// What a blast emptied (the cells solid in `before` and not in `left`): all but its middle as bodies thrown from
-    /// it, lumps a few cells across whose edges wander; and its inner part, and what there can be no body for, as
-    /// rubble that falls where it was (`heap`). Glass is dust. Returns how many bodies were made.
-    fn lumps(&mut self, before: &Region, left: &Region, at: [i32; 3], radius: i32, max_lumps: usize) -> usize {
+    /// What a blast emptied (the cells solid in `before` whose bit is set in `emptied`): all but its middle as bodies
+    /// thrown from it, lumps a few cells across whose edges wander; and its inner part, and what there can be no body
+    /// for, as rubble that falls where it was (`heap`). Glass is dust. Returns how many bodies were made.
+    fn lumps(&mut self, before: &Region, emptied: &[u64], at: [i32; 3], radius: i32, max_lumps: usize) -> usize {
         let (low, size) = (before.low, before.size);
         let mut lumps: Map<[i32; 3], Vec<([i32; 3], Kind)>> = Map::default();
         let mut loose: Vec<([i32; 3], Kind)> = Vec::new();
@@ -2274,9 +2417,12 @@ impl Bodies {
             for z in 0..size[2] {
                 for x in 0..size[0] {
                     let i = before.at(x, y, z);
+                    if (emptied[i >> 6] >> (i & 63)) & 1 == 0 {
+                        continue;
+                    }
                     let kind = before.cells[i];
                     // Glass is dust, and what goes up when hit is gone in its own blast.
-                    if kind == 0 || left.cells[i] != 0 || material(kind) == GLASS || charged(kind) {
+                    if kind == 0 || material(kind) == GLASS || charged(kind) {
                         continue;
                     }
                     let c = [low[0] + x as i32, low[1] + y as i32, low[2] + z as i32];
@@ -2402,13 +2548,13 @@ impl Bodies {
     fn burst(&mut self, at: [i32; 3], radius: i32, max_lumps: usize) -> bool {
         let far = radius * 3 + 2;
         let (low, size) = (at.map(|c| c - far), [(2 * far + 1) as usize; 3]);
-        let (before, left) = self.ground.blasted(at, radius, low, size, false);
+        let (before, emptied) = self.ground.blasted(at, radius, low, size, false);
         let mut gone: Vec<Run> = Vec::new();
         for y in 0..size[1] {
             for z in 0..size[2] {
                 for x in 0..size[0] {
                     let i = before.at(x, y, z);
-                    if before.cells[i] != 0 && left.cells[i] == 0 {
+                    if (emptied[i >> 6] >> (i & 63)) & 1 != 0 {
                         let (wx, wy, wz) = (low[0] + x as i32, low[1] + y as i32, low[2] + z as i32);
                         match gone.last_mut() {
                             Some(r) if r.y == wy && r.z == wz && r.x1 == wx => r.x1 += 1,
@@ -2423,7 +2569,7 @@ impl Bodies {
         }
         self.change(gone);
         self.caught(&before, at, radius);
-        self.lumps(&before, &left, at, radius, max_lumps);
+        self.lumps(&before, &emptied, at, radius, max_lumps);
         true
     }
 
@@ -5263,5 +5409,43 @@ mod tests {
             max_slice_ms < 25.0,
             "time-sliced SupportJob per-frame step must stay bounded (got max={max_slice_ms:.2} ms)"
         );
+    }
+
+    #[test]
+    fn world_memory_budget_and_inplace_ball_push_parity() {
+        let mut g_warm = Ground::new();
+        let mut g_cold = Ground::new();
+        g_warm.set_keep_limit(8);
+        assert_eq!(g_warm.keep_limit(), 8);
+
+        let gy = city::ground(X, Z);
+        // Touch 16 distinct non-uniform surface sectors so `g_warm` exercises LRU eviction.
+        for dx in 0..4 {
+            for dz in 0..4 {
+                let _ = g_warm.kind(X + dx * 64, gy, Z + dz * 64);
+            }
+        }
+        assert!(
+            g_warm.kept_cells_count() <= 8,
+            "set_keep_limit(8) must cap Kept::Cells to <= 8 (got {})",
+            g_warm.kept_cells_count()
+        );
+
+        // Warm the target sector in `g_warm`, then push a blast and a solid ball onto both `g_warm` and `g_cold`.
+        let _ = g_warm.kind(X, gy, Z);
+        let edits = [
+            Edit::Ball { centre: [X, gy, Z], radius: 12, kind: 0 },
+            Edit::Ball { centre: [X + 8, gy + 4, Z + 6], radius: 6, kind: kind(BRICK, OWN) },
+            Edit::Ball { centre: [X + 5, gy + 2, Z + 3], radius: 9, kind: 0 },
+        ];
+        for e in edits {
+            g_warm.push(e.clone(), false, None);
+            g_cold.push(e, false, None);
+        }
+
+        // Every cell around the blast must match identically between in-place `Kept` update and cold rebuild.
+        let r_warm = g_warm.region([X - 40, gy - 24, Z - 40], [80, 48, 80]);
+        let r_cold = g_cold.region([X - 40, gy - 24, Z - 40], [80, 48, 80]);
+        assert_eq!(r_warm.cells, r_cold.cells, "in-place Edit::Ball push must match cold sector rebuild cell-for-cell");
     }
 }
