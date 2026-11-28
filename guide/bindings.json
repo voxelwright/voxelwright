@@ -484,7 +484,8 @@
   "guide/engine-page.md": {
     "engine/page/worker.ts": "types:Ask,Answer",
     "engine/page/world.ts": "lines:^const MISSING|^class Pool|^class Level|label: '(trees|boxes)'|^private hire\\(",
-    "engine/page/march.ts": "lines:^export const SHADOWS|^export interface (View|Marcher)|^reshade\\(|^farCover\\(",
+    "engine/page/march.ts": "lines:^export const SHADOWS|^export interface (View|Marcher)|^reshade\\(|^farCover\\(|^export const AUTOTILE|^let (fade|crisp|structural|paved|masonry) = ",
+    "engine/page/march-shade.ts": "lines:^override AUTOTILE|^if \\(AUTOTILE",
     "engine/page/main.ts": "lines:query\\.get\\('(pool|levels)'\\)|numbers\\('grid'",
     "engine/package.json": [
       "scripts.serve",
