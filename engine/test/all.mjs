@@ -32,6 +32,7 @@ let checks = [
   ['blast', 'node', ['test/blast.mjs'], true],
   ['shadows', 'node', ['test/shadows.mjs'], true],
   ['glass', 'node', ['test/glass.mjs'], true],
+  ['gi-demand', 'node', ['test/gi-demand.mjs'], true],
   ['falls', 'node', ['test/falls.mjs'], true],
   ['tools', 'node', ['test/tools.mjs'], true],
   ['chain', 'node', ['test/chain.mjs'], true],
