@@ -65,6 +65,81 @@ export interface PhoneOptions {
   telemetry?: () => { kmh: number; slip: number; drifting: boolean } | null
 }
 
+export interface RectBox {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+export interface MobileDriveDock {
+  left: number
+  top: number
+  width: number
+  height: number
+  orientation: 'portrait' | 'landscape'
+}
+
+/**
+ * Computes a dashboard car-mount placement for the smartphone on mobile touch while driving
+ * so steering & pedal controls stay 100% uncovered AND the windshield road sightline stays open!
+ */
+export function computeMobileDriveDock(opts: {
+  vw: number
+  vh: number
+  safe: { top: number; bottom: number; left: number; right: number }
+  controls: readonly RectBox[]
+  topHudBottom: number
+}): MobileDriveDock {
+  const { vw, vh, safe, controls, topHudBottom } = opts
+  const portrait = vh > vw
+  if (portrait) {
+    let clusterTop = vh - safe.bottom - 186
+    for (const r of controls) {
+      if ((r.top + r.bottom) * 0.5 >= vh * 0.45 && r.top < clusterTop) clusterTop = r.top
+    }
+    const topClear = Math.max(safe.top + 82, topHudBottom + 8)
+    const avail = Math.max(140, clusterTop - 10 - topClear)
+    // Keep upper ~44% of the clear band open for the first-person windshield road view!
+    const height = Math.round(Math.min(avail - 4, Math.max(170, Math.min(248, avail * 0.56))))
+    const width = Math.round(Math.max(220, Math.min(342, vw - safe.left - safe.right - 24)))
+    const left = Math.round(safe.left + (vw - safe.left - safe.right - width) / 2)
+    const top = Math.round(Math.max(topClear, clusterTop - 10 - height))
+    return { left, top, width, height, orientation: 'portrait' }
+  }
+
+  // Landscape: dock neatly in the open dashboard gap BETWEEN the left & right thumb driving clusters!
+  let leftLimit = safe.left + 14
+  let rightLimit = vw - safe.right - 14
+  let clusterTop = vh - safe.bottom - 170
+  for (const r of controls) {
+    const midY = (r.top + r.bottom) * 0.5
+    if (midY < vh * 0.32) continue
+    if (r.top < clusterTop) clusterTop = r.top
+    const midX = (r.left + r.right) * 0.5
+    if (midX < vw * 0.5) leftLimit = Math.max(leftLimit, r.right + 10)
+    else rightLimit = Math.min(rightLimit, r.left - 10)
+  }
+  const topClear = Math.max(safe.top + 62, topHudBottom + 8)
+  const gapW = rightLimit - leftLimit
+  if (gapW >= 186) {
+    const width = Math.round(Math.min(316, gapW))
+    const left = Math.round(leftLimit + (gapW - width) / 2)
+    const bottomEdge = vh - safe.bottom - 10
+    const availH = Math.max(140, bottomEdge - topClear)
+    const height = Math.round(Math.min(availH, Math.max(172, Math.min(232, availH * 0.80))))
+    const top = Math.round(bottomEdge - height)
+    return { left, top, width, height, orientation: 'landscape' }
+  }
+  // Fallback on very cramped landscape screens: dock cleanly above the thumb controls
+  const width = Math.round(Math.max(220, Math.min(320, vw - safe.left - safe.right - 28)))
+  const left = Math.round(safe.left + (vw - safe.left - safe.right - width) / 2)
+  const availH = Math.max(120, clusterTop - 8 - topClear)
+  const height = Math.round(Math.min(200, availH))
+  const top = Math.round(Math.max(topClear, clusterTop - 8 - height))
+  return { left, top, width, height, orientation: 'landscape' }
+}
+
 export interface PhoneOS {
   readonly open: boolean
   readonly activeAppId: string | null
@@ -77,6 +152,7 @@ export interface PhoneOS {
   openApp(appId: string): void
   goHome(): void
   notify(n: PhoneNotification): void
+  dismissNotification(): void
   setStatusChip(text: string | null): void
   frame(dt: number): void
   destroy(): void
@@ -278,21 +354,22 @@ html.riding.driving [data-panel="phone"] {
   }
 }
 @media (max-width: 520px) {
-  [data-panel="phone"] {
+  [data-panel="phone"]:not(.mobile-drive-dock) {
     right: 50%;
     transform: translateX(50%) translateY(40px) scale(0.95);
     bottom: max(12px, calc(env(safe-area-inset-bottom, 0px) + 10px));
   }
-  [data-panel="phone"].open {
+  [data-panel="phone"]:not(.mobile-drive-dock).open {
     transform: translateX(50%) translateY(0) scale(1);
   }
 }
 
 .ph-chassis {
   position: relative;
+  box-sizing: border-box;
   width: min(326px, calc(100vw - 24px));
   height: min(566px, calc(100dvh - 110px));
-  min-height: 360px;
+  min-height: min(340px, calc(100dvh - 28px));
   border-radius: 36px;
   padding: 9px;
   background: linear-gradient(145deg, #2d3442 0%, #171b24 45%, #0c0f15 100%);
@@ -310,8 +387,52 @@ html.riding.driving [data-panel="phone"] {
   user-select: none;
   -webkit-user-select: none;
 }
-/* First-person cockpit handheld angle when driving */
-[data-panel="phone"].driving-hand .ph-chassis {
+/* Compact mobile landscape on-foot fit so the chassis never overflows short screens */
+@media (pointer: coarse) and (orientation: landscape) {
+  [data-panel="phone"]:not(.mobile-drive-dock) {
+    bottom: max(10px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+  }
+  [data-panel="phone"]:not(.mobile-drive-dock) .ph-chassis {
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 20px);
+    min-height: 220px;
+    border-radius: 24px;
+    padding: 6px;
+  }
+  [data-panel="phone"]:not(.mobile-drive-dock) .ph-screen { border-radius: 19px; }
+  [data-panel="phone"]:not(.mobile-drive-dock) .ph-status { height: 24px; padding: 0 12px; }
+  [data-panel="phone"]:not(.mobile-drive-dock) .ph-notch { display: none; }
+}
+/* Mobile touch dashboard car-mount mode while driving: leaves steering, pedals & windshield completely clear! */
+[data-panel="phone"].mobile-drive-dock {
+  right: auto !important;
+  bottom: auto !important;
+  perspective: none;
+  transform: translateY(18px) scale(0.97);
+}
+[data-panel="phone"].mobile-drive-dock.open {
+  transform: translateY(0) scale(1);
+}
+[data-panel="phone"].mobile-drive-dock .ph-chassis {
+  min-height: 0;
+  border-radius: 20px;
+  padding: 5px;
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.58),
+    0 0 0 1.5px rgba(255, 255, 255, 0.22),
+    inset 0 1px 1px rgba(255, 255, 255, 0.2);
+  transform: none !important;
+}
+[data-panel="phone"].mobile-drive-dock .ph-screen { border-radius: 15px; }
+[data-panel="phone"].mobile-drive-dock .ph-status { height: 22px; padding: 0 10px; font-size: 10px; }
+[data-panel="phone"].mobile-drive-dock .ph-notch { display: none; }
+[data-panel="phone"].mobile-drive-dock .ph-home { padding: 8px 10px; gap: 8px; }
+[data-panel="phone"].mobile-drive-dock .ph-widget { padding: 8px 10px; border-radius: 12px; }
+[data-panel="phone"].mobile-drive-dock .ph-widget-big { font-size: 15px; }
+[data-panel="phone"].mobile-drive-dock .ph-app-ic { width: 42px; height: 42px; border-radius: 11px; }
+[data-panel="phone"].mobile-drive-dock .ph-foot { height: 24px; padding: 0 10px 2px; }
+[data-panel="phone"].mobile-drive-dock .ph-homebar { width: 64px; height: 3px; }
+/* First-person cockpit handheld angle when driving on desktop */
+[data-panel="phone"].driving-hand:not(.mobile-drive-dock) .ph-chassis {
   transform: rotateY(-7deg) rotateX(4deg) rotateZ(-1.4deg);
 }
 @media (prefers-reduced-motion: reduce) {
@@ -761,6 +882,69 @@ export function createPhone(opts: PhoneOptions): PhoneOS {
 
   islandBtn.addEventListener('click', () => toastAction?.())
 
+  let lastDockSig = ''
+  const isTouchViewport = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+
+  const readSafeInsets = () => {
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position:fixed;inset:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);pointer-events:none;visibility:hidden;'
+    document.body.append(probe)
+    const r = probe.getBoundingClientRect()
+    probe.remove()
+    return {
+      top: Math.max(0, Math.round(r.top)),
+      left: Math.max(0, Math.round(r.left)),
+      right: Math.max(0, Math.round(innerWidth - r.right)),
+      bottom: Math.max(0, Math.round(innerHeight - r.bottom)),
+    }
+  }
+
+  const clearMobileDock = () => {
+    if (!panel.classList.contains('mobile-drive-dock') && !lastDockSig) return
+    panel.classList.remove('mobile-drive-dock')
+    document.documentElement.classList.remove('phone-drive-dock')
+    panel.style.left = ''
+    panel.style.top = ''
+    chassis.style.width = ''
+    chassis.style.height = ''
+    lastDockSig = ''
+  }
+
+  const syncMobileDriveDock = () => {
+    if (!isOpen || !opts.driving() || !isTouchViewport()) {
+      clearMobileDock()
+      return
+    }
+    const controls: RectBox[] = []
+    for (const el of document.querySelectorAll<HTMLElement>('[data-panel="living"] .dt-cluster > *')) {
+      if (!el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })) continue
+      const r = el.getBoundingClientRect()
+      if (r.width > 2 && r.height > 2) controls.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+    }
+    let topHudBottom = 0
+    for (const el of document.querySelectorAll<HTMLElement>('#minimap, [data-panel="drive-hud"], [data-panel="living"] .drive-util, #realm .fold')) {
+      if (el.hidden || !el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })) continue
+      const r = el.getBoundingClientRect()
+      if (r.width > 2 && r.height > 2 && r.bottom < innerHeight * 0.48) topHudBottom = Math.max(topHudBottom, r.bottom)
+    }
+    const safe = readSafeInsets()
+    const dock = computeMobileDriveDock({ vw: innerWidth, vh: innerHeight, safe, controls, topHudBottom })
+    const sig = `${dock.left},${dock.top},${dock.width},${dock.height}`
+    panel.classList.add('mobile-drive-dock')
+    document.documentElement.classList.add('phone-drive-dock')
+    if (sig !== lastDockSig) {
+      lastDockSig = sig
+      panel.style.left = `${dock.left}px`
+      panel.style.top = `${dock.top}px`
+      chassis.style.width = `${dock.width}px`
+      chassis.style.height = `${dock.height}px`
+    }
+  }
+
+  const onResize = () => { if (isOpen) syncMobileDriveDock() }
+  addEventListener('resize', onResize)
+  addEventListener('orientationchange', onResize)
+
   const openPhone = (appId?: string) => {
     if (!opts.engaged() || opts.blocked()) return
     const wasOpen = isOpen
@@ -769,6 +953,7 @@ export function createPhone(opts: PhoneOptions): PhoneOS {
     document.documentElement.classList.add('phone-open')
     panel.classList.add('open')
     panel.classList.toggle('driving-hand', lastDriving)
+    syncMobileDriveDock()
     // Release pointer lock gently so user can click/tap the phone while WASD driving remains 100% live!
     if (typeof document !== 'undefined' && document.pointerLockElement) {
       try { document.exitPointerLock() } catch { /* ignore */ }
@@ -794,6 +979,7 @@ export function createPhone(opts: PhoneOptions): PhoneOS {
     isOpen = false
     document.documentElement.classList.remove('phone-open')
     panel.classList.remove('open', 'driving-hand')
+    clearMobileDock()
     if (activeAppId) mounted.get(activeAppId)?.inst.onHide?.()
     play('tap')
     opts.onOpenChange?.(false, opts.driving())
@@ -870,18 +1056,24 @@ export function createPhone(opts: PhoneOptions): PhoneOS {
       panel.classList.toggle('driving-hand', drv)
       opts.onOpenChange?.(true, drv)
     }
-    if (drv && opts.telemetry) {
-      const tel = opts.telemetry()
-      if (tel && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        vibePhase += dt * (8 + tel.kmh * 0.25)
-        const j = Math.min(2.2, tel.kmh * 0.014)
-        const sway = Math.max(-5, Math.min(5, tel.slip * 6))
-        chassis.style.transform = `rotateY(${(-7 + sway * 0.5).toFixed(2)}deg) rotateX(4deg) rotateZ(${(-1.4 + sway * 0.25).toFixed(2)}deg) translate3d(${(Math.sin(vibePhase * 1.3) * j * 0.4).toFixed(2)}px, ${(Math.cos(vibePhase * 2.1) * j * 0.5).toFixed(2)}px, 0)`
+    if (drv && isTouchViewport()) {
+      syncMobileDriveDock()
+      chassis.style.transform = ''
+    } else {
+      clearMobileDock()
+      if (drv && opts.telemetry) {
+        const tel = opts.telemetry()
+        if (tel && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+          vibePhase += dt * (8 + tel.kmh * 0.25)
+          const j = Math.min(2.2, tel.kmh * 0.014)
+          const sway = Math.max(-5, Math.min(5, tel.slip * 6))
+          chassis.style.transform = `rotateY(${(-7 + sway * 0.5).toFixed(2)}deg) rotateX(4deg) rotateZ(${(-1.4 + sway * 0.25).toFixed(2)}deg) translate3d(${(Math.sin(vibePhase * 1.3) * j * 0.4).toFixed(2)}px, ${(Math.cos(vibePhase * 2.1) * j * 0.5).toFixed(2)}px, 0)`
+        } else {
+          chassis.style.transform = ''
+        }
       } else {
         chassis.style.transform = ''
       }
-    } else {
-      chassis.style.transform = ''
     }
     if (activeAppId) mounted.get(activeAppId)?.inst.onTick?.(dt)
   }
@@ -908,17 +1100,21 @@ export function createPhone(opts: PhoneOptions): PhoneOS {
     openApp,
     goHome,
     notify,
+    dismissNotification: hideToast,
     setStatusChip,
     frame,
     destroy() {
       removeEventListener('keydown', onKeyDown, true)
+      removeEventListener('resize', onResize)
+      removeEventListener('orientationchange', onResize)
       hideToast()
+      clearMobileDock()
       for (const m of mounted.values()) m.inst.destroy?.()
       mounted.clear()
       trigPanel.replaceChildren()
       toastPanel.replaceChildren()
       panel.replaceChildren()
-      document.documentElement.classList.remove('phone-open')
+      document.documentElement.classList.remove('phone-open', 'phone-drive-dock')
     },
   }
 }
