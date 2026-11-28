@@ -86,6 +86,42 @@ A released city's first frames can show opaque glass while the GPU compiles the 
 
 `node serve.mjs --world FILE` (in `engine/`) keeps one world in a file and runs `world.mjs` behind the server. Pages open it with `/city?shared=1`. The page then uses `engine/page/link.ts` in place of the mover. The world process applies each ask, then sends the result down `GET /world/stream` as binary frames. Each frame has a 12-byte header (kind, number, length). The kinds are the constants in `engine/page/frames.ts`. A page applies only what the stream says, in the stream's order.
 
+### Anchor zones
+
+A world server can heal what people do to a world, except inside zones that someone keeps. It is off unless the server starts with `--anchor-regen-ttl`:
+
+```sh
+cd engine
+node serve.mjs --world /tmp/world.log --anchor-regen-ttl 600
+```
+
+| Flag | Default | What it sets |
+| --- | --- | --- |
+| `--anchor-regen-ttl` | none: nothing heals | Seconds a changed cell outside every zone is left alone before it is healed. A number over 0. |
+| `--anchor-regen-cells` | 256 | The most cells one step, once a second, puts back in each world |
+| `--anchor-compact-interval` | 60 | The fewest seconds between compactions of a world's file |
+
+A zone is a sphere of 10 cm cells with an id, a name, an owner, a `center` and a `radius`. `engine/anchor-zones.mjs` holds the rules, `engine/world.mjs` applies them and `engine/serve.mjs` keeps what they remember.
+
+- A cell changed inside a zone stays. A cell changed outside every zone is remembered with what it was before its first change. Each later change restarts its wait.
+- Healing puts back the lowest cells first, as an ordinary edit by `the world` that every page receives. No cell becomes solid where someone stands or a living thing is. It waits.
+- Some changes always stay: cells that a made thing is put into, taken from or held out of, what rules build, cells finer than 10 cm, and an edit too large to heal (more than one blast of radius 40, or rows over `CELLS_MOST` cells).
+- Adding a zone keeps what is waiting inside it as it is now. Taking a zone out does not heal what already stood there: only later changes do.
+- After heals, the server compacts the world's file: rows that a later heal made worthless are cut. Zones and pending cells are kept beside it in `<world file>.anchors.json`.
+- A server started without `--anchor-regen-ttl` keeps the zones in that file and forgets the pending cells. If the file cannot be read, nothing heals in that world.
+- A world keeps at most 64 zones of radius 1 to 2000 cells, and remembers at most 500,000 cells to heal. Changes past that stay.
+- `--release` and `--anchor-regen-ttl` cannot be combined yet, and the [dedicated server](/hosting) does not take the anchor flags.
+
+| Request | Answer |
+| --- | --- |
+| `GET /world/anchors` | `{enabled, anchors, ephemeralCells, healedTotal, untrackedCells, policy}`. With healing off: `enabled: false`, no zones and zero counts. |
+| `POST /world/anchors` with `{by, id, name, center: [x, y, z], radius}` | 201 `{anchor, promoted}`. A zone with the same id is replaced. `promoted` counts the waiting cells it now keeps. |
+| `DELETE /world/anchors/<id>` | `{removed: true}`, or 404 for an unknown id |
+
+An `id` is up to 40 lower-case letters, digits and dashes, and `center` and `radius` are whole cells. A bad zone gets 400. A 65th zone, or a change with healing off, gets 409. Another realm answers the same under `/realm/<id>/world/anchors`. The door does not pass these routes, so a lobby's visitors cannot reach them.
+
+`node test/anchor-zones.mjs` (in `engine/`) checks the rules alone and then a real server.
+
 ## Check a change
 
 ```sh

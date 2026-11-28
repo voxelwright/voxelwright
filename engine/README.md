@@ -44,6 +44,9 @@ The controls and every address option are on [gameplay](../guide/gameplay.md).
 | `--arrive` | the realm's | Where people arrive: `x,y,z,yaw` |
 | `--most`, `--tiles-most`, `--ground-wait` | 8, 16, 3000 | How many people and spare tiles a released world holds, and how long a change waits for ground (ms) |
 | `--plugins` | `plugins/` | The engine plugins folder |
+| `--anchor-regen-ttl` | none: nothing heals | Turn on [anchor zones](../guide/engine.md#anchor-zones): seconds a change outside every zone is left alone before it is healed. Not with `--release`. |
+| `--anchor-regen-cells` | 256 | The most cells one healing step, once a second, puts back in a world |
+| `--anchor-compact-interval` | 60 | The fewest seconds between compactions of a healing world's file |
 
 ## The folder
 
@@ -77,6 +80,7 @@ The servers and tools at the top level:
 | `serve.mjs` | The page server: serves the page's TypeScript with types stripped and keeps device reports. Run with `--world`, it is also the world server, which keeps shared worlds and realms. |
 | `world.mjs` | The world process: one core in a thread behind the world server, which orders every change |
 | `ground.mjs` | What a shared world stands on: the generated town or a pinned San Francisco release |
+| `anchor-zones.mjs` | The rules of [anchor zones](../guide/engine.md#anchor-zones): which cells are kept, which heal, and what a world's history no longer needs |
 | `server.mjs`, `door.mjs` | The dedicated server (a world server and its door in one process) and the door strangers' pages reach it through |
 | `guard.mjs` | Who may ask a server on this machine for anything |
 | `helper.mjs` | The helper on a person's own machine, which runs their model to make things |

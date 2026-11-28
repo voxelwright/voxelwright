@@ -472,19 +472,12 @@ struct FroxelCompositeView {
 @group(0) @binding(5) var<uniform> compView: FroxelCompositeView;
 
 ${FROXEL_FOG_WGSL}
+@group(0) @binding(8) var<storage, read> lightInfo: vec4u;
+@group(0) @binding(6) var<storage, read> edgeBits: array<u32>;
+@group(0) @binding(7) var<storage, read_write> discontinuityMask: array<atomic<u32>>;
 
-@vertex fn vs(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4f {
-  let uv = vec2f(f32((idx << 1u) & 2u), f32(idx & 2u));
-  return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
-}
-
-@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-  let depthDims = vec2f(textureDimensions(sceneDepth));
-  let activeDims = select(depthDims, compView.viewport.xy, compView.viewport.x > 0.5 && compView.viewport.y > 0.5);
-  let uv = pos.xy / max(activeDims, vec2f(1.0));
-  let px = clamp(vec2i(pos.xy), vec2i(0), vec2i(depthDims) - vec2i(1));
+fn sceneSurface(px: vec2i) -> vec2f {
   let z = textureLoad(sceneDepth, px, 0);
-
   let nearD = froxelFogParams.flags.y;
   let farD = froxelFogParams.flags.z;
   var linearDepth = froxelFogParams.depth.y;
@@ -502,7 +495,100 @@ ${FROXEL_FOG_WGSL}
     }
   }
 
+  return vec2f(linearDepth, f32(isSky));
+}
+
+fn maskIndex(col: vec2u, layer: u32, dims: vec3u) -> u32 {
+  return (col.x + col.y * dims.x) * ((dims.z + 31u) / 32u) + layer / 32u;
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn cs_discontinuity(@builtin(global_invocation_id) gid: vec3u) {
+  let dims = textureDimensions(froxelFogVolume);
+  if (any(gid.xy >= dims.xy)) { return; }
+  let screen = vec2i(select(vec2f(textureDimensions(sceneDepth)), compView.viewport.xy, compView.viewport.x > 0.5));
+  let tile = vec2f(screen) / vec2f(dims.xy);
+  // Cover the full bilinear footprint, including sub-froxel-width geometry.
+  let lo = max(vec2i(floor((vec2f(gid.xy) - 0.5) * tile)), vec2i(0));
+  let hi = min(vec2i(ceil((vec2f(gid.xy) + 1.5) * tile)), screen);
+  var dMin = 1e30;
+  var dMax = 0.0;
+  for (var y = lo.y; y < hi.y; y++) {
+    for (var x = lo.x; x < hi.x; x++) {
+      let d = sceneSurface(vec2i(x,y)).x;
+      dMin = min(dMin, d);
+      dMax = max(dMax, d);
+    }
+  }
+  let silhouette = dMax > dMin * 1.10;
+  if (silhouette) {
+    for (var z = 0u; z < dims.z; z += 32u) {
+      atomicOr(&discontinuityMask[maskIndex(gid.xy, z, dims)], 0xffffffffu);
+    }
+    return;
+  }
+  if (lightInfo.x == 0u) { return; }
+  let pt = vec2i(gid.xy);
+  let last = vec2i(dims.xy) - 1;
+  let right = min(pt + vec2i(1,0), last);
+  let below = min(pt + vec2i(0,1), last);
+  for (var z = 0u; z < dims.z; z++) {
+    let rgb = textureLoad(froxelFogVolume, vec3i(pt,i32(z)), 0).rgb;
+    let rx = textureLoad(froxelFogVolume, vec3i(right,i32(z)), 0).rgb;
+    let ry = textureLoad(froxelFogVolume, vec3i(below,i32(z)), 0).rgb;
+    let bit = 1u << (z & 31u);
+    let xEdge = length(rgb-rx) > 0.05 + 0.25 * min(length(rgb), length(rx));
+    let yEdge = length(rgb-ry) > 0.05 + 0.25 * min(length(rgb), length(ry));
+    if (xEdge || yEdge) { atomicOr(&discontinuityMask[maskIndex(gid.xy, z, dims)], bit); }
+    if (xEdge) { atomicOr(&discontinuityMask[maskIndex(vec2u(right), z, dims)], bit); }
+    if (yEdge) { atomicOr(&discontinuityMask[maskIndex(vec2u(below), z, dims)], bit); }
+  }
+}
+
+@vertex fn vs(@builtin(vertex_index) idx: u32) -> @builtin(position) vec4f {
+  let uv = vec2f(f32((idx << 1u) & 2u), f32(idx & 2u));
+  return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
+}
+
+@fragment fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let depthDims = vec2f(textureDimensions(sceneDepth));
+  let activeDims = select(depthDims, compView.viewport.xy, compView.viewport.x > 0.5 && compView.viewport.y > 0.5);
+  let uv = pos.xy / max(activeDims, vec2f(1.0));
+  let px = clamp(vec2i(pos.xy), vec2i(0), vec2i(depthDims) - vec2i(1));
+  let surface = sceneSurface(px);
+  let linearDepth = surface.x;
+  let isSky = surface.y > 0.5;
   var fog = sampleFroxelFog(uv, linearDepth);
+  let dims = textureDimensions(froxelFogVolume);
+  let col = min(vec2u(uv * vec2f(dims.xy)), dims.xy - 1u);
+  let slice = froxelDepthToSlice(linearDepth, f32(dims.z), froxelFogParams.depth.x, froxelFogParams.depth.w);
+  let layer = min(u32(max(slice - 0.5, 0.0)), dims.z - 1u);
+  let word = maskIndex(col, layer, dims);
+  if ((edgeBits[word] & (1u << (layer & 31u))) != 0u) {
+    let grid = uv * vec2f(dims.xy) - 0.5;
+    let base = vec2i(floor(grid));
+    let f = fract(grid);
+    let centreUv = (vec2f(col) + 0.5) / vec2f(dims.xy);
+    let refDepth = sceneSurface(min(vec2i(centreUv * activeDims), vec2i(activeDims)-1)).x;
+    let sameSurface = abs(refDepth - linearDepth) <= 0.10 * min(refDepth, linearDepth);
+    let refFog = sampleFroxelFog(centreUv, linearDepth);
+    var sum = vec4f(0.0);
+    var weight = 0.0;
+    for (var j = 0; j < 4; j++) {
+      let offset = vec2i(j & 1, j >> 1);
+      let tap = clamp(base + offset, vec2i(0), vec2i(dims.xy)-1);
+      let tapUv = (vec2f(tap) + 0.5) / vec2f(dims.xy);
+      let d = sceneSurface(min(vec2i(tapUv * activeDims), vec2i(activeDims)-1)).x;
+      let delta = abs(d - linearDepth) / max(min(d, linearDepth), 0.001);
+      let value = sampleFroxelFog(tapUv, linearDepth);
+      let spatial = select(1.0 - f, f, offset != vec2i(0));
+      let lightDelta = select(0.0, length(value.rgb - refFog.rgb) / (0.1 + length(refFog.rgb)), sameSurface);
+      let w = spatial.x * spatial.y * exp2(-16.0 * delta - 2.0 * lightDelta);
+      sum += value * w;
+      weight += w;
+    }
+    if (weight > 0.00001) { fog = sum / weight; }
+  }
   if (isSky) {
     let sw = clamp(compView.viewport.w, 0.0, 1.0);
     if (sw <= 0.001) {
@@ -538,6 +624,8 @@ export interface FroxelLightInput {
 }
 
 export interface FroxelFogUpdateParams {
+  /** Scene depth for discontinuity detection, retained for this frame’s composite. */
+  depthTex?: GPUTextureView | GPUTexture
   view: View
   aspect: number
   time?: number
@@ -601,6 +689,7 @@ export interface FroxelFogApplyParams {
   target: GPUTextureView
   format: GPUTextureFormat
   depth: GPUTextureView
+  depthTex?: GPUTextureView | GPUTexture
   /** Optional far-model reciprocal-depth texture (`farModel.depth`, `depth32float`). */
   farDepth?: GPUTextureView | null
   /** Optional active dynamic-resolution viewport `[width, height]` inside a larger grow-only target. */
@@ -629,6 +718,8 @@ export interface FroxelFogStats {
 
 export interface FroxelFogPass {
   readonly dims: readonly [number, number, number]
+  /** Per-column slice flags from the last depth-aware update or composite, low slice first. */
+  readonly discontinuityMask: GPUBuffer
   readonly integratedTexture: GPUTexture
   readonly integratedView: GPUTextureView
   readonly sampler: GPUSampler
@@ -652,7 +743,7 @@ export interface FroxelFogPass {
   /** Runs `cs_inject` + `cs_integrate` and returns the integrated 3D volume view. */
   update(encoder: GPUCommandEncoder, params: FroxelFogUpdateParams): GPUTextureView
   /** Fullscreen linear-HDR composite pass: `color = color * transmittance + inScatter`. */
-  apply(encoder: GPUCommandEncoder, params: FroxelFogApplyParams): void
+  apply(encoder: GPUCommandEncoder, params: FroxelFogApplyParams | Omit<FroxelFogApplyParams, 'depth'>): void
   /** Marks temporal history invalid so the next `update()` starts cleanly with zero lag. */
   reset(): void
   /** Current volume dimensions, counters, and VRAM footprint. */
@@ -721,7 +812,8 @@ export async function createFroxelFog(
   const slices = Math.max(2, Math.floor(dims[2]))
   const resolvedDims: readonly [number, number, number] = [width, height, slices]
   const froxels = width * height * slices
-  const vramBytes = froxels * 8 * 3 // 2 ping-pong scatter + 1 integrated rgba16float 3D textures
+  const maskBytes = width * height * Math.ceil(slices / 32) * 4
+  const vramBytes = maskBytes + froxels * 8 * 3 // 2 ping-pong scatter + 1 integrated rgba16float 3D textures
 
   const [injectModule, integrateModule, compositeModule] = await Promise.all([
     shader(device, 'froxel-fog-inject', INJECT_WGSL),
@@ -729,6 +821,12 @@ export async function createFroxelFog(
     shader(device, 'froxel-fog-composite', COMPOSITE_WGSL),
   ])
 
+  const edgePipeline = await device.createComputePipelineAsync({
+    layout: 'auto', compute: { module: compositeModule, entryPoint: 'cs_discontinuity' },
+  })
+  const edgeMask = device.createBuffer({
+    label: 'froxel-discontinuity', size: maskBytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  })
   const injectLayout = device.createBindGroupLayout({
     label: 'froxel-inject-bgl',
     entries: [
@@ -759,6 +857,7 @@ export async function createFroxelFog(
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d' } },
       { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth', viewDimension: '2d' } },
       { binding: 5, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+      { binding: 6, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
     ],
   })
 
@@ -949,6 +1048,48 @@ export async function createFroxelFog(
   let cachedFarDepthView: GPUTextureView | null = null
   let cachedCompositeBind: GPUBindGroup | null = null
 
+  const textureViews = new WeakMap<GPUTexture, GPUTextureView>()
+  function depthView(source?: GPUTextureView | GPUTexture) {
+    if (!source || !('createView' in source)) return source
+    let view = textureViews.get(source)
+    if (!view) {
+      view = source.createView()
+      textureViews.set(source, view)
+    }
+    return view
+  }
+  let updateDepth: GPUTextureView | undefined
+  let edgeBind: GPUBindGroup
+  let edgeDepth: GPUTextureView | undefined
+  const fullViewport = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM })
+  let edgeViewport: GPUBuffer | undefined
+  let edgeFar: GPUTextureView | undefined
+  const detectEdges = (encoder: GPUCommandEncoder, depth: GPUTextureView, farView: GPUTextureView, viewport = compViewUniforms) => {
+    if (edgeDepth !== depth || edgeFar !== farView || edgeViewport !== viewport) {
+      edgeViewport = viewport
+      edgeDepth = depth
+      edgeFar = farView
+      edgeBind = device.createBindGroup({
+        layout: edgePipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: integratedView },
+          { binding: 2, resource: { buffer: samplingUniforms } },
+          { binding: 3, resource: depth },
+          { binding: 4, resource: farView },
+          { binding: 5, resource: { buffer: viewport } },
+          { binding: 7, resource: { buffer: edgeMask } },
+          { binding: 8, resource: { buffer: lightsBuffer } },
+        ],
+      })
+    }
+    encoder.clearBuffer(edgeMask)
+    const pass = encoder.beginComputePass({ label: 'froxel-discontinuity' })
+    pass.setPipeline(edgePipeline)
+    pass.setBindGroup(0, edgeBind)
+    pass.dispatchWorkgroups(wgX, wgY)
+    pass.end()
+  }
+
   // Mutable previous-frame camera state (pre-allocated arrays, zero GC).
   const prevEye: [number, number, number] = [0, 0, 0]
   const prevRight: [number, number, number] = [1, 0, 0]
@@ -1001,6 +1142,7 @@ export async function createFroxelFog(
 
   const self: FroxelFogPass = {
     dims: resolvedDims,
+    discontinuityMask: edgeMask,
     integratedTexture,
     integratedView,
     sampler,
@@ -1220,6 +1362,8 @@ export async function createFroxelFog(
       integratePass.dispatchWorkgroups(wgX, wgY, 1)
       integratePass.end()
 
+      updateDepth = depthView(params.depthTex)
+      if (updateDepth) detectEdges(encoder, updateDepth, dummyFarDepthView, fullViewport)
       // Save camera state for next frame's reprojection.
       prevEye[0] = ex; prevEye[1] = ey; prevEye[2] = ez
       prevRight[0] = view.right[0]; prevRight[1] = view.right[1]; prevRight[2] = view.right[2]
@@ -1238,6 +1382,8 @@ export async function createFroxelFog(
 
     apply(encoder, params) {
       if (destroyed) throw new Error('froxel-fog: cannot apply after destroy()')
+      const depth = depthView(params.depthTex) ?? ('depth' in params ? params.depth : updateDepth)
+      if (!depth) return
       const near = params.near ?? NEAR
       const far = params.far ?? FAR
       const strength = params.strength ?? 1
@@ -1259,8 +1405,9 @@ export async function createFroxelFog(
         device.queue.writeBuffer(compViewUniforms, 0, compViewF32)
       }
       const farView = params.farDepth ?? dummyFarDepthView
-      if (cachedDepthView !== params.depth || cachedFarDepthView !== farView || !cachedCompositeBind) {
-        cachedDepthView = params.depth
+      detectEdges(encoder, depth, farView)
+      if (cachedDepthView !== depth || cachedFarDepthView !== farView || !cachedCompositeBind) {
+        cachedDepthView = depth
         cachedFarDepthView = farView
         cachedCompositeBind = device.createBindGroup({
           label: 'froxel-composite-bg',
@@ -1269,9 +1416,10 @@ export async function createFroxelFog(
             { binding: 0, resource: integratedView },
             { binding: 1, resource: sampler },
             { binding: 2, resource: { buffer: samplingUniforms } },
-            { binding: 3, resource: params.depth },
+            { binding: 3, resource: depth },
             { binding: 4, resource: farView },
             { binding: 5, resource: { buffer: compViewUniforms } },
+            { binding: 6, resource: { buffer: edgeMask } },
           ],
         })
       }
@@ -1320,6 +1468,8 @@ export async function createFroxelFog(
       lightsBuffer.destroy()
       samplingUniforms.destroy()
       compViewUniforms.destroy()
+      fullViewport.destroy()
+      edgeMask.destroy()
       compositePipelines.clear()
       cachedCompositeBind = null
       cachedDepthView = null
