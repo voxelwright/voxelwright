@@ -643,6 +643,16 @@ impl Ground {
         self.boxes.iter().any(|(a, b)| a[0] <= x && x < b[0] && a[2] <= z && z < b[2] && a[1] <= y1 && y0 < b[1])
     }
 
+    #[inline]
+    pub(crate) fn has_edit_in_box(&self, lo: [i32; 3], hi: [i32; 3]) -> bool {
+        self.boxes.iter().any(|(a, b)| (0..3).all(|i| a[i] < hi[i] && b[i] > lo[i]))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kept_count(&self) -> usize {
+        self.kept.len()
+    }
+
     fn make(&mut self, key: [i32; 3]) -> Sector {
         let s = SIDE as i32;
         let (lo, hi) = (key.map(|k| k * s), key.map(|k| (k + 1) * s));
