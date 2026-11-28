@@ -14,8 +14,9 @@
 // overlaps an active dent sphere or torn opening are split into 1-cell unit faces so bent faces meet without exploding
 // undamaged regions; pieces are frustum- and backface-culled so off-screen and back-facing quads pay nothing.
 import type { CrashOpening } from './crash-opening.ts'
-import { shader, type Target } from '../probe/gpu.ts'
+import { FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
 import { DEFORM_BYTES, DEFORM_STRUCT, DEFORM_WGSL, packDeformUniforms, type DeformState } from './deform.ts'
+import { createIndirectCuller, writeFrustumPlanesFromCamera, type GpuCamera, type IndirectCuller } from './gpu-particles.ts'
 import { GLASS, GLOBALS, LIGHT, PAINT, SUNLIT, palette, type Marcher, type View } from './march.ts'
 import { LIGHT_EXTRA, LOCAL_LIGHTS_STRUCT, localLightsEval, type LocalLightSink } from './lights.ts'
 import type { Born } from './told.ts'
@@ -585,17 +586,37 @@ export interface Piece {
   destroy(): void
 }
 
+/** Per-frame culling and GPU indirect-culler telemetry for `pieces.ts` (#165). */
+export interface PiecesStats {
+  total: number
+  visible: number
+  culled: number
+  faces: number
+  glassPieces: number
+  gpuCullerReady: boolean
+  gpuCullerSubgroups: boolean
+  gpuCullerDispatches: number
+  lastStagedCount: number
+  lastPrepareMs: number
+}
+
 export interface Pieces {
   /** share: its faces may be drawn from one buffer with every other piece made from the same `born.faces`. */
   add(born: Born, share?: boolean): Piece
   /** Gives a piece made unshared new faces (and smooth words) for the same look: its square faces once its smooth ones are made (#38). Nothing for one destroyed. */
   refit(piece: Piece, faces: Uint32Array<ArrayBuffer>, smooth?: Uint32Array<ArrayBuffer>): void
-  /** Culls visible pieces and writes per-piece uniform/deformed-mesh buffers before a render pass begins; returns true when at least one piece will draw. */
-  prepare(to: Target, view: View, sun: readonly [number, number, number], mirrors?: boolean): boolean
+  /** Culls visible pieces (6-plane sphere + tight AABB, zero-GC) and writes per-piece uniform/deformed-mesh buffers before a render pass begins; when `encoder` is supplied, also dispatches `createIndirectCuller` on the GPU. Returns true when at least one piece will draw. */
+  prepare(to: Target, view: View, sun: readonly [number, number, number], mirrors?: boolean, encoder?: GPUCommandEncoder): boolean
   /** Records the prepared solid and glass faces into an active `(to.color, to.depth)` render pass. */
   record(pass: GPURenderPassEncoder): void
   /** mirrors: false is the M key's mirrors off, under which glass is seen through, tinted, mirroring nothing. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites, mirrors?: boolean, sharedPass?: GPURenderPassEncoder): void
+  /** Uploads all active piece bounds and dispatches GPU compute 6-plane frustum culling via `createIndirectCuller` (returns staged instance count). */
+  cull(encoder: GPUCommandEncoder, to: Target, view: View): number
+  /** Returns latest culling & GPU indirect-culler telemetry snapshot (zero-GC). */
+  stats(): PiecesStats
+  /** Underlying GPU compute frustum culler (`createIndirectCuller` from `gpu-particles.ts`) when compute is available. */
+  readonly culler: IndirectCuller | null
   /** Automatically emits local lights for every non-vehicle piece containing LAMP (material 15) voxels (robotaxi LiDAR domes, traffic signals, depot canopies, conjured lamps). */
   emitLights(sink: LocalLightSink): void
   readonly count: number
@@ -842,7 +863,14 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     // The glass after everything solid, read against its depth and not written to it.
     depthStencil: { format: 'depth24plus', depthWriteEnabled: !glass, depthCompare: 'less' },
   })
-  const [pipeline, tint, glint] = await Promise.all([drawn('fs'), drawn('fs_tint', { srcFactor: 'zero', dstFactor: 'src', operation: 'add' }), drawn('fs_glint', { srcFactor: 'one', dstFactor: 'one', operation: 'add' })])
+  const [pipeline, tint, glint, culler] = await Promise.all([
+    drawn('fs'),
+    drawn('fs_tint', { srcFactor: 'zero', dstFactor: 'src', operation: 'add' }),
+    drawn('fs_glint', { srcFactor: 'one', dstFactor: 'one', operation: 'add' }),
+    typeof device.createComputePipelineAsync === 'function'
+      ? createIndirectCuller(device, { maxInstances: 4096, maxBuckets: 64, defaultVertexCount: 4 }).catch(() => null)
+      : Promise.resolve(null),
+  ])
   let lit: { panes: GPUTextureView; group: GPUBindGroup } | null = null
   const litFor = (panes: GPUTextureView) => {
     if (lit?.panes !== panes) lit = { panes, group: device.createBindGroup({ layout: shared, entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }, { binding: 2, resource: panes }, { binding: 3, resource: { buffer: march.localLights.buffer } }] }) }
@@ -859,6 +887,7 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     count: number
     glass: number
     held: Shared
+    slot: number
   }
   /** A look's faces on the GPU: the solid ones first, then the glass, each with its corners' smooth words. */
   const upload = (born: Born, deform?: DeformState, openings: readonly CrashOpening[] = []): Faces => {
@@ -886,11 +915,59 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
     return piece.bent.mesh
   }
 
+  /** Minimum live piece count before auto-staging/dispatching the GPU indirect culler during `prepare()` / `draw()`. */
+  const CULLER_BATCH_THRESHOLD = 16
+
   const live = new Set<Held>()
+  /** Dense swap-remove array of live pieces for zero-allocation indexed iteration during big debris collapses. */
+  const liveList: Held[] = []
   /** Faces already on the GPU, by the array they came from: many pieces of one look (the street's cars, #450) draw from one buffer. */
   const common = new WeakMap<Uint32Array, Shared>()
   const block = new ArrayBuffer(UNIFORMS), f = new Float32Array(block), i32 = new Int32Array(block)
-  const visible: { piece: Held; faces: Faces }[] = []
+  // Pre-allocated parallel arrays for visible pieces (zero per-frame `{ piece, faces }` allocations).
+  const visiblePieces: Held[] = []
+  const visibleFaces: Faces[] = []
+  let visibleCount = 0
+  // Pre-allocated 6-plane frustum buffer + anchor-relative camera wrapper (shared math with `createIndirectCuller`).
+  const frustumPlanes = new Float32Array(new ArrayBuffer(24 * 4))
+  const cullEye: [number, number, number] = [0, 0, 0]
+  const cullCam: GpuCamera = {
+    eye: cullEye,
+    forward: [0, 0, -1],
+    right: [1, 0, 0],
+    up: [0, 1, 0],
+    tanHalf: 1,
+  }
+  const telemetry: PiecesStats = {
+    total: 0,
+    visible: 0,
+    culled: 0,
+    faces: 0,
+    glassPieces: 0,
+    gpuCullerReady: culler !== null,
+    gpuCullerSubgroups: culler?.usesSubgroups ?? false,
+    gpuCullerDispatches: 0,
+    lastStagedCount: 0,
+    lastPrepareMs: 0,
+  }
+
+  /** Exact 6-plane sphere + tight world AABB frustum test matching `gpu-particles.ts` `testFrustumSphereAabb`. */
+  const testFrustum6 = (
+    cx: number, cy: number, cz: number, rad: number,
+    minX: number, minY: number, minZ: number,
+    maxX: number, maxY: number, maxZ: number,
+  ): boolean => {
+    for (let p = 0; p < 24; p += 4) {
+      const nx = frustumPlanes[p], ny = frustumPlanes[p + 1], nz = frustumPlanes[p + 2], d = frustumPlanes[p + 3]
+      if (nx * cx + ny * cy + nz * cz + d < -rad) return false
+      const px = nx >= 0 ? maxX : minX
+      const py = ny >= 0 ? maxY : minY
+      const pz = nz >= 0 ? maxZ : minZ
+      if (nx * px + ny * py + nz * pz + d < 0) return false
+    }
+    return true
+  }
+
   let preparedPanes: GPUTextureView | null = null
   let preparedMirrors = true
   let preparedGlass = false
@@ -898,8 +975,10 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   const self: Pieces = {
     get smooth() { return smooth },
     set smooth(on: boolean) { smooth = on },
-    get count() { return live.size },
-    get faces() { let n = 0; for (const p of live) n += facesOf(p).count; return n },
+    get count() { return liveList.length },
+    get culler() { return culler },
+    get faces() { let n = 0; for (let i = 0; i < liveList.length; i++) n += facesOf(liveList[i]).count; return n },
+    stats() { return telemetry },
     add(born, share = false) {
       let made = share ? common.get(born.faces) : undefined
       if (!made) {
@@ -909,8 +988,36 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       made.users++
       const held = made, uniforms = device.createBuffer({ size: UNIFORMS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: own, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, held, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); piece.bent?.mesh.faces.destroy(); if (--piece.held.users === 0) { release(piece.held); if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces) } } }
+      const piece: Held = {
+        born,
+        pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]],
+        rot: [0, 0, 0, 1],
+        cell: 1,
+        faces: held.faces,
+        uniforms,
+        bind,
+        count: held.count,
+        glass: held.glass,
+        held,
+        slot: liveList.length,
+        destroy() {
+          if (!live.delete(piece)) return
+          const last = liveList.pop()!
+          if (last !== piece) {
+            liveList[piece.slot] = last
+            last.slot = piece.slot
+          }
+          piece.slot = -1
+          uniforms.destroy()
+          piece.bent?.mesh.faces.destroy()
+          if (--piece.held.users === 0) {
+            release(piece.held)
+            if (common.get(piece.born.faces) === piece.held) common.delete(piece.born.faces)
+          }
+        },
+      }
       live.add(piece)
+      liveList.push(piece)
       return piece
     },
     refit(p, faces, smooth) {
@@ -923,47 +1030,154 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       piece.held = { ...upload(piece.born), users: 1 }
       piece.faces = piece.held.faces; piece.count = piece.held.count; piece.glass = piece.held.glass
     },
-    prepare(to, view, sun, mirrors = true) {
-      visible.length = 0
-      preparedGlass = false
-      if (!live.size) return false
+    cull(encoder, to, view) {
+      if (!culler || !liveList.length) {
+        telemetry.lastStagedCount = 0
+        return 0
+      }
       const aspect = to.size[0] / to.size[1]
-      const tanV = view.tanHalf, tanH = tanV * aspect
-      const secV = Math.hypot(1, tanV), secH = Math.hypot(1, tanH)
       const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
       const anchorX = Math.floor(ex / 64) * 64, anchorY = Math.floor(ey / 64) * 64, anchorZ = Math.floor(ez / 64) * 64
-      const rx = view.right[0], ry = view.right[1], rz = view.right[2]
-      const ux = view.up[0], uy = view.up[1], uz = view.up[2]
-      const fx = view.forward[0], fy = view.forward[1], fz = view.forward[2]
-      f.set([ex - anchorX, ey - anchorY, ez - anchorZ, tanV, rx, ry, rz, aspect, ux, uy, uz, 0, fx, fy, fz, 0, sun[0], sun[1], sun[2], 0])
-      for (const piece of live) {
-        // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
+      cullEye[0] = ex - anchorX; cullEye[1] = ey - anchorY; cullEye[2] = ez - anchorZ
+      cullCam.forward = view.forward; cullCam.right = view.right; cullCam.up = view.up; cullCam.tanHalf = view.tanHalf
+
+      const n = liveList.length
+      const maxSlots = culler.maxInstances
+      let staged = 0
+      for (let idx = 0; idx < n && staged < maxSlots; idx++) {
+        const piece = liveList[idx]
         if (!piece.cell || !piece.count) continue
         const [x, y, z, w] = piece.rot, b = piece.born, cell = piece.cell
         const m00 = 1 - 2 * (y * y + z * z), m10 = 2 * (x * y + z * w), m20 = 2 * (x * z - y * w)
         const m01 = 2 * (x * y - z * w), m11 = 1 - 2 * (x * x + z * z), m21 = 2 * (y * z + x * w)
         const m02 = 2 * (x * z + y * w), m12 = 2 * (y * z - x * w), m22 = 1 - 2 * (x * x + y * y)
-        // Conservative world-space bounding sphere frustum cull: skips behind-camera & off-screen vehicles before uniform upload or draw.
         const midX = b.size[0] * 0.5, midY = b.size[1] * 0.5, midZ = b.size[2] * 0.5
+        const deformPad = piece.deform?.dentCount ? 2.0 : 0.0
+        const hx = midX * cell + deformPad, hy = midY * cell + deformPad, hz = midZ * cell + deformPad
         const ox = (midX - b.com[0]) * cell, oy = (midY - b.com[1]) * cell, oz = (midZ - b.com[2]) * cell
-        const dx = piece.pos[0] + m00 * ox + m01 * oy + m02 * oz - ex
-        const dy = piece.pos[1] + m10 * ox + m11 * oy + m12 * oz - ey
-        const dz = piece.pos[2] + m20 * ox + m21 * oy + m22 * oz - ez
-        const rad = Math.hypot(midX, midY, midZ) * cell + (piece.deform?.dentCount ? 2.0 : 0.0)
-        const dist = dx * fx + dy * fy + dz * fz
-        if (dist + rad < 1.0) continue
-        const upD = Math.abs(dx * ux + dy * uy + dz * uz)
-        if (upD > Math.max(0, dist) * tanV + rad * secV) continue
-        const rightD = Math.abs(dx * rx + dy * ry + dz * rz)
-        if (rightD > Math.max(0, dist) * tanH + rad * secH) continue
+        const cx = piece.pos[0] + m00 * ox + m01 * oy + m02 * oz - anchorX
+        const cy = piece.pos[1] + m10 * ox + m11 * oy + m12 * oz - anchorY
+        const cz = piece.pos[2] + m20 * ox + m21 * oy + m22 * oz - anchorZ
+        const exA = Math.abs(m00) * hx + Math.abs(m01) * hy + Math.abs(m02) * hz
+        const eyA = Math.abs(m10) * hx + Math.abs(m11) * hy + Math.abs(m12) * hz
+        const ezA = Math.abs(m20) * hx + Math.abs(m21) * hy + Math.abs(m22) * hz
+        const rad = Math.hypot(hx, hy, hz)
+        const bucket = piece.glass > 0 ? 1 : 0
+        culler.setInstance(
+          staged,
+          cx, cy, cz, rad,
+          cx - exA, cy - eyA, cz - ezA,
+          cx + exA, cy + eyA, cz + ezA,
+          4, 0, idx, bucket,
+        )
+        staged++
+      }
+      telemetry.lastStagedCount = staged
+      if (staged > 0) {
+        culler.upload(staged)
+        culler.dispatch(encoder, {
+          instanceCount: staged,
+          camera: cullCam,
+          aspect,
+          near: NEAR,
+          far: FAR,
+          testAabb: true,
+          writeMultiDraw: true,
+          updateBuckets: true,
+        })
+        telemetry.gpuCullerDispatches++
+      }
+      return staged
+    },
+    prepare(to, view, sun, mirrors = true, encoder) {
+      const t0 = performance.now()
+      visibleCount = 0
+      preparedGlass = false
+      const n = liveList.length
+      if (!n) {
+        telemetry.total = 0; telemetry.visible = 0; telemetry.culled = 0
+        telemetry.faces = 0; telemetry.glassPieces = 0; telemetry.lastStagedCount = 0
+        telemetry.lastPrepareMs = performance.now() - t0
+        return false
+      }
+      const aspect = to.size[0] / to.size[1]
+      const ex = view.eye[0], ey = view.eye[1], ez = view.eye[2]
+      const anchorX = Math.floor(ex / 64) * 64, anchorY = Math.floor(ey / 64) * 64, anchorZ = Math.floor(ez / 64) * 64
+      const rx = view.right[0], ry = view.right[1], rz = view.right[2]
+      const ux = view.up[0], uy = view.up[1], uz = view.up[2]
+      const fx = view.forward[0], fy = view.forward[1], fz = view.forward[2]
+
+      // Extract 6 inward-pointing frustum planes in anchor-relative space (exact match with `createIndirectCuller`, zero GC).
+      cullEye[0] = ex - anchorX; cullEye[1] = ey - anchorY; cullEye[2] = ez - anchorZ
+      cullCam.forward = view.forward; cullCam.right = view.right; cullCam.up = view.up; cullCam.tanHalf = view.tanHalf
+      writeFrustumPlanesFromCamera(frustumPlanes, 0, cullCam, aspect, NEAR, FAR)
+
+      // Zero-allocation scalar write of shared frame uniform header.
+      f[0] = cullEye[0]; f[1] = cullEye[1]; f[2] = cullEye[2]; f[3] = view.tanHalf
+      f[4] = rx; f[5] = ry; f[6] = rz; f[7] = aspect
+      f[8] = ux; f[9] = uy; f[10] = uz; f[11] = 0
+      f[12] = fx; f[13] = fy; f[14] = fz; f[15] = 0
+      f[16] = sun[0]; f[17] = sun[1]; f[18] = sun[2]; f[19] = 0
+
+      const stageGpuCull = culler !== null && (encoder !== undefined || n >= CULLER_BATCH_THRESHOLD)
+      const maxCullSlots = culler ? culler.maxInstances : 0
+      let staged = 0
+      let activeTotal = 0
+      let culled = 0
+      let drawnFaces = 0
+      let glassPieces = 0
+
+      for (let idx = 0; idx < n; idx++) {
+        const piece = liveList[idx]
+        // A piece of no size or no faces is not drawn: a living thing's own cells while it wears a finer look (living.ts), or what is held out of sight.
+        if (!piece.cell || !piece.count) continue
+        activeTotal++
+        const [x, y, z, w] = piece.rot, b = piece.born, cell = piece.cell
+        const m00 = 1 - 2 * (y * y + z * z), m10 = 2 * (x * y + z * w), m20 = 2 * (x * z - y * w)
+        const m01 = 2 * (x * y - z * w), m11 = 1 - 2 * (x * x + z * z), m21 = 2 * (y * z + x * w)
+        const m02 = 2 * (x * z + y * w), m12 = 2 * (y * z - x * w), m22 = 1 - 2 * (x * x + y * y)
+        // Anchor-relative bounding sphere + tight rotated-OBB AABB bounds (matches `createIndirectCuller`).
+        const midX = b.size[0] * 0.5, midY = b.size[1] * 0.5, midZ = b.size[2] * 0.5
+        const deformPad = piece.deform?.dentCount ? 2.0 : 0.0
+        const hx = midX * cell + deformPad, hy = midY * cell + deformPad, hz = midZ * cell + deformPad
+        const ox = (midX - b.com[0]) * cell, oy = (midY - b.com[1]) * cell, oz = (midZ - b.com[2]) * cell
+        const cx = piece.pos[0] + m00 * ox + m01 * oy + m02 * oz - anchorX
+        const cy = piece.pos[1] + m10 * ox + m11 * oy + m12 * oz - anchorY
+        const cz = piece.pos[2] + m20 * ox + m21 * oy + m22 * oz - anchorZ
+        const exA = Math.abs(m00) * hx + Math.abs(m01) * hy + Math.abs(m02) * hz
+        const eyA = Math.abs(m10) * hx + Math.abs(m11) * hy + Math.abs(m12) * hz
+        const ezA = Math.abs(m20) * hx + Math.abs(m21) * hy + Math.abs(m22) * hz
+        const minX = cx - exA, minY = cy - eyA, minZ = cz - ezA
+        const maxX = cx + exA, maxY = cy + eyA, maxZ = cz + ezA
+        const rad = Math.hypot(hx, hy, hz)
+
+        if (stageGpuCull && staged < maxCullSlots) {
+          culler!.setInstance(
+            staged,
+            cx, cy, cz, rad,
+            minX, minY, minZ,
+            maxX, maxY, maxZ,
+            4, 0, idx, piece.glass > 0 ? 1 : 0,
+          )
+          staged++
+        }
+
+        if (!testFrustum6(cx, cy, cz, rad, minX, minY, minZ, maxX, maxY, maxZ)) {
+          culled++
+          continue
+        }
+
         const lamps = piece.lamps
         f[11] = midX
         f[15] = midY
         f[19] = midZ
-        f.set([piece.pos[0] - anchorX, piece.pos[1] - anchorY, piece.pos[2] - anchorZ, cell], 20)
-        i32.set(b.low, 24)
+        f[20] = piece.pos[0] - anchorX
+        f[21] = piece.pos[1] - anchorY
+        f[22] = piece.pos[2] - anchorZ
+        f[23] = cell
+        i32[24] = b.low[0]; i32[25] = b.low[1]; i32[26] = b.low[2]
         i32[27] = piece.ghost ? 1 : 0
-        f.set(b.com, 28)
+        f[28] = b.com[0]; f[29] = b.com[1]; f[30] = b.com[2]
         f[31] = lamps ? lamps[0] : 0
         // The turn as a matrix, a column at a time.
         f[32] = m00; f[33] = m10; f[34] = m20; f[35] = lamps ? lamps[1] : 0
@@ -983,20 +1197,47 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
         // (Copied when called: each piece has its own uniform buffer, so zero writeBuffer aliasing across pieces.)
         device.queue.writeBuffer(piece.uniforms, 0, block)
         const faces = facesOf(piece)
-        if (faces.glass) preparedGlass = true
-        visible.push({ piece, faces })
+        if (faces.glass) { preparedGlass = true; glassPieces++ }
+        drawnFaces += faces.count
+        visiblePieces[visibleCount] = piece
+        visibleFaces[visibleCount] = faces
+        visibleCount++
       }
-      if (!visible.length) return false
+
+      if (encoder && culler && staged > 0) {
+        culler.upload(staged)
+        culler.dispatch(encoder, {
+          instanceCount: staged,
+          camera: cullCam,
+          aspect,
+          near: NEAR,
+          far: FAR,
+          testAabb: true,
+          writeMultiDraw: true,
+          updateBuckets: true,
+        })
+        telemetry.gpuCullerDispatches++
+      }
+
+      telemetry.total = activeTotal
+      telemetry.visible = visibleCount
+      telemetry.culled = culled
+      telemetry.faces = drawnFaces
+      telemetry.glassPieces = glassPieces
+      telemetry.lastStagedCount = staged
+      telemetry.lastPrepareMs = performance.now() - t0
+
+      if (!visibleCount) return false
       preparedPanes = march.panes(to.allocSize ?? to.size)
       preparedMirrors = mirrors
       return true
     },
     record(pass) {
-      if (!visible.length || !preparedPanes) return
+      if (!visibleCount || !preparedPanes) return
       pass.setPipeline(pipeline)
       pass.setBindGroup(1, litFor(preparedPanes))
-      for (let i = 0; i < visible.length; i++) {
-        const { piece, faces } = visible[i]
+      for (let i = 0; i < visibleCount; i++) {
+        const piece = visiblePieces[i], faces = visibleFaces[i]
         // The solid faces.
         if (faces.count > faces.glass) {
           pass.setBindGroup(0, piece.bind)
@@ -1009,8 +1250,8 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       if (preparedGlass) {
         for (const panes of preparedMirrors ? [tint, glint] : [tint]) {
           pass.setPipeline(panes)
-          for (let i = 0; i < visible.length; i++) {
-            const { piece, faces } = visible[i]
+          for (let i = 0; i < visibleCount; i++) {
+            const piece = visiblePieces[i], faces = visibleFaces[i]
             if (!faces.glass) continue
             pass.setBindGroup(0, piece.bind)
             pass.setVertexBuffer(0, faces.faces)
@@ -1020,8 +1261,10 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
       }
     },
     draw(encoder, to, view, sun, timing, mirrors = true, sharedPass) {
-      const ready = self.prepare(to, view, sun, mirrors)
-      if (!ready && !(timing && live.size)) return
+      // Never start a compute pass when already inside an active `sharedPass`; otherwise dispatch GPU indirect culler for large debris batches.
+      const cullEncoder = !sharedPass && liveList.length >= CULLER_BATCH_THRESHOLD ? encoder : undefined
+      const ready = self.prepare(to, view, sun, mirrors, cullEncoder)
+      if (!ready && !(timing && liveList.length)) return
       if (sharedPass && !timing) { if (ready) self.record(sharedPass); return }
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
