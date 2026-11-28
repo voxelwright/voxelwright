@@ -64,7 +64,7 @@ fn cover(xz: vec2f) -> f32 {
   let dt = (reach - start) / f32(n);
   let jitter = hash(vec2i(at.xy));
   let night = 1.0 - g.day;
-  let dayTone = mix(vec3f(0.80, 0.83, 0.87), vec3f(0.98, 0.86, 0.76), g.low * 0.6);
+  let dayTone = mix(vec3f(0.95, 1.03, 1.15), vec3f(1.45, 1.08, 0.82), g.low * 0.6);
   var col = vec3f(0.0);
   var clear = 1.0;
   for (var k = 0; k < n; k++) {
@@ -77,10 +77,10 @@ fn cover(xz: vec2f) -> f32 {
     let thick = body * fade * f.strength;
     if (thick <= 0.0) { continue; }
     let a = 1.0 - exp(-thick * dt / 3400.0);
-    // Daylight catches the top of the bank; at night the city lights it from below.
+    // Daylight catches the top of the bank; at night the city lights it from below (linear HDR radiance).
     let crest = smoothstep(top - 520.0, top, q.y);
-    let day = dayTone * mix(0.78, 1.04, crest);
-    let glow = mix(vec3f(0.07, 0.085, 0.13), vec3f(0.36, 0.23, 0.14), g.weather.z * (1.0 - crest) * 0.75);
+    let day = dayTone * mix(0.76, 1.08, crest);
+    let glow = mix(vec3f(0.012, 0.016, 0.032), vec3f(0.22, 0.09, 0.035), g.weather.z * (1.0 - crest) * 0.75);
     col += clear * a * mix(day, glow, night);
     clear *= 1.0 - a;
     if (clear < 0.04) { break; }
@@ -125,6 +125,8 @@ export async function fog(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // The faced depth must be the picture's size: where it is not (none), the 1 x 1 is read at its corner only.
       device.queue.writeBuffer(uniforms, 0, new Float32Array([...view.eye, view.tanHalf, ...view.right, to.size[0] / to.size[1], ...view.up, time, ...view.forward, self.strength, to.size[0], to.size[1], 10, 0]))
       const pass = encoder.beginRenderPass({ label: 'fog', colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }] })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, held.bind)
       pass.draw(3)

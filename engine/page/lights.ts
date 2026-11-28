@@ -213,10 +213,10 @@ fn evalLocalLights(p: vec3f, n: vec3f, rd: vec3f, albedo: vec3f, rough: f32, cle
       }
     }
   }
-  // Smooth knee highlight shoulder: zero loss on dark asphalt & red taillight pools (<= 0.12 linear), while compressing
-  // intense white car paint / close-range overlapping beams below glow.ts's 0.80 bloom threshold so only real lamps bloom.
+  // Linear HDR output: preserve full dynamic range for headlights, brake lights, street lamps, and fires under AgX
+  // tonemapping, applying only a gentle high-radiance ceiling (> 3.0) so dense overlapping close-range beams never spike.
   let peak = max(sum.r, max(sum.g, sum.b));
-  return sum / (1.0 + max(peak - 0.12, 0.0) * 1.45);
+  return sum / (1.0 + max(peak - 3.0, 0.0) * 0.22);
 }
 `
 

@@ -57,8 +57,8 @@ const FAR = 100000.0;
   var out: Out;
   out.pos = vec4f(dot(p, u.right) / (u.tanHalf * u.aspect), dot(p, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
   out.uv = corner;
-  let colour = vec3f(1.0, 0.72 + 0.06 * l.y, 0.42 + 0.12 * l.y);
-  out.light = colour * l.x * (1.0 + 0.6 * l.z) * u.glow * min(1.0, (own * own) / (reach * reach)) * mix(1.0, 0.25, smoothstep(400.0, 1200.0, far));
+  let colour = vec3f(1.0, 0.54 + 0.06 * l.y, 0.18 + 0.10 * l.y);
+  out.light = colour * l.x * (1.0 + 0.6 * l.z) * u.glow * 1.8 * min(1.0, (own * own) / (reach * reach)) * mix(1.0, 0.25, smoothstep(400.0, 1200.0, far));
   return out;
 }
 @fragment fn fs(in: Out) -> @location(0) vec4f {
@@ -224,6 +224,8 @@ export async function letterLight(device: GPUDevice, format: GPUTextureFormat, l
       f.set(powers, 16)
       device.queue.writeBuffer(uniforms, 0, f)
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthReadOnly: true } })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind(faced ?? none))
       pass.setVertexBuffer(0, cells)

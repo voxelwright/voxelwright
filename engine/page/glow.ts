@@ -1,14 +1,27 @@
-// The last pass (#163): the picture stretched to the screen, with a glow round what is bright in
-// it (fire, the sun's edge, lamps, a white wall in the sun) and its corners a little darker.
-// The glow is the bright part of the picture at a quarter of its size, spread twice, added back.
-// Three small passes and the stretch: under half a millisecond at the sizes the page holds.
+// The last pass (#163, #165): Linear HDR bloom (Karis-averaged luminance extraction into persistent
+// quarter/sixteenth float targets) + Troy Sobotka AgX post-tonemapping + lens vignette, grade, tint, and rain.
+// Backing bloom targets grow-only so dynamic resolution (`steer`) causes zero GPU texture reallocations.
 import { shader, type Gpu, type Offscreen, GLOWS_OVER } from '../probe/gpu.ts'
 
-const CODE = /* wgsl */ `
+/** Diagnostic tonemap override: `?tonemap=aces` selects Narkowicz ACES; default is AgX. */
+const TONEMAP_ACES = typeof location !== 'undefined' && new URLSearchParams(location.search).get('tonemap') === 'aces'
+/** Base scene exposure before AgX/ACES tonemapping (calibrated to AgX Punchy for sunlit midtones and night depth). */
+const BASE_EXPOSURE = 0.60
+
+const codeOf = (useF16: boolean) => /* wgsl */ `${useF16 ? 'enable f16;\n' : ''}
 @group(0) @binding(0) var picture: texture_2d<f32>;
 @group(0) @binding(1) var smooth_: sampler;
 @group(0) @binding(2) var spread: texture_2d<f32>;
-struct U { step: vec2f, strength: f32, pad: f32, tint: vec4f }
+struct U {
+  step: vec2f,      // texel step (in bright/blur/down), or grade (sat, contrast) in last
+  strength: f32,    // night factor in bright, bloom gain in plain/last
+  pad: f32,         // drive energy (0..1) in last
+  tint: vec4f,      // rgb realm tint, a = drift (-1..1) in last
+  uvMax: vec2f,     // active sub-rect UV extent of picture
+  uvClamp: vec2f,   // max safe sample UV inside picture's active sub-rect
+  spreadMax: vec2f, // active sub-rect UV extent of spread (last)
+  extra: vec2f,     // x = tonemap mode (0=AgX, 1=ACES), y = exposure
+}
 @group(0) @binding(3) var<uniform> u: U;
 struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
@@ -18,44 +31,141 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   out.uv = vec2f(p.x, 1.0 - p.y);
   return out;
 }
-// What is bright enough to glow: over 0.8 of full, and the more the brighter. Four looks, each the mean of four texels.
-// At night (u.strength here is how far it is night) a lamp, a sign or a fire glows by how far brighter than a lit
-// surface it is, which the marcher left in the picture's alpha as one less that.
+
+fn luma(c: vec3f) -> f32 { return dot(c, vec3f(0.2126, 0.7152, 0.0722)); }
+
+// Soft-knee bloom extraction in exposed linear HDR space.
+fn softBloom(c: vec3f, threshold: f32, knee: f32) -> vec3f {
+  let br = max(c.r, max(c.g, c.b));
+  let soft = clamp(br - threshold + knee, 0.0, 2.0 * knee);
+  let rq = (soft * soft) / max(4.0 * knee, 1e-5);
+  let contrib = max(rq, br - threshold) / max(br, 1e-5);
+  return c * contrib;
+}
+
+// Karis-averaged 4-tap downsample from Linear HDR scene: extracts luminance > threshold with 1 / (1 + luma)
+// weighting to suppress sub-pixel specular/lamp firefly flicker.
 @fragment fn bright(in: Out) -> @location(0) vec4f {
+  let base = in.uv * u.uvMax;
+  let lo = u.step * 0.5;
+  let hi = max(lo, u.uvClamp);
+  let exposure = u.extra.y;
+  let threshold = mix(${GLOWS_OVER.toFixed(2)} * 1.35, 0.95, u.strength);
+  let knee = 0.35;
   var sum = vec3f(0.0);
+  var wSum = 0.0;
   for (var k = 0; k < 4; k++) {
-    let c = textureSampleLevel(picture, smooth_, in.uv + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, 0.0);
-    let most = max(c.r, max(c.g, c.b));
-    sum += c.rgb * (smoothstep(${GLOWS_OVER}, 1.0, most) + (1.0 - c.a) * u.strength * 10.0);
+    let suv = clamp(base + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, lo, hi);
+    let raw = max(textureSampleLevel(picture, smooth_, suv, 0.0).rgb, vec3f(0.0));
+    let exposed = min(raw * exposure, vec3f(12.0));
+    let rawBloom = softBloom(exposed, threshold, knee);
+    let b = rawBloom / (1.0 + luma(rawBloom) * 0.35);
+    let w = 1.0 / (1.0 + luma(b));
+    sum += b * w;
+    wSum += w;
   }
-  return vec4f(sum * 0.25, 1.0);
+  return vec4f(sum / max(wSum, 1e-5), 1.0);
 }
-// A quarter of the size again: four looks, each the mean of four texels, so no texel is passed over.
+
+// Quarter-size downsample of the bloom pyramid (clamped inside active sub-rect).
 @fragment fn down(in: Out) -> @location(0) vec4f {
-  var sum = vec3f(0.0);
-  for (var k = 0; k < 4; k++) { sum += textureSampleLevel(picture, smooth_, in.uv + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, 0.0).rgb; }
-  return vec4f(sum * 0.25, 1.0);
+  let base = in.uv * u.uvMax;
+  let lo = u.step * 0.5;
+  let hi = max(lo, u.uvClamp);
+  ${useF16 ? 'var sum = vec3<f16>(0.0h);' : 'var sum = vec3f(0.0);'}
+  for (var k = 0; k < 4; k++) {
+    let suv = clamp(base + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, lo, hi);
+    let c = min(max(textureSampleLevel(picture, smooth_, suv, 0.0).rgb, vec3f(0.0)), vec3f(60000.0));
+    ${useF16 ? 'sum += vec3<f16>(c);' : 'sum += c;'}
+  }
+  return vec4f(vec3f(sum) * 0.25, 1.0);
 }
-// As it is, times a strength: for adding the wide spread onto the near one.
-@fragment fn plain(in: Out) -> @location(0) vec4f { return vec4f(textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb * u.strength, 1.0); }
-// Spread along one way: nine texels' worth in five looks, each between two texels so that none is passed over (a
-// lamp is a few texels far brighter than white: with looks further apart it came out as a grid of its own ghosts).
+
+// Upsample/add wide bloom onto near bloom.
+@fragment fn plain(in: Out) -> @location(0) vec4f {
+  let suv = clamp(in.uv * u.uvMax, vec2f(0.0), u.uvClamp);
+  return vec4f(textureSampleLevel(picture, smooth_, suv, 0.0).rgb * u.strength, 1.0);
+}
+
+// Separable 9-tap Gaussian blur (5 bilinear taps), clamped inside the active sub-rect so unused texels never bleed.
 @fragment fn blur(in: Out) -> @location(0) vec4f {
-  var sum = textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb * 0.227;
+  let base = in.uv * u.uvMax;
+  let lo = abs(u.step) * 0.5;
+  let hi = max(lo, u.uvClamp);
+  ${useF16
+    ? `var sum = vec3<f16>(min(max(textureSampleLevel(picture, smooth_, clamp(base, lo, hi), 0.0).rgb, vec3f(0.0)), vec3f(60000.0))) * 0.227h;
+  for (var k = 1; k < 3; k++) {
+    let off = u.step * select(3.2308, 1.3846, k == 1);
+    let w = select(0.07h, 0.316h, k == 1);
+    let a = vec3<f16>(min(max(textureSampleLevel(picture, smooth_, clamp(base + off, lo, hi), 0.0).rgb, vec3f(0.0)), vec3f(60000.0)));
+    let b = vec3<f16>(min(max(textureSampleLevel(picture, smooth_, clamp(base - off, lo, hi), 0.0).rgb, vec3f(0.0)), vec3f(60000.0)));
+    sum += (a + b) * w;
+  }
+  return vec4f(vec3f(sum), 1.0);`
+    : `var sum = textureSampleLevel(picture, smooth_, clamp(base, lo, hi), 0.0).rgb * 0.227;
   for (var k = 1; k < 3; k++) {
     let off = u.step * select(3.2308, 1.3846, k == 1);
     let w = select(0.07, 0.316, k == 1);
-    sum += (textureSampleLevel(picture, smooth_, in.uv + off, 0.0).rgb + textureSampleLevel(picture, smooth_, in.uv - off, 0.0).rgb) * w;
+    sum += (textureSampleLevel(picture, smooth_, clamp(base + off, lo, hi), 0.0).rgb + textureSampleLevel(picture, smooth_, clamp(base - off, lo, hi), 0.0).rgb) * w;
   }
-  return vec4f(sum, 1.0);
+  return vec4f(sum, 1.0);`}
 }
+
+// Troy Sobotka's AgX (fast 6th-order polynomial sigmoid with inset/outset matrices and subtle punchy look).
+// Output is already sRGB display-encoded [0..1] (ready for bgra8unorm swapchain).
+const AGX_INSET = mat3x3f(
+  vec3f(0.842479062253094,  0.0423282422610123, 0.0423756549057051),
+  vec3f(0.0784335999999992, 0.878468636469772,  0.0784336),
+  vec3f(0.0792237451477643, 0.0791661274605434, 0.879142973793104)
+);
+const AGX_OUTSET = mat3x3f(
+  vec3f( 1.19687900512017,   -0.0528968517574562, -0.0529716355144438),
+  vec3f(-0.0980208811401368,  1.15190312990417,   -0.0980434501171241),
+  vec3f(-0.0990297440797205, -0.0989611768448433,  1.15107367264116)
+);
+fn agxDefaultContrastApprox(x: vec3f) -> vec3f {
+  let x2 = x * x;
+  let x4 = x2 * x2;
+  return 15.5 * x4 * x2
+    - 40.14 * x4 * x
+    + 31.96 * x4
+    - 6.868 * x2 * x
+    + 0.4298 * x2
+    + 0.1191 * x
+    - 0.00232;
+}
+fn agxLook(val: vec3f) -> vec3f {
+  // AgX Punchy CDL look (power 1.32, saturation 1.30): crisp daylight contrast, deep night shadows, and rich colour without highlight hue skew.
+  let v = pow(max(val, vec3f(0.0)), vec3f(1.32));
+  let l = luma(v);
+  return vec3f(l) + 1.30 * (v - vec3f(l));
+}
+fn tonemapAgX(color: vec3f) -> vec3f {
+  let minEv = -12.47393;
+  let maxEv = 4.026069;
+  var val = AGX_INSET * max(color, vec3f(0.0));
+  val = clamp(log2(max(val, vec3f(1e-10))), vec3f(minEv), vec3f(maxEv));
+  val = (val - minEv) / (maxEv - minEv);
+  val = agxDefaultContrastApprox(val);
+  val = agxLook(val);
+  val = AGX_OUTSET * val;
+  return clamp(val, vec3f(0.0), vec3f(1.0));
+}
+fn tonemapAces(color: vec3f) -> vec3f {
+  let x = max(color, vec3f(0.0));
+  let y = clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
+  return pow(y, vec3f(0.4545));
+}
+
 @fragment fn last(in: Out) -> @location(0) vec4f {
   let d = in.uv - 0.5;
-  var c = textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb;
+  let srcLo = vec2f(0.0005);
+  let srcHi = max(srcLo, u.uvClamp);
+  let sprHi = max(srcLo, u.spreadMax - vec2f(0.001));
+  let baseUv = clamp(in.uv * u.uvMax, srcLo, srcHi);
+  var c = max(textureSampleLevel(picture, smooth_, baseUv, 0.0).rgb, vec3f(0.0));
+
   // High-speed driving lens energy (u.pad = 0..1) and rotational/lateral drift blur (u.tint.a = -1..1).
-  // Radial speed streaks intensify along rushing roadside asphalt & side buildings while keeping the
-  // lower-center car silhouette and road vanishing point razor sharp; drift blur streaks background
-  // city buildings & streetlights tangentially across the frame.
   let energy = u.pad;
   let drift = u.tint.a;
   let driftMag = abs(drift);
@@ -80,34 +190,36 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
         let t = f32(k) / 8.0;
         let w = (1.0 - t * 0.65) * 0.20;
         let off = blurVec * (t * 1.25 - 0.14);
-        let suv = clamp(in.uv - off, vec2f(0.001), vec2f(0.999));
-        acc += textureSampleLevel(picture, smooth_, suv, 0.0).rgb * w;
+        let suv = clamp((in.uv - off) * u.uvMax, srcLo, srcHi);
+        acc += max(textureSampleLevel(picture, smooth_, suv, 0.0).rgb, vec3f(0.0)) * w;
         wSum += w;
       }
       c = acc / wSum;
       let ca = rd * radAmt * (1.0 - driftMag * 0.85) * 0.0022;
-      c.r = mix(c.r, textureSampleLevel(picture, smooth_, clamp(in.uv + ca, vec2f(0.001), vec2f(0.999)), 0.0).r, 0.35);
-      c.b = mix(c.b, textureSampleLevel(picture, smooth_, clamp(in.uv - ca, vec2f(0.001), vec2f(0.999)), 0.0).b, 0.35);
+      c.r = mix(c.r, max(textureSampleLevel(picture, smooth_, clamp((in.uv + ca) * u.uvMax, srcLo, srcHi), 0.0).r, 0.0), 0.35);
+      c.b = mix(c.b, max(textureSampleLevel(picture, smooth_, clamp((in.uv - ca) * u.uvMax, srcLo, srcHi), 0.0).b, 0.0), 0.35);
     }
   }
-  var bloom = textureSampleLevel(spread, smooth_, in.uv, 0.0).rgb;
+
+  // Expose scene into working HDR space, add linear HDR bloom, then vignette before tonemapping.
+  var exposed = c * u.extra.y;
+  var bloom = max(textureSampleLevel(spread, smooth_, clamp(in.uv * u.spreadMax, srcLo, sprHi), 0.0).rgb, vec3f(0.0));
   if (driftMag > 0.04 || energy > 0.15) {
-    let b1 = textureSampleLevel(spread, smooth_, clamp(in.uv - blurVec * 0.55, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
-    let b2 = textureSampleLevel(spread, smooth_, clamp(in.uv - blurVec * 1.10, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+    let b1 = max(textureSampleLevel(spread, smooth_, clamp((in.uv - blurVec * 0.55) * u.spreadMax, srcLo, sprHi), 0.0).rgb, vec3f(0.0));
+    let b2 = max(textureSampleLevel(spread, smooth_, clamp((in.uv - blurVec * 1.10) * u.spreadMax, srcLo, sprHi), 0.0).rgb, vec3f(0.0));
     bloom = bloom * 0.50 + b1 * 0.32 + b2 * 0.18;
   }
-  c += bloom * u.strength;
-  // The corners of the picture a little darker, as a lens leaves them (tightening subtly at high speed/drift).
-  c *= 1.0 - dot(d, d) * (0.42 + max(energy, driftMag * 0.85) * 0.18);
-  // The grade, which follows the hour (u.step here is how much colour, how much contrast). With the sun low and at
-  // night, more of both than the tone curve leaves: that is what made the sunset. By day, a little less colour and
-  // nearly no more contrast: with the evening's grade a street by day was called bright and toy-coloured by every
-  // judge who saw it, and the same pictures with the grade undone sat beside the films' far better.
-  c = clamp(c, vec3f(0.0), vec3f(1.0));
-  c = mix(vec3f(dot(c, vec3f(0.3, 0.59, 0.11))), c, u.step.x);
-  c = mix(c, c * c * (3.0 - 2.0 * c), u.step.y);
-  // A realm's own tint (#264), over the graded picture: white leaves it as it is.
-  return vec4f(c * u.tint.rgb, 1.0);
+  exposed += bloom * u.strength;
+  // Lens vignette in linear space (tightens subtly at high speed/drift).
+  exposed *= max(0.0, 1.0 - dot(d, d) * (0.42 + max(energy, driftMag * 0.85) * 0.20));
+
+  // Tonemap linear HDR -> sRGB display space (AgX default, ACES optional via ?tonemap=aces).
+  var outCol = select(tonemapAgX(exposed), tonemapAces(exposed), u.extra.x > 0.5);
+
+  // Hour-dependent subtle colour/contrast grade and realm tint.
+  outCol = mix(vec3f(dot(outCol, vec3f(0.3, 0.59, 0.11))), outCol, u.step.x);
+  outCol = mix(outCol, outCol * outCol * (3.0 - 2.0 * outCol), u.step.y);
+  return vec4f(clamp(outCol * u.tint.rgb, vec3f(0.0), vec3f(1.0)), 1.0);
 }
 `
 
@@ -120,9 +232,6 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   out.uv = vec2f(p.x, 1.0 - p.y);
   return out;
 }
-// Rain: streaks falling down the picture, two sizes of them, a little aslant. Drawn over the finished picture, and
-// only while it rains: in the marcher's own shader, behind a test of whether it rains, it cost every dry frame
-// 2 ms (the test was done away with and the streaks worked out for every pixel).
 struct Rain { size: vec2f, time: f32, strength: f32 }
 @group(0) @binding(0) var<uniform> rain: Rain;
 fn chance(c: vec2i) -> f32 {
@@ -143,10 +252,12 @@ fn chance(c: vec2i) -> f32 {
 }
 `
 
-/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for; `tint` is what the finished picture is multiplied by; `drive` (0 to 1) adds high-speed radial lens streaks while `drift` (-1 to 1) adds tangential drift motion blur. Returns the pass to call each frame. */
+const UNIFORM_BYTES = 64
+
+/** Draws Linear HDR `from` to swapchain `to` with Karis-averaged luminance bloom, AgX tonemapping, and optional rain. */
 export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number], drive?: number, drift?: number) => void> {
   const { device } = gpu
-  const module = await shader(device, 'glow', CODE), rainModule = await shader(device, 'rain', RAIN)
+  const module = await shader(device, 'glow', codeOf(gpu.canF16)), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: {} },
@@ -156,12 +267,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     ],
   })
   const make = (entryPoint: string, format: GPUTextureFormat) => device.createRenderPipelineAsync({ label: `glow ${entryPoint}`, layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }), vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint, targets: [{ format }] } })
-  // Kept as floats: a lamp is a few texels many times brighter than white, and spread wide it must still show.
   const small: GPUTextureFormat = 'rgba16float'
   const [bright, blur, last, down] = await Promise.all([make('bright', small), make('blur', small), make('last', gpu.format), make('down', small)])
   const add = await device.createRenderPipelineAsync({ label: 'glow add', layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }), vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'plain', targets: [{ format: small, blend: { color: { srcFactor: 'one', dstFactor: 'one' }, alpha: { srcFactor: 'zero', dstFactor: 'one' } } }] }, primitive: { topology: 'triangle-list' } })
-  const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' })
-  // The rain has a pipeline of its own, added onto the picture; its module is the same code with only its own binding used.
+  const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' })
   const wet = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {} }] })
   const falling = await device.createRenderPipelineAsync({
     label: 'rain', layout: device.createPipelineLayout({ bindGroupLayouts: [wet] }), vertex: { module: rainModule, entryPoint: 'vs' },
@@ -169,56 +278,132 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
   })
   const rainBlock = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const rainBind = device.createBindGroup({ layout: wet, entries: [{ binding: 0, resource: { buffer: rainBlock } }] })
-  const block = (step: readonly [number, number], strength = 0) => {
-    const b = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-    device.queue.writeBuffer(b, 0, new Float32Array([step[0], step[1], strength, 0, 1, 1, 1, 1]))
-    return b
+
+  const blocks = Array.from({ length: 8 }, () => device.createBuffer({ size: UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }))
+  const scratch = new Float32Array(16)
+  const writeU = (
+    idx: number,
+    stepX: number, stepY: number, strength: number, pad: number,
+    tr: number, tg: number, tb: number, ta: number,
+    uvMaxX: number, uvMaxY: number, uvClampX: number, uvClampY: number,
+    spreadMaxX = 1, spreadMaxY = 1, extraX = 0, extraY = BASE_EXPOSURE,
+  ) => {
+    scratch[0] = stepX; scratch[1] = stepY; scratch[2] = strength; scratch[3] = pad
+    scratch[4] = tr; scratch[5] = tg; scratch[6] = tb; scratch[7] = ta
+    scratch[8] = uvMaxX; scratch[9] = uvMaxY; scratch[10] = uvClampX; scratch[11] = uvClampY
+    scratch[12] = spreadMaxX; scratch[13] = spreadMaxY; scratch[14] = extraX; scratch[15] = extraY
+    device.queue.writeBuffer(blocks[idx], 0, scratch)
   }
-  // What is kept for the picture as it now is: two quarter-size textures and the four passes' bindings. The picture
-  // is a new one whenever its size changes, and that is often: what was kept for the last is thrown away then.
-  interface Kept { from: Offscreen; textures: GPUTexture[]; blocks: GPUBuffer[]; binds: GPUBindGroup[]; views: GPUTextureView[] }
+
+  // Persistent grow-only bloom pyramid: keyed on the source backing texture and its allocated size, so dynamic
+  // resolution `steer` updates active sub-rect viewports & UVs with zero GPU texture or bind group churn.
+  interface Kept {
+    srcTexture: GPUTexture
+    alloc: readonly [number, number]
+    quarter: readonly [number, number]
+    sixteenth: readonly [number, number]
+    textures: GPUTexture[]
+    views: GPUTextureView[]
+    binds: GPUBindGroup[]
+  }
   let kept: Kept | null = null
+  const bind = (picture: GPUTextureView, spread: GPUTextureView, uniforms: GPUBuffer) =>
+    device.createBindGroup({ layout, entries: [{ binding: 0, resource: picture }, { binding: 1, resource: sampler }, { binding: 2, resource: spread }, { binding: 3, resource: { buffer: uniforms } }] })
+
   const keep = (from: Offscreen): Kept => {
-    if (kept?.from === from) return kept
-    for (const t of kept?.textures ?? []) t.destroy()
-    for (const b of kept?.blocks ?? []) b.destroy()
-    const quarter = [Math.max(1, from.size[0] >> 2), Math.max(1, from.size[1] >> 2)], sixteenth = [Math.max(1, quarter[0] >> 2), Math.max(1, quarter[1] >> 2)]
-    const texture = (size: number[]) => device.createTexture({ size, format: small, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
-    // Two at a quarter of the picture's size for the near glow; two at a sixteenth for the night's wide one: a lamp
-    // in wet air has a halo many times its own size.
-    const textures = [texture(quarter), texture(quarter), texture(sixteenth), texture(sixteenth)], views = textures.map((t) => t.createView())
-    const blocks = [block([1 / from.size[0], 1 / from.size[1]]), block([1 / quarter[0], 0]), block([0, 1 / quarter[1]]), block([0, 0], 1.0), block([1 / quarter[0], 1 / quarter[1]]), block([1 / sixteenth[0], 0]), block([0, 1 / sixteenth[1]]), block([0, 0], 0.8)]
-    const bind = (picture: GPUTextureView, spread: GPUTextureView, uniforms: GPUBuffer) => device.createBindGroup({ layout, entries: [{ binding: 0, resource: picture }, { binding: 1, resource: sampler }, { binding: 2, resource: spread }, { binding: 3, resource: { buffer: uniforms } }] })
-    kept = { from, textures, blocks, views, binds: [bind(from.color, views[1], blocks[0]), bind(views[0], views[0], blocks[1]), bind(views[1], views[1], blocks[2]), bind(from.color, views[0], blocks[3]), bind(views[0], views[0], blocks[4]), bind(views[2], views[2], blocks[5]), bind(views[3], views[3], blocks[6]), bind(views[2], views[2], blocks[7])] }
+    const alloc = from.allocSize ?? from.size
+    if (kept && kept.srcTexture === from.texture && alloc[0] <= kept.alloc[0] && alloc[1] <= kept.alloc[1]) return kept
+    const needGrow = !kept || alloc[0] > kept.alloc[0] || alloc[1] > kept.alloc[1]
+    const quarter: readonly [number, number] = needGrow
+      ? [Math.max(1, Math.ceil(alloc[0] / 4)), Math.max(1, Math.ceil(alloc[1] / 4))]
+      : kept!.quarter
+    const sixteenth: readonly [number, number] = needGrow
+      ? [Math.max(1, Math.ceil(quarter[0] / 4)), Math.max(1, Math.ceil(quarter[1] / 4))]
+      : kept!.sixteenth
+    let textures: GPUTexture[], views: GPUTextureView[]
+    if (needGrow) {
+      for (const t of kept?.textures ?? []) t.destroy()
+      const makeTex = (size: readonly [number, number]) =>
+        device.createTexture({ size: [size[0], size[1]], format: small, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+      textures = [makeTex(quarter), makeTex(quarter), makeTex(sixteenth), makeTex(sixteenth)]
+      views = textures.map((t) => t.createView())
+    } else {
+      textures = kept!.textures
+      views = kept!.views
+    }
+    const binds = [
+      bind(from.color, views[1], blocks[0]),
+      bind(views[0], views[0], blocks[1]),
+      bind(views[1], views[1], blocks[2]),
+      bind(from.color, views[0], blocks[3]),
+      bind(views[0], views[0], blocks[4]),
+      bind(views[2], views[2], blocks[5]),
+      bind(views[3], views[3], blocks[6]),
+      bind(views[2], views[2], blocks[7]),
+    ]
+    kept = { srcTexture: from.texture, alloc: needGrow ? [alloc[0], alloc[1]] : kept!.alloc, quarter, sixteenth, textures, views, binds }
     return kept
   }
-  const pass = (encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, bind: GPUBindGroup, to: GPUTextureView, onto = false) => {
+
+  const pass = (encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, bg: GPUBindGroup, to: GPUTextureView, onto = false, viewport?: readonly [number, number]) => {
     const p = encoder.beginRenderPass({ colorAttachments: [{ view: to, loadOp: onto ? 'load' : 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }] })
+    if (viewport) {
+      p.setViewport(0, 0, viewport[0], viewport[1], 0, 1)
+      p.setScissorRect(0, 0, viewport[0], viewport[1])
+    }
     p.setPipeline(pipeline)
-    p.setBindGroup(0, bind)
+    p.setBindGroup(0, bg)
     p.draw(3)
     p.end()
   }
+
   return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1], drive = 0, drift = 0) => {
     const k = keep(from)
-    device.queue.writeBuffer(k.blocks[0], 0, new Float32Array([1 / from.size[0], 1 / from.size[1], night, 0]))
-    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, Math.max(0, Math.min(1, drive)), tint[0], tint[1], tint[2], Math.max(-1, Math.min(1, drift))]))
-    pass(encoder, bright, k.binds[0], k.views[0])
-    // Twice over: the looks are close together, and once is too narrow a glow.
+    const alloc = from.allocSize ?? from.size
+    const srcW = from.size[0], srcH = from.size[1]
+    const srcUvX = srcW / alloc[0], srcUvY = srcH / alloc[1]
+    const srcStepX = 1 / alloc[0], srcStepY = 1 / alloc[1]
+
+    const qW = Math.max(1, Math.min(k.quarter[0], Math.ceil(srcW / 4)))
+    const qH = Math.max(1, Math.min(k.quarter[1], Math.ceil(srcH / 4)))
+    const qUvX = qW / k.quarter[0], qUvY = qH / k.quarter[1]
+    const qStepX = 1 / k.quarter[0], qStepY = 1 / k.quarter[1]
+    const qActive: readonly [number, number] = [qW, qH]
+
+    const exposure = TONEMAP_ACES ? 0.43 : BASE_EXPOSURE
+    const bloomGain = 0.68 + night * 0.72
+
+    // 0: bright extraction (Karis average) from active HDR scene sub-rect -> quarter[0]
+    writeU(0, srcStepX, srcStepY, night, 0, 1, 1, 1, 1, srcUvX, srcUvY, Math.max(srcStepX * 0.5, srcUvX - srcStepX * 0.5), Math.max(srcStepY * 0.5, srcUvY - srcStepY * 0.5), 1, 1, 0, exposure)
+    // 1, 2: separable blur on quarter[0] <-> quarter[1]
+    writeU(1, qStepX, 0, 0, 0, 1, 1, 1, 1, qUvX, qUvY, Math.max(qStepX * 0.5, qUvX - qStepX * 0.5), Math.max(qStepY * 0.5, qUvY - qStepY * 0.5))
+    writeU(2, 0, qStepY, 0, 0, 1, 1, 1, 1, qUvX, qUvY, Math.max(qStepX * 0.5, qUvX - qStepX * 0.5), Math.max(qStepY * 0.5, qUvY - qStepY * 0.5))
+    // 3: final composite + AgX tonemap -> swapchain
+    writeU(3, grade[0], grade[1], bloomGain, Math.max(0, Math.min(1, drive)), tint[0], tint[1], tint[2], Math.max(-1, Math.min(1, drift)), srcUvX, srcUvY, Math.max(srcStepX * 0.5, srcUvX - srcStepX * 0.5), Math.max(srcStepY * 0.5, srcUvY - srcStepY * 0.5), qUvX, qUvY, TONEMAP_ACES ? 1 : 0, exposure)
+
+    pass(encoder, bright, k.binds[0], k.views[0], false, qActive)
     for (let twice = 0; twice < 2; twice++) {
-      pass(encoder, blur, k.binds[1], k.views[1])
-      pass(encoder, blur, k.binds[2], k.views[0])
+      pass(encoder, blur, k.binds[1], k.views[1], false, qActive)
+      pass(encoder, blur, k.binds[2], k.views[0], false, qActive)
     }
     if (night > 0) {
-      // The wide glow: the near one made a quarter of its size again, spread there, and added back onto it.
-      pass(encoder, down, k.binds[4], k.views[2])
-      pass(encoder, blur, k.binds[5], k.views[3])
-      pass(encoder, blur, k.binds[6], k.views[2])
-      pass(encoder, add, k.binds[7], k.views[0], true)
+      const sW = Math.max(1, Math.min(k.sixteenth[0], Math.ceil(qW / 4)))
+      const sH = Math.max(1, Math.min(k.sixteenth[1], Math.ceil(qH / 4)))
+      const sUvX = sW / k.sixteenth[0], sUvY = sH / k.sixteenth[1]
+      const sStepX = 1 / k.sixteenth[0], sStepY = 1 / k.sixteenth[1]
+      const sActive: readonly [number, number] = [sW, sH]
+      writeU(4, qStepX, qStepY, 0, 0, 1, 1, 1, 1, qUvX, qUvY, Math.max(qStepX * 0.5, qUvX - qStepX * 0.5), Math.max(qStepY * 0.5, qUvY - qStepY * 0.5))
+      writeU(5, sStepX, 0, 0, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
+      writeU(6, 0, sStepY, 0, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
+      writeU(7, 0, 0, 0.50, 0, 1, 1, 1, 1, sUvX, sUvY, Math.max(sStepX * 0.5, sUvX - sStepX * 0.5), Math.max(sStepY * 0.5, sUvY - sStepY * 0.5))
+      pass(encoder, down, k.binds[4], k.views[2], false, sActive)
+      pass(encoder, blur, k.binds[5], k.views[3], false, sActive)
+      pass(encoder, blur, k.binds[6], k.views[2], false, sActive)
+      pass(encoder, add, k.binds[7], k.views[0], true, qActive)
     }
     pass(encoder, last, k.binds[3], to)
     if (rain > 0) {
-      device.queue.writeBuffer(rainBlock, 0, new Float32Array([from.size[0], from.size[1], time, rain * 0.4]))
+      device.queue.writeBuffer(rainBlock, 0, new Float32Array([srcW, srcH, time, rain * 0.4]))
       const p = encoder.beginRenderPass({ colorAttachments: [{ view: to, loadOp: 'load', storeOp: 'store' }] })
       p.setPipeline(falling)
       p.setBindGroup(0, rainBind)

@@ -26,7 +26,9 @@ const FAR = 100000.0;
   // A rounded box: nearly its footprint, softening to nothing at the quad's edge.
   let q = abs(in.uv);
   let r = pow(pow(q.x, 4.0) + pow(q.y, 4.0), 0.25);
-  return vec4f(0.0, 0.0, 0.0, in.dark * (1.0 - smoothstep(0.45, 1.0, r)));
+  let a = in.dark * (1.0 - smoothstep(0.45, 1.0, r));
+  let linA = 1.0 - pow(1.0 - clamp(a, 0.0, 0.95), 2.0);
+  return vec4f(0.0, 0.0, 0.0, linA);
 }
 `
 
@@ -78,6 +80,8 @@ export async function under(device: GPUDevice, format: GPUTextureFormat): Promis
       device.queue.writeBuffer(uniforms, 0, Float32Array.from([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, 0]))
       device.queue.writeBuffer(corners, 0, data, 0, n * 6 * FLOATS)
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
       pass.setVertexBuffer(0, corners)

@@ -23,7 +23,8 @@ const FAR = 100000.0;
   let rib = 0.86 + 0.14 * cos(in.uv.x * 12.566);
   let a = in.col.a * edge * rib;
   if (a < 0.005) { discard; }
-  return vec4f(in.col.rgb, a);
+  let linA = 1.0 - pow(1.0 - clamp(a, 0.0, 0.95), 1.8);
+  return vec4f(pow(max(in.col.rgb, vec3f(0.0)), vec3f(2.2)), linA);
 }
 `
 
@@ -45,7 +46,7 @@ const FAR = 100000.0;
   // Soft elongated beam/pool falloff on the road surface.
   let r = length(in.uv);
   let fall = (1.0 - smoothstep(0.05, 1.0, r));
-  let glow = fall * fall * in.col.a;
+  let glow = fall * fall * in.col.a * 1.35;
   if (glow < 0.003) { discard; }
   return vec4f(in.col.rgb * glow, 0.0);
 }
@@ -219,6 +220,8 @@ export async function tracks(device: GPUDevice, format: GPUTextureFormat): Promi
       if (nSpill) device.queue.writeBuffer(spillBuf, 0, spillData, 0, nSpill * 6 * FLOATS)
 
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       if (nSkid) {
         pass.setPipeline(skidPipe)
         pass.setBindGroup(0, skidBind)

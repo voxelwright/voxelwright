@@ -251,9 +251,9 @@ struct Lit { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   // Wet cloth is darker, and shines a little towards the light.
   col *= 1.0 - 0.18 * g.weather.y * select(1.0, 0.0, made == ${SKIN}u);
   var lit: Lit;
-  // Seen through a pane of the world's glass (someone in a room, from the street), tinted as the pane tints.
+  // Seen through a pane of the world's glass (someone in a room, from the street), tinted in linear space.
   let pane = textureLoad(panes, vec2i(in.pos.xy), 0);
-  lit.colour = vec4f(tone(col) * select(vec3f(1.0), pow(pane.rgb, vec3f(0.4545)), pane.a > 0.0 && length(seen) > pane.a), 1.0);
+  lit.colour = vec4f(max(col, vec3f(0.0)) * select(vec3f(1.0), pane.rgb, pane.a > 0.0 && length(seen) > pane.a), 1.0);
   let deep = max(dot(seen, u.forward), NEAR);
   lit.depth = FAR / (FAR - NEAR) * (1.0 - NEAR / deep);
   return lit;
@@ -300,7 +300,8 @@ struct Shade {
   }
   let day = g.lightSun.a;
   let dark = max(near * 0.38, thrown * sunny * 0.5 * clamp(day * 4.0, 0.0, 1.0) * (1.0 - g.weather.x));
-  return vec4f(0.0, 0.0, 0.0, dark);
+  let linDark = 1.0 - pow(1.0 - clamp(dark, 0.0, 0.95), 2.0);
+  return vec4f(0.0, 0.0, 0.0, linDark);
 }
 `
 
@@ -327,7 +328,11 @@ const FAR = 100000.0;
   return out;
 }
 @fragment fn fs(in: Out) -> @location(0) vec4f {
-  return textureSampleLevel(sheet, smooth_, in.uv, 0.0) * in.show;
+  let s = textureSampleLevel(sheet, smooth_, in.uv, 0.0);
+  let a = s.a * in.show;
+  if (a <= 0.001) { return vec4f(0.0); }
+  let unpre = clamp(s.rgb / max(s.a, 1e-4), vec3f(0.0), vec3f(1.0));
+  return vec4f(pow(unpre, vec3f(2.2)) * 1.5 * a, a);
 }
 `
 /** The sheet of letters: slots of 512 by 128, four across and eight down. */
@@ -948,8 +953,10 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setBindGroup(0, view0)
-      pass.setBindGroup(1, litFor(march.panes(to.size)))
+      pass.setBindGroup(1, litFor(march.panes(to.allocSize ?? to.size)))
       if (lies) {
         pass.setPipeline(shadows)
         pass.setVertexBuffer(0, lain)

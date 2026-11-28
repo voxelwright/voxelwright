@@ -7,7 +7,12 @@
 export interface Gpu {
   adapter: GPUAdapter
   device: GPUDevice
+  /** Preferred swapchain canvas format (e.g. bgra8unorm). */
   format: GPUTextureFormat
+  /** Linear HDR offscreen scene format: rg11b10ufloat when renderable, else rgba16float. */
+  sceneFormat: GPUTextureFormat
+  /** Whether WGSL shader-f16 is enabled on this device. */
+  canF16: boolean
   /** Whether the device can stamp the start and end of a pass with the GPU's own clock. */
   canTime: boolean
   /** Whatever went wrong on the device after it was opened, as text. */
@@ -29,7 +34,13 @@ export async function openGpu(): Promise<Gpu> {
   const requiredLimits: Record<string, number> = {}
   for (const name of LIMITS) requiredLimits[name] = adapter.limits[name]
   const canTime = adapter.features.has('timestamp-query')
-  const device = await adapter.requestDevice({ requiredLimits, requiredFeatures: canTime ? ['timestamp-query'] : [] })
+  const canRg11b10 = adapter.features.has('rg11b10ufloat-renderable')
+  const canF16 = adapter.features.has('shader-f16')
+  const requiredFeatures: GPUFeatureName[] = []
+  if (canTime) requiredFeatures.push('timestamp-query')
+  if (canRg11b10) requiredFeatures.push('rg11b10ufloat-renderable')
+  if (canF16) requiredFeatures.push('shader-f16')
+  const device = await adapter.requestDevice({ requiredLimits, requiredFeatures })
   const faults: string[] = []
   device.addEventListener('uncapturederror', (e) => faults.push(`error: ${(e as GPUUncapturedErrorEvent).error.message}`))
   let gone: { reason: string; message: string } | null = null
@@ -41,7 +52,8 @@ export async function openGpu(): Promise<Gpu> {
     hearing.clear()
   })
   const onLost = (each: (info: { reason: string; message: string }) => void) => { if (gone) each(gone); else hearing.add(each) }
-  return { adapter, device, format: navigator.gpu.getPreferredCanvasFormat(), canTime, faults, onLost }
+  const sceneFormat: GPUTextureFormat = canRg11b10 ? 'rg11b10ufloat' : 'rgba16float'
+  return { adapter, device, format: navigator.gpu.getPreferredCanvasFormat(), sceneFormat, canF16, canTime, faults, onLost }
 }
 
 /** A shader module, or an error that says what the compiler said. */
@@ -53,14 +65,30 @@ export async function shader(device: GPUDevice, label: string, code: string): Pr
   return module
 }
 
-/** Somewhere to draw: a colour texture and a depth texture of one size. */
+/** Somewhere to draw: a colour texture and a depth texture, with an active viewport sub-rect (`size`) inside `allocSize`. */
 export interface Target {
   color: GPUTextureView
   depth: GPUTextureView
+  /** Active render viewport dimensions `[width, height]`. */
   size: readonly [number, number]
+  /** Backing GPU texture dimensions `[width, height]` (grow-only when resized). Defaults to `size`. */
+  readonly allocSize?: readonly [number, number]
+  /** Ratio `[size[0] / allocSize[0], size[1] / allocSize[1]]` for UV sampling from a persistent target. Defaults to `[1, 1]`. */
+  readonly uvScale?: readonly [number, number]
+  /** Colour attachment texture format, when known. */
+  readonly format?: GPUTextureFormat
 }
 export interface Offscreen extends Target {
-  texture: GPUTexture
+  readonly texture: GPUTexture
+  readonly allocSize: readonly [number, number]
+  readonly uvScale: readonly [number, number]
+  readonly format: GPUTextureFormat
+  /**
+   * Updates the active render viewport to `size`. Backing textures grow only when `size` exceeds `allocSize`,
+   * avoiding GPU allocation churn during dynamic resolution scaling (`steer`). Returns true if backing textures
+   * were reallocated.
+   */
+  resize(size: readonly [number, number]): boolean
   destroy(): void
 }
 
@@ -68,15 +96,45 @@ export interface Offscreen extends Target {
 export const NEAR = 1, FAR = 100000
 /** What a Target's depth is kept as. */
 export const DEPTH: GPUTextureFormat = 'depth24plus'
-/** Over this much of full, the last pass makes a pixel glow (glow.ts). */
-export const GLOWS_OVER = 0.8
+/** Exposed linear HDR luminance threshold above which the bloom pass extracts glow (glow.ts). */
+export const GLOWS_OVER = 1.0
 
 export const depthFor = (device: GPUDevice, size: readonly [number, number]) => device.createTexture({ size: [size[0], size[1]], format: DEPTH, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
 
-export function offscreen(gpu: Gpu, size: readonly [number, number]): Offscreen {
-  const texture = gpu.device.createTexture({ size: [size[0], size[1]], format: gpu.format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING })
-  const depth = depthFor(gpu.device, size)
-  return { texture, color: texture.createView(), depth: depth.createView(), size, destroy() { texture.destroy(); depth.destroy() } }
+export function offscreen(gpu: Gpu, size: readonly [number, number], format: GPUTextureFormat = gpu.format): Offscreen {
+  const allocate = (dim: readonly [number, number]) => {
+    const w = Math.max(1, dim[0]), h = Math.max(1, dim[1])
+    const tex = gpu.device.createTexture({ size: [w, h], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING })
+    const dep = depthFor(gpu.device, [w, h])
+    return { tex, dep, color: tex.createView(), depth: dep.createView(), alloc: [w, h] as readonly [number, number] }
+  }
+  let state = allocate(size)
+  let active: readonly [number, number] = [Math.max(1, size[0]), Math.max(1, size[1])]
+  let uv: readonly [number, number] = [active[0] / state.alloc[0], active[1] / state.alloc[1]]
+  return {
+    get texture() { return state.tex },
+    get color() { return state.color },
+    get depth() { return state.depth },
+    get size() { return active },
+    get allocSize() { return state.alloc },
+    get uvScale() { return uv },
+    format,
+    resize(next) {
+      const w = Math.max(1, next[0]), h = Math.max(1, next[1])
+      let reallocated = false
+      if (w > state.alloc[0] || h > state.alloc[1]) {
+        const grown: readonly [number, number] = [Math.max(w, state.alloc[0]), Math.max(h, state.alloc[1])]
+        state.tex.destroy()
+        state.dep.destroy()
+        state = allocate(grown)
+        reallocated = true
+      }
+      active = [w, h]
+      uv = [w / state.alloc[0], h / state.alloc[1]]
+      return reallocated
+    },
+    destroy() { state.tex.destroy(); state.dep.destroy() },
+  }
 }
 
 /** Draws one frame. `timing`, when given, goes on the pass that does the work. */

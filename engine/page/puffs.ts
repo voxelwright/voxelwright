@@ -145,7 +145,7 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
     let forkEdge = abs(in.uv.x + foot * (0.34 + 0.13 * sin(phase - height*8.0))) / max(0.005, forkWidth);
     let tongue = max(main, (1.0 - smoothstep(0.3, 1.0, forkEdge)) * (1.0 - smoothstep(forkHeight-0.16, forkHeight, height)));
     let core = (1.0 - smoothstep(0.04, 0.64, edge)) * (1.0 - smoothstep(0.12, 0.68, height));
-    let colour = mix(vec3f(0.93, 0.19, 0.02), vec3f(1.0, 0.73, 0.22), core);
+    let colour = mix(vec3f(2.6, 0.22, 0.012), vec3f(5.5, 2.4, 0.32), core);
     return vec4f(colour * tongue, tongue * 0.44);
   }
   // A puff is a sculpted curling billow lit with warm sunlight on its sunward folds and cool sky
@@ -172,24 +172,23 @@ fn billowAt(uv: vec2f, drift: vec2f, seed: u32) -> f32 {
   let topLight = 0.5 + 0.5 * round.y;
   let rim = pow(1.0 - max(round.z, 0.0), 2.2) * (0.25 + 0.55 * max(dot(towards, vec3f(0.0, 0.0, 1.0)), 0.0));
   // Pale steam scatters light internally (never dark grey in its core); dark oil smoke keeps deep shadowed undersides.
+  let baseCol = pow(max(in.colour.rgb, vec3f(0.0)), vec3f(2.2));
   let lum = dot(in.colour.rgb, vec3f(0.333));
   let scatter = smoothstep(0.45, 0.82, lum);
-  let shadowTint = mix(mix(vec3f(0.16, 0.20, 0.28), vec3f(0.30, 0.37, 0.48), topLight), vec3f(0.52, 0.56, 0.62), scatter * 0.65);
-  let sunTint = vec3f(0.76, 0.72, 0.64) * (sunFace * 0.82 + rim * 0.26);
-  let lightCol = (shadowTint + sunTint) * mix(0.08, 1.0, u.day);
-  // Keep non-emissive smoke strictly below glow.ts's 0.80 bloom threshold so bright steam never blooms into a glowing orb.
-  let rawSmoke = in.colour.rgb * lightCol;
-  let smoke = rawSmoke / (vec3f(1.0) + rawSmoke * 0.62);
-  // Fire: white-yellow at its heart and when hottest, then yellow, orange for most of its life, and a dull red only
-  // as it goes out. Blue-white plasma flame for nitrous boost when colour encodes cool blue with zero smoke cover.
+  let shadowTint = mix(mix(vec3f(0.05, 0.07, 0.12), vec3f(0.14, 0.20, 0.30), topLight), vec3f(0.32, 0.36, 0.42), scatter * 0.65);
+  let sunTint = vec3f(1.35, 1.25, 1.08) * (sunFace * 0.85 + rim * 0.28);
+  let lightCol = (shadowTint + sunTint) * mix(0.04, 1.0, u.day);
+  // Keep non-emissive smoke below bloom threshold so bright steam never blooms into a glowing orb.
+  let smoke = min(baseCol * lightCol, vec3f(1.55));
+  // Fire in linear HDR: deep red-orange skirts climbing into incandescent gold-white cores that bloom smoothly under AgX.
   let core = body * body;
   let hot = clamp(heat * (0.5 + core * 0.95), 0.0, 1.0);
-  let warm = mix(mix(vec3f(0.82, 0.10, 0.01), vec3f(1.0, 0.48, 0.06), smoothstep(0.06, 0.38, hot)), vec3f(1.0, 0.94, 0.65), smoothstep(0.42, 0.92, hot));
-  let coolFlame = mix(mix(vec3f(0.06, 0.36, 1.0), vec3f(0.35, 0.84, 1.0), smoothstep(0.06, 0.36, hot)), vec3f(0.92, 0.99, 1.0), smoothstep(0.42, 0.92, hot));
+  let warm = mix(mix(vec3f(2.2, 0.09, 0.004), vec3f(5.8, 1.15, 0.03), smoothstep(0.06, 0.38, hot)), vec3f(10.5, 5.8, 1.1), smoothstep(0.42, 0.92, hot));
+  let coolFlame = mix(mix(vec3f(0.06, 0.45, 4.2), vec3f(0.55, 2.6, 7.2), smoothstep(0.06, 0.36, hot)), vec3f(7.0, 8.8, 10.5), smoothstep(0.42, 0.92, hot));
   let isBlue = step(0.5, in.colour.b - in.colour.r) * step(in.colour.a, 0.05);
   let flame = mix(warm, coolFlame, isBlue);
   let pureJet = step(in.colour.a, 0.02) * smoothstep(0.5, 0.9, heat);
-  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.32 + billow * 1.15) * body * fade * (0.9 + pureJet * 0.85);
+  let glow = flame * smoothstep(0.0, 0.22, heat) * (0.35 + billow * 1.15) * body * fade * (0.95 + pureJet * 0.85);
   return vec4f(smoke * cover + glow, cover);
 }
 `
@@ -523,6 +522,8 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
       pass.setVertexBuffer(0, instances)

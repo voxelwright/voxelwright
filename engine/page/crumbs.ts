@@ -55,8 +55,7 @@ const FAR = 100000.0;
     let hv = normalize(u.sun - rd);
     col += vec3f(1.0, 0.96, 0.88) * pow(max(dot(in.n, hv), 0.0), 42.0) * 1.4 * u.day;
   }
-  col = col / (col + 0.75) * 1.45;
-  return vec4f(pow(clamp(col, vec3f(0.0), vec3f(1.0)), vec3f(0.4545)), 1.0);
+  return vec4f(max(col, vec3f(0.0)), 1.0);
 }
 `
 
@@ -172,6 +171,8 @@ export async function crumbs(device: GPUDevice, format: GPUTextureFormat): Promi
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
       pass.setVertexBuffer(0, instances)

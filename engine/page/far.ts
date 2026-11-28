@@ -298,7 +298,7 @@ struct Drawn { @location(0) colour: vec4f }
       let wall = nightWall(wx, wy, bx, by, pw, y0, ph, in.id + in.way * 7919u, least);
       // The window screen (march.ts SCREEN, eggs.ts): the panes show the picture where they are in the view, and their
       // own lamps as much as it leaves on.
-      let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
+      let pic = screenAt(in.pos.xy / g.res);
       // (A pane some pixels across is a lit room and no lamp, march.ts PANE_LIGHT: from a pixel and a half wide to four.)
       let near = smoothstep(1.5, 4.0, pw / bx);
       col += wall.rgb * wall.a * dark * mix(mix(2.4, ${PANE_LIGHT}, near), 1.5, smoothstep(0.3, 0.8, bx)) * (1.0 - pic.a) * (1.0 - locker) + pic.rgb * panes * shows * 2.4;
@@ -309,7 +309,7 @@ struct Drawn { @location(0) colour: vec4f }
     // too: what the windows show, the crown's screen shows, and its own light as much as that leaves on.
     let own = landmarkLight(at, wide);
     if (own.r + own.g + own.b > 0.0) {
-      let shown = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
+      let shown = screenAt(in.pos.xy / g.res);
       // (As much of it as its own windows show, measured: half, where every pixel of a lit part is lamp and a wall is one
       // part in four pane. Whole, the crown was the brightest thing in the Matrix; a sixth was measured under its fog,
       // which lay over the shaft and not the crown, and under the cloud that replaced it the crown was a dark cap, #450.)
@@ -320,8 +320,8 @@ struct Drawn { @location(0) colour: vec4f }
   col = air(col, rd, dist);
   // The march's fog (FOG), as over the cells: the faces begin 100 m off in the wedge, and the bank had stopped there.
   if (g.fog.x > 0.0) { col = inFog(col, rd, dist); }
-  // Beside the colour, how far brighter than any lit surface the pixel is, as the march writes it (glow.ts reads it).
-  return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)));
+  // Linear HDR radiance directly; glow.ts handles bloom and AgX tonemapping.
+  return Drawn(vec4f(max(col, vec3f(0.0)), 1.0));
 }
 // Each pixel's window as the lockers know it (lockers.ts, Key): its building's number, its way, whether it is a
 // wall with windows (flag 1) and in a pane's glass (flag 2); its bay; its storey; its style. Beside it, where the
@@ -469,7 +469,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     primitive: { topology: 'triangle-strip', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
   })
-  const [picture, numbers] = await Promise.all([pipelineFor('fs', format), pipelineFor('fsIds', format)])
+  const [picture, numbers] = await Promise.all([pipelineFor('fs', format), pipelineFor('fsIds', 'rgba8unorm')])
   // (The windows' keys are for placing the eggs' lockers, by the tools: made the first time they are asked for.)
   let keyed: Promise<GPURenderPipeline> | null = null
   const mergeModule = await shader(device, 'far depth', MERGE)
@@ -773,18 +773,20 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) {
-      pass(encoder, [to.color], to.depth, to.size, view, picture, false)
+      pass(encoder, [to.color], to.depth, to.size, to.allocSize ?? to.size, view, picture, false)
       if (!stats.faces || !own) return
       let bind = mergeBinds.get(own.view)
       if (!bind) { bind = device.createBindGroup({ layout: merging.getBindGroupLayout(0), entries: [{ binding: 0, resource: own.view }] }); mergeBinds.set(own.view, bind) }
       const merge = encoder.beginRenderPass({ label: 'far depth', colorAttachments: [], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      merge.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      merge.setScissorRect(0, 0, to.size[0], to.size[1])
       merge.setPipeline(merging)
       merge.setBindGroup(0, bind)
       merge.draw(3)
       merge.end()
     },
-    drawIds(encoder, ids, depth, size, view) { pass(encoder, [ids], depth, size, view, numbers, true) },
-    async drawKeys(encoder, keys, at, depth, size, view) { pass(encoder, [keys, at], depth, size, view, await (keyed ??= pipelineFor('fsKeys', 'rgba32uint', 'rgba32float')), true) },
+    drawIds(encoder, ids, depth, size, view) { pass(encoder, [ids], depth, size, size, view, numbers, true) },
+    async drawKeys(encoder, keys, at, depth, size, view) { pass(encoder, [keys, at], depth, size, size, view, await (keyed ??= pipelineFor('fsKeys', 'rgba32uint', 'rgba32float')), true) },
     lockers(words) { device.queue.writeBuffer(lockerTable, 0, words) },
     lockerHeader(words) { device.queue.writeBuffer(lockerTable, 4, words) },
   }
@@ -800,7 +802,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     return own.view
   }
 
-  const pass = (encoder: GPUCommandEncoder, colours: GPUTextureView[], depth: GPUTextureView, sz: readonly [number, number], view: View, pipeline: GPURenderPipeline, clear: boolean) => {
+  const pass = (encoder: GPUCommandEncoder, colours: GPUTextureView[], depth: GPUTextureView, sz: readonly [number, number], allocSz: readonly [number, number], view: View, pipeline: GPURenderPipeline, clear: boolean) => {
     frame++
     const reach = self.reach * 10, aspect = sz[0] / sz[1], focal = sz[1] / (2 * view.tanHalf), eye = view.eye
     // The march's map of held tiles is 64 a side round the eye's tile (the city is wider than that: 32 km).
@@ -917,8 +919,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const out = encoder.beginRenderPass({
       label: 'far',
       colorAttachments: colours.map((view) => ({ view, loadOp: clear ? 'clear' as const : 'load' as const, storeOp: 'store' as const, clearValue: [0, 0, 0, 0] })),
-      depthStencilAttachment: { view: ownDepth(sz), depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
+      depthStencilAttachment: { view: ownDepth(allocSz), depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
     })
+    out.setViewport(0, 0, sz[0], sz[1], 0, 1)
+    out.setScissorRect(0, 0, sz[0], sz[1])
     out.setPipeline(pipeline)
     out.setBindGroup(0, bind)
     let faces = 0, sections = 0, drawn = 0

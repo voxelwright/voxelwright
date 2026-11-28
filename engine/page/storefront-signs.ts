@@ -135,18 +135,16 @@ const FAR = 100000.0;
   let sampleUv = mix(in.uvRect.xy, in.uvRect.zw, vec2f(uCoord, vCoord));
   let tex = textureSampleLevel(atlas, samp, sampleUv, 0.0);
   if (tex.a < 0.45) { discard; }
-  // Physically grounded daylight shading with realistic sky bounce so shaded storefront signs stay legible.
+  // Physically grounded daylight shading in linear HDR with realistic sky bounce so shaded storefront signs stay legible.
+  let base = pow(max(tex.rgb, vec3f(0.0)), vec3f(2.2));
   let ndl = max(dot(normalize(in.norm), normalize(u.sun)), 0.0);
   let daylight = (0.62 + 0.38 * ndl) * (0.30 + 0.70 * u.day) * (1.0 - 0.18 * u.dull);
   let night = 1.0 - u.day;
-  // Illuminated signs & plaza plaques stay crisp in daytime shade and shine warmly at dusk/night.
+  // Illuminated signs & plaza plaques stay crisp in daytime shade and glow warmly in linear HDR at dusk/night.
   let lit = select(max(0.22, daylight), max(daylight, 0.72 * u.day + 0.88 * night), in.glow > 0.5);
-  let warmTint = mix(vec3f(1.0), vec3f(1.04, 0.96, 0.84), night * in.glow);
-  let rgb = tex.rgb * lit * warmTint;
-  let luma = max(rgb.r, max(rgb.g, rgb.b));
-  // Subtle bloom into glow.ts only for lit signs at dusk/night.
-  let glowAlpha = 1.0 - select(0.0, 0.14 * night * luma, in.glow > 0.5);
-  return vec4f(rgb, glowAlpha);
+  let warmTint = mix(vec3f(1.0), vec3f(1.08, 0.88, 0.64), night * in.glow);
+  let gain = pow(lit, 1.8) * 1.65 + select(0.0, 0.65 * night, in.glow > 0.5);
+  return vec4f(base * gain * warmTint, 1.0);
 }
 `
 
@@ -575,6 +573,8 @@ export async function createStorefrontSigns(device: GPUDevice, format: GPUTextur
         colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bindFor(faced ?? none))
       pass.setVertexBuffer(0, instances)

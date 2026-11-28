@@ -440,11 +440,6 @@ fn land(p: vec2f, px: f32) -> Land {
   out.colour = col;
   return out;
 }
-fn tone(c: vec3f) -> vec3f {
-  let x = c * 0.43;
-  let y = (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
-  return pow(clamp(y, vec3f(0.0), vec3f(1.0)), vec3f(0.4545));
-}
 // What the air does to light that crosses it: blue is thrown about most, red least.
 const AIR = vec3f(0.02, 0.045, 0.105);
 const BLUE = vec3f(0.3, 0.52, 1.0);
@@ -512,7 +507,7 @@ const BLUE = vec3f(0.3, 0.52, 1.0);
     // The sun itself.
     col += vec3f(1.0, 0.95, 0.85) * (smoothstep(0.9994, 0.9998, dot(rd, u.sun)) * 6.0 + pow(max(dot(rd, u.sun), 0.0), 600.0) * 0.8);
   }
-  return vec4f(tone(col), 1.0);
+  return vec4f(max(col, vec3f(0.0)), 1.0);
 }
 `
 
@@ -557,6 +552,8 @@ export async function space(device: GPUDevice, format: GPUTextureFormat): Promis
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
         ...(timing ? { timestampWrites: timing } : {}),
       })
+      pass.setViewport(0, 0, to.size[0], to.size[1], 0, 1)
+      pass.setScissorRect(0, 0, to.size[0], to.size[1])
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
       pass.draw(3)
